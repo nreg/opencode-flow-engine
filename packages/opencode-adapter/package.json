@@ -1,0 +1,23 @@
+{
+  "name": "@opencode-sflow/adapter",
+  "version": "0.1.0",
+  "description": "OpenCode adapter for sFlow - agents, hooks, tools, and features",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opencode-sflow/core": "workspace:*",
+    "@opencode-sflow/shared": "workspace:*",
+    "@opencode-ai/plugin": "latest",
+    "@opencode-ai/sdk": "latest"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "license": "MIT"
+}

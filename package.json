@@ -1,0 +1,42 @@
+{
+  "name": "opencode-sflow",
+  "version": "0.1.0",
+  "description": "OpenCode plugin for sFlow workflow - integrating OpenSpec planning engine with Superpowers execution discipline",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "ssf": "./bin/ssf.js"
+  },
+  "scripts": {
+    "build": "bun run build:core && bun run build:adapter && bun run build:shared",
+    "build:core": "cd packages/core && bun run build",
+    "build:adapter": "cd packages/opencode-adapter && bun run build",
+    "build:shared": "cd packages/shared && bun run build",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "latest",
+    "@opencode-ai/sdk": "latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.4.0",
+    "biome": "^1.8.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT",
+  "keywords": [
+    "opencode",
+    "plugin",
+    "spec-superflow",
+    "workflow",
+    "openspec",
+    "superpowers"
+  ]
+}

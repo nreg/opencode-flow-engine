@@ -1,37 +1,195 @@
-# opencode-sflow
+# sFlow - OpenCode Plugin
 
-#### 介绍
-spec + superflow 
+OpenSpec planning engine + Superpowers execution discipline for OpenCode.
 
-#### 软件架构
-软件架构说明
+## Overview
 
+sFlow is an OpenCode plugin that integrates:
 
-#### 安装教程
+- **OpenSpec** - Planning engine for requirements, specs, and proposals
+- **Superpowers** - Execution discipline with TDD, code review, and systematic debugging
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+## Features
 
-#### 使用说明
+### Workflow Management
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+- 8-state workflow: exploring → specifying → bridging → approved-for-build → executing → debugging → closing → abandoned
+- Automatic state detection and routing
+- Guard conditions to prevent invalid transitions
 
-#### 参与贡献
+### Agents
 
-1.  Fork 本仓库
-2.  新建 Feat_xxx 分支
-3.  提交代码
-4.  新建 Pull Request
+| Agent | Mode | Description |
+|-------|------|-------------|
+| sFlow | Primary | Main orchestrator, routes to subagents |
+| need-explorer | Subagent | Requirement clarification |
+| spec-writer | Subagent | Artifact generation with validation |
+| contract-builder | Subagent | Bridge contract creation |
+| build-executor | Subagent | TDD execution |
+| bug-investigator | Subagent | Systematic debugging |
+| code-reviewer | Subagent | Code quality review |
+| release-archivist | Subagent | Closure and archiving |
+| spec-merger | Subagent | Delta spec synchronization |
 
+### Tools
 
-#### 特技
+- `workflow_router` - Detect current state and route to appropriate skill
+- `contract_validator` - Validate execution contracts
+- `artifact_inspector` - Inspect planning artifacts
 
-1.  使用 Readme\_XXX.md 来支持不同的语言，例如 Readme\_en.md, Readme\_zh.md
-2.  Gitee 官方博客 [blog.gitee.com](https://blog.gitee.com)
-3.  你可以 [https://gitee.com/explore](https://gitee.com/explore) 这个地址来了解 Gitee 上的优秀开源项目
-4.  [GVP](https://gitee.com/gvp) 全称是 Gitee 最有价值开源项目，是综合评定出的优秀开源项目
-5.  Gitee 官方提供的使用手册 [https://gitee.com/help](https://gitee.com/help)
-6.  Gitee 封面人物是一档用来展示 Gitee 会员风采的栏目 [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
+### Hooks
+
+- `state_transition` - Manage workflow state transitions
+- `artifact_validation` - Validate artifacts on transitions
+- `guard` - Guard state transitions and block invalid operations
+
+### Features
+
+- `workflow_manager` - Manage workflow execution
+- `state_manager` - Manage workflow state
+
+## Installation
+
+### From npm
+
+```bash
+npm install -g opencode-sflow
+```
+
+### From source
+
+```bash
+git clone https://github.com/your-org/opencode-sflow.git
+cd opencode-sflow
+npm install
+npm run build
+```
+
+## Configuration
+
+Add to your `opencode.json`:
+
+```json
+{
+  "plugin": ["opencode-sflow"]
+}
+```
+
+Or create `.opencode/sflow.json`:
+
+```json
+{
+  "enabled": true,
+  "agents": {
+    "sflow": {
+      "model": "claude-opus-4-7"
+    }
+  },
+  "features": {
+    "workflow_manager": true,
+    "state_manager": true
+  }
+}
+```
+
+## Usage
+
+### Starting a Workflow
+
+```
+/help me add a new feature
+```
+
+The sFlow agent will:
+1. Detect current state
+2. Route to appropriate subagent
+3. Guide you through the workflow
+
+### Continuing a Workflow
+
+```
+/continue
+```
+
+### Checking Status
+
+```
+/status
+```
+
+## Workflow States
+
+1. **exploring** - Requirement clarification with need-explorer
+2. **specifying** - Artifact generation with spec-writer
+3. **bridging** - Contract creation with contract-builder
+4. **approved-for-build** - Contract approved, ready for execution
+5. **executing** - Implementation with build-executor
+6. **debugging** - Bug investigation with bug-investigator
+7. **closing** - Verification with release-archivist
+8. **abandoned** - Terminal state
+
+## Development
+
+### Prerequisites
+
+- Node.js 20+
+- npm or yarn
+
+### Setup
+
+```bash
+git clone https://github.com/your-org/opencode-sflow.git
+cd opencode-sflow
+npm install
+```
+
+### Build
+
+```bash
+npm run build
+```
+
+### Test
+
+```bash
+npm test
+```
+
+### Lint
+
+```bash
+npm run lint
+```
+
+## Architecture
+
+```
+opencode-sflow/
+├── packages/
+│   ├── core/                    # Schema, validation, parsing
+│   ├── opencode-adapter/        # Agents, hooks, tools, features
+│   └── shared/                  # Shared utilities
+├── skills/                      # Skill definitions
+├── scripts/                     # Helper scripts
+├── hooks/                       # Session hooks
+└── templates/                   # Artifact templates
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Run the test suite
+6. Submit a pull request
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+## Acknowledgments
+
+- [OpenSpec](https://github.com/Fission-AI/OpenSpec) - Planning engine
+- [Superpowers](https://github.com/obra/superpowers) - Execution discipline
+- [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) - Architecture inspiration
