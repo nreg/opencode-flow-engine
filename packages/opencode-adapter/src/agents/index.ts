@@ -14,9 +14,12 @@ export { createSpecMergerAgent } from './spec-merger.js';
 
 export {
   loadSFlowConfig,
+  loadUserSFlowConfig,
+  loadCascadedSFlowConfig,
   agentOverridesFromConfig,
   mergeOverrides,
   generateConfigTemplate,
+  USER_CONFIG_FILE,
 } from './config-loader.js';
 
 export type {

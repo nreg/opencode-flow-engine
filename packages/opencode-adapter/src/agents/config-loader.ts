@@ -3,6 +3,7 @@
  */
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import { homedir } from 'os';
 import type { BuiltinAgentName, AgentOverrides } from './types.js';
 
 export interface AgentConfigEntry {
@@ -21,7 +22,12 @@ export interface SFlowConfig {
 }
 
 /**
- * Load sFlow config from .sflow/config.json
+ * User-level config path: ~/.sFlow/config.json
+ */
+export const USER_CONFIG_FILE = join(homedir(), '.sFlow', 'config.json');
+
+/**
+ * Load sFlow config from a specific directory's .sflow/config.json
  */
 export function loadSFlowConfig(projectDir?: string): SFlowConfig {
   const dir = projectDir || process.cwd();
@@ -38,6 +44,56 @@ export function loadSFlowConfig(projectDir?: string): SFlowConfig {
     console.warn(`[sflow] Failed to parse ${configPath}`);
     return {};
   }
+}
+
+/**
+ * Load user-level config from ~/.sFlow/config.json
+ */
+export function loadUserSFlowConfig(): SFlowConfig {
+  if (!existsSync(USER_CONFIG_FILE)) {
+    return {};
+  }
+
+  try {
+    const raw = readFileSync(USER_CONFIG_FILE, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    console.warn(`[sflow] Failed to parse user config: ${USER_CONFIG_FILE}`);
+    return {};
+  }
+}
+
+/**
+ * Load cascading config: user-level (~/.sFlow/config.json) as base,
+ * project-level (.sflow/config.json) as higher-priority override.
+ */
+export function loadCascadedSFlowConfig(projectDir?: string): SFlowConfig {
+  const user = loadUserSFlowConfig();
+  const project = loadSFlowConfig(projectDir);
+
+  // If no project config, return user config as-is
+  if (Object.keys(project).length === 0) return user;
+
+  // Merge: user as base, project overrides on top
+  const mergedAgents: Record<string, AgentConfigEntry> = {};
+
+  // Start with all user agents
+  for (const [name, cfg] of Object.entries(user.agents || {})) {
+    mergedAgents[name] = { ...cfg };
+  }
+  // Overlay project agents (field-level merge per agent)
+  for (const [name, cfg] of Object.entries(project.agents || {})) {
+    mergedAgents[name] = { ...(mergedAgents[name] || {}), ...cfg };
+  }
+
+  return {
+    ...user,
+    ...project,
+    agents: mergedAgents,
+    features: { ...(user.features || {}), ...(project.features || {}) },
+    hooks: { ...(user.hooks || {}), ...(project.hooks || {}) },
+    tools: { ...(user.tools || {}), ...(project.tools || {}) },
+  };
 }
 
 /**

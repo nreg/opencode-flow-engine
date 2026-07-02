@@ -87,6 +87,21 @@ sflow init
 
 该命令会在项目根目录创建 `.sflow/config.json`，包含全部 9 个智能体的模型配置。
 
+### 用户级全局配置
+
+如果你希望所有项目共享同一套模型配置，可以设置用户级配置：
+
+```bash
+sflow init --user
+```
+
+该命令会在用户目录创建 `~/.sFlow/config.json`。配置加载优先级如下（从高到低）：
+
+1. **项目级 `.sflow/config.json`** — 覆盖用户级配置
+2. **用户级 `~/.sFlow/config.json`** — 全局默认
+
+这样你只需配置一次模型，每个项目按需覆盖即可。
+
 ### 自定义智能体模型
 
 编辑 `.sflow/config.json`，可单独为每个智能体指定模型、温度参数和备用模型：
@@ -96,7 +111,7 @@ sflow init
   "agents": {
     "sflow": {
       "model": "deepseek-v4-flash",
-      "temperature": 0.1,
+      "temperature": 0.6,
       "fallbackModels": ["glm-5.1", "kimi-k2.6"]
     }
   }
@@ -105,7 +120,54 @@ sflow init
 
 ## 使用方式
 
+### 1. 构建插件
+
+```bash
+cd opencode-sflow
+npm run build
+```
+
+### 2. 注册为本地包
+
+```bash
+cd opencode-sflow
+npm link
+```
+
+### 3. 在目标项目中链接
+
+进入你想使用 sFlow 工作流的项目目录，链接插件包：
+
+```bash
+cd /path/to/your-project
+npm link opencode-sflow
+```
+
+### 4. 配置 opencode.json
+
+在目标项目的 `opencode.json` 中添加插件：
+
+```json
+{
+  "plugin": ["opencode-sflow"]
+}
+```
+
+### 5. 初始化工作流配置
+
+```bash
+# 项目级配置（推荐）
+node bin/sflow.js init
+
+# 或用户级全局配置（所有项目共享）
+node bin/sflow.js init --user
+```
+
+项目级会在当前目录生成 `.sflow/config.json`，用户级会在 `~/.sFlow/config.json` 生成。两者叠加生效，项目级优先。
+
 ### 开启工作流
+
+在 OpenCode 聊天框输入：
 
 ```
 "开始一个新功能" 或 "start a workflow"

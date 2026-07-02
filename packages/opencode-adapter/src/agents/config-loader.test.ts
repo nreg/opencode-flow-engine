@@ -2,16 +2,18 @@
  * Config Loader tests
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { unlinkSync, existsSync, writeFileSync, mkdirSync } from 'fs';
+import { unlinkSync, existsSync, writeFileSync, mkdirSync, rmdirSync } from 'fs';
 import { join } from 'path';
 import {
   loadSFlowConfig,
+  loadUserSFlowConfig,
+  loadCascadedSFlowConfig,
   agentOverridesFromConfig,
   mergeOverrides,
   generateConfigTemplate,
+  USER_CONFIG_FILE,
 } from './config-loader.js';
 import { createAgent, createAllAgents } from './agent-builder.js';
-import { unlinkSync, existsSync, writeFileSync, mkdirSync, rmdirSync } from 'fs';
 
 const TEST_DIR = `${import.meta.dir}/../__test_cfg__`;
 const TEST_CONFIG = join(TEST_DIR, '.sflow', 'config.json');
@@ -56,6 +58,78 @@ describe('Config Loader', () => {
       writeFileSync(TEST_CONFIG, 'not json');
       const config = loadSFlowConfig(TEST_DIR);
       expect(config).toEqual({});
+    });
+  });
+
+  describe('loadUserSFlowConfig', () => {
+    it('should return empty object when no user config exists', () => {
+      // Ensure USER_CONFIG_FILE doesn't exist for this test
+      try { unlinkSync(USER_CONFIG_FILE); } catch {}
+      const config = loadUserSFlowConfig();
+      expect(config).toEqual({});
+    });
+
+    it('should parse user config correctly', () => {
+      const userDir = join(USER_CONFIG_FILE, '..');
+      if (!existsSync(userDir)) {
+        mkdirSync(userDir, { recursive: true });
+      }
+      writeFileSync(USER_CONFIG_FILE, JSON.stringify({
+        agents: { sflow: { model: 'user-model' } },
+      }));
+      try {
+        const config = loadUserSFlowConfig();
+        expect(config.agents?.sflow?.model).toBe('user-model');
+      } finally {
+        try { unlinkSync(USER_CONFIG_FILE); } catch {}
+        try { rmdirSync(userDir); } catch {}
+      }
+    });
+  });
+
+  describe('loadCascadedSFlowConfig', () => {
+    it('should return project config when no user config exists', () => {
+      try { unlinkSync(USER_CONFIG_FILE); } catch {}
+      writeTestConfig({
+        agents: { sflow: { model: 'project-model' } },
+      });
+      const config = loadCascadedSFlowConfig(TEST_DIR);
+      expect(config.agents?.sflow?.model).toBe('project-model');
+    });
+
+    it('should merge user and project config with project winning', () => {
+      // Write user config first, then project config that overrides
+      const userDir = join(USER_CONFIG_FILE, '..');
+      if (!existsSync(userDir)) {
+        mkdirSync(userDir, { recursive: true });
+      }
+      writeFileSync(USER_CONFIG_FILE, JSON.stringify({
+        version: '0.1.0',
+        agents: {
+          sflow: { model: 'user-sflow', temperature: 0.8 },
+          'need-explorer': { model: 'user-need' },
+        },
+      }));
+      writeTestConfig({
+        agents: {
+          sflow: { model: 'project-sflow' },
+          'spec-writer': { model: 'project-spec' },
+        },
+      });
+      try {
+        const config = loadCascadedSFlowConfig(TEST_DIR);
+        // Project overrides user for sflow
+        expect(config.agents?.sflow?.model).toBe('project-sflow');
+        // But user's temperature for sflow should merge through
+        expect(config.agents?.sflow?.temperature).toBe(0.8);
+        // User-only agent preserved
+        expect(config.agents?.['need-explorer']?.model).toBe('user-need');
+        // Project-only agent added
+        expect(config.agents?.['spec-writer']?.model).toBe('project-spec');
+      } finally {
+        try { unlinkSync(USER_CONFIG_FILE); } catch {}
+        try { rmdirSync(userDir); } catch {}
+      }
     });
   });
 

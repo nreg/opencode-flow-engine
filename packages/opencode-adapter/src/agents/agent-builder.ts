@@ -17,7 +17,7 @@ import {
   createSpecMergerAgent,
 } from './index.js';
 import {
-  loadSFlowConfig,
+  loadCascadedSFlowConfig,
   agentOverridesFromConfig,
   mergeOverrides,
 } from './config-loader.js';
@@ -66,7 +66,7 @@ export function createAgent(
     throw new Error(`Unknown agent: ${name}`);
   }
 
-  const config = loadSFlowConfig();
+  const config = loadCascadedSFlowConfig();
   const configOverrides = agentOverridesFromConfig(config);
 
   // Merge config + programmatic overrides for non-model fields
@@ -103,7 +103,7 @@ export function createAllAgents(
   const agents: Record<string, AgentConfig> = {};
 
   // Load config once for all agents
-  const config = loadSFlowConfig();
+  const config = loadCascadedSFlowConfig();
   const configOverrides = agentOverridesFromConfig(config);
 
   for (const name of Object.keys(AGENT_REGISTRY) as BuiltinAgentName[]) {
