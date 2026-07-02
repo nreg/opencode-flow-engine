@@ -43,7 +43,7 @@ Add to your `opencode.json`:
 Simply start a conversation about what you want to build:
 
 ```
-/help me add a new feature
+"开始一个新功能" 或 "start a workflow"
 ```
 
 The sFlow agent will guide you through the workflow:

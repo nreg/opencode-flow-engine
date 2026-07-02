@@ -40,7 +40,7 @@ npm install -g opencode-sflow
 启动 OpenCode 并开始对话：
 
 ```
-/help me add a new feature
+"开始一个新功能" 或 "start a workflow"
 ```
 
 sFlow agent 会引导你完成整个工作流。

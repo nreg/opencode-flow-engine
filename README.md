@@ -59,7 +59,7 @@ npm install -g opencode-sflow
 ### From source
 
 ```bash
-git clone https://github.com/your-org/opencode-sflow.git
+git clone https://gitee.com/opencode-plugin/opencode-sflow.git
 cd opencode-sflow
 npm install
 npm run build
@@ -97,7 +97,7 @@ Or create `.opencode/sflow.json`:
 ### Starting a Workflow
 
 ```
-/help me add a new feature
+"开始一个新功能" 或 "start a workflow"
 ```
 
 The sFlow agent will:
