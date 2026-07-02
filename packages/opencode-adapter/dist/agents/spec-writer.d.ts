@@ -1,0 +1,10 @@
+/**
+ * Spec Writer agent - Artifact generation
+ * Based on oh-my-openagent's subagent pattern
+ */
+import type { AgentFactory } from './types.js';
+/**
+ * Create the spec-writer agent configuration
+ */
+export declare const createSpecWriterAgent: AgentFactory;
+//# sourceMappingURL=spec-writer.d.ts.map

@@ -285,8 +285,8 @@ export function parseChangeMarkdown(content: string): {
         continue;
       }
       if (line.startsWith('- **REMOVED:**')) {
-        if (currentType && currentType !== 'REMOVED' && currentRequirement) {
-          deltas.push({ type: currentType, requirementName: currentRequirement, text: currentText || undefined, lineStart, lineEnd: i - 1 });
+        if (currentRequirement) {
+          deltas.push({ type: currentType!, requirementName: currentRequirement, text: currentText || undefined, lineStart, lineEnd: i - 1 });
         }
         currentType = 'REMOVED';
         currentRequirement = line.replace(/- \*\*REMOVED:\*\*\s*/, '').trim();
@@ -301,8 +301,8 @@ export function parseChangeMarkdown(content: string): {
         continue;
       }
       if (line.startsWith('- **RENAMED:**')) {
-        if (currentType && currentType !== 'REMOVED' && currentRequirement) {
-          deltas.push({ type: currentType, requirementName: currentRequirement, text: currentText || undefined, lineStart, lineEnd: i - 1 });
+        if (currentRequirement) {
+          deltas.push({ type: currentType!, requirementName: currentRequirement, text: currentText || undefined, lineStart, lineEnd: i - 1 });
         }
         const renameMatch = line.match(/- \*\*RENAMED:\*\*\s*(.+)\s*->\s*(.+)/);
         if (renameMatch) {

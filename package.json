@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "description": "OpenCode plugin for sFlow workflow - integrating OpenSpec planning engine with Superpowers execution discipline",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "packages/opencode-adapter/dist/index.js",
+  "types": "packages/opencode-adapter/dist/index.d.ts",
   "bin": {
     "sflow": "./bin/sflow.js"
   },
