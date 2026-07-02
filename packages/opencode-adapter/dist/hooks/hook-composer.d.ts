@@ -1,8 +1,14 @@
 /**
  * Hook Composer - Manages hook registration and execution
- * Based on oh-my-openagent's hook composition pattern
+ * Based on oh-my-openagent's 5-tier hook composition pattern
+ * Tiers: Session → ToolGuard → Transform → Continuation → Skill
  */
 import type { HookName, HookHandler, HookContext, HookResult } from './types.js';
+/**
+ * Hook tiers for layered composition
+ * Aligned with oh-my-openagent's 5-tier pattern
+ */
+type HookTier = 'session' | 'toolguard' | 'transform' | 'continuation' | 'skill';
 /**
  * Hook composer instance
  */
@@ -11,7 +17,7 @@ export declare class HookComposer {
     private disabledHooks;
     private hookOrder;
     /**
-     * Initialize the hook composer
+     * Initialize the hook composer with tiered ordering
      */
     initialize(): void;
     /**
@@ -23,47 +29,33 @@ export declare class HookComposer {
      */
     executeHook(name: HookName, context: HookContext): Promise<HookResult>;
     /**
-     * Execute all hooks in order
+     * Execute hooks for a specific tier
+     */
+    executeTier(tier: HookTier, context: HookContext): Promise<{
+        success: boolean;
+        results: Record<HookName, HookResult>;
+    }>;
+    /**
+     * Execute all hooks in tier order
      */
     executeAllHooks(context: HookContext): Promise<{
         success: boolean;
         results: Record<HookName, HookResult>;
     }>;
-    /**
-     * Disable a hook
-     */
     disableHook(name: HookName): void;
-    /**
-     * Enable a hook
-     */
     enableHook(name: HookName): void;
-    /**
-     * Check if hook is enabled
-     */
     isHookEnabled(name: string): boolean;
-    /**
-     * Get all enabled hooks
-     */
     getEnabledHooks(): HookName[];
-    /**
-     * Get all disabled hooks
-     */
     getDisabledHooks(): HookName[];
-    /**
-     * Get hook count
-     */
     getHookCount(): {
         total: number;
         enabled: number;
         disabled: number;
     };
     /**
-     * Add a custom hook
+     * Add a custom hook at a specific tier
      */
-    addHook(name: HookName, hook: HookHandler, position?: number): void;
-    /**
-     * Remove a hook
-     */
+    addHook(name: HookName, hook: HookHandler, tier?: HookTier, position?: number): void;
     removeHook(name: HookName): void;
 }
 /**
@@ -77,5 +69,5 @@ export declare function getHookNames(): HookName[];
 /**
  * Check if hook exists
  */
-export declare function hookExists(name: string): name is HookName;
-//# sourceMappingURL=hook-composer.d.ts.map
+export declare function hookExists(name: string): boolean;
+export {};

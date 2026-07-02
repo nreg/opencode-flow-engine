@@ -1,74 +1,62 @@
 /**
  * Parsing types for spec-superflow core engine
+ * Aligned with spec-superflow/src/parsing/requirement-blocks.ts
  */
-
-import type { Requirement, Scenario, Delta, Change } from '../schema/base.js';
 
 /**
- * Represents a requirement block in markdown
+ * Represents a requirement block in markdown.
+ * Uses raw text to preserve original content for validation.
  */
 export interface RequirementBlock {
-  /** Requirement name */
+  headerLine: string;
   name: string;
-  /** Requirement text */
-  text: string;
-  /** Scenarios */
-  scenarios: Scenario[];
-  /** Line numbers in original file */
-  lineStart: number;
-  lineEnd: number;
+  raw: string;
 }
 
 /**
  * Parts of a requirements section
+ * Aligned with spec-superflow: before/headerLine/preamble/bodyBlocks/after
  */
 export interface RequirementsSectionParts {
-  /** Section header */
-  header: string;
-  /** Raw content */
-  content: string;
-  /** Parsed requirements */
-  requirements: RequirementBlock[];
+  before: string;
+  headerLine: string;
+  preamble: string;
+  bodyBlocks: RequirementBlock[];
+  after: string;
 }
 
 /**
  * Represents a delta plan (parsed from delta spec)
+ * Aligned with spec-superflow: includes sectionPresence
  */
 export interface DeltaPlan {
-  /** Added requirements */
   added: RequirementBlock[];
-  /** Modified requirements */
   modified: RequirementBlock[];
-  /** Removed requirements */
   removed: string[];
-  /** Renamed requirements */
   renamed: Array<{ from: string; to: string }>;
+  sectionPresence: {
+    added: boolean;
+    modified: boolean;
+    removed: boolean;
+    renamed: boolean;
+  };
 }
 
 /**
- * Parsed delta operation - extends base Delta with source locations
+ * Parsed delta from change markdown
  */
-export interface ParsedDelta extends Delta {
-  /** Line numbers in original file */
-  lineStart: number;
-  lineEnd: number;
+export interface ParsedDelta {
+  spec: string;
+  operation: string;
+  description: string;
 }
 
 /**
  * Parsed change markdown
  */
 export interface ParsedChange {
-  /** Change name */
   name: string;
-  /** Why section */
   why: string;
-  /** What changes section */
   whatChanges: string;
-  /** Deltas */
   deltas: ParsedDelta[];
-  /** Metadata */
-  metadata: {
-    lineStart: number;
-    lineEnd: number;
-  };
 }

@@ -7,4 +7,3 @@ import type { AgentFactory } from './types.js';
  * Create the spec-writer agent configuration
  */
 export declare const createSpecWriterAgent: AgentFactory;
-//# sourceMappingURL=spec-writer.d.ts.map

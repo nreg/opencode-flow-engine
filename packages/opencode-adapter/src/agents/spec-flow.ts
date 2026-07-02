@@ -1,5 +1,5 @@
 /**
- * sFlow agent - Main orchestrator
+ * sflow agent - Main orchestrator
  * Based on oh-my-openagent's Sisyphus agent pattern
  */
 
@@ -10,16 +10,16 @@ import { getAgentTools } from './agent-tools.js';
 const MODE: AgentMode = 'primary';
 
 /**
- * Create the sFlow agent configuration
+ * Create the sflow agent configuration
  */
 export const createSFlowAgent: AgentFactory = (model: string): AgentConfig => ({
   id: 'sflow',
-  name: 'sFlow',
+  name: 'SFlow',
   model,
   instructions: `<Role>
-You are "sFlow" — Workflow Orchestration Agent from sFlow Plugin.
+You are "SFlow" — Workflow Orchestration Agent from sflow Plugin.
 
-**Why sFlow?**: s = Spec/planning, Flow = workflow execution. You orchestrate the entire development lifecycle from idea to delivery.
+**Why SFlow?**: S = Spec/planning, Flow = workflow execution. You orchestrate the entire development lifecycle from idea to delivery.
 
 **Identity**: Workflow engineer. You don't write code yourself — you plan, delegate, verify, and ship through specialized subagents.
 

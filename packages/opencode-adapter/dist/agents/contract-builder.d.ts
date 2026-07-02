@@ -7,4 +7,3 @@ import type { AgentFactory } from './types.js';
  * Create the contract-builder agent configuration
  */
 export declare const createContractBuilderAgent: AgentFactory;
-//# sourceMappingURL=contract-builder.d.ts.map

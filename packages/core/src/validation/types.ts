@@ -1,5 +1,6 @@
 /**
  * Validation types for spec-superflow core engine
+ * Aligned with spec-superflow/src/validation/types.ts
  */
 
 /**
@@ -11,32 +12,31 @@ export type ValidationLevel = 'ERROR' | 'WARNING' | 'INFO';
  * Validation issue
  */
 export interface ValidationIssue {
-  /** Severity level */
   level: ValidationLevel;
-  /** Path to the issue (e.g., "specs/auth/spec.md:requirements[0]") */
   path: string;
-  /** Issue message */
   message: string;
-  /** Suggested fix */
+  line?: number;
   suggestion?: string;
 }
 
 /**
  * Validation report
+ * Aligned with spec-superflow: includes structured summary
  */
 export interface ValidationReport {
-  /** Whether validation passed */
   valid: boolean;
-  /** List of issues */
   issues: ValidationIssue[];
-  /** Summary of validation */
-  summary: string;
+  summary: {
+    errors: number;
+    warnings: number;
+    info: number;
+  };
 }
 
 /**
  * Verification dimensions
  */
-export type VerificationDimension = 
+export type VerificationDimension =
   | 'Completeness'
   | 'Correctness'
   | 'Coherence';
@@ -50,50 +50,37 @@ export type VerificationStatus = 'PASS' | 'FAIL' | 'WARN';
  * Verification finding
  */
 export interface VerificationFinding {
-  /** Dimension */
+  level: 'CRITICAL' | 'IMPORTANT' | 'INFO';
   dimension: VerificationDimension;
-  /** Status */
-  status: VerificationStatus;
-  /** Description */
-  description: string;
-  /** Related files */
-  files?: string[];
+  message: string;
 }
 
 /**
  * Verification report
+ * Aligned with spec-superflow: structured dimensions + verdict
  */
 export interface VerificationReport {
-  /** Overall status */
-  status: VerificationStatus;
-  /** Findings */
-  findings: VerificationFinding[];
-  /** Summary */
-  summary: string;
+  dimensions: {
+    name: VerificationDimension;
+    status: VerificationStatus;
+    findings: VerificationFinding[];
+  }[];
+  verdict: 'PASS' | 'CONDITIONAL' | 'FAIL';
 }
 
 /**
  * Sync conflict
  */
 export interface SyncConflict {
-  /** Capability name */
-  capability: string;
-  /** Conflict description */
-  description: string;
-  /** Source change */
-  sourceChange: string;
-  /** Target spec */
-  targetSpec: string;
+  requirement: string;
+  spec: string;
+  changes: string[];
 }
 
 /**
  * Conflict report
  */
 export interface ConflictReport {
-  /** Whether conflicts exist */
   hasConflicts: boolean;
-  /** List of conflicts */
   conflicts: SyncConflict[];
-  /** Summary */
-  summary: string;
 }

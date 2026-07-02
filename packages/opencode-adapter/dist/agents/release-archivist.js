@@ -2,6 +2,7 @@
  * Release Archivist agent - Closure specialist
  * Based on oh-my-openagent's subagent pattern
  */
+import { getAgentTools } from './agent-tools.js';
 const MODE = 'subagent';
 /**
  * Create the release-archivist agent configuration
@@ -97,17 +98,7 @@ You have access to:
 - \`bash\` - Run tests and commands
 - \`glob\` - Search for files`,
     temperature: 0.7,
-    tools: {
-        read: true,
-        write: true,
-        edit: false,
-        glob: true,
-        grep: true,
-        bash: true,
-        call_omo_agent: false,
-        task: false,
-        skill: false,
-    },
+    tools: getAgentTools('release-archivist'),
 });
 createReleaseArchivistAgent.mode = MODE;
 //# sourceMappingURL=release-archivist.js.map

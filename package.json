@@ -18,6 +18,11 @@
     "lint": "npx @biomejs/biome check .",
     "format": "npx @biomejs/biome format --write ."
   },
+  "workspaces": [
+    "packages/core",
+    "packages/shared",
+    "packages/opencode-adapter"
+  ],
   "dependencies": {
     "@opencode-ai/plugin": "latest",
     "@opencode-ai/sdk": "latest",

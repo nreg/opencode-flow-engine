@@ -2,6 +2,7 @@
  * Spec Writer agent - Artifact generation
  * Based on oh-my-openagent's subagent pattern
  */
+import { getAgentTools } from './agent-tools.js';
 const MODE = 'subagent';
 /**
  * Create the spec-writer agent configuration
@@ -76,17 +77,7 @@ You have access to:
 
 Use validation scripts to ensure quality.`,
     temperature: 0.6,
-    tools: {
-        read: true,
-        write: true,
-        edit: true,
-        glob: true,
-        grep: true,
-        bash: true,
-        call_omo_agent: false,
-        task: false,
-        skill: false,
-    },
+    tools: getAgentTools('spec-writer'),
 });
 createSpecWriterAgent.mode = MODE;
 //# sourceMappingURL=spec-writer.js.map

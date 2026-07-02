@@ -2,6 +2,7 @@
  * Build Executor agent - Execution governor
  * Based on oh-my-openagent's subagent pattern
  */
+import { getAgentTools } from './agent-tools.js';
 const MODE = 'subagent';
 /**
  * Create the build-executor agent configuration
@@ -83,20 +84,7 @@ You have access to:
 - \`lsp_diagnostics\` - Check for errors
 - \`lsp_goto_definition\` - Navigate code`,
     temperature: 0.7,
-    tools: {
-        read: true,
-        write: true,
-        edit: true,
-        glob: true,
-        grep: true,
-        bash: true,
-        call_omo_agent: false,
-        task: false,
-        skill: false,
-        lsp_diagnostics: true,
-        lsp_goto_definition: true,
-        lsp_find_references: true,
-    },
+    tools: getAgentTools('build-executor'),
 });
 createBuildExecutorAgent.mode = MODE;
 //# sourceMappingURL=build-executor.js.map

@@ -2,6 +2,7 @@
  * Code Reviewer agent - Code review specialist
  * Based on oh-my-openagent's subagent pattern
  */
+import { getAgentTools } from './agent-tools.js';
 const MODE = 'subagent';
 /**
  * Create the code-reviewer agent configuration
@@ -97,20 +98,7 @@ You have access to:
 - \`lsp_goto_definition\` - Navigate code
 - \`lsp_find_references\` - Find usages`,
     temperature: 0.6,
-    tools: {
-        read: true,
-        write: false,
-        edit: false,
-        glob: true,
-        grep: true,
-        bash: true,
-        call_omo_agent: false,
-        task: false,
-        skill: false,
-        lsp_diagnostics: true,
-        lsp_goto_definition: true,
-        lsp_find_references: true,
-    },
+    tools: getAgentTools('code-reviewer'),
 });
 createCodeReviewerAgent.mode = MODE;
 //# sourceMappingURL=code-reviewer.js.map

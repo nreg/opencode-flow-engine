@@ -7,4 +7,3 @@ import type { AgentFactory } from './types.js';
  * Create the code-reviewer agent configuration
  */
 export declare const createCodeReviewerAgent: AgentFactory;
-//# sourceMappingURL=code-reviewer.d.ts.map

@@ -2,9 +2,9 @@
  * Hook types for sFlow
  */
 /**
- * Available hook names
+ * Available hook names (extensible for custom hooks)
  */
-export type HookName = 'state_transition' | 'artifact_validation' | 'guard';
+export type HookName = 'state_transition' | 'artifact_validation' | 'guard' | 'session_start' | 'session_end' | 'pre_process' | 'post_process' | 'continuation' | (string & {});
 /**
  * Hook handler interface
  */
@@ -33,4 +33,3 @@ export interface HookResult {
     block?: boolean;
     blockReason?: string;
 }
-//# sourceMappingURL=types.d.ts.map

@@ -1,323 +1,281 @@
 /**
  * Parsing functions for spec-superflow core engine
  * Ported from spec-superflow/src/parsing/requirement-blocks.ts
+ * Ported from spec-superflow/src/parsing/change-parser.ts
  */
 /**
- * Regex for requirement headers (#### Requirement: Name)
+ * Regex for requirement headers (### Requirement: Name)
  */
-export const REQUIREMENT_HEADER_REGEX = /^#{3,4} (?:Requirement|SHALL|MUST):\s*(.+)$/gm;
+export const REQUIREMENT_HEADER_REGEX = /^###\s*Requirement:\s*(.+)\s*$/i;
 /**
- * Normalize a requirement name (trim, lowercase)
+ * Normalize a requirement name (trim)
+ * Aligned with spec-superflow: only trim, do NOT lowercase
+ * (lowercasing loses case information needed for cross-referencing)
  */
 export function normalizeRequirementName(name) {
-    return name.trim().toLowerCase();
+    return name.trim();
+}
+function normalizeLineEndings(content) {
+    return content.replace(/\r\n?/g, '\n');
 }
 /**
  * Extract the requirements section from a spec file
+ * Aligned with spec-superflow: returns structured parts
  */
 export function extractRequirementsSection(content) {
-    const sectionMatch = content.match(/## Requirements\n([\s\S]*?)(?=\n## |$)/);
-    if (!sectionMatch) {
-        return null;
+    const normalized = normalizeLineEndings(content);
+    const lines = normalized.split('\n');
+    const reqHeaderIndex = lines.findIndex((l) => /^##\s+Requirements\s*$/i.test(l));
+    if (reqHeaderIndex === -1) {
+        const before = content.trimEnd();
+        const headerLine = '## Requirements';
+        return {
+            before: before ? before + '\n\n' : '',
+            headerLine,
+            preamble: '',
+            bodyBlocks: [],
+            after: '\n',
+        };
     }
-    const requirementsContent = sectionMatch[1];
-    const requirements = parseRequirementBlocks(requirementsContent);
+    let endIndex = lines.length;
+    for (let i = reqHeaderIndex + 1; i < lines.length; i++) {
+        if (/^##\s+/.test(lines[i])) {
+            endIndex = i;
+            break;
+        }
+    }
+    const before = lines.slice(0, reqHeaderIndex).join('\n');
+    const headerLine = lines[reqHeaderIndex];
+    const sectionBodyLines = lines.slice(reqHeaderIndex + 1, endIndex);
+    const blocks = [];
+    let cursor = 0;
+    const preambleLines = [];
+    while (cursor < sectionBodyLines.length &&
+        !REQUIREMENT_HEADER_REGEX.test(sectionBodyLines[cursor])) {
+        preambleLines.push(sectionBodyLines[cursor]);
+        cursor++;
+    }
+    while (cursor < sectionBodyLines.length) {
+        const headerLineCandidate = sectionBodyLines[cursor];
+        const headerMatch = headerLineCandidate.match(REQUIREMENT_HEADER_REGEX);
+        if (!headerMatch) {
+            cursor++;
+            continue;
+        }
+        const name = normalizeRequirementName(headerMatch[1]);
+        cursor++;
+        const bodyLines = [headerLineCandidate];
+        while (cursor < sectionBodyLines.length &&
+            !REQUIREMENT_HEADER_REGEX.test(sectionBodyLines[cursor]) &&
+            !/^##\s+/.test(sectionBodyLines[cursor])) {
+            bodyLines.push(sectionBodyLines[cursor]);
+            cursor++;
+        }
+        const raw = bodyLines.join('\n').trimEnd();
+        blocks.push({ headerLine: headerLineCandidate, name, raw });
+    }
+    const after = lines.slice(endIndex).join('\n');
+    const preamble = preambleLines.join('\n').trimEnd();
     return {
-        header: '## Requirements',
-        content: requirementsContent,
-        requirements,
+        before: before.trimEnd() ? before + '\n' : before,
+        headerLine,
+        preamble,
+        bodyBlocks: blocks,
+        after: after.startsWith('\n') ? after : '\n' + after,
     };
 }
 /**
- * Parse requirement blocks from markdown content
+ * Parse requirement blocks from a section body
  */
-export function parseRequirementBlocks(content) {
+function parseRequirementBlocksFromSection(sectionBody) {
+    if (!sectionBody)
+        return [];
+    const lines = normalizeLineEndings(sectionBody).split('\n');
     const blocks = [];
-    const lines = content.split('\n');
-    let currentBlock = null;
-    let lineStart = 0;
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        // Check for requirement header
-        const headerMatch = line.match(/^#{3,4} (?:Requirement|SHALL|MUST):\s*(.+)$/);
-        if (headerMatch) {
-            // Save previous block
-            if (currentBlock) {
-                currentBlock.lineEnd = i - 1;
-                blocks.push(currentBlock);
-            }
-            // Start new block
-            currentBlock = {
-                name: headerMatch[1].trim(),
-                text: '',
-                scenarios: [],
-                lineStart: i,
-                lineEnd: i,
-            };
-            lineStart = i;
+    let i = 0;
+    while (i < lines.length) {
+        while (i < lines.length && !REQUIREMENT_HEADER_REGEX.test(lines[i]))
+            i++;
+        if (i >= lines.length)
+            break;
+        const headerLine = lines[i];
+        const m = headerLine.match(REQUIREMENT_HEADER_REGEX);
+        if (!m) {
+            i++;
             continue;
         }
-        // Check for scenario header
-        const scenarioMatch = line.match(/^##### Scenario:\s*(.+)$/);
-        if (scenarioMatch && currentBlock) {
-            const scenario = {
-                name: scenarioMatch[1].trim(),
-                description: '',
-                expectedBehavior: '',
-            };
-            // Read scenario content
-            let j = i + 1;
-            while (j < lines.length && !lines[j].startsWith('#####') && !lines[j].startsWith('####')) {
-                const scenarioLine = lines[j];
-                if (scenarioLine.startsWith('**Expected:**') || scenarioLine.startsWith('**Behavior:**')) {
-                    scenario.expectedBehavior = scenarioLine.replace(/^\*\*.*?:\*\*\s*/, '').trim();
-                }
-                else if (scenarioLine.startsWith('**Given:**') || scenarioLine.startsWith('**Description:**')) {
-                    scenario.description = scenarioLine.replace(/^\*\*.*?:\*\*\s*/, '').trim();
-                }
-                j++;
-            }
-            currentBlock.scenarios.push(scenario);
-            i = j - 1; // Adjust loop counter
-            continue;
+        const name = normalizeRequirementName(m[1]);
+        const buf = [headerLine];
+        i++;
+        while (i < lines.length &&
+            !REQUIREMENT_HEADER_REGEX.test(lines[i]) &&
+            !/^##\s+/.test(lines[i])) {
+            buf.push(lines[i]);
+            i++;
         }
-        // Add content to current block
-        if (currentBlock && line.trim()) {
-            if (currentBlock.text) {
-                currentBlock.text += '\n' + line;
-            }
-            else {
-                currentBlock.text = line;
-            }
-        }
-    }
-    // Save last block
-    if (currentBlock) {
-        currentBlock.lineEnd = lines.length - 1;
-        blocks.push(currentBlock);
+        blocks.push({ headerLine, name, raw: buf.join('\n').trimEnd() });
     }
     return blocks;
 }
 /**
+ * Parse removed requirement names from a section body
+ */
+function parseRemovedNames(sectionBody) {
+    if (!sectionBody)
+        return [];
+    const names = [];
+    const lines = normalizeLineEndings(sectionBody).split('\n');
+    for (const line of lines) {
+        const m = line.match(REQUIREMENT_HEADER_REGEX);
+        if (m) {
+            names.push(normalizeRequirementName(m[1]));
+            continue;
+        }
+        const bullet = line.match(/^\s*-\s*`?###\s*Requirement:\s*(.+?)`?\s*$/);
+        if (bullet) {
+            names.push(normalizeRequirementName(bullet[1]));
+        }
+    }
+    return names;
+}
+/**
+ * Parse renamed pairs from a section body
+ */
+function parseRenamedPairs(sectionBody) {
+    if (!sectionBody)
+        return [];
+    const pairs = [];
+    const lines = normalizeLineEndings(sectionBody).split('\n');
+    let current = {};
+    for (const line of lines) {
+        const fromMatch = line.match(/^\s*-?\s*FROM:\s*`?###\s*Requirement:\s*(.+?)`?\s*$/);
+        const toMatch = line.match(/^\s*-?\s*TO:\s*`?###\s*Requirement:\s*(.+?)`?\s*$/);
+        if (fromMatch) {
+            current.from = normalizeRequirementName(fromMatch[1]);
+        }
+        else if (toMatch) {
+            current.to = normalizeRequirementName(toMatch[1]);
+            if (current.from && current.to) {
+                pairs.push({ from: current.from, to: current.to });
+                current = {};
+            }
+        }
+    }
+    return pairs;
+}
+/**
+ * Split top-level ## sections from content
+ */
+function splitTopLevelSections(content) {
+    const lines = content.split('\n');
+    const result = {};
+    const indices = [];
+    for (let i = 0; i < lines.length; i++) {
+        const m = lines[i].match(/^##\s+(.+)$/);
+        if (m) {
+            indices.push({ title: m[1].trim(), index: i });
+        }
+    }
+    for (let i = 0; i < indices.length; i++) {
+        const current = indices[i];
+        const next = indices[i + 1];
+        const body = lines
+            .slice(current.index + 1, next ? next.index : lines.length)
+            .join('\n');
+        result[current.title] = body;
+    }
+    return result;
+}
+/**
+ * Get a section by name (case-insensitive)
+ */
+function getSectionCaseInsensitive(sections, desired) {
+    const target = desired.toLowerCase();
+    for (const [title, body] of Object.entries(sections)) {
+        if (title.toLowerCase() === target)
+            return { body, found: true };
+    }
+    return { body: '', found: false };
+}
+/**
  * Parse a delta spec markdown into a DeltaPlan
+ * Aligned with spec-superflow: uses section-based parsing
  */
 export function parseDeltaSpec(content) {
-    const plan = {
-        added: [],
-        modified: [],
-        removed: [],
-        renamed: [],
+    const normalized = normalizeLineEndings(content);
+    const sections = splitTopLevelSections(normalized);
+    const addedLookup = getSectionCaseInsensitive(sections, 'ADDED Requirements');
+    const modifiedLookup = getSectionCaseInsensitive(sections, 'MODIFIED Requirements');
+    const removedLookup = getSectionCaseInsensitive(sections, 'REMOVED Requirements');
+    const renamedLookup = getSectionCaseInsensitive(sections, 'RENAMED Requirements');
+    const added = parseRequirementBlocksFromSection(addedLookup.body);
+    const modified = parseRequirementBlocksFromSection(modifiedLookup.body);
+    const removedNames = parseRemovedNames(removedLookup.body);
+    const renamedPairs = parseRenamedPairs(renamedLookup.body);
+    return {
+        added,
+        modified,
+        removed: removedNames,
+        renamed: renamedPairs,
+        sectionPresence: {
+            added: addedLookup.found,
+            modified: modifiedLookup.found,
+            removed: removedLookup.found,
+            renamed: renamedLookup.found,
+        },
     };
-    const lines = content.split('\n');
-    let currentSection = null;
-    let currentBlock = null;
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (line.startsWith('### ADDED:')) {
-            if (currentBlock && currentSection) {
-                currentBlock.lineEnd = i - 1;
-                if (currentSection === 'added')
-                    plan.added.push(currentBlock);
-                else if (currentSection === 'modified')
-                    plan.modified.push(currentBlock);
-            }
-            currentSection = 'added';
-            const name = line.replace('### ADDED:', '').trim();
-            currentBlock = { name, text: '', scenarios: [], lineStart: i, lineEnd: i };
-            continue;
-        }
-        if (line.startsWith('### MODIFIED:')) {
-            if (currentBlock && currentSection) {
-                currentBlock.lineEnd = i - 1;
-                if (currentSection === 'added')
-                    plan.added.push(currentBlock);
-                else if (currentSection === 'modified')
-                    plan.modified.push(currentBlock);
-            }
-            currentSection = 'modified';
-            const name = line.replace('### MODIFIED:', '').trim();
-            currentBlock = { name, text: '', scenarios: [], lineStart: i, lineEnd: i };
-            continue;
-        }
-        if (line.startsWith('### REMOVED:')) {
-            if (currentBlock && currentSection) {
-                currentBlock.lineEnd = i - 1;
-                if (currentSection === 'added')
-                    plan.added.push(currentBlock);
-                else if (currentSection === 'modified')
-                    plan.modified.push(currentBlock);
-            }
-            currentSection = 'removed';
-            const requirementName = line.replace('### REMOVED:', '').trim();
-            plan.removed.push(requirementName);
-            currentBlock = null;
-            currentSection = null;
-            continue;
-        }
-        if (line.startsWith('### RENAMED:')) {
-            if (currentBlock && currentSection) {
-                currentBlock.lineEnd = i - 1;
-                if (currentSection === 'added')
-                    plan.added.push(currentBlock);
-                else if (currentSection === 'modified')
-                    plan.modified.push(currentBlock);
-            }
-            currentSection = 'renamed';
-            const renameMatch = line.match(/### RENAMED:\s*(.+)\s*->\s*(.+)/);
-            if (renameMatch) {
-                plan.renamed.push({
-                    from: renameMatch[1].trim(),
-                    to: renameMatch[2].trim(),
-                });
-            }
-            currentBlock = null;
-            currentSection = null;
-            continue;
-        }
-        // Parse requirement blocks for added/modified sections
-        if (currentSection === 'added' || currentSection === 'modified') {
-            const headerMatch = line.match(/^#{3,4} (?:Requirement|SHALL|MUST):\s*(.+)$/);
-            if (headerMatch) {
-                // Save previous block
-                if (currentBlock) {
-                    currentBlock.lineEnd = i - 1;
-                    if (currentSection === 'added') {
-                        plan.added.push(currentBlock);
-                    }
-                    else {
-                        plan.modified.push(currentBlock);
-                    }
-                }
-                // Start new block
-                currentBlock = {
-                    name: headerMatch[1].trim(),
-                    text: '',
-                    scenarios: [],
-                    lineStart: i,
-                    lineEnd: i,
-                };
-                continue;
-            }
-            // Add content to current block
-            if (currentBlock && line.trim()) {
-                if (currentBlock.text) {
-                    currentBlock.text += '\n' + line;
-                }
-                else {
-                    currentBlock.text = line;
-                }
-            }
+}
+/**
+ * Extract a section by heading from markdown content
+ */
+function extractSection(content, heading) {
+    const normalized = normalizeLineEndings(content);
+    const lines = normalized.split('\n');
+    const headingRegex = new RegExp(`^##\\s+${heading.replace(/\s+/g, '\\s+')}\\s*$`, 'i');
+    const idx = lines.findIndex((l) => headingRegex.test(l));
+    if (idx === -1)
+        return '';
+    let endIdx = lines.length;
+    for (let i = idx + 1; i < lines.length; i++) {
+        if (/^##\s+/.test(lines[i])) {
+            endIdx = i;
+            break;
         }
     }
-    // Save last block
-    if (currentBlock) {
-        currentBlock.lineEnd = lines.length - 1;
-        if (currentSection === 'added') {
-            plan.added.push(currentBlock);
-        }
-        else if (currentSection === 'modified') {
-            plan.modified.push(currentBlock);
-        }
-    }
-    return plan;
+    return lines.slice(idx + 1, endIdx).join('\n').trim();
 }
 /**
  * Parse a change markdown file
+ * Aligned with spec-superflow/src/parsing/change-parser.ts
  */
-export function parseChangeMarkdown(content) {
-    const whyMatch = content.match(/## Why\n([\s\S]*?)(?=\n## |$)/);
-    const whatChangesMatch = content.match(/## What Changes\n([\s\S]*?)(?=\n## |$)/);
-    const why = whyMatch ? whyMatch[1].trim() : '';
-    const whatChanges = whatChangesMatch ? whatChangesMatch[1].trim() : '';
-    // Parse deltas from What Changes section
+export function parseChangeMarkdown(content, changeName) {
+    const why = extractSection(content, 'Why');
+    const whatChanges = extractSection(content, 'What Changes');
     const deltas = [];
-    if (whatChanges) {
-        const lines = whatChanges.split('\n');
-        let currentType = null;
-        let currentRequirement = '';
-        let currentText = '';
-        let lineStart = 0;
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (line.startsWith('- **ADDED:**')) {
-                if (currentType && currentRequirement) {
-                    deltas.push({ type: currentType, requirementName: currentRequirement, text: currentText || undefined, lineStart, lineEnd: i - 1 });
-                }
-                currentType = 'ADDED';
-                currentRequirement = line.replace(/- \*\*ADDED:\*\*\s*/, '').trim();
-                currentText = '';
-                lineStart = i;
-                continue;
+    const deltaSectionRegex = /^##\s+(ADDED|MODIFIED|REMOVED|RENAMED)\s+Requirements\s*$/im;
+    const sections = content.split(/(?=^##\s)/m);
+    for (const section of sections) {
+        const match = section.match(deltaSectionRegex);
+        if (match) {
+            const operation = match[1].toUpperCase();
+            const body = section.substring(match[0].length).trim();
+            const descLines = [];
+            for (const line of body.split('\n')) {
+                if (/^###\s+/.test(line))
+                    break;
+                const trimmed = line.trim();
+                if (trimmed)
+                    descLines.push(trimmed);
             }
-            if (line.startsWith('- **MODIFIED:**')) {
-                if (currentType && currentRequirement) {
-                    deltas.push({ type: currentType, requirementName: currentRequirement, text: currentText || undefined, lineStart, lineEnd: i - 1 });
-                }
-                currentType = 'MODIFIED';
-                currentRequirement = line.replace(/- \*\*MODIFIED:\*\*\s*/, '').trim();
-                currentText = '';
-                lineStart = i;
-                continue;
-            }
-            if (line.startsWith('- **REMOVED:**')) {
-                if (currentType && currentRequirement) {
-                    deltas.push({ type: currentType, requirementName: currentRequirement, text: currentText || undefined, lineStart, lineEnd: i - 1 });
-                }
-                currentType = 'REMOVED';
-                currentRequirement = line.replace(/- \*\*REMOVED:\*\*\s*/, '').trim();
-                deltas.push({
-                    type: 'REMOVED',
-                    requirementName: currentRequirement,
-                    lineStart: i,
-                    lineEnd: i,
-                });
-                currentType = null;
-                currentText = '';
-                continue;
-            }
-            if (line.startsWith('- **RENAMED:**')) {
-                if (currentType && currentRequirement) {
-                    deltas.push({ type: currentType, requirementName: currentRequirement, text: currentText || undefined, lineStart, lineEnd: i - 1 });
-                }
-                const renameMatch = line.match(/- \*\*RENAMED:\*\*\s*(.+)\s*->\s*(.+)/);
-                if (renameMatch) {
-                    deltas.push({
-                        type: 'RENAMED',
-                        requirementName: renameMatch[1].trim(),
-                        rename: {
-                            from: renameMatch[1].trim(),
-                            to: renameMatch[2].trim(),
-                        },
-                        lineStart: i,
-                        lineEnd: i,
-                    });
-                }
-                currentType = null;
-                currentText = '';
-                continue;
-            }
-            // Add content to current delta
-            if (currentType && line.trim()) {
-                if (currentText) {
-                    currentText += '\n' + line;
-                }
-                else {
-                    currentText = line;
-                }
-            }
-        }
-        // Save last delta
-        if (currentType && currentRequirement) {
             deltas.push({
-                type: currentType,
-                requirementName: currentRequirement,
-                text: currentText || undefined,
-                lineStart,
-                lineEnd: lines.length - 1,
+                spec: '',
+                operation,
+                description: descLines.join('\n'),
             });
         }
     }
     return {
+        name: changeName,
         why,
         whatChanges,
         deltas,

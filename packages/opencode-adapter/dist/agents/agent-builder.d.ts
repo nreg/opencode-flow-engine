@@ -4,15 +4,16 @@
  */
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory, AgentMode, BuiltinAgentName, AgentOverrides } from './types.js';
+export declare function clearConfigCache(): void;
 /**
  * Create an agent by name
  * Priority chain: AgentOverrides.model > model param > .sflow/config.json > DEFAULT_MODELS
  */
-export declare function createAgent(name: BuiltinAgentName, model?: string, overrides?: AgentOverrides): AgentConfig;
+export declare function createAgent(name: BuiltinAgentName, model?: string, overrides?: AgentOverrides, skillContent?: string): Promise<AgentConfig>;
 /**
  * Create all agents
  */
-export declare function createAllAgents(model?: string, overrides?: AgentOverrides): Record<BuiltinAgentName, AgentConfig>;
+export declare function createAllAgents(model?: string, overrides?: AgentOverrides, skillContents?: Record<string, string>): Promise<Record<BuiltinAgentName, AgentConfig>>;
 /**
  * Get agent by name
  */
@@ -22,7 +23,7 @@ export declare function getAgent(name: BuiltinAgentName): AgentFactory | undefin
  */
 export declare function getAgentNames(): BuiltinAgentName[];
 /**
- * Get agent mode
+ * Get agent mode — reads from explicit registry, not from function static property
  */
 export declare function getAgentMode(name: BuiltinAgentName): AgentMode;
 /**
@@ -45,4 +46,3 @@ export declare function getDefaultModel(name: BuiltinAgentName): string;
  * Get all default models
  */
 export declare function getAllDefaultModels(): Record<BuiltinAgentName, string>;
-//# sourceMappingURL=agent-builder.d.ts.map

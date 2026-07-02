@@ -3,8 +3,9 @@
  */
 
 import type { ToolDefinition, ToolContext, ToolResult } from './types.js';
-import { Validator } from '@opencode-sflow/core';
+import { sharedValidator } from '@opencode-sflow/core';
 import { readFile } from '@opencode-sflow/shared';
+import { checkContractStaleness } from './workflow-router.js';
 
 /**
  * Create the contract validator tool
@@ -21,8 +22,7 @@ export function createContractValidatorTool(): ToolDefinition {
       },
     },
     execute: async (params, context) => {
-      const { changeDir } = params as { changeDir: string };
-      const validator = new Validator();
+      const changeDir = (params as { changeDir?: string }).changeDir || context.changeDir;
 
       try {
         const contractContent = await readFile(`${changeDir}/execution-contract.md`);
@@ -30,16 +30,15 @@ export function createContractValidatorTool(): ToolDefinition {
           return {
             success: true,
             data: {
-              validation: { valid: false, issues: [] },
+              validation: { valid: false, issues: [], summary: { errors: 0, warnings: 0, info: 0 } },
               isStale: false,
               recommendations: ['execution-contract.md not found - run contract-builder to create the contract'],
             },
           };
         }
 
-        const report = validator.validateExecutionContract(contractContent);
-        const proposalContent = await readFile(`${changeDir}/proposal.md`);
-        const isStale = await checkContractStaleness(changeDir, contractContent, proposalContent);
+        const report = sharedValidator.validateExecutionContract(contractContent);
+        const isStale = await checkContractStaleness(changeDir);
 
         return {
           success: true,
@@ -60,23 +59,9 @@ export function createContractValidatorTool(): ToolDefinition {
   };
 }
 
-async function checkContractStaleness(
-  changeDir: string,
-  contractContent: string,
-  proposalContent: string | null
-): Promise<boolean> {
-  if (!proposalContent) {
-    return false;
-  }
-
-  // Simple staleness check - compare intent lock with proposal scope
-  // TODO: Implement more sophisticated staleness detection
-  return false;
-}
-
 function generateRecommendations(
   report: { valid: boolean; issues: Array<{ level: string; message: string }> },
-  isStale: boolean
+  isStale: boolean,
 ): string[] {
   const recommendations: string[] = [];
 

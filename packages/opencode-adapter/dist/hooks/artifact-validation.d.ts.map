@@ -1,1 +1,1 @@
-{"version":3,"file":"artifact-validation.d.ts","sourceRoot":"","sources":["../../src/hooks/artifact-validation.ts"],"names":[],"mappings":"AAAA;;GAEG;AAEH,OAAO,KAAK,EAAE,WAAW,EAA2B,MAAM,YAAY,CAAC;AAGvE;;GAEG;AACH,wBAAgB,4BAA4B,IAAI,WAAW,CAgC1D"}
+{"version":3,"file":"artifact-validation.d.ts","sourceRoot":"","sources":["../../src/hooks/artifact-validation.ts"],"names":[],"mappings":"AAAA;;GAEG;AAEH,OAAO,KAAK,EAAE,WAAW,EAA2B,MAAM,YAAY,CAAC;AAIvE;;GAEG;AACH,wBAAgB,4BAA4B,IAAI,WAAW,CA8B1D"}

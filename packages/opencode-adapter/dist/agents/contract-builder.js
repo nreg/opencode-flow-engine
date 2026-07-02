@@ -2,6 +2,7 @@
  * Contract Builder agent - Bridge contract creation
  * Based on oh-my-openagent's subagent pattern
  */
+import { getAgentTools } from './agent-tools.js';
 const MODE = 'subagent';
 /**
  * Create the contract-builder agent configuration
@@ -86,17 +87,7 @@ You have access to:
 - \`edit\` - Edit contract
 - \`bash\` - Run validation scripts`,
     temperature: 0.6,
-    tools: {
-        read: true,
-        write: true,
-        edit: true,
-        glob: true,
-        grep: true,
-        bash: true,
-        call_omo_agent: false,
-        task: false,
-        skill: false,
-    },
+    tools: getAgentTools('contract-builder'),
 });
 createContractBuilderAgent.mode = MODE;
 //# sourceMappingURL=contract-builder.js.map

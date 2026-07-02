@@ -72,4 +72,3 @@ export declare class McpManager {
  * Create an MCP manager instance
  */
 export declare function createMcpManager(): McpManager;
-//# sourceMappingURL=mcp-manager.d.ts.map

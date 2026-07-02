@@ -3,9 +3,10 @@
  */
 
 import type { FeatureConfig, FeatureResult } from './types.js';
-import { Validator } from '@opencode-sflow/core';
-import { readJsonFile, writeJsonFile, ensureDir } from '@opencode-sflow/shared';
-import { isValidTransition, getValidTransitions } from '@opencode-sflow/core';
+import { isValidTransition } from '@opencode-sflow/core';
+import { readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir } from '@opencode-sflow/shared';
+
+const STATE_FILE = '.sflow/state.json';
 
 /**
  * Create the workflow manager feature
@@ -14,10 +15,7 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
   return {
     name: 'workflow_manager',
     config,
-    
-    /**
-     * Initialize the workflow manager
-     */
+
     async initialize(): Promise<FeatureResult> {
       if (!config.enabled) {
         return { success: true, data: { message: 'Workflow manager disabled' } };
@@ -27,17 +25,11 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       return { success: true };
     },
 
-    /**
-     * Start a new workflow
-     */
     async startWorkflow(changeDir: string): Promise<FeatureResult> {
       try {
-        // Create change directory structure
         await createChangeDirectory(changeDir);
-        
-        // Initialize state file
         await initializeStateFile(changeDir);
-        
+
         return {
           success: true,
           data: {
@@ -54,9 +46,6 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       }
     },
 
-    /**
-     * Get current workflow state
-     */
     async getState(changeDir: string): Promise<FeatureResult> {
       try {
         const state = await readStateFile(changeDir);
@@ -72,9 +61,6 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       }
     },
 
-    /**
-     * Transition to new state
-     */
     async transitionState(changeDir: string, newState: string): Promise<FeatureResult> {
       try {
         const currentState = await readStateFile(changeDir);
@@ -86,7 +72,6 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
           };
         }
 
-        // Update state
         await updateStateFile(changeDir, {
           ...currentState,
           state: newState,
@@ -109,14 +94,10 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       }
     },
 
-    /**
-     * Complete workflow
-     */
     async completeWorkflow(changeDir: string): Promise<FeatureResult> {
       try {
-        // Archive the change
         await archiveChange(changeDir);
-        
+
         return {
           success: true,
           data: {
@@ -133,9 +114,6 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
     },
   };
 }
-
-// Helper functions
-const STATE_FILE = '.sflow/state.json';
 
 async function createChangeDirectory(changeDir: string): Promise<void> {
   const stateDir = `${changeDir}/.sflow`;
@@ -166,13 +144,14 @@ async function readStateFile(changeDir: string): Promise<{
   state: string;
   mode: string;
   updatedAt: string;
+  [key: string]: unknown;
 }> {
-  const state = await readJsonFile<{ state: string; mode: string; updatedAt: string }>(`${changeDir}/${STATE_FILE}`);
+  const state = await readJsonFile<{ state: string; mode: string; updatedAt: string; [key: string]: unknown }>(`${changeDir}/${STATE_FILE}`);
   return state || { state: 'exploring', mode: 'full', updatedAt: new Date().toISOString() };
 }
 
 async function updateStateFile(changeDir: string, state: Record<string, unknown>): Promise<void> {
-  await writeJsonFile(`${changeDir}/${STATE_FILE}`, state);
+  await atomicWriteJsonFile(`${changeDir}/${STATE_FILE}`, state);
 }
 
 async function archiveChange(changeDir: string): Promise<void> {

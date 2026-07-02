@@ -1,5 +1,6 @@
 /**
  * Unit tests for Validator
+ * Updated to match spec-superflow-aligned Validator API
  */
 
 import { describe, it, expect } from 'bun:test';
@@ -8,7 +9,7 @@ import { Validator } from './validator.js';
 describe('Validator', () => {
   const validator = new Validator();
 
-  describe('validateProposal', () => {
+  describe('validateProposal / validateChangeContent', () => {
     it('should pass for valid proposal', () => {
       const content = `
 # Proposal: Add User Authentication
@@ -23,17 +24,11 @@ We need to add user authentication to protect sensitive data and ensure only aut
 - Implement JWT token-based authentication
 - Add user session management
 - Create protected routes
-
-## Scope
-
-- Authentication module
-- User management
-- Route protection
-      `;
+`;
 
       const report = validator.validateProposal(content);
       expect(report.valid).toBe(true);
-      expect(report.issues).toHaveLength(0);
+      expect(report.issues.filter(i => i.level === 'ERROR')).toHaveLength(0);
     });
 
     it('should fail for missing Why section', () => {
@@ -43,11 +38,11 @@ We need to add user authentication to protect sensitive data and ensure only aut
 ## What Changes
 
 - Add login/logout functionality
-      `;
+`;
 
       const report = validator.validateProposal(content);
       expect(report.valid).toBe(false);
-      expect(report.issues.some(i => i.message.includes('Missing ## Why section'))).toBe(true);
+      expect(report.issues.some(i => i.message.includes('Why'))).toBe(true);
     });
 
     it('should fail for Why section too short', () => {
@@ -61,11 +56,11 @@ Short.
 ## What Changes
 
 - Add login/logout functionality
-      `;
+`;
 
       const report = validator.validateProposal(content);
       expect(report.valid).toBe(false);
-      expect(report.issues.some(i => i.message.includes('Why section must be at least'))).toBe(true);
+      expect(report.issues.some(i => i.message.includes('at least 50'))).toBe(true);
     });
 
     it('should fail for missing What Changes section', () => {
@@ -75,11 +70,11 @@ Short.
 ## Why
 
 We need to add user authentication to protect sensitive data and ensure only authorized users can access the system. This is a critical security requirement for our application.
-      `;
+`;
 
       const report = validator.validateProposal(content);
       expect(report.valid).toBe(false);
-      expect(report.issues.some(i => i.message.includes('Missing ## What Changes section'))).toBe(true);
+      expect(report.issues.some(i => i.message.includes('What Changes'))).toBe(true);
     });
 
     it('should fail for empty What Changes section', () => {
@@ -92,22 +87,39 @@ We need to add user authentication to protect sensitive data and ensure only aut
 
 ## What Changes
 
-      `;
+`;
 
       const report = validator.validateProposal(content);
       expect(report.valid).toBe(false);
-      expect(report.issues.some(i => i.message.includes('What Changes section cannot be empty'))).toBe(true);
+      expect(report.issues.some(i => i.message.includes('cannot be empty'))).toBe(true);
+    });
+
+    it('should include structured summary', () => {
+      const content = `
+# Proposal: Add User Authentication
+
+## Why
+
+Short.
+
+## What Changes
+`;
+      const report = validator.validateProposal(content);
+      expect(report.summary).toBeDefined();
+      expect(typeof report.summary.errors).toBe('number');
+      expect(typeof report.summary.warnings).toBe('number');
+      expect(typeof report.summary.info).toBe('number');
     });
   });
 
-  describe('validateSpec', () => {
-    it('should pass for valid spec', () => {
+  describe('validateSpecContent', () => {
+    it('should pass for valid spec with block-level validation', () => {
       const content = `
 # Spec: User Authentication
 
-## Overview
+## Purpose
 
-This spec defines the user authentication requirements.
+This spec defines the user authentication requirements for the system.
 
 ## Requirements
 
@@ -121,45 +133,72 @@ The system SHALL allow users to log in with email and password.
 
 **When:** The user submits login form
 
-**Then:** The system authenticates the user and creates a session
+**Then:** The system authenticates the user
+`;
 
-#### Scenario: Failed Login
-
-**Given:** A user with invalid credentials
-
-**When:** The user submits login form
-
-**Then:** The system rejects the login and shows error message
-      `;
-
-      const report = validator.validateSpec(content, 'auth');
+      const report = validator.validateSpecContent('auth', content);
       expect(report.valid).toBe(true);
-      expect(report.issues).toHaveLength(0);
+    });
+
+    it('should fail for missing Purpose section', () => {
+      const content = `
+# Spec: User Authentication
+
+## Requirements
+
+### Requirement: User Login
+
+The system SHALL allow users to log in.
+`;
+
+      const report = validator.validateSpecContent('auth', content);
+      expect(report.valid).toBe(false);
+      expect(report.issues.some(i => i.message.includes('Purpose'))).toBe(true);
     });
 
     it('should fail for missing requirements', () => {
       const content = `
 # Spec: User Authentication
 
-## Overview
+## Purpose
+
+This spec defines the user authentication requirements.
+`;
+
+      const report = validator.validateSpecContent('auth', content);
+      expect(report.valid).toBe(false);
+      expect(report.issues.some(i => i.message.includes('at least one requirement'))).toBe(true);
+    });
+
+    it('should fail per-block for missing SHALL/MUST', () => {
+      const content = `
+# Spec: User Authentication
+
+## Purpose
 
 This spec defines the user authentication requirements.
 
 ## Requirements
 
-No requirements defined here.
-      `;
+### Requirement: User Login
 
-      const report = validator.validateSpec(content, 'auth');
+Users can log in with email and password.
+
+#### Scenario: Login
+
+**When:** The user submits login form
+`;
+
+      const report = validator.validateSpecContent('auth', content);
       expect(report.valid).toBe(false);
-      expect(report.issues.some(i => i.message.includes('No requirements found'))).toBe(true);
+      expect(report.issues.some(i => i.message.includes('SHALL or MUST'))).toBe(true);
     });
 
-    it('should fail for requirements without scenarios', () => {
+    it('should warn per-block for missing scenarios', () => {
       const content = `
 # Spec: User Authentication
 
-## Overview
+## Purpose
 
 This spec defines the user authentication requirements.
 
@@ -168,11 +207,18 @@ This spec defines the user authentication requirements.
 ### Requirement: User Login
 
 The system SHALL allow users to log in with email and password.
-      `;
+`;
 
-      const report = validator.validateSpec(content, 'auth');
+      const report = validator.validateSpecContent('auth', content);
+      // Missing scenarios is a WARNING, not ERROR
+      expect(report.issues.some(i => i.message.includes('scenario') && i.level === 'WARNING')).toBe(true);
+    });
+
+    it('should fail for empty spec name', () => {
+      const content = `## Purpose\nTest\n\n## Requirements\n### Requirement: Test\nThe system SHALL work.`;
+      const report = validator.validateSpecContent('', content);
       expect(report.valid).toBe(false);
-      expect(report.issues.some(i => i.message.includes('must have at least one scenario'))).toBe(true);
+      expect(report.issues.some(i => i.message.includes('name cannot be empty'))).toBe(true);
     });
   });
 
@@ -181,7 +227,9 @@ The system SHALL allow users to log in with email and password.
       const content = `
 # Delta Spec: User Authentication
 
-## ADDED: User Logout
+## ADDED Requirements
+
+### Requirement: User Logout
 
 The system SHALL allow users to log out.
 
@@ -192,53 +240,132 @@ The system SHALL allow users to log out.
 **When:** The user clicks logout
 
 **Then:** The system destroys the session
-      `;
+`;
 
       const report = validator.validateDeltaSpec(content, 'add-logout');
       expect(report.valid).toBe(true);
-      expect(report.issues).toHaveLength(0);
     });
 
-    it('should fail for ADDED without text', () => {
+    it('should fail for ADDED without requirement text', () => {
       const content = `
 # Delta Spec: User Authentication
 
-## ADDED: User Logout
-      `;
+## ADDED Requirements
+
+### Requirement: User Logout
+
+#### Scenario: Logout
+
+**When:** The user clicks logout
+`;
 
       const report = validator.validateDeltaSpec(content, 'add-logout');
       expect(report.valid).toBe(false);
-      expect(report.issues.some(i => i.message.includes('ADDED operation must have requirement text'))).toBe(true);
+      expect(report.issues.some(i => i.message.includes('missing requirement text'))).toBe(true);
     });
 
-    it('should fail for ADDED without scenario', () => {
+    it('should fail for ADDED without SHALL/MUST', () => {
       const content = `
 # Delta Spec: User Authentication
 
-## ADDED: User Logout
+## ADDED Requirements
 
-The system SHALL allow users to log out.
-      `;
+### Requirement: User Logout
+
+Users can log out from the system.
+
+#### Scenario: Logout
+
+**When:** The user clicks logout
+`;
 
       const report = validator.validateDeltaSpec(content, 'add-logout');
       expect(report.valid).toBe(false);
-      expect(report.issues.some(i => i.message.includes('ADDED operation must have at least one scenario'))).toBe(true);
+      expect(report.issues.some(i => i.message.includes('SHALL or MUST'))).toBe(true);
     });
 
-    it('should detect cross-section conflicts', () => {
+    it('should detect cross-section conflicts (MODIFIED and REMOVED)', () => {
       const content = `
 # Delta Spec: User Authentication
 
-## MODIFIED: User Login
+## MODIFIED Requirements
 
-Updated login requirements.
+### Requirement: User Login
 
-## REMOVED: User Login
-      `;
+The system SHALL allow users to log in securely.
+
+#### Scenario: Login
+
+**When:** The user logs in
+
+## REMOVED Requirements
+
+### Requirement: User Login
+`;
 
       const report = validator.validateDeltaSpec(content, 'conflict-change');
       expect(report.valid).toBe(false);
-      expect(report.issues.some(i => i.message.includes('Cross-section conflict'))).toBe(true);
+      expect(report.issues.some(i => i.message.includes('both MODIFIED and REMOVED'))).toBe(true);
+    });
+
+    it('should detect duplicate requirements in ADDED', () => {
+      const content = `
+# Delta Spec: User Authentication
+
+## ADDED Requirements
+
+### Requirement: User Login
+
+The system SHALL allow users to log in.
+
+#### Scenario: Login
+
+**When:** The user logs in
+
+### Requirement: User Login
+
+The system SHALL allow users to log in again.
+
+#### Scenario: Login Again
+
+**When:** The user logs in again
+`;
+
+      const report = validator.validateDeltaSpec(content, 'dup-change');
+      expect(report.valid).toBe(false);
+      expect(report.issues.some(i => i.message.includes('Duplicate'))).toBe(true);
+    });
+
+    it('should detect RENAMED TO colliding with ADDED', () => {
+      const content = `
+# Delta Spec: User Authentication
+
+## ADDED Requirements
+
+### Requirement: New Auth
+
+The system SHALL support new auth.
+
+#### Scenario: Auth
+
+**When:** Auth runs
+
+## RENAMED Requirements
+
+- FROM: ### Requirement: Old Auth
+- TO: ### Requirement: New Auth
+`;
+
+      const report = validator.validateDeltaSpec(content, 'rename-collision');
+      expect(report.valid).toBe(false);
+      expect(report.issues.some(i => i.message.includes('collides with ADDED'))).toBe(true);
+    });
+
+    it('should fail for no deltas', () => {
+      const content = `# Delta Spec: Empty Change`;
+      const report = validator.validateDeltaSpec(content, 'empty-change');
+      expect(report.valid).toBe(false);
+      expect(report.issues.some(i => i.message.includes('at least one delta'))).toBe(true);
     });
   });
 
@@ -251,23 +378,16 @@ Updated login requirements.
 
 - [ ] Task 1.1: Create authentication module — Module created with login/logout functions
 - [ ] Task 1.2: Implement JWT tokens — Tokens generated and validated correctly
-- [ ] Task 1.3: Add session management — Sessions created and destroyed properly
-      `;
+`;
 
       const report = validator.validateTasks(content);
       expect(report.valid).toBe(true);
-      expect(report.issues).toHaveLength(0);
     });
 
     it('should warn for no tasks', () => {
-      const content = `
-# Tasks: Add User Authentication
-
-No tasks defined yet.
-      `;
-
+      const content = `# Tasks: Add User Authentication\n\nNo tasks defined yet.`;
       const report = validator.validateTasks(content);
-      expect(report.valid).toBe(true); // Warning only
+      expect(report.valid).toBe(true);
       expect(report.issues.some(i => i.message.includes('No tasks found'))).toBe(true);
     });
   });
@@ -284,38 +404,24 @@ Add user authentication to protect sensitive data.
 ## Approved Behavior
 
 - Users can log in with email and password
-- Users can log out
-- Sessions are managed securely
 
 ## Design Constraints
 
 - Use JWT tokens
-- Follow security best practices
-- Support multiple authentication methods
 
 ## Task Batches
 
 ### Batch 1: Core Authentication
+
 - Create authentication module
-- Implement JWT tokens
-- Add session management
 
 ## Test Obligations
 
-### TDD Requirements
-
-- **RED**: Write failing test first
-- **GREEN**: Write minimal implementation
-- **REFACTOR**: Clean up code
-
-### Review Gates
-
-- After each batch completion
-      `;
+- Write failing test first
+`;
 
       const report = validator.validateExecutionContract(content);
       expect(report.valid).toBe(true);
-      expect(report.issues).toHaveLength(0);
     });
 
     it('should fail for missing required sections', () => {
@@ -324,17 +430,121 @@ Add user authentication to protect sensitive data.
 
 ## Intent Lock
 
-Add user authentication to protect sensitive data.
+Add user authentication.
 
 ## Approved Behavior
 
-- Users can log in with email and password
-      `;
+- Users can log in
+`;
 
       const report = validator.validateExecutionContract(content);
       expect(report.valid).toBe(false);
-      expect(report.issues.some(i => i.message.includes('Missing required section: Design Constraints'))).toBe(true);
-      expect(report.issues.some(i => i.message.includes('Missing required section: Task Batches'))).toBe(true);
+      expect(report.issues.some(i => i.message.includes('Design Constraints'))).toBe(true);
+      expect(report.issues.some(i => i.message.includes('Task Batches'))).toBe(true);
+    });
+  });
+
+  describe('validateImplementation', () => {
+    it('should return PASS verdict for complete implementation', () => {
+      const specContent = `
+### Requirement: User Login
+The system SHALL allow users to log in.
+`;
+      const designContent = `- Choice: JWT token authentication`;
+      const diffSummary = `Added user login with JWT token authentication`;
+
+      const report = validator.validateImplementation(diffSummary, specContent, designContent);
+      expect(report.verdict).toBe('PASS');
+    });
+
+    it('should return FAIL verdict when requirements not covered', () => {
+      const specContent = `
+### Requirement: User Login
+The system SHALL allow users to log in with multi-factor authentication.
+`;
+      const designContent = `- Choice: Simple password authentication`;
+      const diffSummary = `Added simple password check`;
+
+      const report = validator.validateImplementation(diffSummary, specContent, designContent);
+      expect(report.verdict).not.toBe('PASS');
+    });
+
+    it('should detect placeholder markers', () => {
+      const specContent = `### Requirement: Auth\nThe system SHALL authenticate users.`;
+      const designContent = ``;
+      const diffSummary = `Added TODO: implement authentication`;
+
+      const report = validator.validateImplementation(diffSummary, specContent, designContent);
+      expect(report.dimensions.some(d => d.name === 'Correctness' && d.status !== 'PASS')).toBe(true);
+    });
+  });
+
+  describe('detectSyncConflicts', () => {
+    it('should detect conflicts across multiple changes', () => {
+      const delta1 = `
+## MODIFIED Requirements
+
+### Requirement: User Login
+
+The system SHALL allow users to log in with email.
+
+#### Scenario: Login
+
+**When:** The user logs in
+`;
+
+      const delta2 = `
+## MODIFIED Requirements
+
+### Requirement: User Login
+
+The system SHALL allow users to log in with phone.
+
+#### Scenario: Login
+
+**When:** The user logs in
+`;
+
+      const report = validator.detectSyncConflicts([
+        { changeName: 'change-1', content: delta1 },
+        { changeName: 'change-2', content: delta2 },
+      ]);
+
+      expect(report.hasConflicts).toBe(true);
+      expect(report.conflicts.length).toBeGreaterThan(0);
+    });
+
+    it('should not report conflicts for independent changes', () => {
+      const delta1 = `
+## ADDED Requirements
+
+### Requirement: User Login
+
+The system SHALL allow users to log in.
+
+#### Scenario: Login
+
+**When:** The user logs in
+`;
+
+      const delta2 = `
+## ADDED Requirements
+
+### Requirement: User Logout
+
+The system SHALL allow users to log out.
+
+#### Scenario: Logout
+
+**When:** The user logs out
+`;
+
+      const report = validator.detectSyncConflicts([
+        { changeName: 'change-1', content: delta1 },
+        { changeName: 'change-2', content: delta2 },
+      ]);
+
+      expect(report.hasConflicts).toBe(false);
     });
   });
 });

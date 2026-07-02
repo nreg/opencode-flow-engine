@@ -109,7 +109,7 @@ export class SkillLoader {
       for (const skill of results) {
         if (skill) {
           skills.push(skill);
-          this.skills.set(skill.name || 'unknown', skill);
+          this.skills.set(skill.metadata.name || 'unknown', skill);
         }
       }
     } catch (error) {
@@ -189,15 +189,19 @@ export class SkillLoader {
       };
     }
 
-    const frontmatter = frontmatterMatch[1];
+    const frontmatterRaw = frontmatterMatch[1];
+    if (!frontmatterRaw) {
+      return { name: '', description: '' };
+    }
+
     const metadata: SkillMetadata = {
       name: '',
       description: '',
     };
 
     try {
-      const parsed = yaml.load(frontmatter) as Record<string, unknown>;
-      if (parsed && typeof parsed === 'object') {
+      const parsed = yaml.load(frontmatterRaw) as Record<string, unknown> | undefined;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         if (typeof parsed.name === 'string') metadata.name = parsed.name;
         if (typeof parsed.description === 'string') metadata.description = parsed.description;
         if (typeof parsed.version === 'string') metadata.version = parsed.version;
@@ -207,17 +211,18 @@ export class SkillLoader {
         } else if (typeof parsed.tags === 'string') {
           metadata.tags = parsed.tags.split(',').map(t => t.trim()).filter(Boolean);
         }
-        if (parsed.mcp && typeof parsed.mcp === 'object') {
+        if (parsed.mcp && typeof parsed.mcp === 'object' && !Array.isArray(parsed.mcp)) {
           metadata.mcp = parsed.mcp as McpConfig;
         }
       }
     } catch {
       // Fallback to simple regex-based parsing if YAML fails
-      const lines = frontmatter.split('\n');
+      const lines = frontmatterRaw.split('\n');
       for (const line of lines) {
         const match = line.match(/^(\w+):\s*(.+)$/);
-        if (match) {
-          const [, key, value] = match;
+        if (match && match[1] && match[2]) {
+          const key = match[1];
+          const value = match[2];
           switch (key) {
             case 'name':
               if (!metadata.name) metadata.name = value;

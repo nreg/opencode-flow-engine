@@ -22,54 +22,38 @@ import {
   agentOverridesFromConfig,
   mergeOverrides,
 } from './config-loader.js';
-import { getSkillContentWithoutFrontmatter } from '../features/skill-loader.js';
-import { access, readFile } from 'fs/promises';
-import { join, resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const PACKAGE_ROOT = resolvePackageRoot();
-
-function resolvePackageRoot(): string {
-  let current = resolve(__dirname, '..');
-  for (let i = 0; i < 10; i++) {
-    if (existsSync(join(current, 'package.json'))) {
-      return current;
-    }
-    current = resolve(current, '..');
-  }
-  return resolve(__dirname, '..', '..', '..', '..');
-}
-
-async function loadSkillInstructions(name: string): Promise<string | null> {
-  const skillFile = join(PACKAGE_ROOT, 'skills', name, 'SKILL.md');
-  try {
-    await access(skillFile);
-    const content = await readFile(skillFile, 'utf-8');
-    return getSkillContentWithoutFrontmatter(content);
-  } catch {
-    return null;
-  }
-}
 
 /**
- * Cached config to avoid redundant file I/O
+ * Agent mode registry — explicit mapping instead of static property on function
+ * This avoids the unsafe pattern of assigning .mode to a function object
  */
-let _cascadedConfigCache: SFlowConfig | null = null;
+const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
+  sflow: 'primary',
+  'need-explorer': 'subagent',
+  'spec-writer': 'subagent',
+  'contract-builder': 'subagent',
+  'build-executor': 'subagent',
+  'bug-investigator': 'subagent',
+  'code-reviewer': 'subagent',
+  'release-archivist': 'subagent',
+  'spec-merger': 'subagent',
+};
 
-async function getCascadedConfig() {
-  if (!_cascadedConfigCache) {
-    _cascadedConfigCache = await loadCascadedSFlowConfig();
-  }
-  return _cascadedConfigCache;
-}
-
-export function clearConfigCache(): void {
-  _cascadedConfigCache = null;
-}
+/**
+ * Default model for each agent
+ * 国产模型默认配置
+ */
+const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
+  sflow: 'deepseek-v4-flash',
+  'need-explorer': 'kimi-k2.6',
+  'spec-writer': 'glm-5.1',
+  'contract-builder': 'glm-5',
+  'build-executor': 'step-3.7-flash',
+  'bug-investigator': 'minimax-m2.7',
+  'code-reviewer': 'deepseek-v4-flash',
+  'release-archivist': 'mimo-v2.5-pro',
+  'spec-merger': 'mimo-v2.5',
+};
 
 /**
  * Agent registry with factory functions
@@ -87,19 +71,26 @@ const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
 };
 
 /**
- * Default model for each agent
+ * Cached config to avoid redundant file I/O
  */
-const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
-  sflow: 'deepseek-v4-flash',
-  'need-explorer': 'kimi-k2.6',
-  'spec-writer': 'glm-5.1',
-  'contract-builder': 'glm-5',
-  'build-executor': 'step-3.7-flash',
-  'bug-investigator': 'minimax-m2.7',
-  'code-reviewer': 'deepseek-v4-flash',
-  'release-archivist': 'mimo-v2.5-pro',
-  'spec-merger': 'mimo-v2.5',
-};
+let _cascadedConfigCache: SFlowConfig | null = null;
+let _cascadedConfigTimestamp = 0;
+const CONFIG_CACHE_TTL_MS = 30_000; // 30 seconds
+
+async function getCascadedConfig() {
+  const now = Date.now();
+  if (_cascadedConfigCache && now - _cascadedConfigTimestamp < CONFIG_CACHE_TTL_MS) {
+    return _cascadedConfigCache;
+  }
+  _cascadedConfigCache = await loadCascadedSFlowConfig();
+  _cascadedConfigTimestamp = now;
+  return _cascadedConfigCache;
+}
+
+export function clearConfigCache(): void {
+  _cascadedConfigCache = null;
+  _cascadedConfigTimestamp = 0;
+}
 
 /**
  * Create an agent by name
@@ -108,7 +99,8 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
 export async function createAgent(
   name: BuiltinAgentName,
   model?: string,
-  overrides?: AgentOverrides
+  overrides?: AgentOverrides,
+  skillContent?: string,
 ): Promise<AgentConfig> {
   const factory = AGENT_REGISTRY[name];
   if (!factory) {
@@ -118,7 +110,7 @@ export async function createAgent(
   const config = await getCascadedConfig();
   const configOverrides = agentOverridesFromConfig(config);
 
-  // Merge config + programmatic overrides for non-model fields
+  // Merge config + programmatic overrides
   const merged = mergeOverrides(configOverrides, overrides || {});
   const agentOverride = merged[name];
 
@@ -129,7 +121,7 @@ export async function createAgent(
 
   const agentConfig = factory(resolvedModel);
 
-  const skillContent = await loadSkillInstructions(name);
+  // Use skill content if provided (from unified SkillLoader)
   if (skillContent) {
     agentConfig.instructions = skillContent;
   }
@@ -138,7 +130,7 @@ export async function createAgent(
     return {
       ...agentConfig,
       ...agentOverride,
-      model: resolvedModel, // preserve correct priority: overrides > param > config > default
+      model: resolvedModel,
       id: agentConfig.id,
       name: agentConfig.name,
     };
@@ -152,9 +144,10 @@ export async function createAgent(
  */
 export async function createAllAgents(
   model?: string,
-  overrides?: AgentOverrides
+  overrides?: AgentOverrides,
+  skillContents?: Record<string, string>,
 ): Promise<Record<BuiltinAgentName, AgentConfig>> {
-  const agents: Record<string, AgentConfig> = {};
+  const agents: Partial<Record<BuiltinAgentName, AgentConfig>> = {};
 
   const config = await getCascadedConfig();
   const configOverrides = agentOverridesFromConfig(config);
@@ -168,10 +161,10 @@ export async function createAllAgents(
 
     const agentConfig = factory(resolvedModel);
 
-    // Load SKILL.md content as instructions if available
-    const skillContent = await loadSkillInstructions(name);
-    if (skillContent) {
-      agentConfig.instructions = skillContent;
+    // Use skill content from SkillLoader if available
+    const content = skillContents?.[name];
+    if (content) {
+      agentConfig.instructions = content;
     }
 
     const merged = mergeOverrides(configOverrides, overrides || {});
@@ -208,25 +201,24 @@ export function getAgentNames(): BuiltinAgentName[] {
 }
 
 /**
- * Get agent mode
+ * Get agent mode — reads from explicit registry, not from function static property
  */
 export function getAgentMode(name: BuiltinAgentName): AgentMode {
-  const factory = AGENT_REGISTRY[name];
-  return factory?.mode || 'subagent';
+  return AGENT_MODES[name] || 'subagent';
 }
 
 /**
  * Get primary agents (mode === 'primary')
  */
 export function getPrimaryAgents(): BuiltinAgentName[] {
-  return getAgentNames().filter(name => getAgentMode(name) === 'primary');
+  return getAgentNames().filter(name => AGENT_MODES[name] === 'primary');
 }
 
 /**
  * Get subagent agents (mode === 'subagent')
  */
 export function getSubagentAgents(): BuiltinAgentName[] {
-  return getAgentNames().filter(name => getAgentMode(name) === 'subagent');
+  return getAgentNames().filter(name => AGENT_MODES[name] === 'subagent');
 }
 
 /**

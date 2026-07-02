@@ -1,16 +1,10 @@
-/**
- * State Manager feature - Manage workflow state
- */
-/**
- * Create the state manager feature
- */
-export function createStateManager(config = { enabled: true }) {
+import { createWorkflowManager } from './workflow-manager.js';
+export function createStateManager(config = { enabled: true }, workflowManager) {
+    const wf = workflowManager || createWorkflowManager(config);
     return {
         name: 'state_manager',
         config,
-        /**
-         * Initialize the state manager
-         */
+        getWorkflowManager: () => wf,
         async initialize() {
             if (!config.enabled) {
                 return { success: true, data: { message: 'State manager disabled' } };
@@ -18,16 +12,9 @@ export function createStateManager(config = { enabled: true }) {
             console.log('State manager initialized');
             return { success: true };
         },
-        /**
-         * Get current state
-         */
         async getState(changeDir) {
             try {
-                const state = await readStateFile(changeDir);
-                return {
-                    success: true,
-                    data: state,
-                };
+                return await wf.getState(changeDir);
             }
             catch (error) {
                 return {
@@ -36,18 +23,9 @@ export function createStateManager(config = { enabled: true }) {
                 };
             }
         },
-        /**
-         * Update state
-         */
         async updateState(changeDir, updates) {
             try {
-                const currentState = await readStateFile(changeDir);
-                const newState = { ...currentState, ...updates, updatedAt: new Date().toISOString() };
-                await writeStateFile(changeDir, newState);
-                return {
-                    success: true,
-                    data: newState,
-                };
+                return await wf.transitionState(changeDir, updates.state || 'exploring');
             }
             catch (error) {
                 return {
@@ -56,17 +34,14 @@ export function createStateManager(config = { enabled: true }) {
                 };
             }
         },
-        /**
-         * Check if contract is approved
-         */
         async isContractApproved(changeDir) {
             try {
-                const state = await readStateFile(changeDir);
+                const state = await wf.getState(changeDir);
+                if (!state.success)
+                    return state;
                 return {
                     success: true,
-                    data: {
-                        approved: state.contractApproved || false,
-                    },
+                    data: { approved: state.data?.contractApproved || false },
                 };
             }
             catch (error) {
@@ -76,25 +51,15 @@ export function createStateManager(config = { enabled: true }) {
                 };
             }
         },
-        /**
-         * Approve contract
-         */
         async approveContract(changeDir) {
             try {
-                const state = await readStateFile(changeDir);
-                const newState = {
-                    ...state,
-                    contractApproved: true,
-                    contractApprovedAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                };
-                await writeStateFile(changeDir, newState);
+                const current = await wf.getState(changeDir);
+                if (!current.success)
+                    return current;
+                const result = await wf.transitionState(changeDir, 'approved-for-build');
                 return {
-                    success: true,
-                    data: {
-                        approved: true,
-                        timestamp: new Date().toISOString(),
-                    },
+                    success: result.success,
+                    data: { approved: true, timestamp: new Date().toISOString() },
                 };
             }
             catch (error) {
@@ -104,19 +69,9 @@ export function createStateManager(config = { enabled: true }) {
                 };
             }
         },
-        /**
-         * Check if contract is stale
-         */
         async isContractStale(changeDir) {
             try {
-                // TODO: Implement staleness detection
-                // Compare proposal scope vs contract intent lock
-                return {
-                    success: true,
-                    data: {
-                        stale: false,
-                    },
-                };
+                return { success: true, data: { stale: false } };
             }
             catch (error) {
                 return {
@@ -126,20 +81,5 @@ export function createStateManager(config = { enabled: true }) {
             }
         },
     };
-}
-// Helper functions
-async function readStateFile(changeDir) {
-    // TODO: Read state file
-    return {
-        state: 'exploring',
-        mode: 'full',
-        contractApproved: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-    };
-}
-async function writeStateFile(changeDir, state) {
-    // TODO: Write state file
-    console.log(`Writing state file in: ${changeDir}`, state);
 }
 //# sourceMappingURL=state-manager.js.map

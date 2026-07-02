@@ -20,4 +20,3 @@ export interface FeatureResult {
     data?: unknown;
     error?: string;
 }
-//# sourceMappingURL=types.d.ts.map

@@ -3,7 +3,6 @@
  */
 
 import type { ToolDefinition, ToolContext, ToolResult } from './types.js';
-import { Validator } from '@opencode-sflow/core';
 import { fileExists, directoryExists, readJsonFile } from '@opencode-sflow/shared';
 
 /**
@@ -21,8 +20,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
       },
     },
     execute: async (params, context) => {
-      const { changeDir } = params as { changeDir: string };
-      const validator = new Validator();
+      const changeDir = (params as { changeDir?: string }).changeDir || context.changeDir;
 
       try {
         // Check for planning artifacts
@@ -32,7 +30,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
           design: await fileExists(`${changeDir}/design.md`),
           tasks: await fileExists(`${changeDir}/tasks.md`),
           contract: await fileExists(`${changeDir}/execution-contract.md`),
-          state: await fileExists(`${changeDir}/.spec-superflow.yaml`),
+          state: await fileExists(`${changeDir}/.sflow/state.json`),
         };
 
         // Determine workflow state
@@ -58,9 +56,9 @@ export function createWorkflowRouterTool(): ToolDefinition {
           reasons.push('Contract approved, ready for implementation');
         }
 
-        // Check for stale artifacts
+        // Check for stale artifacts using unified staleness check
         if (artifacts.contract) {
-          const isStale = await isContractStale(changeDir);
+          const isStale = await checkContractStaleness(changeDir);
           if (isStale) {
             state = 'bridging';
             skill = 'contract-builder';
@@ -95,16 +93,21 @@ async function isContractApproved(changeDir: string): Promise<boolean> {
   return false;
 }
 
-async function isContractStale(changeDir: string): Promise<boolean> {
+/**
+ * Unified contract staleness check
+ * Used by workflow-router, contract-validator, and guard hook
+ */
+export async function checkContractStaleness(changeDir: string): Promise<boolean> {
   const contractPath = `${changeDir}/execution-contract.md`;
   const proposalPath = `${changeDir}/proposal.md`;
   const contractExists = await fileExists(contractPath);
   const proposalExists = await fileExists(proposalPath);
   if (!contractExists || !proposalExists) return false;
   try {
-    const contractMod = Bun.file(contractPath).lastModified;
-    const proposalMod = Bun.file(proposalPath).lastModified;
-    return proposalMod > contractMod;
+    const { stat } = await import('fs/promises');
+    const contractStats = await stat(contractPath);
+    const proposalStats = await stat(proposalPath);
+    return proposalStats.mtimeMs > contractStats.mtimeMs;
   } catch {
     return false;
   }

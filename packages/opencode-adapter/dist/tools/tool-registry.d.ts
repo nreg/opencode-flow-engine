@@ -62,4 +62,3 @@ export declare function getToolNames(): ToolName[];
  * Check if tool exists
  */
 export declare function toolExists(name: string): name is ToolName;
-//# sourceMappingURL=tool-registry.d.ts.map

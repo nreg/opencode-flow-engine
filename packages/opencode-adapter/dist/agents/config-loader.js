@@ -1,24 +1,28 @@
 /**
  * Config Loader - Load agent configuration from .sflow/config.json
  */
-import { readFileSync, existsSync } from 'fs';
+import { access, readFile } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
+import { deepMerge } from '@opencode-sflow/shared';
 /**
- * User-level config path: ~/.sFlow/config.json
+ * User-level config path: ~/.sflow/config.json
  */
-export const USER_CONFIG_FILE = join(homedir(), '.sFlow', 'config.json');
+export const USER_CONFIG_FILE = join(homedir(), '.sflow', 'config.json');
 /**
  * Load sFlow config from a specific directory's .sflow/config.json
  */
-export function loadSFlowConfig(projectDir) {
+export async function loadSFlowConfig(projectDir) {
     const dir = projectDir || process.cwd();
     const configPath = join(dir, '.sflow', 'config.json');
-    if (!existsSync(configPath)) {
+    try {
+        await access(configPath);
+    }
+    catch {
         return {};
     }
     try {
-        const raw = readFileSync(configPath, 'utf-8');
+        const raw = await readFile(configPath, 'utf-8');
         return JSON.parse(raw);
     }
     catch {
@@ -27,14 +31,17 @@ export function loadSFlowConfig(projectDir) {
     }
 }
 /**
- * Load user-level config from ~/.sFlow/config.json
+ * Load user-level config from ~/.sflow/config.json
  */
-export function loadUserSFlowConfig() {
-    if (!existsSync(USER_CONFIG_FILE)) {
+export async function loadUserSFlowConfig() {
+    try {
+        await access(USER_CONFIG_FILE);
+    }
+    catch {
         return {};
     }
     try {
-        const raw = readFileSync(USER_CONFIG_FILE, 'utf-8');
+        const raw = await readFile(USER_CONFIG_FILE, 'utf-8');
         return JSON.parse(raw);
     }
     catch {
@@ -43,33 +50,15 @@ export function loadUserSFlowConfig() {
     }
 }
 /**
- * Load cascading config: user-level (~/.sFlow/config.json) as base,
+ * Load cascading config: user-level (~/.sflow/config.json) as base,
  * project-level (.sflow/config.json) as higher-priority override.
  */
-export function loadCascadedSFlowConfig(projectDir) {
-    const user = loadUserSFlowConfig();
-    const project = loadSFlowConfig(projectDir);
-    // If no project config, return user config as-is
+export async function loadCascadedSFlowConfig(projectDir) {
+    const user = await loadUserSFlowConfig();
+    const project = await loadSFlowConfig(projectDir);
     if (Object.keys(project).length === 0)
         return user;
-    // Merge: user as base, project overrides on top
-    const mergedAgents = {};
-    // Start with all user agents
-    for (const [name, cfg] of Object.entries(user.agents || {})) {
-        mergedAgents[name] = { ...cfg };
-    }
-    // Overlay project agents (field-level merge per agent)
-    for (const [name, cfg] of Object.entries(project.agents || {})) {
-        mergedAgents[name] = { ...(mergedAgents[name] || {}), ...cfg };
-    }
-    return {
-        ...user,
-        ...project,
-        agents: mergedAgents,
-        features: { ...(user.features || {}), ...(project.features || {}) },
-        hooks: { ...(user.hooks || {}), ...(project.hooks || {}) },
-        tools: { ...(user.tools || {}), ...(project.tools || {}) },
-    };
+    return deepMerge(user, project);
 }
 /**
  * Known built-in agent names
@@ -87,7 +76,6 @@ const BUILTIN_AGENTS = [
 ];
 /**
  * Convert SFlowConfig.agents to AgentOverrides format
- * Only includes fields that actually differ from defaults
  */
 export function agentOverridesFromConfig(config) {
     const overrides = {};
@@ -100,8 +88,9 @@ export function agentOverridesFromConfig(config) {
             override.model = entry.model;
         if (entry.temperature !== undefined)
             override.temperature = entry.temperature;
-        if (entry.fallbackModels && entry.fallbackModels.length > 0) {
-            override.fallback_models = entry.fallbackModels;
+        const fb = entry.fallback_models || entry.fallbackModels;
+        if (fb && fb.length > 0) {
+            override.fallback_models = fb;
         }
         if (Object.keys(override).length > 0) {
             overrides[name] = override;
@@ -111,13 +100,17 @@ export function agentOverridesFromConfig(config) {
 }
 /**
  * Merge two override configs. Higher-priority wins.
+ * Uses proper typing instead of `as any`.
  */
 export function mergeOverrides(base, higher) {
     if (!higher)
         return { ...base };
     const merged = { ...base };
     for (const [name, cfg] of Object.entries(higher)) {
-        merged[name] = { ...(base[name] || {}), ...cfg };
+        const baseEntry = base[name];
+        merged[name] = baseEntry
+            ? { ...baseEntry, ...cfg }
+            : { ...cfg };
     }
     return merged;
 }
@@ -130,49 +123,49 @@ export function generateConfigTemplate() {
         mode: 'full',
         agents: {
             sflow: {
-                model: 'deepseek-v4-flash',
+                model: 'anthropic/claude-sonnet-4-20250514',
                 temperature: 0.6,
-                fallbackModels: ['glm-5.1', 'kimi-k2.6'],
+                fallback_models: ['anthropic/claude-haiku-4-20250514', 'openai/gpt-4o'],
             },
             'need-explorer': {
-                model: 'kimi-k2.6',
+                model: 'anthropic/claude-sonnet-4-20250514',
                 temperature: 0.6,
-                fallbackModels: ['glm-5.1', 'deepseek-v4-flash'],
+                fallback_models: ['anthropic/claude-haiku-4-20250514', 'openai/gpt-4o'],
             },
             'spec-writer': {
-                model: 'glm-5.1',
+                model: 'anthropic/claude-sonnet-4-20250514',
                 temperature: 0.6,
-                fallbackModels: ['kimi-k2.6', 'deepseek-v4-flash'],
+                fallback_models: ['anthropic/claude-haiku-4-20250514', 'openai/gpt-4o'],
             },
             'contract-builder': {
-                model: 'glm-5',
+                model: 'anthropic/claude-sonnet-4-20250514',
                 temperature: 0.6,
-                fallbackModels: ['glm-5.1', 'deepseek-v4-flash'],
+                fallback_models: ['anthropic/claude-haiku-4-20250514', 'openai/gpt-4o'],
             },
             'build-executor': {
-                model: 'step-3.7-flash',
+                model: 'anthropic/claude-sonnet-4-20250514',
                 temperature: 0.7,
-                fallbackModels: ['deepseek-v4-flash', 'glm-5.1'],
+                fallback_models: ['anthropic/claude-haiku-4-20250514', 'openai/gpt-4o'],
             },
             'bug-investigator': {
-                model: 'minimax-m2.7',
+                model: 'anthropic/claude-sonnet-4-20250514',
                 temperature: 0.6,
-                fallbackModels: ['deepseek-v4-flash', 'glm-5.1'],
+                fallback_models: ['anthropic/claude-haiku-4-20250514', 'openai/gpt-4o'],
             },
             'code-reviewer': {
-                model: 'deepseek-v4-flash',
+                model: 'anthropic/claude-sonnet-4-20250514',
                 temperature: 0.6,
-                fallbackModels: ['glm-5.1', 'kimi-k2.6'],
+                fallback_models: ['anthropic/claude-haiku-4-20250514', 'openai/gpt-4o'],
             },
             'release-archivist': {
-                model: 'mimo-v2.5-pro',
+                model: 'anthropic/claude-sonnet-4-20250514',
                 temperature: 0.7,
-                fallbackModels: ['mimo-v2.5', 'glm-5.1'],
+                fallback_models: ['anthropic/claude-haiku-4-20250514', 'openai/gpt-4o'],
             },
             'spec-merger': {
-                model: 'mimo-v2.5',
+                model: 'anthropic/claude-sonnet-4-20250514',
                 temperature: 0.7,
-                fallbackModels: ['mimo-v2.5-pro', 'glm-5.1'],
+                fallback_models: ['anthropic/claude-haiku-4-20250514', 'openai/gpt-4o'],
             },
         },
         features: {

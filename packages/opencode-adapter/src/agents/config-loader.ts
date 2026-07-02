@@ -5,7 +5,7 @@ import { access, readFile } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 import { deepMerge } from '@opencode-sflow/shared';
-import type { BuiltinAgentName, AgentOverrides } from './types.js';
+import type { BuiltinAgentName, AgentOverrides, AgentOverrideConfig } from './types.js';
 
 export interface AgentConfigEntry {
   model?: string;
@@ -24,12 +24,12 @@ export interface SFlowConfig {
 }
 
 /**
- * User-level config path: ~/.sFlow/config.json
+ * User-level config path: ~/.sflow/config.json
  */
 export const USER_CONFIG_FILE = join(homedir(), '.sflow', 'config.json');
 
 /**
- * Load sFlow config from a specific directory's .sflow/config.json
+ * Load sflow config from a specific directory's .sflow/config.json
  */
 export async function loadSFlowConfig(projectDir?: string): Promise<SFlowConfig> {
   const dir = projectDir || process.cwd();
@@ -57,6 +57,7 @@ export async function loadUserSFlowConfig(): Promise<SFlowConfig> {
   try {
     await access(USER_CONFIG_FILE);
   } catch {
+    console.warn(`[sflow] No user-level config found at ${USER_CONFIG_FILE}. Run 'sflow init --user' to create one.`);
     return {};
   }
 
@@ -70,20 +71,18 @@ export async function loadUserSFlowConfig(): Promise<SFlowConfig> {
 }
 
 /**
- * Load cascading config: user-level (~/.sFlow/config.json) as base,
+ * Load cascading config: user-level (~/.sflow/config.json) as base,
  * project-level (.sflow/config.json) as higher-priority override.
  */
 export async function loadCascadedSFlowConfig(projectDir?: string): Promise<SFlowConfig> {
   const user = await loadUserSFlowConfig();
   const project = await loadSFlowConfig(projectDir);
 
-  // If no project config, return user config as-is
   if (Object.keys(project).length === 0) return user;
 
-  // Use shared deepMerge for full recursive merge
   return deepMerge(
     user as Record<string, unknown>,
-    project as Record<string, unknown>
+    project as Record<string, unknown>,
   ) as SFlowConfig;
 }
 
@@ -104,7 +103,6 @@ const BUILTIN_AGENTS: BuiltinAgentName[] = [
 
 /**
  * Convert SFlowConfig.agents to AgentOverrides format
- * Only includes fields that actually differ from defaults
  */
 export function agentOverridesFromConfig(config: SFlowConfig): AgentOverrides {
   const overrides: AgentOverrides = {};
@@ -113,17 +111,16 @@ export function agentOverridesFromConfig(config: SFlowConfig): AgentOverrides {
     const entry = config.agents?.[name];
     if (!entry) continue;
 
-    const override: Record<string, unknown> = {};
+    const override: Partial<AgentOverrideConfig> = {};
     if (entry.model) override.model = entry.model;
     if (entry.temperature !== undefined) override.temperature = entry.temperature;
-    // Accept both camelCase and snake_case for fallback models
     const fb = entry.fallback_models || entry.fallbackModels;
     if (fb && fb.length > 0) {
       override.fallback_models = fb;
     }
 
     if (Object.keys(override).length > 0) {
-      overrides[name] = override;
+      overrides[name] = override as AgentOverrideConfig;
     }
   }
 
@@ -132,15 +129,19 @@ export function agentOverridesFromConfig(config: SFlowConfig): AgentOverrides {
 
 /**
  * Merge two override configs. Higher-priority wins.
+ * Uses proper typing instead of `as any`.
  */
 export function mergeOverrides(
   base: AgentOverrides,
-  higher: AgentOverrides | undefined
+  higher: AgentOverrides | undefined,
 ): AgentOverrides {
   if (!higher) return { ...base };
   const merged: AgentOverrides = { ...base };
-  for (const [name, cfg] of Object.entries(higher) as [BuiltinAgentName, unknown][]) {
-    merged[name] = { ...(base[name] || {}), ...(cfg as Record<string, unknown>) } as any;
+  for (const [name, cfg] of Object.entries(higher) as [BuiltinAgentName, AgentOverrideConfig][]) {
+    const baseEntry = base[name];
+    merged[name] = baseEntry
+      ? { ...baseEntry, ...cfg }
+      : { ...cfg };
   }
   return merged;
 }

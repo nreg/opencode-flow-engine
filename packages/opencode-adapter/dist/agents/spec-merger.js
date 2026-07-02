@@ -2,6 +2,7 @@
  * Spec Merger agent - Delta spec synchronization
  * Based on oh-my-openagent's subagent pattern
  */
+import { getAgentTools } from './agent-tools.js';
 const MODE = 'subagent';
 /**
  * Create the spec-merger agent configuration
@@ -101,17 +102,7 @@ You have access to:
 - \`edit\` - Edit specs
 - \`bash\` - Run validation scripts`,
     temperature: 0.7,
-    tools: {
-        read: true,
-        write: true,
-        edit: true,
-        glob: true,
-        grep: true,
-        bash: true,
-        call_omo_agent: false,
-        task: false,
-        skill: false,
-    },
+    tools: getAgentTools('spec-merger'),
 });
 createSpecMergerAgent.mode = MODE;
 //# sourceMappingURL=spec-merger.js.map

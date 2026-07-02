@@ -3,7 +3,7 @@
  */
 
 import type { HookHandler, HookContext, HookResult } from './types.js';
-import { Validator } from '@opencode-sflow/core';
+import { sharedValidator } from '@opencode-sflow/core';
 import { readFile, listFiles } from '@opencode-sflow/shared';
 
 /**
@@ -14,22 +14,20 @@ export function createArtifactValidationHook(): HookHandler {
     name: 'artifact_validation',
     description: 'Validate artifacts when transitioning between states',
     execute: async (context) => {
-      const { changeDir, action, data } = context;
-      const validator = new Validator();
+      const { changeDir, data } = context;
 
       try {
         const newState = data?.newState as string;
 
-        // Validate based on target state
         switch (newState) {
           case 'specifying':
-            return await validateForSpecifying(changeDir, validator);
+            return await validateForSpecifying(changeDir);
           case 'bridging':
-            return await validateForBridging(changeDir, validator);
+            return await validateForBridging(changeDir);
           case 'approved-for-build':
-            return await validateForExecution(changeDir, validator);
+            return await validateForExecution(changeDir);
           case 'closing':
-            return await validateForClosing(changeDir, validator);
+            return await validateForClosing(changeDir);
           default:
             return { success: true };
         }
@@ -43,12 +41,7 @@ export function createArtifactValidationHook(): HookHandler {
   };
 }
 
-// Validation functions
-async function validateForSpecifying(
-  changeDir: string,
-  validator: Validator
-): Promise<HookResult> {
-  // For specifying state, we need valid proposal
+async function validateForSpecifying(changeDir: string): Promise<HookResult> {
   const proposalContent = await readFile(`${changeDir}/proposal.md`);
   if (!proposalContent) {
     return {
@@ -59,26 +52,22 @@ async function validateForSpecifying(
     };
   }
 
-  const report = validator.validateProposal(proposalContent);
+  const report = sharedValidator.validateChangeContent('proposal', proposalContent);
   if (!report.valid) {
     return {
       success: false,
       error: 'Proposal validation failed',
       block: true,
-      blockReason: `Proposal has ${report.issues.filter(i => i.level === 'ERROR').length} errors`,
+      blockReason: `Proposal has ${report.summary.errors} error(s)`,
     };
   }
 
   return { success: true };
 }
 
-async function validateForBridging(
-  changeDir: string,
-  validator: Validator
-): Promise<HookResult> {
-  // For bridging state, we need valid specs
+async function validateForBridging(changeDir: string): Promise<HookResult> {
   const specsDir = `${changeDir}/specs`;
-  const specFiles = await listFiles(specsDir);
+  const specFiles = await listFiles(specsDir, '.md');
 
   if (specFiles.length === 0) {
     return {
@@ -89,17 +78,16 @@ async function validateForBridging(
     };
   }
 
-  // Validate each spec
   for (const specFile of specFiles) {
     const specContent = await readFile(`${specsDir}/${specFile}`);
     if (specContent) {
-      const report = validator.validateSpec(specContent, specFile.replace('.md', ''));
+      const report = sharedValidator.validateSpecContent(specFile.replace('.md', ''), specContent);
       if (!report.valid) {
         return {
           success: false,
           error: `Spec validation failed: ${specFile}`,
           block: true,
-          blockReason: `Spec ${specFile} has ${report.issues.filter(i => i.level === 'ERROR').length} errors`,
+          blockReason: `Spec ${specFile} has ${report.summary.errors} error(s)`,
         };
       }
     }
@@ -108,11 +96,7 @@ async function validateForBridging(
   return { success: true };
 }
 
-async function validateForExecution(
-  changeDir: string,
-  validator: Validator
-): Promise<HookResult> {
-  // For execution state, we need valid execution contract
+async function validateForExecution(changeDir: string): Promise<HookResult> {
   const contractContent = await readFile(`${changeDir}/execution-contract.md`);
   if (!contractContent) {
     return {
@@ -123,24 +107,20 @@ async function validateForExecution(
     };
   }
 
-  const report = validator.validateExecutionContract(contractContent);
+  const report = sharedValidator.validateExecutionContract(contractContent);
   if (!report.valid) {
     return {
       success: false,
       error: 'Execution contract validation failed',
       block: true,
-      blockReason: `Execution contract has ${report.issues.filter(i => i.level === 'ERROR').length} errors`,
+      blockReason: `Execution contract has ${report.summary.errors} error(s)`,
     };
   }
 
   return { success: true };
 }
 
-async function validateForClosing(
-  changeDir: string,
-  validator: Validator
-): Promise<HookResult> {
-  // For closing state, we need all tasks complete
+async function validateForClosing(changeDir: string): Promise<HookResult> {
   const tasksContent = await readFile(`${changeDir}/tasks.md`);
   if (!tasksContent) {
     return {
@@ -151,13 +131,13 @@ async function validateForClosing(
     };
   }
 
-  const report = validator.validateTasks(tasksContent);
+  const report = sharedValidator.validateTasks(tasksContent);
   if (!report.valid) {
     return {
       success: false,
       error: 'Tasks validation failed',
       block: true,
-      blockReason: `Tasks has ${report.issues.filter(i => i.level === 'ERROR').length} errors`,
+      blockReason: `Tasks has ${report.summary.errors} error(s)`,
     };
   }
 

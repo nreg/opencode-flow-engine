@@ -1,7 +1,7 @@
 /**
  * Workflow Router tool - State detection and routing
  */
-import { Validator } from '@opencode-sflow/core';
+import { fileExists, directoryExists, readJsonFile } from '@opencode-sflow/shared';
 /**
  * Create the workflow router tool
  */
@@ -17,8 +17,7 @@ export function createWorkflowRouterTool() {
             },
         },
         execute: async (params, context) => {
-            const { changeDir } = params;
-            const validator = new Validator();
+            const changeDir = params.changeDir || context.changeDir;
             try {
                 // Check for planning artifacts
                 const artifacts = {
@@ -27,7 +26,7 @@ export function createWorkflowRouterTool() {
                     design: await fileExists(`${changeDir}/design.md`),
                     tasks: await fileExists(`${changeDir}/tasks.md`),
                     contract: await fileExists(`${changeDir}/execution-contract.md`),
-                    state: await fileExists(`${changeDir}/.spec-superflow.yaml`),
+                    state: await fileExists(`${changeDir}/.sflow/state.json`),
                 };
                 // Determine workflow state
                 let state;
@@ -53,9 +52,9 @@ export function createWorkflowRouterTool() {
                     skill = 'build-executor';
                     reasons.push('Contract approved, ready for implementation');
                 }
-                // Check for stale artifacts
+                // Check for stale artifacts using unified staleness check
                 if (artifacts.contract) {
-                    const isStale = await isContractStale(changeDir);
+                    const isStale = await checkContractStaleness(changeDir);
                     if (isStale) {
                         state = 'bridging';
                         skill = 'contract-builder';
@@ -82,31 +81,33 @@ export function createWorkflowRouterTool() {
         },
     };
 }
-// Helper functions
-async function fileExists(path) {
-    try {
-        await Bun.file(path).exists();
-        return true;
-    }
-    catch {
-        return false;
-    }
-}
-async function directoryExists(path) {
-    try {
-        const dir = Bun.file(path);
-        return await dir.exists();
-    }
-    catch {
-        return false;
-    }
-}
 async function isContractApproved(changeDir) {
-    // TODO: Read state file and check if contract is approved
+    const state = await readJsonFile(`${changeDir}/.sflow/state.json`);
+    if (state?.contractApproved === true)
+        return true;
+    if (state?.state === 'approved-for-build' || state?.state === 'executing' || state?.state === 'closing')
+        return true;
     return false;
 }
-async function isContractStale(changeDir) {
-    // TODO: Compare proposal scope vs contract intent lock
-    return false;
+/**
+ * Unified contract staleness check
+ * Used by workflow-router, contract-validator, and guard hook
+ */
+export async function checkContractStaleness(changeDir) {
+    const contractPath = `${changeDir}/execution-contract.md`;
+    const proposalPath = `${changeDir}/proposal.md`;
+    const contractExists = await fileExists(contractPath);
+    const proposalExists = await fileExists(proposalPath);
+    if (!contractExists || !proposalExists)
+        return false;
+    try {
+        const { stat } = await import('fs/promises');
+        const contractStats = await stat(contractPath);
+        const proposalStats = await stat(proposalPath);
+        return proposalStats.mtimeMs > contractStats.mtimeMs;
+    }
+    catch {
+        return false;
+    }
 }
 //# sourceMappingURL=workflow-router.js.map

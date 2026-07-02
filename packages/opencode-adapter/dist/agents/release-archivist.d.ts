@@ -7,4 +7,3 @@ import type { AgentFactory } from './types.js';
  * Create the release-archivist agent configuration
  */
 export declare const createReleaseArchivistAgent: AgentFactory;
-//# sourceMappingURL=release-archivist.d.ts.map

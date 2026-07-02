@@ -4,8 +4,8 @@
 
 import type { HookHandler, HookContext, HookResult } from './types.js';
 import { fileExists, readFile, readJsonFile } from '@opencode-sflow/shared';
-import { getValidTransitions } from '@opencode-sflow/core';
-import { stat } from 'fs/promises';
+import { sharedValidator } from '@opencode-sflow/core';
+import { checkContractStaleness } from '../tools/workflow-router.js';
 
 /**
  * Create the guard hook
@@ -15,18 +15,16 @@ export function createGuardHook(): HookHandler {
     name: 'guard',
     description: 'Guard state transitions and block invalid operations',
     execute: async (context) => {
-      const { changeDir, action, data } = context;
+      const { changeDir } = context;
 
       try {
-        // Check for various guard conditions
         const guards = [
           await checkArtifactExistence(changeDir),
-          await checkContractStaleness(changeDir),
+          await checkContractStalenessGuard(changeDir),
           await checkTaskCompletion(changeDir),
           await checkDebuggingState(changeDir),
         ];
 
-        // Find any blocking guards
         const blockingGuards = guards.filter(g => g.block);
         if (blockingGuards.length > 0) {
           return {
@@ -48,14 +46,12 @@ export function createGuardHook(): HookHandler {
   };
 }
 
-// Guard functions
 async function checkArtifactExistence(changeDir: string): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
   const dirExists = await fileExists(changeDir);
   if (!dirExists) return { success: true };
 
-  // Get current workflow state to determine which artifacts are relevant
   const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
   const currentState = stateData?.state || 'exploring';
 
@@ -91,32 +87,16 @@ async function checkArtifactExistence(changeDir: string): Promise<HookResult> {
   return { success: true };
 }
 
-async function checkContractStaleness(changeDir: string): Promise<HookResult> {
+async function checkContractStalenessGuard(changeDir: string): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
-  const contractPath = `${changeDir}/execution-contract.md`;
-  const proposalPath = `${changeDir}/proposal.md`;
-
-  const contractExists = await fileExists(contractPath);
-  const proposalExists = await fileExists(proposalPath);
-
-  if (!contractExists || !proposalExists) return { success: true };
-
-  try {
-    const contractStats = await stat(contractPath);
-    const proposalStats = await stat(proposalPath);
-    const contractModTime = contractStats.mtimeMs;
-    const proposalModTime = proposalStats.mtimeMs;
-
-    if (proposalModTime > contractModTime) {
-      return {
-        success: false,
-        block: true,
-        blockReason: 'Contract is stale: proposal.md was modified after execution-contract.md was created',
-      };
-    }
-  } catch {
-    return { success: true };
+  const isStale = await checkContractStaleness(changeDir);
+  if (isStale) {
+    return {
+      success: false,
+      block: true,
+      blockReason: 'Contract is stale: proposal.md was modified after execution-contract.md was created',
+    };
   }
   return { success: true };
 }

@@ -42,6 +42,29 @@ export async function writeFile(path: string, content: string): Promise<boolean>
 }
 
 /**
+ * Atomic write: write to temp file, then rename.
+ * Prevents partial writes on crash.
+ */
+export async function atomicWriteFile(path: string, content: string): Promise<boolean> {
+  const tmp = `${path}.tmp.${Date.now()}`;
+  try {
+    await Bun.write(tmp, content);
+    const { rename } = await import('fs/promises');
+    await rename(tmp, path);
+    return true;
+  } catch {
+    // Clean up temp file on failure
+    try {
+      const { unlink } = await import('fs/promises');
+      await unlink(tmp);
+    } catch {
+      // Ignore cleanup failure
+    }
+    return false;
+  }
+}
+
+/**
  * List files in directory
  */
 export async function listFiles(dirPath: string, extension?: string): Promise<string[]> {
@@ -95,6 +118,13 @@ export async function writeJsonFile(path: string, data: unknown): Promise<boolea
 }
 
 /**
+ * Atomic write JSON file
+ */
+export async function atomicWriteJsonFile(path: string, data: unknown): Promise<boolean> {
+  return atomicWriteFile(path, JSON.stringify(data, null, 2));
+}
+
+/**
  * Ensure directory exists (creates parent directories if needed)
  */
 export async function ensureDir(dirPath: string): Promise<void> {
@@ -102,5 +132,6 @@ export async function ensureDir(dirPath: string): Promise<void> {
     const { mkdir } = await import('fs/promises');
     await mkdir(dirPath, { recursive: true });
   } catch {
+    // Directory might already exist or be created concurrently
   }
 }

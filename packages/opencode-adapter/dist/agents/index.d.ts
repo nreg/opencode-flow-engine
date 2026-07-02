@@ -11,6 +11,6 @@ export { createCodeReviewerAgent } from './code-reviewer.js';
 export { createReleaseArchivistAgent } from './release-archivist.js';
 export { createSpecMergerAgent } from './spec-merger.js';
 export { loadSFlowConfig, loadUserSFlowConfig, loadCascadedSFlowConfig, agentOverridesFromConfig, mergeOverrides, generateConfigTemplate, USER_CONFIG_FILE, } from './config-loader.js';
+export { createAgent, createAllAgents, getAgent, getAgentNames, getAgentMode, getPrimaryAgents, getSubagentAgents, agentExists, getDefaultModel, getAllDefaultModels, clearConfigCache, } from './agent-builder.js';
 export type { AgentConfigEntry, SFlowConfig, } from './config-loader.js';
 export type { AgentMode, AgentFactory, AgentCategory, AgentCost, DelegationTrigger, AgentPromptMetadata, BuiltinAgentName, AgentOverrideConfig, AgentOverrides, } from './types.js';
-//# sourceMappingURL=index.d.ts.map

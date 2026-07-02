@@ -31,4 +31,3 @@ export interface ToolResult {
     error?: string;
     suggestions?: string[];
 }
-//# sourceMappingURL=types.d.ts.map

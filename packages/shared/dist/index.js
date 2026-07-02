@@ -8,7 +8,9 @@ function deepMerge(target, source) {
     if (Object.prototype.hasOwnProperty.call(source, key)) {
       const sourceValue = source[key];
       const targetValue = result[key];
-      if (isPlainObject(sourceValue) && isPlainObject(targetValue)) {
+      if (Array.isArray(sourceValue) && Array.isArray(targetValue)) {
+        result[key] = [...new Set([...targetValue, ...sourceValue])];
+      } else if (isPlainObject(sourceValue) && isPlainObject(targetValue)) {
         result[key] = deepMerge(targetValue, sourceValue);
       } else if (sourceValue !== undefined) {
         result[key] = sourceValue;
@@ -48,6 +50,21 @@ async function writeFile(path, content) {
     return false;
   }
 }
+async function atomicWriteFile(path, content) {
+  const tmp = `${path}.tmp.${Date.now()}`;
+  try {
+    await Bun.write(tmp, content);
+    const { rename } = await import("fs/promises");
+    await rename(tmp, path);
+    return true;
+  } catch {
+    try {
+      const { unlink } = await import("fs/promises");
+      await unlink(tmp);
+    } catch {}
+    return false;
+  }
+}
 async function listFiles(dirPath, extension) {
   try {
     const { readdir } = await import("fs/promises");
@@ -84,6 +101,9 @@ async function writeJsonFile(path, data) {
     return false;
   }
 }
+async function atomicWriteJsonFile(path, data) {
+  return atomicWriteFile(path, JSON.stringify(data, null, 2));
+}
 async function ensureDir(dirPath) {
   try {
     const { mkdir } = await import("fs/promises");
@@ -99,5 +119,7 @@ export {
   fileExists,
   ensureDir,
   directoryExists,
-  deepMerge
+  deepMerge,
+  atomicWriteJsonFile,
+  atomicWriteFile
 };

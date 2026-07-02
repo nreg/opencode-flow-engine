@@ -1,7 +1,9 @@
 /**
  * Contract Validator tool - Validate execution contracts
  */
-import { Validator } from '@opencode-sflow/core';
+import { sharedValidator } from '@opencode-sflow/core';
+import { readFile } from '@opencode-sflow/shared';
+import { checkContractStaleness } from './workflow-router.js';
 /**
  * Create the contract validator tool
  */
@@ -17,23 +19,21 @@ export function createContractValidatorTool() {
             },
         },
         execute: async (params, context) => {
-            const { changeDir } = params;
-            const validator = new Validator();
+            const changeDir = params.changeDir || context.changeDir;
             try {
                 const contractContent = await readFile(`${changeDir}/execution-contract.md`);
                 if (!contractContent) {
                     return {
                         success: true,
                         data: {
-                            validation: { valid: false, issues: [] },
+                            validation: { valid: false, issues: [], summary: { errors: 0, warnings: 0, info: 0 } },
                             isStale: false,
                             recommendations: ['execution-contract.md not found - run contract-builder to create the contract'],
                         },
                     };
                 }
-                const report = validator.validateExecutionContract(contractContent);
-                const proposalContent = await readFile(`${changeDir}/proposal.md`);
-                const isStale = await checkContractStaleness(changeDir, contractContent, proposalContent);
+                const report = sharedValidator.validateExecutionContract(contractContent);
+                const isStale = await checkContractStaleness(changeDir);
                 return {
                     success: true,
                     data: {
@@ -52,27 +52,6 @@ export function createContractValidatorTool() {
             }
         },
     };
-}
-// Helper functions
-async function readFile(path) {
-    try {
-        const file = Bun.file(path);
-        if (await file.exists()) {
-            return await file.text();
-        }
-        return null;
-    }
-    catch {
-        return null;
-    }
-}
-async function checkContractStaleness(changeDir, contractContent, proposalContent) {
-    if (!proposalContent) {
-        return false;
-    }
-    // Simple staleness check - compare intent lock with proposal scope
-    // TODO: Implement more sophisticated staleness detection
-    return false;
 }
 function generateRecommendations(report, isStale) {
     const recommendations = [];

@@ -1,4 +1,5 @@
 import type { PluginInput, PluginOptions, Hooks, PluginModule } from '@opencode-ai/plugin';
+import { z } from 'zod';
 
 export { Validator } from '@opencode-sflow/core';
 export type {
@@ -37,6 +38,7 @@ export { deepMerge, fileExists, readFile, writeFile, listFiles } from '@opencode
 import { loadCascadedSFlowConfig, agentOverridesFromConfig } from './agents/config-loader.js';
 import { createToolRegistry } from './tools/tool-registry.js';
 import { createHookComposer } from './hooks/hook-composer.js';
+import { createSkillLoader } from './features/skill-loader.js';
 
 export const PLUGIN_ID = 'opencode-sflow';
 export const PLUGIN_VERSION = '0.1.0';
@@ -49,23 +51,55 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
 
   const toolRegistry = createToolRegistry();
   const hookComposer = createHookComposer();
+  const skillLoader = await createSkillLoader();
 
   return {
     dispose: async () => {
       console.log('[sFlow] Plugin disposed');
     },
 
-    config: async (cfg) => {
-      cfg.agent = cfg.agent || {};
+    config: async (cfg: Record<string, unknown>) => {
+      // --- Register agents ---
+      (cfg as Record<string, unknown>).agent = (cfg as Record<string, unknown>).agent || {};
+      const agentMap = (cfg as Record<string, unknown>).agent as Record<string, unknown>;
       for (const name of getAgentNames()) {
         const override = configOverrides[name];
         const agentCfg = await createAgent(name);
-        cfg.agent[name] = {
+        agentMap[name] = {
           model: agentCfg.model,
           mode: getAgentMode(name),
           prompt: agentCfg.instructions,
           ...(override?.temperature ? { temperature: override.temperature } : {}),
         };
+      }
+
+      // --- Register tools ---
+      (cfg as Record<string, unknown>).tool = (cfg as Record<string, unknown>).tool || {};
+      const toolMap = (cfg as Record<string, unknown>).tool as Record<string, unknown>;
+      for (const toolName of toolRegistry.getEnabledTools()) {
+        const tool = toolRegistry.getTool(toolName);
+        if (tool) {
+          toolMap[toolName] = {
+            description: tool.description,
+          };
+        }
+      }
+
+      // --- Register skill-embedded MCPs (Tier 3) ---
+      (cfg as Record<string, unknown>).mcp = (cfg as Record<string, unknown>).mcp || {};
+      const mcpMap = (cfg as Record<string, unknown>).mcp as Record<string, unknown>;
+      const skillsWithMcp = skillLoader.getSkillsWithMcp();
+      for (const skill of skillsWithMcp) {
+        if (skill.metadata.mcp?.servers) {
+          for (const server of skill.metadata.mcp.servers) {
+            mcpMap[server.name] = {
+              type: 'local',
+              command: server.command,
+              args: server.args,
+              env: server.env,
+            };
+          }
+        }
       }
     },
 
@@ -73,16 +107,19 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       workflow_router: {
         description: 'Detect current workflow state and route to the appropriate agent',
         args: {
-          state: { type: 'string', description: 'Target workflow state to transition to' },
+          state: z.string().optional(),
         },
         execute: async (args, context) => {
-          const tool = toolRegistry.getTool('workflow_router');
-          if (!tool) return { title: 'Error', output: 'Tool not found' };
-          const result = await tool.execute(args, {
-            changeDir: context.directory || '',
-            stateFile: `${context.directory || ''}/.sflow/state.json`,
-            pluginRoot: '',
-          });
+          const resolvedDir = context.directory || process.cwd();
+          const result = await toolRegistry.executeTool(
+            'workflow_router',
+            { changeDir: resolvedDir },
+            {
+              changeDir: resolvedDir,
+              stateFile: `${resolvedDir}/.sflow/state.json`,
+              pluginRoot: '',
+            },
+          );
           return { title: 'Workflow Router', output: JSON.stringify(result.data || result.error) };
         },
       },
@@ -90,16 +127,22 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       contract_validator: {
         description: 'Validate execution contract for correctness and completeness',
         args: {
-          contract_path: { type: 'string', description: 'Path to the contract file' },
+          contract_path: z.string().optional(),
         },
         execute: async (args, context) => {
-          const tool = toolRegistry.getTool('contract_validator');
-          if (!tool) return { title: 'Error', output: 'Tool not found' };
-          const result = await tool.execute(args, {
-            changeDir: context.directory || '',
-            stateFile: '',
-            pluginRoot: '',
-          });
+          const contractPath = (args as { contract_path?: string }).contract_path;
+          const changeDir = contractPath
+            ? contractPath.replace(/\/execution-contract\.md$/, '')
+            : context.directory || process.cwd();
+          const result = await toolRegistry.executeTool(
+            'contract_validator',
+            { changeDir },
+            {
+              changeDir,
+              stateFile: `${changeDir}/.sflow/state.json`,
+              pluginRoot: '',
+            },
+          );
           return { title: 'Contract Validator', output: JSON.stringify(result.data || result.error) };
         },
       },
@@ -107,16 +150,22 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       artifact_inspector: {
         description: 'Inspect planning artifacts for completeness and consistency',
         args: {
-          artifact_path: { type: 'string', description: 'Path to the artifact file' },
+          artifact_path: z.string().optional(),
         },
         execute: async (args, context) => {
-          const tool = toolRegistry.getTool('artifact_inspector');
-          if (!tool) return { title: 'Error', output: 'Tool not found' };
-          const result = await tool.execute(args, {
-            changeDir: context.directory || '',
-            stateFile: '',
-            pluginRoot: '',
-          });
+          const artifactPath = (args as { artifact_path?: string }).artifact_path;
+          const changeDir = artifactPath
+            ? artifactPath.replace(/\/(proposal|design|tasks)\.md$/, '').replace(/\/specs$/, '')
+            : context.directory || process.cwd();
+          const result = await toolRegistry.executeTool(
+            'artifact_inspector',
+            { changeDir },
+            {
+              changeDir,
+              stateFile: `${changeDir}/.sflow/state.json`,
+              pluginRoot: '',
+            },
+          );
           return { title: 'Artifact Inspector', output: JSON.stringify(result.data || result.error) };
         },
       },

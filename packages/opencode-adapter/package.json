@@ -11,8 +11,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@opencode-sflow/core": "workspace:*",
-    "@opencode-sflow/shared": "workspace:*",
+    "@opencode-sflow/core": "*",
+    "@opencode-sflow/shared": "*",
     "@opencode-ai/plugin": "latest",
     "@opencode-ai/sdk": "latest",
     "js-yaml": "^4.1.0",

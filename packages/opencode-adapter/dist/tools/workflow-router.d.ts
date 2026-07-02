@@ -6,4 +6,8 @@ import type { ToolDefinition } from './types.js';
  * Create the workflow router tool
  */
 export declare function createWorkflowRouterTool(): ToolDefinition;
-//# sourceMappingURL=workflow-router.d.ts.map
+/**
+ * Unified contract staleness check
+ * Used by workflow-router, contract-validator, and guard hook
+ */
+export declare function checkContractStaleness(changeDir: string): Promise<boolean>;

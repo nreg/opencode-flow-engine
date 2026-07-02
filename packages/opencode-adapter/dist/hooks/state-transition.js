@@ -1,19 +1,9 @@
 /**
  * State Transition hook - Manage workflow state transitions
  */
-/**
- * Valid state transitions
- */
-const VALID_TRANSITIONS = {
-    exploring: ['specifying', 'abandoned'],
-    specifying: ['bridging', 'exploring', 'abandoned'],
-    bridging: ['approved-for-build', 'specifying', 'abandoned'],
-    'approved-for-build': ['executing', 'bridging', 'abandoned'],
-    executing: ['debugging', 'closing', 'abandoned'],
-    debugging: ['executing', 'abandoned'],
-    closing: ['abandoned'],
-    abandoned: [], // Terminal state
-};
+import { isValidTransition, getValidTransitions } from '@opencode-sflow/core';
+import { ensureDir, readJsonFile, writeJsonFile } from '@opencode-sflow/shared';
+const STATE_FILE_PATH = '.sflow/state.json';
 /**
  * Create the state transition hook
  */
@@ -22,13 +12,12 @@ export function createStateTransitionHook() {
         name: 'state_transition',
         description: 'Manage workflow state transitions and validate transitions',
         execute: async (context) => {
-            const { changeDir, action, data } = context;
+            const { changeDir, data } = context;
             try {
-                // Get current state
                 const currentState = await getCurrentState(changeDir);
                 const newState = data?.newState;
                 if (!newState) {
-                    return { success: true, data: { currentState: await getCurrentState(changeDir) } };
+                    return { success: true, data: { currentState } };
                 }
                 if (!currentState) {
                     await updateState(changeDir, newState);
@@ -37,13 +26,13 @@ export function createStateTransitionHook() {
                         data: { from: null, to: newState, timestamp: new Date().toISOString() },
                     };
                 }
-                const validTransitions = VALID_TRANSITIONS[currentState] || [];
-                if (!validTransitions.includes(newState)) {
+                if (!isValidTransition(currentState, newState)) {
+                    const valid = getValidTransitions(currentState);
                     return {
                         success: false,
                         error: `Invalid transition from ${currentState} to ${newState}`,
                         block: true,
-                        blockReason: `Cannot transition from ${currentState} to ${newState}. Valid transitions: ${validTransitions.join(', ')}`,
+                        blockReason: `Cannot transition from ${currentState} to ${newState}. Valid transitions: ${valid.join(', ')}`,
                     };
                 }
                 await updateState(changeDir, newState);
@@ -65,36 +54,35 @@ export function createStateTransitionHook() {
         },
     };
 }
-// Helper functions
 async function getCurrentState(changeDir) {
-    if (!changeDir)
-        return null;
-    const stateFilePath = `${changeDir}/.sflow/state.json`;
-    try {
-        const file = Bun.file(stateFilePath);
-        if (await file.exists()) {
-            const content = await file.text();
-            const state = JSON.parse(content);
-            return state.state || state.currentState || 'exploring';
-        }
+    const state = await readStateFile(changeDir);
+    if (state) {
+        return state.state || state.currentState || 'exploring';
     }
-    catch { }
     return null;
 }
+async function readStateFile(changeDir) {
+    if (!changeDir)
+        return null;
+    return await readJsonFile(`${changeDir}/${STATE_FILE_PATH}`);
+}
 async function updateState(changeDir, newState) {
-    const stateFilePath = `${changeDir}/.sflow/state.json`;
     const now = new Date().toISOString();
-    const file = Bun.file(stateFilePath);
     let state = {};
-    if (await file.exists()) {
-        const content = await file.text();
-        state = JSON.parse(content);
+    const existing = await readStateFile(changeDir);
+    if (existing) {
+        state = existing;
     }
     else {
-        state = { mode: 'full', createdAt: now };
+        state = { mode: 'full', createdAt: now, timestamps: { createdAt: now, updatedAt: now } };
+        await ensureDir(`${changeDir}/.sflow`);
     }
     state.state = newState;
     state.updatedAt = now;
-    await Bun.write(stateFilePath, JSON.stringify(state, null, 2));
+    if (!state.timestamps)
+        state.timestamps = {};
+    state.timestamps.lastTransition = now;
+    state.timestamps.updatedAt = now;
+    await writeJsonFile(`${changeDir}/${STATE_FILE_PATH}`, state);
 }
 //# sourceMappingURL=state-transition.js.map

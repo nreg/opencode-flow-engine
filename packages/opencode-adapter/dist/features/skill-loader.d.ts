@@ -46,11 +46,11 @@ export declare class SkillLoader {
     /**
      * Load all skills from skills directory
      */
-    loadAllSkills(): Skill[];
+    loadAllSkills(): Promise<Skill[]>;
     /**
      * Load a single skill by name
      */
-    loadSkill(name: string): Skill | null;
+    loadSkill(name: string): Promise<Skill | null>;
     /**
      * Get a loaded skill by name
      */
@@ -85,9 +85,9 @@ export declare class SkillLoader {
     getSkillMcpServers(name: string): McpServer[];
 }
 /**
- * Create a skill loader instance
+ * Create a skill loader instance (caller must await loadAllSkills)
  */
-export declare function createSkillLoader(skillsDir?: string): SkillLoader;
+export declare function createSkillLoader(skillsDir?: string): Promise<SkillLoader>;
 /**
  * Parse skill metadata from content
  */
@@ -96,4 +96,3 @@ export declare function parseSkillMetadata(content: string): SkillMetadata;
  * Get skill content without frontmatter
  */
 export declare function getSkillContentWithoutFrontmatter(content: string): string;
-//# sourceMappingURL=skill-loader.d.ts.map

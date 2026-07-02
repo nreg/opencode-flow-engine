@@ -7,4 +7,3 @@ import type { AgentFactory } from './types.js';
  * Create the sFlow agent configuration
  */
 export declare const createSFlowAgent: AgentFactory;
-//# sourceMappingURL=spec-flow.d.ts.map

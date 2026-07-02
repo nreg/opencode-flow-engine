@@ -3,7 +3,7 @@
  */
 
 import type { ToolDefinition, ToolContext, ToolResult } from './types.js';
-import { Validator } from '@opencode-sflow/core';
+import { sharedValidator } from '@opencode-sflow/core';
 import { readFile, listFiles } from '@opencode-sflow/shared';
 
 /**
@@ -27,36 +27,36 @@ export function createArtifactInspectorTool(): ToolDefinition {
     },
     execute: async (params, context) => {
       const { changeDir, artifactType } = params as {
-        changeDir: string;
+        changeDir?: string;
         artifactType?: string;
       };
-      const validator = new Validator();
+      const resolvedDir = changeDir || context.changeDir;
 
       try {
         const results: Record<string, unknown> = {};
 
-        // Inspect proposal
+        // Inspect proposal (also validates as change content)
         if (!artifactType || artifactType === 'proposal') {
-          const proposalContent = await readFile(`${changeDir}/proposal.md`);
+          const proposalContent = await readFile(`${resolvedDir}/proposal.md`);
           if (proposalContent) {
-            results.proposal = validator.validateProposal(proposalContent);
+            results.proposal = sharedValidator.validateChangeContent('proposal', proposalContent);
           } else {
-            results.proposal = { valid: false, error: 'File not found' };
+            results.proposal = { valid: false, error: 'File not found', issues: [], summary: { errors: 1, warnings: 0, info: 0 } };
           }
         }
 
-        // Inspect specs
+        // Inspect specs (block-level validation)
         if (!artifactType || artifactType === 'specs') {
-          const specsDir = `${changeDir}/specs`;
-          const specFiles = await listFiles(specsDir);
+          const specsDir = `${resolvedDir}/specs`;
+          const specFiles = await listFiles(specsDir, '.md');
           results.specs = {};
 
           for (const specFile of specFiles) {
             const specContent = await readFile(`${specsDir}/${specFile}`);
             if (specContent) {
-              (results.specs as Record<string, unknown>)[specFile] = validator.validateSpec(
+              (results.specs as Record<string, unknown>)[specFile] = sharedValidator.validateSpecContent(
+                specFile.replace('.md', ''),
                 specContent,
-                specFile.replace('.md', '')
               );
             }
           }
@@ -64,25 +64,24 @@ export function createArtifactInspectorTool(): ToolDefinition {
 
         // Inspect design
         if (!artifactType || artifactType === 'design') {
-          const designContent = await readFile(`${changeDir}/design.md`);
+          const designContent = await readFile(`${resolvedDir}/design.md`);
           if (designContent) {
-            results.design = { valid: true, message: 'Design file exists' };
+            results.design = sharedValidator.validateDesign(designContent);
           } else {
-            results.design = { valid: false, error: 'File not found' };
+            results.design = { valid: false, error: 'File not found', issues: [], summary: { errors: 1, warnings: 0, info: 0 } };
           }
         }
 
         // Inspect tasks
         if (!artifactType || artifactType === 'tasks') {
-          const tasksContent = await readFile(`${changeDir}/tasks.md`);
+          const tasksContent = await readFile(`${resolvedDir}/tasks.md`);
           if (tasksContent) {
-            results.tasks = validator.validateTasks(tasksContent);
+            results.tasks = sharedValidator.validateTasks(tasksContent);
           } else {
-            results.tasks = { valid: false, error: 'File not found' };
+            results.tasks = { valid: false, error: 'File not found', issues: [], summary: { errors: 1, warnings: 0, info: 0 } };
           }
         }
 
-        // Generate summary
         const summary = generateInspectionSummary(results);
 
         return {
@@ -107,25 +106,22 @@ export function createArtifactInspectorTool(): ToolDefinition {
 function generateInspectionSummary(results: Record<string, unknown>): string {
   const issues: string[] = [];
 
-  // Check proposal
-  const proposal = results.proposal as { valid: boolean; issues?: Array<{ message: string }> } | undefined;
+  const proposal = results.proposal as { valid: boolean; summary?: { errors: number } } | undefined;
   if (proposal && !proposal.valid) {
-    issues.push(`Proposal: ${proposal.issues?.length || 0} issues`);
+    issues.push(`Proposal: ${proposal.summary?.errors || 0} error(s)`);
   }
 
-  // Check specs
-  const specs = results.specs as Record<string, { valid: boolean; issues?: Array<{ message: string }> }> | undefined;
+  const specs = results.specs as Record<string, { valid: boolean; summary?: { errors: number } }> | undefined;
   if (specs) {
-    const specIssues = Object.values(specs).filter(s => !s.valid).length;
-    if (specIssues > 0) {
-      issues.push(`Specs: ${specIssues} files with issues`);
+    const specErrors = Object.values(specs).filter(s => !s.valid).length;
+    if (specErrors > 0) {
+      issues.push(`Specs: ${specErrors} file(s) with errors`);
     }
   }
 
-  // Check tasks
-  const tasks = results.tasks as { valid: boolean; issues?: Array<{ message: string }> } | undefined;
+  const tasks = results.tasks as { valid: boolean; summary?: { errors: number } } | undefined;
   if (tasks && !tasks.valid) {
-    issues.push(`Tasks: ${tasks.issues?.length || 0} issues`);
+    issues.push(`Tasks: ${tasks.summary?.errors || 0} error(s)`);
   }
 
   if (issues.length === 0) {
@@ -138,22 +134,19 @@ function generateInspectionSummary(results: Record<string, unknown>): string {
 function generateInspectionRecommendations(results: Record<string, unknown>): string[] {
   const recommendations: string[] = [];
 
-  // Check proposal
-  const proposal = results.proposal as { valid: boolean; issues?: Array<{ level: string; message: string }> } | undefined;
+  const proposal = results.proposal as { valid: boolean } | undefined;
   if (proposal && !proposal.valid) {
     recommendations.push('Fix proposal issues before proceeding');
   }
 
-  // Check specs
   const specs = results.specs as Record<string, { valid: boolean }> | undefined;
   if (specs) {
-    const specIssues = Object.values(specs).filter(s => !s.valid).length;
-    if (specIssues > 0) {
+    const specErrors = Object.values(specs).filter(s => !s.valid).length;
+    if (specErrors > 0) {
       recommendations.push('Fix spec issues before proceeding');
     }
   }
 
-  // Check tasks
   const tasks = results.tasks as { valid: boolean } | undefined;
   if (tasks && !tasks.valid) {
     recommendations.push('Fix task issues before proceeding');

@@ -2,6 +2,7 @@
  * Need Explorer agent - Requirement clarification
  * Based on oh-my-openagent's subagent pattern
  */
+import { getAgentTools } from './agent-tools.js';
 const MODE = 'subagent';
 /**
  * Create the need-explorer agent configuration
@@ -28,7 +29,7 @@ You are a requirement clarification specialist. Your job is to help users clarif
 3. Identify constraints and edge cases
 4. Compare implementation approaches
 5. Recommend the best approach with reasoning
-6. Record decisions in \`.spec-superflow.yaml\`
+6. Record decisions in '.sflow/state.json'
 
 ## Output Format
 
@@ -55,17 +56,7 @@ You have access to:
 
 Use these to understand the current context before asking questions.`,
     temperature: 0.6,
-    tools: {
-        read: true,
-        write: true,
-        edit: false,
-        glob: true,
-        grep: true,
-        bash: false,
-        call_omo_agent: false,
-        task: false,
-        skill: false,
-    },
+    tools: getAgentTools('need-explorer'),
 });
 createNeedExplorerAgent.mode = MODE;
 //# sourceMappingURL=need-explorer.js.map

@@ -1,6 +1,7 @@
 /**
  * Hook Composer - Manages hook registration and execution
- * Based on oh-my-openagent's hook composition pattern
+ * Based on oh-my-openagent's 5-tier hook composition pattern
+ * Tiers: Session → ToolGuard → Transform → Continuation → Skill
  */
 
 import type { HookName, HookHandler, HookContext, HookResult } from './types.js';
@@ -16,23 +17,40 @@ import {
 } from './index.js';
 
 /**
- * Hook registry with factory functions
+ * Hook tiers for layered composition
+ * Aligned with oh-my-openagent's 5-tier pattern
  */
-const HOOK_REGISTRY: Record<HookName, () => HookHandler> = {
-  state_transition: createStateTransitionHook,
-  artifact_validation: createArtifactValidationHook,
-  guard: createGuardHook,
-  session_start: createSessionStartHook,
-  session_end: createSessionEndHook,
-  pre_process: createPreProcessHook,
-  post_process: createPostProcessHook,
-  continuation: createContinuationHook,
-};
+type HookTier = 'session' | 'toolguard' | 'transform' | 'continuation' | 'skill';
+
+interface TieredHook {
+  name: HookName;
+  tier: HookTier;
+  factory: () => HookHandler;
+}
 
 /**
- * Hook tiers for composition order
+ * Tiered hook registry
+ * Each hook is assigned to a tier, and hooks execute in tier order
  */
-type HookTier = 'pre' | 'main' | 'post';
+const TIERED_HOOKS: TieredHook[] = [
+  // Tier 1: Session hooks - lifecycle management
+  { name: 'session_start', tier: 'session', factory: createSessionStartHook },
+  { name: 'session_end', tier: 'session', factory: createSessionEndHook },
+
+  // Tier 2: ToolGuard hooks - pre/post execution guards
+  { name: 'guard', tier: 'toolguard', factory: createGuardHook },
+  { name: 'artifact_validation', tier: 'toolguard', factory: createArtifactValidationHook },
+
+  // Tier 3: Transform hooks - message transformation
+  { name: 'pre_process', tier: 'transform', factory: createPreProcessHook },
+  { name: 'post_process', tier: 'transform', factory: createPostProcessHook },
+
+  // Tier 4: State & Continuation hooks - state management and auto-continue
+  { name: 'state_transition', tier: 'continuation', factory: createStateTransitionHook },
+  { name: 'continuation', tier: 'continuation', factory: createContinuationHook },
+];
+
+const TIER_ORDER: HookTier[] = ['session', 'toolguard', 'transform', 'continuation', 'skill'];
 
 /**
  * Hook composer instance
@@ -43,16 +61,18 @@ export class HookComposer {
   private hookOrder: HookName[] = [];
 
   /**
-   * Initialize the hook composer
+   * Initialize the hook composer with tiered ordering
    */
   initialize(): void {
-    this.hookOrder = ['session_start', 'pre_process', 'guard', 'artifact_validation', 'state_transition', 'post_process', 'session_end', 'continuation'];
-
-    for (const name of this.hookOrder) {
-      const factory = HOOK_REGISTRY[name];
-      if (factory) {
-        const hook = factory();
-        this.hooks.set(name, hook);
+    // Build execution order from tier order
+    this.hookOrder = [];
+    for (const tier of TIER_ORDER) {
+      for (const entry of TIERED_HOOKS) {
+        if (entry.tier === tier) {
+          this.hookOrder.push(entry.name);
+          const hook = entry.factory();
+          this.hooks.set(entry.name, hook);
+        }
       }
     }
   }
@@ -72,7 +92,7 @@ export class HookComposer {
    */
   async executeHook(
     name: HookName,
-    context: HookContext
+    context: HookContext,
   ): Promise<HookResult> {
     if (!this.hooks.has(name)) {
       return {
@@ -99,10 +119,41 @@ export class HookComposer {
   }
 
   /**
-   * Execute all hooks in order
+   * Execute hooks for a specific tier
+   */
+  async executeTier(
+    tier: HookTier,
+    context: HookContext,
+  ): Promise<{ success: boolean; results: Record<HookName, HookResult> }> {
+    const results: Record<string, HookResult> = {};
+    let allSuccess = true;
+
+    for (const entry of TIERED_HOOKS) {
+      if (entry.tier !== tier) continue;
+      if (this.disabledHooks.has(entry.name)) continue;
+
+      const result = await this.executeHook(entry.name, context);
+      results[entry.name] = result;
+
+      if (!result.success) {
+        allSuccess = false;
+        if (result.block) {
+          break;
+        }
+      }
+    }
+
+    return {
+      success: allSuccess,
+      results: results as Record<HookName, HookResult>,
+    };
+  }
+
+  /**
+   * Execute all hooks in tier order
    */
   async executeAllHooks(
-    context: HookContext
+    context: HookContext,
   ): Promise<{ success: boolean; results: Record<HookName, HookResult> }> {
     const results: Record<string, HookResult> = {};
     let allSuccess = true;
@@ -127,45 +178,27 @@ export class HookComposer {
     };
   }
 
-  /**
-   * Disable a hook
-   */
   disableHook(name: HookName): void {
     this.disabledHooks.add(name);
   }
 
-  /**
-   * Enable a hook
-   */
   enableHook(name: HookName): void {
     this.disabledHooks.delete(name);
   }
 
-  /**
-   * Check if hook is enabled
-   */
   isHookEnabled(name: string): boolean {
-    if (!this.hooks.has(name)) return false;
-    return !this.disabledHooks.has(name);
+    if (!this.hooks.has(name as HookName)) return false;
+    return !this.disabledHooks.has(name as HookName);
   }
 
-  /**
-   * Get all enabled hooks
-   */
   getEnabledHooks(): HookName[] {
     return this.hookOrder.filter(name => !this.disabledHooks.has(name));
   }
 
-  /**
-   * Get all disabled hooks
-   */
   getDisabledHooks(): HookName[] {
     return Array.from(this.disabledHooks);
   }
 
-  /**
-   * Get hook count
-   */
   getHookCount(): { total: number; enabled: number; disabled: number } {
     return {
       total: this.hooks.size,
@@ -175,20 +208,24 @@ export class HookComposer {
   }
 
   /**
-   * Add a custom hook
+   * Add a custom hook at a specific tier
    */
-  addHook(name: HookName, hook: HookHandler, position?: number): void {
+  addHook(name: HookName, hook: HookHandler, tier: HookTier = 'skill', position?: number): void {
     this.hooks.set(name, hook);
+    // Insert into hookOrder at the right tier boundary
+    const tierStartIdx = this.hookOrder.findIndex(n => {
+      const entry = TIERED_HOOKS.find(e => e.name === n);
+      return entry && TIER_ORDER.indexOf(entry.tier) >= TIER_ORDER.indexOf(tier);
+    });
     if (position !== undefined && position >= 0 && position <= this.hookOrder.length) {
       this.hookOrder.splice(position, 0, name);
+    } else if (tierStartIdx >= 0) {
+      this.hookOrder.splice(tierStartIdx, 0, name);
     } else {
       this.hookOrder.push(name);
     }
   }
 
-  /**
-   * Remove a hook
-   */
   removeHook(name: HookName): void {
     this.hooks.delete(name);
     this.hookOrder = this.hookOrder.filter(n => n !== name);
@@ -209,12 +246,12 @@ export function createHookComposer(): HookComposer {
  * Get all hook names
  */
 export function getHookNames(): HookName[] {
-  return Object.keys(HOOK_REGISTRY) as HookName[];
+  return TIERED_HOOKS.map(e => e.name);
 }
 
 /**
  * Check if hook exists
  */
 export function hookExists(name: string): boolean {
-  return name in HOOK_REGISTRY;
+  return TIERED_HOOKS.some(e => e.name === name);
 }
