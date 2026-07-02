@@ -1,106 +1,54 @@
-/**
- * sFlow OpenCode Plugin
- * OpenSpec planning engine + Superpowers execution discipline
- */
-
 import type { PluginInput, PluginOptions, Hooks, PluginModule } from '@opencode-ai/plugin';
-import { tool } from '@opencode-ai/plugin';
-import { z } from 'zod';
 
-// Core
 export { Validator } from '@opencode-sflow/core';
 export type {
-  Scenario,
-  Requirement,
-  Spec,
-  DeltaOperationType,
-  Rename,
-  Delta,
-  Change,
-  WorkflowState,
-  WorkflowMode,
-  WorkflowStateFile,
-  ValidationReport,
-  ValidationIssue,
-  VerificationReport,
-  ConflictReport,
+  Scenario, Requirement, Spec, DeltaOperationType, Rename, Delta, Change,
+  WorkflowState, WorkflowMode, WorkflowStateFile,
+  ValidationReport, ValidationIssue, VerificationReport, ConflictReport,
 } from '@opencode-sflow/core';
 
-// Agents
 import {
-  createSFlowAgent,
-  createNeedExplorerAgent,
-  createSpecWriterAgent,
-  createContractBuilderAgent,
-  createBuildExecutorAgent,
-  createBugInvestigatorAgent,
-  createCodeReviewerAgent,
-  createReleaseArchivistAgent,
-  createSpecMergerAgent,
-  getAgentNames,
-  getAgentMode,
-  getDefaultModel,
+  getAgentNames, getAgentMode, getDefaultModel, createAgent, createAllAgents,
 } from './agents/index.js';
 export {
-  createSFlowAgent,
-  createNeedExplorerAgent,
-  createSpecWriterAgent,
-  createContractBuilderAgent,
-  createBuildExecutorAgent,
-  createBugInvestigatorAgent,
-  createCodeReviewerAgent,
-  createReleaseArchivistAgent,
-  createSpecMergerAgent,
-};
+  createSFlowAgent, createNeedExplorerAgent, createSpecWriterAgent,
+  createContractBuilderAgent, createBuildExecutorAgent, createBugInvestigatorAgent,
+  createCodeReviewerAgent, createReleaseArchivistAgent, createSpecMergerAgent,
+} from './agents/index.js';
 
-// Tools
 export {
-  createWorkflowRouterTool,
-  createContractValidatorTool,
-  createArtifactInspectorTool,
+  createWorkflowRouterTool, createContractValidatorTool, createArtifactInspectorTool,
 } from './tools/index.js';
 
-// Hooks
 export {
-  createStateTransitionHook,
-  createArtifactValidationHook,
-  createGuardHook,
+  createStateTransitionHook, createArtifactValidationHook, createGuardHook,
+  createSessionStartHook, createSessionEndHook,
+  createPreProcessHook, createPostProcessHook, createContinuationHook,
 } from './hooks/index.js';
 
-// Features
 export {
-  createWorkflowManager,
-  createStateManager,
-  BuiltinMcpRegistry,
-  createValidatorMcpServer,
+  createWorkflowManager, createStateManager,
+  BuiltinMcpRegistry, createValidatorMcpServer,
 } from './features/index.js';
 export type { BuiltinMcpServer } from './features/index.js';
 
-// Shared
 export { deepMerge, fileExists, readFile, writeFile, listFiles } from '@opencode-sflow/shared';
 
-// Config
-import {
-  loadCascadedSFlowConfig,
-  agentOverridesFromConfig,
-} from './agents/config-loader.js';
+import { loadCascadedSFlowConfig, agentOverridesFromConfig } from './agents/config-loader.js';
+import { createToolRegistry } from './tools/tool-registry.js';
+import { createHookComposer } from './hooks/hook-composer.js';
 
 export const PLUGIN_ID = 'opencode-sflow';
 export const PLUGIN_VERSION = '0.1.0';
 
-/**
- * sFlow Plugin - registers agents and tools with OpenCode
- */
 async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promise<Hooks> {
   const cascadedConfig = await loadCascadedSFlowConfig();
   const configOverrides = agentOverridesFromConfig(cascadedConfig);
 
   console.log(`[sFlow] Initializing in ${input.directory}`);
 
-  const DEFAULT_MODELS: Record<string, string> = {};
-  for (const name of getAgentNames()) {
-    DEFAULT_MODELS[name] = getDefaultModel(name);
-  }
+  const toolRegistry = createToolRegistry();
+  const hookComposer = createHookComposer();
 
   return {
     dispose: async () => {
@@ -111,63 +59,71 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       cfg.agent = cfg.agent || {};
       for (const name of getAgentNames()) {
         const override = configOverrides[name];
-        const model = override?.model || DEFAULT_MODELS[name];
+        const agentCfg = await createAgent(name);
         cfg.agent[name] = {
-          model,
+          model: agentCfg.model,
           mode: getAgentMode(name),
-          description: `sFlow workflow agent`,
+          prompt: agentCfg.instructions,
           ...(override?.temperature ? { temperature: override.temperature } : {}),
         };
       }
     },
 
     tool: {
-      workflow_router: tool({
+      workflow_router: {
         description: 'Detect current workflow state and route to the appropriate agent',
         args: {
-          state: z.string().optional().describe('Target workflow state to transition to'),
+          state: { type: 'string', description: 'Target workflow state to transition to' },
         },
-        async execute(args) {
-          const state = args.state || 'exploring';
-          return {
-            title: 'Workflow Router',
-            output: `Routing to workflow state: ${state}`,
-          };
+        execute: async (args, context) => {
+          const tool = toolRegistry.getTool('workflow_router');
+          if (!tool) return { title: 'Error', output: 'Tool not found' };
+          const result = await tool.execute(args, {
+            changeDir: context.directory || '',
+            stateFile: `${context.directory || ''}/.sflow/state.json`,
+            pluginRoot: '',
+          });
+          return { title: 'Workflow Router', output: JSON.stringify(result.data || result.error) };
         },
-      }),
+      },
 
-      contract_validator: tool({
+      contract_validator: {
         description: 'Validate execution contract for correctness and completeness',
         args: {
-          contract_path: z.string().describe('Path to the contract file'),
+          contract_path: { type: 'string', description: 'Path to the contract file' },
         },
-        async execute(args) {
-          return {
-            title: 'Contract Validator',
-            output: `Validating contract: ${args.contract_path}`,
-          };
+        execute: async (args, context) => {
+          const tool = toolRegistry.getTool('contract_validator');
+          if (!tool) return { title: 'Error', output: 'Tool not found' };
+          const result = await tool.execute(args, {
+            changeDir: context.directory || '',
+            stateFile: '',
+            pluginRoot: '',
+          });
+          return { title: 'Contract Validator', output: JSON.stringify(result.data || result.error) };
         },
-      }),
+      },
 
-      artifact_inspector: tool({
+      artifact_inspector: {
         description: 'Inspect planning artifacts for completeness and consistency',
         args: {
-          artifact_path: z.string().describe('Path to the artifact file'),
+          artifact_path: { type: 'string', description: 'Path to the artifact file' },
         },
-        async execute(args) {
-          return {
-            title: 'Artifact Inspector',
-            output: `Inspecting artifact: ${args.artifact_path}`,
-          };
+        execute: async (args, context) => {
+          const tool = toolRegistry.getTool('artifact_inspector');
+          if (!tool) return { title: 'Error', output: 'Tool not found' };
+          const result = await tool.execute(args, {
+            changeDir: context.directory || '',
+            stateFile: '',
+            pluginRoot: '',
+          });
+          return { title: 'Artifact Inspector', output: JSON.stringify(result.data || result.error) };
         },
-      }),
+      },
     },
   };
 }
 
-/**
- * sFlow Plugin Module - matches OpenCode PluginModule format
- */
 const sflowPluginModule: PluginModule = {
   id: PLUGIN_ID,
   server: sflowPlugin,

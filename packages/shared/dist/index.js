@@ -50,16 +50,9 @@ async function writeFile(path, content) {
 }
 async function listFiles(dirPath, extension) {
   try {
-    const dir = Bun.dir(dirPath);
-    const files = [];
-    for await (const file of dir) {
-      if (file.isFile()) {
-        if (!extension || file.name.endsWith(extension)) {
-          files.push(file.name);
-        }
-      }
-    }
-    return files;
+    const { readdir } = await import("fs/promises");
+    const entries = await readdir(dirPath, { withFileTypes: true });
+    return entries.filter((e) => e.isFile() && (!extension || e.name.endsWith(extension))).map((e) => e.name);
   } catch {
     return [];
   }

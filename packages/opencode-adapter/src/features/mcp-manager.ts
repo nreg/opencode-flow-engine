@@ -94,7 +94,7 @@ export class McpManager {
     try {
       const proc = Bun.spawn([config.command, ...(config.args || [])], {
         env: { ...process.env, ...config.env },
-        stdio: ['pipe', 'pipe', 'pipe'],
+        stdio: ['pipe', 'ignore', 'ignore'],
       });
 
       instance.pid = proc.pid;

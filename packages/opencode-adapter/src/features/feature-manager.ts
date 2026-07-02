@@ -8,46 +8,37 @@ import { createStateManager } from './state-manager.js';
 import { createSkillLoader, type Skill, type SkillLoader } from './skill-loader.js';
 import { createMcpManager, type McpManager } from './mcp-manager.js';
 
-/**
- * Feature manager configuration
- */
 export interface FeatureManagerConfig {
   workflowManager?: FeatureConfig;
   stateManager?: FeatureConfig;
   skillsDir?: string;
 }
 
-/**
- * Feature manager class
- */
 export class FeatureManager {
   private workflowManager;
   private stateManager;
-  private skillLoader;
+  private skillLoader: SkillLoader | null = null;
   private mcpManager: McpManager;
   private config: FeatureManagerConfig;
+  private initialized = false;
 
   constructor(config: FeatureManagerConfig = {}) {
     this.config = config;
     this.workflowManager = createWorkflowManager(config.workflowManager);
     this.stateManager = createStateManager(config.stateManager, this.workflowManager);
-    this.skillLoader = null as unknown as SkillLoader;
     this.mcpManager = createMcpManager();
   }
 
-  /**
-   * Initialize all features
-   */
   async initialize(): Promise<FeatureResult> {
     try {
       await this.workflowManager.initialize();
       await this.stateManager.initialize();
 
       this.skillLoader = await createSkillLoader(this.config.skillsDir);
+      this.initialized = true;
       const loadedSkills = this.skillLoader.getAllSkills();
       console.log(`Loaded ${loadedSkills.length} skills`);
 
-      // Start MCP servers for skills with MCP config
       const skillsWithMcp = this.skillLoader.getSkillsWithMcp();
       for (const skill of skillsWithMcp) {
         const servers = skill.metadata.mcp?.servers || [];
@@ -71,64 +62,48 @@ export class FeatureManager {
     }
   }
 
-  /**
-   * Get workflow manager
-   */
+  private requireInitialized(): void {
+    if (!this.initialized || !this.skillLoader) {
+      throw new Error('FeatureManager not initialized. Call initialize() first.');
+    }
+  }
+
   getWorkflowManager() {
     return this.workflowManager;
   }
 
-  /**
-   * Get state manager
-   */
   getStateManager() {
     return this.stateManager;
   }
 
-  /**
-   * Get skill loader
-   */
-  getSkillLoader() {
+  getSkillLoader(): SkillLoader | null {
     return this.skillLoader;
   }
 
-  /**
-   * Get MCP manager
-   */
   getMcpManager() {
     return this.mcpManager;
   }
 
-  /**
-   * Get all loaded skills
-   */
   getSkills(): Skill[] {
-    return this.skillLoader.getAllSkills();
+    this.requireInitialized();
+    return this.skillLoader!.getAllSkills();
   }
 
-  /**
-   * Get skill by name
-   */
   getSkill(name: string): Skill | undefined {
-    return this.skillLoader.getSkill(name);
+    this.requireInitialized();
+    return this.skillLoader!.getSkill(name);
   }
 
-  /**
-   * Get feature status
-   */
   getStatus(): Record<string, unknown> {
     return {
       workflowManager: this.workflowManager.config.enabled,
       stateManager: this.stateManager.config.enabled,
-      skillsLoaded: this.skillLoader.getSkillNames().length,
+      skillsLoaded: this.skillLoader?.getSkillNames().length ?? 0,
       mcpServers: this.mcpManager.getServerCount(),
     };
   }
 }
 
-/**
- * Create a feature manager instance
- */
 export function createFeatureManager(config?: FeatureManagerConfig): FeatureManager {
   return new FeatureManager(config);
 }

@@ -23,16 +23,16 @@ import {
   mergeOverrides,
 } from './config-loader.js';
 import { getSkillContentWithoutFrontmatter } from '../features/skill-loader.js';
-import { readFileSync, existsSync } from 'fs';
+import { access, readFile } from 'fs/promises';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { existsSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-/**
- * Resolve package root by looking for package.json
- */
+const PACKAGE_ROOT = resolvePackageRoot();
+
 function resolvePackageRoot(): string {
   let current = resolve(__dirname, '..');
   for (let i = 0; i < 10; i++) {
@@ -44,23 +44,15 @@ function resolvePackageRoot(): string {
   return resolve(__dirname, '..', '..', '..', '..');
 }
 
-const PACKAGE_ROOT = resolvePackageRoot();
-
-/**
- * Load skill content from skills/<name>/SKILL.md if it exists.
- * Returns the content without frontmatter, or null if unavailable.
- */
-function loadSkillInstructions(name: string): string | null {
+async function loadSkillInstructions(name: string): Promise<string | null> {
   const skillFile = join(PACKAGE_ROOT, 'skills', name, 'SKILL.md');
   try {
-    if (existsSync(skillFile)) {
-      const content = readFileSync(skillFile, 'utf-8');
-      return getSkillContentWithoutFrontmatter(content);
-    }
+    await access(skillFile);
+    const content = await readFile(skillFile, 'utf-8');
+    return getSkillContentWithoutFrontmatter(content);
   } catch {
-    // Silently fall back to hardcoded instructions
+    return null;
   }
-  return null;
 }
 
 /**
@@ -137,8 +129,7 @@ export async function createAgent(
 
   const agentConfig = factory(resolvedModel);
 
-  // Load SKILL.md content as instructions if available
-  const skillContent = loadSkillInstructions(name);
+  const skillContent = await loadSkillInstructions(name);
   if (skillContent) {
     agentConfig.instructions = skillContent;
   }
@@ -178,7 +169,7 @@ export async function createAllAgents(
     const agentConfig = factory(resolvedModel);
 
     // Load SKILL.md content as instructions if available
-    const skillContent = loadSkillInstructions(name);
+    const skillContent = await loadSkillInstructions(name);
     if (skillContent) {
       agentConfig.instructions = skillContent;
     }

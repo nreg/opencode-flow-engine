@@ -5,7 +5,7 @@
 export type {
   PluginConfig,
   WorkflowConfig,
-  AgentConfig,
+  AgentModelEntry,
 } from './types.js';
 
 export { deepMerge } from './deep-merge.js';

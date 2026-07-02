@@ -5,6 +5,7 @@
 import type { HookHandler, HookContext, HookResult } from './types.js';
 import { fileExists, readFile, readJsonFile } from '@opencode-sflow/shared';
 import { getValidTransitions } from '@opencode-sflow/core';
+import { stat } from 'fs/promises';
 
 /**
  * Create the guard hook
@@ -102,8 +103,10 @@ async function checkContractStaleness(changeDir: string): Promise<HookResult> {
   if (!contractExists || !proposalExists) return { success: true };
 
   try {
-    const contractModTime = Bun.file(contractPath).lastModified;
-    const proposalModTime = Bun.file(proposalPath).lastModified;
+    const contractStats = await stat(contractPath);
+    const proposalStats = await stat(proposalPath);
+    const contractModTime = contractStats.mtimeMs;
+    const proposalModTime = proposalStats.mtimeMs;
 
     if (proposalModTime > contractModTime) {
       return {

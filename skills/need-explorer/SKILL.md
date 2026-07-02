@@ -23,7 +23,7 @@ Invoke this skill when:
 3. Identify constraints and edge cases
 4. Compare implementation approaches
 5. Recommend the best approach with reasoning
-6. Record decisions in `.spec-superflow.yaml`
+6. Record decisions in `.sflow/state.json`
 
 ## Output Format
 

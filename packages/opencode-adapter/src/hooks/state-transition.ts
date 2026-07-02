@@ -3,8 +3,10 @@
  */
 
 import type { HookHandler, HookContext, HookResult } from './types.js';
-import { readJsonFile, writeJsonFile, ensureDir } from '@opencode-sflow/shared';
+import { ensureDir } from '@opencode-sflow/shared';
 import { isValidTransition, getValidTransitions } from '@opencode-sflow/core';
+import { readFile, writeFile, rename } from 'fs/promises';
+import { join } from 'path';
 
 /**
  * Create the state transition hook
@@ -63,12 +65,28 @@ export function createStateTransitionHook(): HookHandler {
   };
 }
 
-// Helper functions
+// Helper functions with atomic write for concurrency safety
 const STATE_FILE_PATH = '.sflow/state.json';
 
-async function getCurrentState(changeDir: string): Promise<string | null> {
+async function readStateFile(changeDir: string): Promise<Record<string, unknown> | null> {
   if (!changeDir) return null;
-  const state = await readJsonFile<Record<string, unknown>>(`${changeDir}/${STATE_FILE_PATH}`);
+  try {
+    const content = await readFile(`${changeDir}/${STATE_FILE_PATH}`, 'utf-8');
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
+async function atomicWriteStateFile(changeDir: string, state: Record<string, unknown>): Promise<void> {
+  const target = `${changeDir}/${STATE_FILE_PATH}`;
+  const tmp = `${target}.tmp.${Date.now()}`;
+  await writeFile(tmp, JSON.stringify(state, null, 2), 'utf-8');
+  await rename(tmp, target);
+}
+
+async function getCurrentState(changeDir: string): Promise<string | null> {
+  const state = await readStateFile(changeDir);
   if (state) {
     return (state.state as string) || (state.currentState as string) || 'exploring';
   }
@@ -76,10 +94,9 @@ async function getCurrentState(changeDir: string): Promise<string | null> {
 }
 
 async function updateState(changeDir: string, newState: string): Promise<void> {
-  const stateFilePath = `${changeDir}/${STATE_FILE_PATH}`;
   const now = new Date().toISOString();
   let state: Record<string, unknown> = {};
-  const existing = await readJsonFile<Record<string, unknown>>(stateFilePath);
+  const existing = await readStateFile(changeDir);
   if (existing) {
     state = existing;
   } else {
@@ -91,5 +108,5 @@ async function updateState(changeDir: string, newState: string): Promise<void> {
   if (!state.timestamps) state.timestamps = {};
   (state.timestamps as Record<string, string>).lastTransition = now;
   (state.timestamps as Record<string, string>).updatedAt = now;
-  await writeJsonFile(stateFilePath, state);
+  await atomicWriteStateFile(changeDir, state);
 }

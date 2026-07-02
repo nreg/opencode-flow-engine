@@ -2,20 +2,14 @@
  * Shared types for sFlow
  */
 
-/**
- * Plugin configuration
- */
 export interface PluginConfig {
   enabled: boolean;
   version: string;
-  agents: Record<string, AgentConfig>;
+  agents: Record<string, AgentModelEntry>;
   features: Record<string, boolean>;
   hooks: Record<string, boolean>;
 }
 
-/**
- * Workflow configuration
- */
 export interface WorkflowConfig {
   mode: 'full' | 'hotfix' | 'tweak';
   autoTransition: boolean;
@@ -23,10 +17,7 @@ export interface WorkflowConfig {
   validationEnabled: boolean;
 }
 
-/**
- * Agent configuration
- */
-export interface AgentConfig {
+export interface AgentModelEntry {
   model: string;
   temperature?: number;
   maxTokens?: number;

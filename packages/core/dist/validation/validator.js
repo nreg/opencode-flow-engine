@@ -83,12 +83,7 @@ export class Validator {
     validateSpec(content, specName) {
         const issues = [];
         // Extract requirements (SHALL/MUST statements)
-        const requirementRegex = /(?:SHALL|MUST)\s+([^\n]+)/g;
-        let match;
-        const requirements = [];
-        while ((match = requirementRegex.exec(content)) !== null) {
-            requirements.push(match[1]);
-        }
+        const requirements = [...content.matchAll(/(?:SHALL|MUST)\s+([^\n]+)/g)].map(m => m[1]);
         if (requirements.length === 0) {
             issues.push({
                 level: 'ERROR',
@@ -98,11 +93,7 @@ export class Validator {
             });
         }
         // Check for scenarios
-        const scenarioRegex = /#### Scenario:\s*([^\n]+)/g;
-        const scenarios = [];
-        while ((match = scenarioRegex.exec(content)) !== null) {
-            scenarios.push(match[1]);
-        }
+        const scenarios = [...content.matchAll(/#### Scenario:\s*([^\n]+)/g)].map(m => m[1]);
         if (requirements.length > 0 && scenarios.length === 0) {
             issues.push({
                 level: 'ERROR',
@@ -157,8 +148,10 @@ export class Validator {
             }
         }
         const modifiedRegex = /#{2,3} MODIFIED:\s*([^\n]+)\n([\s\S]*?)(?=\n#{2,3} (?:ADDED|MODIFIED|REMOVED|RENAMED):|\n## |$)/g;
+        const modifiedRequirements = [];
         while ((match = modifiedRegex.exec(content)) !== null) {
             deltaCount++;
+            modifiedRequirements.push(match[1]);
             const requirementText = match[2].trim();
             if (requirementText.length === 0) {
                 issues.push({
@@ -174,11 +167,6 @@ export class Validator {
         while ((match = removedRegex.exec(content)) !== null) {
             removedRequirements.push(match[1]);
             deltaCount++;
-        }
-        const modifiedRequirements = [];
-        const modifiedRegex2 = /#{2,3} MODIFIED:\s*([^\n]+)/g;
-        while ((match = modifiedRegex2.exec(content)) !== null) {
-            modifiedRequirements.push(match[1]);
         }
         // Check for conflicts (same requirement in both MODIFIED and REMOVED)
         const conflicts = removedRequirements.filter(req => modifiedRequirements.includes(req));
