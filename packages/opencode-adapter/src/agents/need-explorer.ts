@@ -5,6 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory, AgentMode } from './types.js';
+import { getAgentTools } from './agent-tools.js';
 
 const MODE: AgentMode = 'subagent';
 
@@ -60,17 +61,7 @@ You have access to:
 
 Use these to understand the current context before asking questions.`,
       temperature: 0.6,
-  tools: {
-    read: true,
-    write: true,
-    edit: false,
-    glob: true,
-    grep: true,
-    bash: false,
-    call_omo_agent: false,
-    task: false,
-    skill: false,
-  },
+  tools: getAgentTools('need-explorer'),
 });
 
 createNeedExplorerAgent.mode = MODE;

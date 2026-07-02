@@ -13,3 +13,6 @@ export { Validator } from './validation/validator.js';
 // Parsing
 export type { RequirementBlock, RequirementsSectionParts, DeltaPlan, ParsedDelta, ParsedChange } from './parsing/types.js';
 export { REQUIREMENT_HEADER_REGEX, normalizeRequirementName, extractRequirementsSection, parseDeltaSpec, parseRequirementBlocks, parseChangeMarkdown } from './parsing/requirement-blocks.js';
+
+// Workflow constants
+export { VALID_TRANSITIONS, ALL_STATES, isValidTransition, getValidTransitions } from './constants.js';

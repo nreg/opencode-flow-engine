@@ -2,7 +2,8 @@
  * Config Loader tests
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { unlinkSync, existsSync, writeFileSync, mkdirSync, rmdirSync } from 'fs';
+import { existsSync, unlinkSync, mkdirSync, rmdirSync, writeFileSync } from 'fs';
+import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import {
   loadSFlowConfig,
@@ -36,40 +37,39 @@ describe('Config Loader', () => {
   afterEach(cleanTestDir);
 
   describe('loadSFlowConfig', () => {
-    it('should return empty object when no config file exists', () => {
-      const config = loadSFlowConfig(TEST_DIR);
+    it('should return empty object when no config file exists', async () => {
+      const config = await loadSFlowConfig(TEST_DIR);
       expect(config).toEqual({});
     });
 
-    it('should parse config file correctly', () => {
+    it('should parse config file correctly', async () => {
       writeTestConfig({
         version: '0.1.0',
         agents: { sflow: { model: 'gpt-4o' } },
       });
-      const config = loadSFlowConfig(TEST_DIR);
+      const config = await loadSFlowConfig(TEST_DIR);
       expect(config.version).toBe('0.1.0');
       expect(config.agents?.sflow?.model).toBe('gpt-4o');
     });
 
-    it('should return empty object on malformed JSON', () => {
+    it('should return empty object on malformed JSON', async () => {
       if (!existsSync(join(TEST_DIR, '.sflow'))) {
         mkdirSync(join(TEST_DIR, '.sflow'), { recursive: true });
       }
       writeFileSync(TEST_CONFIG, 'not json');
-      const config = loadSFlowConfig(TEST_DIR);
+      const config = await loadSFlowConfig(TEST_DIR);
       expect(config).toEqual({});
     });
   });
 
   describe('loadUserSFlowConfig', () => {
-    it('should return empty object when no user config exists', () => {
-      // Ensure USER_CONFIG_FILE doesn't exist for this test
+    it('should return empty object when no user config exists', async () => {
       try { unlinkSync(USER_CONFIG_FILE); } catch {}
-      const config = loadUserSFlowConfig();
+      const config = await loadUserSFlowConfig();
       expect(config).toEqual({});
     });
 
-    it('should parse user config correctly', () => {
+    it('should parse user config correctly', async () => {
       const userDir = join(USER_CONFIG_FILE, '..');
       if (!existsSync(userDir)) {
         mkdirSync(userDir, { recursive: true });
@@ -78,7 +78,7 @@ describe('Config Loader', () => {
         agents: { sflow: { model: 'user-model' } },
       }));
       try {
-        const config = loadUserSFlowConfig();
+        const config = await loadUserSFlowConfig();
         expect(config.agents?.sflow?.model).toBe('user-model');
       } finally {
         try { unlinkSync(USER_CONFIG_FILE); } catch {}
@@ -88,16 +88,16 @@ describe('Config Loader', () => {
   });
 
   describe('loadCascadedSFlowConfig', () => {
-    it('should return project config when no user config exists', () => {
+    it('should return project config when no user config exists', async () => {
       try { unlinkSync(USER_CONFIG_FILE); } catch {}
       writeTestConfig({
         agents: { sflow: { model: 'project-model' } },
       });
-      const config = loadCascadedSFlowConfig(TEST_DIR);
+      const config = await loadCascadedSFlowConfig(TEST_DIR);
       expect(config.agents?.sflow?.model).toBe('project-model');
     });
 
-    it('should merge user and project config with project winning', () => {
+    it('should merge user and project config with project winning', async () => {
       // Write user config first, then project config that overrides
       const userDir = join(USER_CONFIG_FILE, '..');
       if (!existsSync(userDir)) {
@@ -117,7 +117,7 @@ describe('Config Loader', () => {
         },
       });
       try {
-        const config = loadCascadedSFlowConfig(TEST_DIR);
+        const config = await loadCascadedSFlowConfig(TEST_DIR);
         // Project overrides user for sflow
         expect(config.agents?.sflow?.model).toBe('project-sflow');
         // But user's temperature for sflow should merge through
@@ -241,20 +241,18 @@ describe('Config File Integration with Agent Builder', () => {
     expect(agent.fallback_models).toEqual(['gpt-4o', 'claude-sonnet-4-7']);
   });
 
-  it('should prefer programmatic overrides over config file', () => {
+  it('should prefer programmatic overrides over config file', async () => {
     writeCwdConfig({
       agents: { sflow: { model: 'from-config' } },
     });
-    // Verify config file was written correctly
-    const config = loadSFlowConfig();
+    const config = await loadSFlowConfig();
     expect(config.agents?.sflow?.model).toBe('from-config');
     expect(config.agents?.sflow?.model).not.toBe('from-code');
-    // Now test priority: model param > config file
     const agent = createAgent('sflow', 'from-code');
     expect(agent.model).toBe('from-code');
   });
 
-  it('should prefer AgentOverrides over config file', () => {
+  it('should prefer AgentOverrides over config file', async () => {
     writeCwdConfig({
       agents: { sflow: { model: 'from-config' } },
     });
@@ -264,14 +262,14 @@ describe('Config File Integration with Agent Builder', () => {
     expect(agent.model).toBe('from-override');
   });
 
-  it('should use config file for createAllAgents', () => {
+  it('should use config file for createAllAgents', async () => {
     writeCwdConfig({
       agents: {
         sflow: { model: 'gpt-5' },
         'build-executor': { model: 'claude-4-opus' },
       },
     });
-    const agents = createAllAgents();
+    const agents = await createAllAgents();
     expect(agents.sflow.model).toBe('gpt-5');
     expect(agents['build-executor'].model).toBe('claude-4-opus');
     expect(agents['code-reviewer'].model).toBe('deepseek-v4-flash');

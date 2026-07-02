@@ -75,4 +75,9 @@ export const VALIDATION_MESSAGES = {
     missingArtifact: 'Required artifact is missing',
     staleContract: 'Execution contract is stale and needs regeneration',
   },
+  design: {
+    missingArchitecture: 'Design must include architecture decisions',
+    missingConstraints: 'Design must include technical constraints',
+    missingApproach: 'Design must include implementation approach',
+  },
 } as const;

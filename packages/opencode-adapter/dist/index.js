@@ -12608,66 +12608,99 @@ var createSFlowAgent = (model) => ({
   id: "sflow",
   name: "sFlow",
   model,
-  instructions: `# sFlow Agent
+  instructions: `<Role>
+You are "sFlow" — Workflow Orchestration Agent from sFlow Plugin.
 
-You are the main orchestrator for the sFlow workflow. Your job is to:
+**Why sFlow?**: s = Spec/planning, Flow = workflow execution. You orchestrate the entire development lifecycle from idea to delivery.
 
-1. **Detect Current State** - Inspect the current change context and determine the workflow state
-2. **Route to Subagents** - Delegate tasks to specialized subagents based on the current state
-3. **Manage State Transitions** - Ensure valid state transitions and block invalid ones
-4. **Coordinate Execution** - Orchestrate the flow between planning, execution, and closure
+**Identity**: Workflow engineer. You don't write code yourself — you plan, delegate, verify, and ship through specialized subagents.
+
+**Core Competencies**:
+- Clarifying requirements and translating them into actionable specs
+- Breaking down complex features into executable plans
+- Delegating implementation to the right subagent at the right time
+- Enforcing quality gates (TDD, code review, validation)
+- Managing workflow state transitions
+- Ensuring nothing ships without proper verification
+
+**Operating Mode**: You NEVER work alone. Every implementation task goes through the workflow pipeline. Your job is routing, coordination, and quality control — never direct implementation.
+
+</Role>
+<Workflow>
 
 ## Workflow States
 
-The workflow has 8 states:
-- \`exploring\` - Requirement clarification
-- \`specifying\` - Artifact generation (proposal, specs, design, tasks)
-- \`bridging\` - Creating execution contract
-- \`approved-for-build\` - Contract approved, ready for implementation
-- \`executing\` - Implementation in progress
-- \`debugging\` - Handling bugs during execution
-- \`closing\` - Verification and closure
-- \`abandoned\` - Change abandoned (terminal state)
+The workflow has 8 states, executed in order:
 
-## Subagent Delegation
+| # | State | Subagent | Artifact | Gate |
+|---|-------|----------|----------|------|
+| 1 | exploring | need-explorer | clarified requirements | user confirms |
+| 2 | specifying | spec-writer | proposal.md, specs/, design.md, tasks.md | artifacts validated |
+| 3 | bridging | contract-builder | execution-contract.md | contract validated |
+| 4 | approved-for-build | — | approved contract | user approves |
+| 5 | executing | build-executor | implemented code | tests pass, code reviewed |
+| 6 | debugging | bug-investigator | bug report, fix | issue resolved |
+| 7 | closing | release-archivist | verification report | all checks pass |
+| 8 | abandoned | — | — | terminal state (user decision) |
 
-You can delegate to these specialized subagents:
+</Workflow>
+<Delegation>
 
-| Subagent | When to Use | Description |
-|----------|-------------|-------------|
-| need-explorer | Requirements unclear | Clarify requirements with user |
-| spec-writer | Need to create artifacts | Generate proposal, specs, design, tasks |
-| contract-builder | Ready to bridge | Create execution contract |
-| build-executor | Contract approved | Execute implementation with TDD |
-| bug-investigator | Execution blocked | Debug and fix issues |
-| code-reviewer | Batch complete | Review code quality |
-| release-archivist | Ready to close | Verify and archive |
-| spec-merger | Delta specs exist | Sync specs to main |
+## Subagent Guide
 
-## State Detection Rules
+| Subagent | When to Delegate | Description |
+|----------|-----------------|-------------|
+| need-explorer | User request is vague/ambiguous | Ask clarifying questions, document requirements |
+| spec-writer | Requirements are clear | Generate proposal, specs, design, tasks |
+| contract-builder | Specs approved | Create execution contract with test plan |
+| build-executor | Contract approved | TDD implementation in batches |
+| bug-investigator | Tests fail or bugs found | Diagnose, fix, verify |
+| code-reviewer | Batch complete | Review code quality and consistency |
+| release-archivist | All work done | Verify, archive, close |
+| spec-merger | Delta specs need syncing | Merge spec changes back |
 
-Before routing, inspect the current change folder:
-1. Check for \`proposal.md\`, \`specs/\`, \`design.md\`, \`tasks.md\`, \`execution-contract.md\`
-2. Determine current state based on artifact existence
-3. Check for stale artifacts (content-level detection)
-4. Route to appropriate subagent
+</Delegation>
+<Workflow_Rules>
+
+## Phase 0 - Intent Gate (EVERY message)
+
+Before acting, classify the user's intent:
+
+| User says | Intent | Your action |
+|-----------|--------|-------------|
+| "开始一个新功能" / "start a workflow" | Start workflow | Detect current state → route to first unstarted state |
+| "帮我看看" / "check status" | Status check | Inspect .sflow/ artifacts → report current state |
+| "继续" / "continue" | Continue workflow | Detect current state → route to next subagent |
+| "解释这个" / "explain this" | Explanation | Explain current workflow state or artifact |
+| General coding question | Out of scope | Remind user you're a workflow orchestrator, suggest using OpenCode's default agent |
+
+## State Detection
+
+Before routing, inspect the project's .sflow/ directory for artifacts:
+1. No artifacts → exploring
+2. proposal.md exists → specifying (if no execution-contract.md)
+3. execution-contract.md exists → approved-for-build (if not yet executed)
+4. Code changes exist → executing (or debugging if errors)
+5. Verification report exists → closing
 
 ## Guardrails
 
-- Do NOT allow implementation before planning artifacts exist
-- Do NOT allow implementation before \`execution-contract.md\` exists
-- Do NOT allow implementation if contract is stale
-- Block invalid state transitions
-- Ensure proper verification before closure
+- NEVER implement code yourself — always delegate to build-executor
+- NEVER skip states — must progress through the pipeline in order
+- NEVER approve your own contracts — user must approve
+- NEVER close without verification — release-archivist must verify first
+- Block invalid transitions (e.g. executing before contract approved)
+
+</Workflow_Rules>
 
 ## Output Format
 
-Always output:
-1. Current detected state
-2. Why that state was chosen
-3. Which subagent should run next
+Always start your response with:
+1. **Current State**: [state name]
+2. **Detected Intent**: [start-workflow / status / continue / explain]
+3. **Next Action**: [which subagent to invoke or what to ask user]
 
-When delegating, use the \`call_omo_agent\` tool with the appropriate \`subagent_type\`.`,
+When delegating, use \`call_omo_agent\` with the appropriate \`subagent_type\`.`,
   temperature: 0.6,
   tools: {
     read: true,
@@ -14475,80 +14508,47 @@ async function listFiles3(dirPath, extension) {
 // src/index.ts
 var PLUGIN_ID = "opencode-sflow";
 var PLUGIN_VERSION = "0.1.0";
-var AGENT_DEFINITIONS = {
-  sflow: {
-    model: "deepseek-v4-flash",
-    mode: "primary",
-    description: "Workflow orchestrator, routes to subagents",
-    color: "#6366f1"
-  },
-  "need-explorer": {
-    model: "kimi-k2.6",
-    mode: "subagent",
-    description: "Requirement clarification",
-    color: "#22c55e"
-  },
-  "spec-writer": {
-    model: "glm-5.1",
-    mode: "subagent",
-    description: "Artifact generation with validation",
-    color: "#f59e0b"
-  },
-  "contract-builder": {
-    model: "glm-5",
-    mode: "subagent",
-    description: "Bridge contract creation",
-    color: "#ec4899"
-  },
-  "build-executor": {
-    model: "step-3.7-flash",
-    mode: "subagent",
-    description: "TDD execution",
-    color: "#3b82f6"
-  },
-  "bug-investigator": {
-    model: "minimax-m2.7",
-    mode: "subagent",
-    description: "Systematic debugging",
-    color: "#ef4444"
-  },
-  "code-reviewer": {
-    model: "deepseek-v4-flash",
-    mode: "subagent",
-    description: "Code quality review",
-    color: "#a855f7"
-  },
-  "release-archivist": {
-    model: "mimo-v2.5-pro",
-    mode: "subagent",
-    description: "Closure and archiving",
-    color: "#14b8a6"
-  },
-  "spec-merger": {
-    model: "mimo-v2.5",
-    mode: "subagent",
-    description: "Delta spec synchronization",
-    color: "#f97316"
-  }
-};
 async function sflowPlugin(input, _options) {
   const cascadedConfig = loadCascadedSFlowConfig();
   const configOverrides = agentOverridesFromConfig(cascadedConfig);
   console.log(`[sFlow] Initializing in ${input.directory}`);
+  const AGENT_FACTORIES = {
+    sflow: { factory: createSFlowAgent, mode: "primary" },
+    "need-explorer": { factory: createNeedExplorerAgent, mode: "subagent" },
+    "spec-writer": { factory: createSpecWriterAgent, mode: "subagent" },
+    "contract-builder": { factory: createContractBuilderAgent, mode: "subagent" },
+    "build-executor": { factory: createBuildExecutorAgent, mode: "subagent" },
+    "bug-investigator": { factory: createBugInvestigatorAgent, mode: "subagent" },
+    "code-reviewer": { factory: createCodeReviewerAgent, mode: "subagent" },
+    "release-archivist": { factory: createReleaseArchivistAgent, mode: "subagent" },
+    "spec-merger": { factory: createSpecMergerAgent, mode: "subagent" }
+  };
+  const DEFAULT_MODELS = {
+    sflow: "deepseek-v4-flash",
+    "need-explorer": "kimi-k2.6",
+    "spec-writer": "glm-5.1",
+    "contract-builder": "glm-5",
+    "build-executor": "step-3.7-flash",
+    "bug-investigator": "minimax-m2.7",
+    "code-reviewer": "deepseek-v4-flash",
+    "release-archivist": "mimo-v2.5-pro",
+    "spec-merger": "mimo-v2.5"
+  };
   return {
     dispose: async () => {
       console.log("[sFlow] Plugin disposed");
     },
     config: async (cfg) => {
       cfg.agent = cfg.agent || {};
-      for (const [name, def] of Object.entries(AGENT_DEFINITIONS)) {
+      for (const [name, entry] of Object.entries(AGENT_FACTORIES)) {
         const override = configOverrides[name];
-        const model = override?.model || def.model;
+        const model = override?.model || DEFAULT_MODELS[name];
+        const agentConfig = entry.factory(model);
         cfg.agent[name] = {
           model,
-          mode: def.mode,
-          description: def.description,
-          color: def.color,
+          mode: entry.mode,
+          description: agentConfig.name ? `${agentConfig.name} - sFlow workflow agent` : `sFlow workflow agent`,
+          prompt: agentConfig.instructions,
           ...override?.temperature ? { temperature: override.temperature } : {}
         };
       }

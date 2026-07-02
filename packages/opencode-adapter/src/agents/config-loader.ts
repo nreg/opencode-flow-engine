@@ -2,6 +2,7 @@
  * Config Loader - Load agent configuration from .sflow/config.json
  */
 import { readFileSync, existsSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { BuiltinAgentName, AgentOverrides } from './types.js';
@@ -29,7 +30,7 @@ export const USER_CONFIG_FILE = join(homedir(), '.sFlow', 'config.json');
 /**
  * Load sFlow config from a specific directory's .sflow/config.json
  */
-export function loadSFlowConfig(projectDir?: string): SFlowConfig {
+export async function loadSFlowConfig(projectDir?: string): Promise<SFlowConfig> {
   const dir = projectDir || process.cwd();
   const configPath = join(dir, '.sflow', 'config.json');
 
@@ -38,7 +39,7 @@ export function loadSFlowConfig(projectDir?: string): SFlowConfig {
   }
 
   try {
-    const raw = readFileSync(configPath, 'utf-8');
+    const raw = await readFile(configPath, 'utf-8');
     return JSON.parse(raw);
   } catch {
     console.warn(`[sflow] Failed to parse ${configPath}`);
@@ -49,13 +50,13 @@ export function loadSFlowConfig(projectDir?: string): SFlowConfig {
 /**
  * Load user-level config from ~/.sFlow/config.json
  */
-export function loadUserSFlowConfig(): SFlowConfig {
+export async function loadUserSFlowConfig(): Promise<SFlowConfig> {
   if (!existsSync(USER_CONFIG_FILE)) {
     return {};
   }
 
   try {
-    const raw = readFileSync(USER_CONFIG_FILE, 'utf-8');
+    const raw = await readFile(USER_CONFIG_FILE, 'utf-8');
     return JSON.parse(raw);
   } catch {
     console.warn(`[sflow] Failed to parse user config: ${USER_CONFIG_FILE}`);
@@ -67,9 +68,9 @@ export function loadUserSFlowConfig(): SFlowConfig {
  * Load cascading config: user-level (~/.sFlow/config.json) as base,
  * project-level (.sflow/config.json) as higher-priority override.
  */
-export function loadCascadedSFlowConfig(projectDir?: string): SFlowConfig {
-  const user = loadUserSFlowConfig();
-  const project = loadSFlowConfig(projectDir);
+export async function loadCascadedSFlowConfig(projectDir?: string): Promise<SFlowConfig> {
+  const user = await loadUserSFlowConfig();
+  const project = await loadSFlowConfig(projectDir);
 
   // If no project config, return user config as-is
   if (Object.keys(project).length === 0) return user;

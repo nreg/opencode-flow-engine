@@ -64,6 +64,43 @@ export async function listFiles(dirPath: string, extension?: string): Promise<st
 }
 
 /**
+ * Check if directory exists
+ */
+export async function directoryExists(dirPath: string): Promise<boolean> {
+  try {
+    const dir = Bun.file(dirPath);
+    return await dir.exists();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read and parse JSON file
+ */
+export async function readJsonFile<T = Record<string, unknown>>(path: string): Promise<T | null> {
+  const content = await readFile(path);
+  if (!content) return null;
+  try {
+    return JSON.parse(content) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write JSON file
+ */
+export async function writeJsonFile(path: string, data: unknown): Promise<boolean> {
+  try {
+    await Bun.write(path, JSON.stringify(data, null, 2));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Ensure directory exists
  */
 export async function ensureDir(dirPath: string): Promise<void> {
@@ -73,6 +110,5 @@ export async function ensureDir(dirPath: string): Promise<void> {
       await Bun.write(`${dirPath}/.gitkeep`, '');
     }
   } catch {
-    // Directory creation will be handled by write operations
   }
 }

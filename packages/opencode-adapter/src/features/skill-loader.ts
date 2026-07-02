@@ -3,7 +3,8 @@
  * Based on oh-my-openagent's skill loader pattern
  */
 
-import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
+import { readFile, readdir, stat } from 'fs/promises';
+import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -62,7 +63,7 @@ export class SkillLoader {
   /**
    * Load all skills from skills directory
    */
-  loadAllSkills(): Skill[] {
+  async loadAllSkills(): Promise<Skill[]> {
     const skills: Skill[] = [];
 
     if (!existsSync(this.skillsDir)) {
@@ -70,16 +71,31 @@ export class SkillLoader {
       return skills;
     }
 
-    const entries = readdirSync(this.skillsDir);
-    for (const entry of entries) {
-      const skillPath = join(this.skillsDir, entry);
-      if (statSync(skillPath).isDirectory()) {
-        const skill = this.loadSkill(entry);
+    try {
+      const entries = await readdir(this.skillsDir);
+      const loadPromises = entries
+        .filter(entry => entry !== '.gitkeep')
+        .map(async (entry) => {
+          const skillPath = join(this.skillsDir, entry);
+          try {
+            const entryStat = await stat(skillPath);
+            if (entryStat.isDirectory()) {
+              return this.loadSkill(entry);
+            }
+          } catch {
+            return null;
+          }
+        });
+
+      const results = await Promise.all(loadPromises);
+      for (const skill of results) {
         if (skill) {
           skills.push(skill);
-          this.skills.set(entry, skill);
+          this.skills.set(skill.name || 'unknown', skill);
         }
       }
+    } catch (error) {
+      console.error(`Error loading skills from ${this.skillsDir}:`, error);
     }
 
     return skills;
@@ -88,7 +104,7 @@ export class SkillLoader {
   /**
    * Load a single skill by name
    */
-  loadSkill(name: string): Skill | null {
+  async loadSkill(name: string): Promise<Skill | null> {
     const skillDir = join(this.skillsDir, name);
     const skillFile = join(skillDir, 'SKILL.md');
 
@@ -97,17 +113,22 @@ export class SkillLoader {
       return null;
     }
 
-    const content = readFileSync(skillFile, 'utf-8');
-    const metadata = this.parseMetadata(content);
+    try {
+      const content = await readFile(skillFile, 'utf-8');
+      const metadata = this.parseMetadata(content);
 
-    const skill: Skill = {
-      metadata,
-      content,
-      path: skillFile,
-    };
+      const skill: Skill = {
+        metadata,
+        content,
+        path: skillFile,
+      };
 
-    this.skills.set(name, skill);
-    return skill;
+      this.skills.set(name, skill);
+      return skill;
+    } catch (error) {
+      console.error(`Error loading skill ${name}:`, error);
+      return null;
+    }
   }
 
   /**
@@ -218,11 +239,11 @@ export class SkillLoader {
 }
 
 /**
- * Create a skill loader instance
+ * Create a skill loader instance (caller must await loadAllSkills)
  */
-export function createSkillLoader(skillsDir?: string): SkillLoader {
+export async function createSkillLoader(skillsDir?: string): Promise<SkillLoader> {
   const loader = new SkillLoader(skillsDir);
-  loader.loadAllSkills();
+  await loader.loadAllSkills();
   return loader;
 }
 

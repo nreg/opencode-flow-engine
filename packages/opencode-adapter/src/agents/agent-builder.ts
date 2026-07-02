@@ -66,7 +66,7 @@ export function createAgent(
     throw new Error(`Unknown agent: ${name}`);
   }
 
-  const config = loadCascadedSFlowConfig();
+  const config = await loadCascadedSFlowConfig();
   const configOverrides = agentOverridesFromConfig(config);
 
   // Merge config + programmatic overrides for non-model fields
@@ -96,27 +96,26 @@ export function createAgent(
 /**
  * Create all agents
  */
-export function createAllAgents(
+export async function createAllAgents(
   model?: string,
   overrides?: AgentOverrides
 ): Record<BuiltinAgentName, AgentConfig> {
   const agents: Record<string, AgentConfig> = {};
 
-  // Load config once for all agents
-  const config = loadCascadedSFlowConfig();
+  const config = await loadCascadedSFlowConfig();
   const configOverrides = agentOverridesFromConfig(config);
 
   for (const name of Object.keys(AGENT_REGISTRY) as BuiltinAgentName[]) {
     const factory = AGENT_REGISTRY[name];
-    const merged = mergeOverrides(configOverrides, overrides || {});
-    const agentOverride = merged[name];
 
-    // Model priority: programmatic overrides > model param > config file > default
     const programmaticModel = overrides?.[name]?.model;
     const configModel = configOverrides[name]?.model;
     const resolvedModel = programmaticModel || model || configModel || DEFAULT_MODELS[name];
 
     const agentConfig = factory(resolvedModel);
+
+    const merged = mergeOverrides(configOverrides, overrides || {});
+    const agentOverride = merged[name];
 
     if (agentOverride) {
       agents[name] = {

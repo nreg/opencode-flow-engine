@@ -4,6 +4,7 @@
 
 import type { HookHandler, HookContext, HookResult } from './types.js';
 import { Validator } from '@opencode-sflow/core';
+import { readFile, listFiles } from '@opencode-sflow/shared';
 
 /**
  * Create the artifact validation hook
@@ -161,32 +162,4 @@ async function validateForClosing(
   }
 
   return { success: true };
-}
-
-// Helper functions
-async function readFile(path: string): Promise<string | null> {
-  try {
-    const file = Bun.file(path);
-    if (await file.exists()) {
-      return await file.text();
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-async function listFiles(dirPath: string): Promise<string[]> {
-  try {
-    const dir = Bun.dir(dirPath);
-    const files: string[] = [];
-    for await (const file of dir) {
-      if (file.isFile() && file.name.endsWith('.md')) {
-        files.push(file.name);
-      }
-    }
-    return files;
-  } catch {
-    return [];
-  }
 }

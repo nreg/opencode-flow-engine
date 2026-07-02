@@ -27,6 +27,20 @@ export type {
 } from '@opencode-sflow/core';
 
 // Agents
+import {
+  createSFlowAgent,
+  createNeedExplorerAgent,
+  createSpecWriterAgent,
+  createContractBuilderAgent,
+  createBuildExecutorAgent,
+  createBugInvestigatorAgent,
+  createCodeReviewerAgent,
+  createReleaseArchivistAgent,
+  createSpecMergerAgent,
+  getAgentNames,
+  getAgentMode,
+  getDefaultModel,
+} from './agents/index.js';
 export {
   createSFlowAgent,
   createNeedExplorerAgent,
@@ -37,7 +51,7 @@ export {
   createCodeReviewerAgent,
   createReleaseArchivistAgent,
   createSpecMergerAgent,
-} from './agents/index.js';
+};
 
 // Tools
 export {
@@ -71,79 +85,19 @@ import {
 export const PLUGIN_ID = 'opencode-sflow';
 export const PLUGIN_VERSION = '0.1.0';
 
-interface SflowAgentEntry {
-  model: string;
-  mode: 'primary' | 'subagent';
-  description: string;
-  temperature?: number;
-  color?: string;
-}
-
-const AGENT_DEFINITIONS: Record<string, SflowAgentEntry> = {
-  sflow: {
-    model: 'deepseek-v4-flash',
-    mode: 'primary',
-    description: 'Workflow orchestrator, routes to subagents',
-    color: '#6366f1',
-  },
-  'need-explorer': {
-    model: 'kimi-k2.6',
-    mode: 'subagent',
-    description: 'Requirement clarification',
-    color: '#22c55e',
-  },
-  'spec-writer': {
-    model: 'glm-5.1',
-    mode: 'subagent',
-    description: 'Artifact generation with validation',
-    color: '#f59e0b',
-  },
-  'contract-builder': {
-    model: 'glm-5',
-    mode: 'subagent',
-    description: 'Bridge contract creation',
-    color: '#ec4899',
-  },
-  'build-executor': {
-    model: 'step-3.7-flash',
-    mode: 'subagent',
-    description: 'TDD execution',
-    color: '#3b82f6',
-  },
-  'bug-investigator': {
-    model: 'minimax-m2.7',
-    mode: 'subagent',
-    description: 'Systematic debugging',
-    color: '#ef4444',
-  },
-  'code-reviewer': {
-    model: 'deepseek-v4-flash',
-    mode: 'subagent',
-    description: 'Code quality review',
-    color: '#a855f7',
-  },
-  'release-archivist': {
-    model: 'mimo-v2.5-pro',
-    mode: 'subagent',
-    description: 'Closure and archiving',
-    color: '#14b8a6',
-  },
-  'spec-merger': {
-    model: 'mimo-v2.5',
-    mode: 'subagent',
-    description: 'Delta spec synchronization',
-    color: '#f97316',
-  },
-};
-
 /**
  * sFlow Plugin - registers agents and tools with OpenCode
  */
 async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promise<Hooks> {
-  const cascadedConfig = loadCascadedSFlowConfig();
+  const cascadedConfig = await loadCascadedSFlowConfig();
   const configOverrides = agentOverridesFromConfig(cascadedConfig);
 
   console.log(`[sFlow] Initializing in ${input.directory}`);
+
+  const DEFAULT_MODELS: Record<string, string> = {};
+  for (const name of getAgentNames()) {
+    DEFAULT_MODELS[name] = getDefaultModel(name);
+  }
 
   return {
     dispose: async () => {
@@ -151,16 +105,14 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
     },
 
     config: async (cfg) => {
-      // Register sFlow agents with OpenCode via config hook
       cfg.agent = cfg.agent || {};
-      for (const [name, def] of Object.entries(AGENT_DEFINITIONS)) {
-        const override = configOverrides[name as keyof typeof configOverrides];
-        const model = override?.model || def.model;
+      for (const name of getAgentNames()) {
+        const override = configOverrides[name];
+        const model = override?.model || DEFAULT_MODELS[name];
         cfg.agent[name] = {
           model,
-          mode: def.mode,
-          description: def.description,
-          color: def.color,
+          mode: getAgentMode(name),
+          description: `sFlow workflow agent`,
           ...(override?.temperature ? { temperature: override.temperature } : {}),
         };
       }

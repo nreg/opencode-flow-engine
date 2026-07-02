@@ -5,6 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory, AgentMode } from './types.js';
+import { getAgentTools } from './agent-tools.js';
 
 const MODE: AgentMode = 'subagent';
 
@@ -106,17 +107,7 @@ You have access to:
 - \`edit\` - Edit specs
 - \`bash\` - Run validation scripts`,
       temperature: 0.7,
-  tools: {
-    read: true,
-    write: true,
-    edit: true,
-    glob: true,
-    grep: true,
-    bash: true,
-    call_omo_agent: false,
-    task: false,
-    skill: false,
-  },
+  tools: getAgentTools('spec-merger'),
 });
 
 createSpecMergerAgent.mode = MODE;

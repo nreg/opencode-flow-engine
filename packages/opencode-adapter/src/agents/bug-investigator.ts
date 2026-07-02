@@ -5,6 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory, AgentMode } from './types.js';
+import { getAgentTools } from './agent-tools.js';
 
 const MODE: AgentMode = 'subagent';
 
@@ -85,20 +86,7 @@ You have access to:
 - \`lsp_goto_definition\` - Navigate code
 - \`lsp_find_references\` - Find usages`,
       temperature: 0.6,
-  tools: {
-    read: true,
-    write: false,
-    edit: true,
-    glob: true,
-    grep: true,
-    bash: true,
-    call_omo_agent: false,
-    task: false,
-    skill: false,
-    lsp_diagnostics: true,
-    lsp_goto_definition: true,
-    lsp_find_references: true,
-  },
+  tools: getAgentTools('bug-investigator'),
 });
 
 createBugInvestigatorAgent.mode = MODE;

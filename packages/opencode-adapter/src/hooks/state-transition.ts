@@ -3,20 +3,8 @@
  */
 
 import type { HookHandler, HookContext, HookResult } from './types.js';
-
-/**
- * Valid state transitions
- */
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  exploring: ['specifying', 'abandoned'],
-  specifying: ['bridging', 'exploring', 'abandoned'],
-  bridging: ['approved-for-build', 'specifying', 'abandoned'],
-  'approved-for-build': ['executing', 'bridging', 'abandoned'],
-  executing: ['debugging', 'closing', 'abandoned'],
-  debugging: ['executing', 'abandoned'],
-  closing: ['abandoned'],
-  abandoned: [], // Terminal state
-};
+import { readJsonFile, writeJsonFile, ensureDir } from '@opencode-sflow/shared';
+import { isValidTransition, getValidTransitions } from '@opencode-sflow/core';
 
 /**
  * Create the state transition hook
@@ -45,13 +33,13 @@ export function createStateTransitionHook(): HookHandler {
           };
         }
 
-        const validTransitions = VALID_TRANSITIONS[currentState] || [];
-        if (!validTransitions.includes(newState)) {
+        if (!isValidTransition(currentState, newState)) {
+          const valid = getValidTransitions(currentState);
           return {
             success: false,
             error: `Invalid transition from ${currentState} to ${newState}`,
             block: true,
-            blockReason: `Cannot transition from ${currentState} to ${newState}. Valid transitions: ${validTransitions.join(', ')}`,
+            blockReason: `Cannot transition from ${currentState} to ${newState}. Valid transitions: ${valid.join(', ')}`,
           };
         }
 
@@ -76,32 +64,32 @@ export function createStateTransitionHook(): HookHandler {
 }
 
 // Helper functions
+const STATE_FILE_PATH = '.sflow/state.json';
+
 async function getCurrentState(changeDir: string): Promise<string | null> {
   if (!changeDir) return null;
-  const stateFilePath = `${changeDir}/.sflow/state.json`;
-  try {
-    const file = Bun.file(stateFilePath);
-    if (await file.exists()) {
-      const content = await file.text();
-      const state = JSON.parse(content);
-      return state.state || state.currentState || 'exploring';
-    }
-  } catch {}
+  const state = await readJsonFile<Record<string, unknown>>(`${changeDir}/${STATE_FILE_PATH}`);
+  if (state) {
+    return (state.state as string) || (state.currentState as string) || 'exploring';
+  }
   return null;
 }
 
 async function updateState(changeDir: string, newState: string): Promise<void> {
-  const stateFilePath = `${changeDir}/.sflow/state.json`;
+  const stateFilePath = `${changeDir}/${STATE_FILE_PATH}`;
   const now = new Date().toISOString();
-  const file = Bun.file(stateFilePath);
   let state: Record<string, unknown> = {};
-  if (await file.exists()) {
-    const content = await file.text();
-    state = JSON.parse(content);
+  const existing = await readJsonFile<Record<string, unknown>>(stateFilePath);
+  if (existing) {
+    state = existing;
   } else {
-    state = { mode: 'full', createdAt: now };
+    state = { mode: 'full', createdAt: now, timestamps: { createdAt: now, updatedAt: now } };
+    await ensureDir(`${changeDir}/.sflow`);
   }
   state.state = newState;
   state.updatedAt = now;
-  await Bun.write(stateFilePath, JSON.stringify(state, null, 2));
+  if (!state.timestamps) state.timestamps = {};
+  (state.timestamps as Record<string, string>).lastTransition = now;
+  (state.timestamps as Record<string, string>).updatedAt = now;
+  await writeJsonFile(stateFilePath, state);
 }

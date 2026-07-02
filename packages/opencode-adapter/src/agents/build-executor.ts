@@ -5,6 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory, AgentMode } from './types.js';
+import { getAgentTools } from './agent-tools.js';
 
 const MODE: AgentMode = 'subagent';
 
@@ -88,20 +89,7 @@ You have access to:
 - \`lsp_diagnostics\` - Check for errors
 - \`lsp_goto_definition\` - Navigate code`,
       temperature: 0.7,
-  tools: {
-    read: true,
-    write: true,
-    edit: true,
-    glob: true,
-    grep: true,
-    bash: true,
-    call_omo_agent: false,
-    task: false,
-    skill: false,
-    lsp_diagnostics: true,
-    lsp_goto_definition: true,
-    lsp_find_references: true,
-  },
+  tools: getAgentTools('build-executor'),
 });
 
 createBuildExecutorAgent.mode = MODE;

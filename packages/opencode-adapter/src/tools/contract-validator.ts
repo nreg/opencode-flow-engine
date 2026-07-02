@@ -4,6 +4,7 @@
 
 import type { ToolDefinition, ToolContext, ToolResult } from './types.js';
 import { Validator } from '@opencode-sflow/core';
+import { readFile } from '@opencode-sflow/shared';
 
 /**
  * Create the contract validator tool
@@ -57,19 +58,6 @@ export function createContractValidatorTool(): ToolDefinition {
       }
     },
   };
-}
-
-// Helper functions
-async function readFile(path: string): Promise<string | null> {
-  try {
-    const file = Bun.file(path);
-    if (await file.exists()) {
-      return await file.text();
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 async function checkContractStaleness(

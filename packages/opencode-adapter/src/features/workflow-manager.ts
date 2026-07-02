@@ -4,6 +4,8 @@
 
 import type { FeatureConfig, FeatureResult } from './types.js';
 import { Validator } from '@opencode-sflow/core';
+import { readJsonFile, writeJsonFile, ensureDir } from '@opencode-sflow/shared';
+import { isValidTransition, getValidTransitions } from '@opencode-sflow/core';
 
 /**
  * Create the workflow manager feature
@@ -76,10 +78,8 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
     async transitionState(changeDir: string, newState: string): Promise<FeatureResult> {
       try {
         const currentState = await readStateFile(changeDir);
-        
-        // Validate transition
-        const validTransitions = getValidTransitions(currentState.state);
-        if (!validTransitions.includes(newState)) {
+
+        if (!isValidTransition(currentState.state, newState)) {
           return {
             success: false,
             error: `Invalid transition from ${currentState.state} to ${newState}`,
@@ -135,27 +135,30 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
 }
 
 // Helper functions
+const STATE_FILE = '.sflow/state.json';
+
 async function createChangeDirectory(changeDir: string): Promise<void> {
   const stateDir = `${changeDir}/.sflow`;
-  await Bun.write(`${stateDir}/state.json`, JSON.stringify({
+  await ensureDir(stateDir);
+  await writeJsonFile(`${changeDir}/${STATE_FILE}`, {
     state: 'exploring',
     mode: 'full',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-  }, null, 2));
+  });
 }
 
 async function initializeStateFile(changeDir: string): Promise<void> {
-  const stateDir = `${changeDir}/.sflow`;
-  const stateFile = `${stateDir}/state.json`;
-  const file = Bun.file(stateFile);
-  if (!(await file.exists())) {
-    await Bun.write(stateFile, JSON.stringify({
+  const stateFile = `${changeDir}/${STATE_FILE}`;
+  const existing = await readJsonFile(stateFile);
+  if (!existing) {
+    await ensureDir(`${changeDir}/.sflow`);
+    await writeJsonFile(stateFile, {
       state: 'exploring',
       mode: 'full',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-    }, null, 2));
+    });
   }
 }
 
@@ -164,40 +167,16 @@ async function readStateFile(changeDir: string): Promise<{
   mode: string;
   updatedAt: string;
 }> {
-  const stateFile = `${changeDir}/.sflow/state.json`;
-  const file = Bun.file(stateFile);
-  if (await file.exists()) {
-    const content = await file.text();
-    return JSON.parse(content);
-  }
-  return {
-    state: 'exploring',
-    mode: 'full',
-    updatedAt: new Date().toISOString(),
-  };
+  const state = await readJsonFile<{ state: string; mode: string; updatedAt: string }>(`${changeDir}/${STATE_FILE}`);
+  return state || { state: 'exploring', mode: 'full', updatedAt: new Date().toISOString() };
 }
 
 async function updateStateFile(changeDir: string, state: Record<string, unknown>): Promise<void> {
-  const stateFile = `${changeDir}/.sflow/state.json`;
-  await Bun.write(stateFile, JSON.stringify(state, null, 2));
+  await writeJsonFile(`${changeDir}/${STATE_FILE}`, state);
 }
 
 async function archiveChange(changeDir: string): Promise<void> {
   const archiveDir = `${changeDir}/.sflow/archive`;
+  await ensureDir(archiveDir);
   await Bun.write(`${archiveDir}/archived-at.txt`, new Date().toISOString());
-}
-
-function getValidTransitions(currentState: string): string[] {
-  const transitions: Record<string, string[]> = {
-    exploring: ['specifying', 'abandoned'],
-    specifying: ['bridging', 'exploring', 'abandoned'],
-    bridging: ['approved-for-build', 'specifying', 'abandoned'],
-    'approved-for-build': ['executing', 'bridging', 'abandoned'],
-    executing: ['debugging', 'closing', 'abandoned'],
-    debugging: ['executing', 'abandoned'],
-    closing: ['abandoned'],
-    abandoned: [],
-  };
-
-  return transitions[currentState] || [];
 }

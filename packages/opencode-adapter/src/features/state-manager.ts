@@ -3,6 +3,7 @@
  */
 
 import type { FeatureConfig, FeatureResult } from './types.js';
+import { readJsonFile, writeJsonFile, ensureDir, fileExists } from '@opencode-sflow/shared';
 
 /**
  * Create the state manager feature
@@ -138,8 +139,11 @@ export function createStateManager(config: FeatureConfig = { enabled: true }) {
 }
 
 // Helper functions
+const STATE_FILE_NAME = '.sflow/state.json';
+
 async function readStateFile(changeDir: string): Promise<Record<string, unknown>> {
-  // TODO: Read state file
+  const existing = await readJsonFile<Record<string, unknown>>(`${changeDir}/${STATE_FILE_NAME}`);
+  if (existing) return existing;
   return {
     state: 'exploring',
     mode: 'full',
@@ -150,6 +154,7 @@ async function readStateFile(changeDir: string): Promise<Record<string, unknown>
 }
 
 async function writeStateFile(changeDir: string, state: Record<string, unknown>): Promise<void> {
-  // TODO: Write state file
-  console.log(`Writing state file in: ${changeDir}`, state);
+  await ensureDir(`${changeDir}/.sflow`);
+  const ok = await writeJsonFile(`${changeDir}/${STATE_FILE_NAME}`, state);
+  if (!ok) throw new Error(`Failed to write state file: ${changeDir}/${STATE_FILE_NAME}`);
 }

@@ -9,4 +9,4 @@ export type {
 } from './types.js';
 
 export { deepMerge } from './deep-merge.js';
-export { fileExists, readFile, writeFile, listFiles } from './file-utils.js';
+export { fileExists, readFile, writeFile, listFiles, directoryExists, readJsonFile, writeJsonFile, ensureDir } from './file-utils.js';

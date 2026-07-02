@@ -5,7 +5,7 @@
 import type { FeatureConfig, FeatureResult } from './types.js';
 import { createWorkflowManager } from './workflow-manager.js';
 import { createStateManager } from './state-manager.js';
-import { createSkillLoader, type Skill } from './skill-loader.js';
+import { createSkillLoader, type Skill, type SkillLoader } from './skill-loader.js';
 import { createMcpManager, type McpManager } from './mcp-manager.js';
 
 /**
@@ -31,7 +31,7 @@ export class FeatureManager {
     this.config = config;
     this.workflowManager = createWorkflowManager(config.workflowManager);
     this.stateManager = createStateManager(config.stateManager);
-    this.skillLoader = createSkillLoader(config.skillsDir);
+    this.skillLoader = null as unknown as SkillLoader;
     this.mcpManager = createMcpManager();
   }
 
@@ -43,8 +43,7 @@ export class FeatureManager {
       await this.workflowManager.initialize();
       await this.stateManager.initialize();
 
-      // Load skills
-      const skills = this.skillLoader.loadAllSkills();
+      this.skillLoader = await createSkillLoader(this.config.skillsDir);
       console.log(`Loaded ${skills.length} skills`);
 
       // Start MCP servers for skills with MCP config

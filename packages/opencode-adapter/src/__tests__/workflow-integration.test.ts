@@ -4,19 +4,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { createWorkflowManager } from '../features/workflow-manager.js';
 import { createStateTransitionHook } from '../hooks/state-transition.js';
+import { VALID_TRANSITIONS, ALL_STATES } from '@opencode-sflow/core';
 
-const TRANSITION_TABLE: Record<string, string[]> = {
-  exploring: ['specifying', 'abandoned'],
-  specifying: ['bridging', 'exploring', 'abandoned'],
-  bridging: ['approved-for-build', 'specifying', 'abandoned'],
-  'approved-for-build': ['executing', 'bridging', 'abandoned'],
-  executing: ['debugging', 'closing', 'abandoned'],
-  debugging: ['executing', 'abandoned'],
-  closing: ['abandoned'],
-  abandoned: [],
-};
-
-const ALL_STATES = Object.keys(TRANSITION_TABLE);
+const TRANSITION_TABLE = VALID_TRANSITIONS;
 
 function tempDir(name: string): string {
   return `${import.meta.dir}/../__test_workdir__/${name}`;

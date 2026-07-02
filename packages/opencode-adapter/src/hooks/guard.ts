@@ -3,6 +3,7 @@
  */
 
 import type { HookHandler, HookContext, HookResult } from './types.js';
+import { fileExists, readFile, readJsonFile } from '@opencode-sflow/shared';
 
 /**
  * Create the guard hook
@@ -74,29 +75,63 @@ async function checkArtifactExistence(changeDir: string): Promise<HookResult> {
 }
 
 async function checkContractStaleness(changeDir: string): Promise<HookResult> {
-  // TODO: Implement contract staleness check
-  // Compare proposal scope vs contract intent lock
+  if (!changeDir) return { success: true };
+
+  const contractPath = `${changeDir}/execution-contract.md`;
+  const proposalPath = `${changeDir}/proposal.md`;
+
+  const contractExists = await fileExists(contractPath);
+  const proposalExists = await fileExists(proposalPath);
+
+  if (!contractExists || !proposalExists) return { success: true };
+
+  try {
+    const contractModTime = Bun.file(contractPath).lastModified;
+    const proposalModTime = Bun.file(proposalPath).lastModified;
+
+    if (proposalModTime > contractModTime) {
+      return {
+        success: false,
+        block: true,
+        blockReason: 'Contract is stale: proposal.md was modified after execution-contract.md was created',
+      };
+    }
+  } catch {
+    return { success: true };
+  }
   return { success: true };
 }
 
 async function checkTaskCompletion(changeDir: string): Promise<HookResult> {
-  // TODO: Implement task completion check
-  // Check if all tasks are marked complete
+  if (!changeDir) return { success: true };
+
+  const tasksContent = await readFile(`${changeDir}/tasks.md`);
+  if (!tasksContent) return { success: true };
+
+  const taskLines = tasksContent.split('\n').filter(line => line.match(/^-\s*\[.\]\s+/));
+  if (taskLines.length === 0) return { success: true };
+
+  const incompleteTasks = taskLines.filter(line => line.match(/^-\s*\[\s\]/));
+  if (incompleteTasks.length > 0) {
+    return {
+      success: false,
+      block: true,
+      blockReason: `${incompleteTasks.length} task(s) are incomplete. Complete all tasks before closing.`,
+    };
+  }
   return { success: true };
 }
 
 async function checkDebuggingState(changeDir: string): Promise<HookResult> {
-  // TODO: Implement debugging state check
-  // Check if we're in debugging state and need to complete debugging first
-  return { success: true };
-}
+  if (!changeDir) return { success: true };
 
-// Helper functions
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    const file = Bun.file(path);
-    return await file.exists();
-  } catch {
-    return false;
+  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
+  if (stateData?.state === 'debugging') {
+    return {
+      success: false,
+      block: true,
+      blockReason: 'Workflow is in debugging state. Fix the bug and transition back to executing before continuing.',
+    };
   }
+  return { success: true };
 }

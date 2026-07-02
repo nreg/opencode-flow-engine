@@ -4,6 +4,7 @@
 
 import type { ToolDefinition, ToolContext, ToolResult } from './types.js';
 import { Validator } from '@opencode-sflow/core';
+import { fileExists, directoryExists } from '@opencode-sflow/shared';
 
 /**
  * Create the workflow router tool
@@ -85,25 +86,6 @@ export function createWorkflowRouterTool(): ToolDefinition {
       }
     },
   };
-}
-
-// Helper functions
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await Bun.file(path).exists();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function directoryExists(path: string): Promise<boolean> {
-  try {
-    const dir = Bun.file(path);
-    return await dir.exists();
-  } catch {
-    return false;
-  }
 }
 
 async function isContractApproved(changeDir: string): Promise<boolean> {
