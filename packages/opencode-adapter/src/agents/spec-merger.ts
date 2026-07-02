@@ -105,7 +105,7 @@ You have access to:
 - \`write\` - Write updated specs
 - \`edit\` - Edit specs
 - \`bash\` - Run validation scripts`,
-  temperature: 0.2,
+      temperature: 0.7,
   tools: {
     read: true,
     write: true,

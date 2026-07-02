@@ -75,7 +75,7 @@ Always output:
 3. Which subagent should run next
 
 When delegating, use the \`call_omo_agent\` tool with the appropriate \`subagent_type\`.`,
-  temperature: 0.1,
+      temperature: 0.6,
   tools: {
     read: true,
     write: false,

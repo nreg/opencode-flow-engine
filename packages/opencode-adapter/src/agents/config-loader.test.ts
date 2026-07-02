@@ -200,6 +200,6 @@ describe('Config File Integration with Agent Builder', () => {
     const agents = createAllAgents();
     expect(agents.sflow.model).toBe('gpt-5');
     expect(agents['build-executor'].model).toBe('claude-4-opus');
-    expect(agents['code-reviewer'].model).toBe('claude-opus-4-7');
+    expect(agents['code-reviewer'].model).toBe('deepseek-v4-flash');
   });
 });

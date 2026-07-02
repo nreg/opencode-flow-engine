@@ -81,7 +81,7 @@ describe('Agent Builder', () => {
 
     it('should use default model when not specified', () => {
       const agent = createAgent('sflow');
-      expect(agent.model).toBe('claude-opus-4-7');
+      expect(agent.model).toBe('deepseek-v4-flash');
     });
   });
 
@@ -205,12 +205,12 @@ describe('Agent Builder', () => {
   describe('getDefaultModel', () => {
     it('should return default model for sFlow', () => {
       const model = getDefaultModel('sflow');
-      expect(model).toBe('claude-opus-4-7');
+      expect(model).toBe('deepseek-v4-flash');
     });
 
     it('should return default model for other agents', () => {
       const model = getDefaultModel('need-explorer');
-      expect(model).toBe('claude-sonnet-4-6');
+      expect(model).toBe('kimi-k2.6');
     });
   });
 
@@ -218,9 +218,9 @@ describe('Agent Builder', () => {
     it('should return models for all agents', () => {
       const models = getAllDefaultModels();
       expect(Object.keys(models)).toHaveLength(9);
-      expect(models.sflow).toBe('claude-opus-4-7');
-      expect(models['need-explorer']).toBe('claude-sonnet-4-6');
-      expect(models['spec-writer']).toBe('claude-sonnet-4-6');
+      expect(models.sflow).toBe('deepseek-v4-flash');
+      expect(models['need-explorer']).toBe('kimi-k2.6');
+      expect(models['spec-writer']).toBe('glm-5.1');
     });
   });
 

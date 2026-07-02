@@ -59,7 +59,7 @@ You have access to:
 - \`grep\` - Search file contents
 
 Use these to understand the current context before asking questions.`,
-  temperature: 0.3,
+      temperature: 0.6,
   tools: {
     read: true,
     write: true,

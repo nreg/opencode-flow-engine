@@ -90,7 +90,7 @@ You have access to:
 - \`write\` - Write execution contract
 - \`edit\` - Edit contract
 - \`bash\` - Run validation scripts`,
-  temperature: 0.2,
+      temperature: 0.6,
   tools: {
     read: true,
     write: true,

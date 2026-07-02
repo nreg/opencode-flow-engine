@@ -87,7 +87,7 @@ You have access to:
 - \`bash\` - Run tests and commands
 - \`lsp_diagnostics\` - Check for errors
 - \`lsp_goto_definition\` - Navigate code`,
-  temperature: 0.1,
+      temperature: 0.7,
   tools: {
     read: true,
     write: true,

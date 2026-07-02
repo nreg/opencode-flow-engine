@@ -80,7 +80,7 @@ You have access to:
 - \`bash\` - Run validation scripts
 
 Use validation scripts to ensure quality.`,
-  temperature: 0.2,
+      temperature: 0.6,
   tools: {
     read: true,
     write: true,

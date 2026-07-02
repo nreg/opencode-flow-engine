@@ -41,15 +41,15 @@ const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
  * Default model for each agent
  */
 const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
-  sflow: 'claude-opus-4-7',
-  'need-explorer': 'claude-sonnet-4-6',
-  'spec-writer': 'claude-sonnet-4-6',
-  'contract-builder': 'claude-sonnet-4-6',
-  'build-executor': 'claude-sonnet-4-6',
-  'bug-investigator': 'claude-sonnet-4-6',
-  'code-reviewer': 'claude-opus-4-7',
-  'release-archivist': 'claude-sonnet-4-6',
-  'spec-merger': 'claude-sonnet-4-6',
+  sflow: 'deepseek-v4-flash',
+  'need-explorer': 'kimi-k2.6',
+  'spec-writer': 'glm-5.1',
+  'contract-builder': 'glm-5',
+  'build-executor': 'step-3.7-flash',
+  'bug-investigator': 'minimax-m2.7',
+  'code-reviewer': 'deepseek-v4-flash',
+  'release-archivist': 'mimo-v2.5-pro',
+  'spec-merger': 'mimo-v2.5',
 };
 
 /**

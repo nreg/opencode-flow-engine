@@ -84,7 +84,7 @@ You have access to:
 - \`lsp_diagnostics\` - Check for errors
 - \`lsp_goto_definition\` - Navigate code
 - \`lsp_find_references\` - Find usages`,
-  temperature: 0.1,
+      temperature: 0.6,
   tools: {
     read: true,
     write: false,

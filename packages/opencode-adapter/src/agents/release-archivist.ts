@@ -101,7 +101,7 @@ You have access to:
 - \`write\` - Write verification report and archive
 - \`bash\` - Run tests and commands
 - \`glob\` - Search for files`,
-  temperature: 0.1,
+      temperature: 0.7,
   tools: {
     read: true,
     write: true,
