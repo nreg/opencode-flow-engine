@@ -260,7 +260,7 @@ export function parseChangeMarkdown(content) {
                 continue;
             }
             if (line.startsWith('- **REMOVED:**')) {
-                if (currentRequirement) {
+                if (currentType && currentRequirement) {
                     deltas.push({ type: currentType, requirementName: currentRequirement, text: currentText || undefined, lineStart, lineEnd: i - 1 });
                 }
                 currentType = 'REMOVED';
@@ -276,7 +276,7 @@ export function parseChangeMarkdown(content) {
                 continue;
             }
             if (line.startsWith('- **RENAMED:**')) {
-                if (currentRequirement) {
+                if (currentType && currentRequirement) {
                     deltas.push({ type: currentType, requirementName: currentRequirement, text: currentText || undefined, lineStart, lineEnd: i - 1 });
                 }
                 const renameMatch = line.match(/- \*\*RENAMED:\*\*\s*(.+)\s*->\s*(.+)/);
