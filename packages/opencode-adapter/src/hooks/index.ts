@@ -1,7 +1,3 @@
-/**
- * Hooks index exports for sFlow
- */
-
 export type {
   HookName,
   HookHandler,
@@ -11,3 +7,6 @@ export type {
 export { createStateTransitionHook } from './state-transition.js';
 export { createArtifactValidationHook } from './artifact-validation.js';
 export { createGuardHook } from './guard.js';
+export { createSessionStartHook, createSessionEndHook } from './session.js';
+export { createPreProcessHook, createPostProcessHook } from './transform.js';
+export { createContinuationHook } from './continuation.js';

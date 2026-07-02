@@ -1,8 +1,7 @@
 /**
  * Config Loader - Load agent configuration from .sflow/config.json
  */
-import { readFileSync, existsSync } from 'fs';
-import { readFile } from 'fs/promises';
+import { access, readFile } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 import { deepMerge } from '@opencode-sflow/shared';
@@ -27,7 +26,7 @@ export interface SFlowConfig {
 /**
  * User-level config path: ~/.sFlow/config.json
  */
-export const USER_CONFIG_FILE = join(homedir(), '.sFlow', 'config.json');
+export const USER_CONFIG_FILE = join(homedir(), '.sflow', 'config.json');
 
 /**
  * Load sFlow config from a specific directory's .sflow/config.json
@@ -36,7 +35,9 @@ export async function loadSFlowConfig(projectDir?: string): Promise<SFlowConfig>
   const dir = projectDir || process.cwd();
   const configPath = join(dir, '.sflow', 'config.json');
 
-  if (!existsSync(configPath)) {
+  try {
+    await access(configPath);
+  } catch {
     return {};
   }
 
@@ -50,10 +51,12 @@ export async function loadSFlowConfig(projectDir?: string): Promise<SFlowConfig>
 }
 
 /**
- * Load user-level config from ~/.sFlow/config.json
+ * Load user-level config from ~/.sflow/config.json
  */
 export async function loadUserSFlowConfig(): Promise<SFlowConfig> {
-  if (!existsSync(USER_CONFIG_FILE)) {
+  try {
+    await access(USER_CONFIG_FILE);
+  } catch {
     return {};
   }
 

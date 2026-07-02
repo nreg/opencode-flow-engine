@@ -24,8 +24,8 @@ describe('Hook Composer', () => {
     it('should have correct hook count', () => {
       composer.initialize();
       const count = composer.getHookCount();
-      expect(count.total).toBe(3);
-      expect(count.enabled).toBe(3);
+      expect(count.total).toBe(8);
+      expect(count.enabled).toBe(8);
       expect(count.disabled).toBe(0);
     });
   });
@@ -64,7 +64,7 @@ describe('Hook Composer', () => {
       composer.initialize();
       composer.disableHook('guard');
       const count = composer.getHookCount();
-      expect(count.enabled).toBe(2);
+      expect(count.enabled).toBe(7);
       expect(count.disabled).toBe(1);
     });
 
@@ -88,7 +88,7 @@ describe('Hook Composer', () => {
       composer.disableHook('guard');
       composer.enableHook('guard');
       const count = composer.getHookCount();
-      expect(count.enabled).toBe(3);
+      expect(count.enabled).toBe(8);
       expect(count.disabled).toBe(0);
     });
 
@@ -124,7 +124,7 @@ describe('Hook Composer', () => {
     it('should return all enabled hooks', () => {
       composer.initialize();
       const hooks = composer.getEnabledHooks();
-      expect(hooks).toHaveLength(3);
+      expect(hooks).toHaveLength(8);
       expect(hooks).toContain('guard');
       expect(hooks).toContain('artifact_validation');
       expect(hooks).toContain('state_transition');
@@ -134,7 +134,7 @@ describe('Hook Composer', () => {
       composer.initialize();
       composer.disableHook('guard');
       const hooks = composer.getEnabledHooks();
-      expect(hooks).toHaveLength(2);
+      expect(hooks).toHaveLength(7);
       expect(hooks).not.toContain('guard');
     });
   });
@@ -159,8 +159,8 @@ describe('Hook Composer', () => {
     it('should return correct count', () => {
       composer.initialize();
       const count = composer.getHookCount();
-      expect(count.total).toBe(3);
-      expect(count.enabled).toBe(3);
+      expect(count.total).toBe(8);
+      expect(count.enabled).toBe(8);
       expect(count.disabled).toBe(0);
     });
 
@@ -168,8 +168,8 @@ describe('Hook Composer', () => {
       composer.initialize();
       composer.disableHook('guard');
       const count = composer.getHookCount();
-      expect(count.total).toBe(3);
-      expect(count.enabled).toBe(2);
+      expect(count.total).toBe(8);
+      expect(count.enabled).toBe(7);
       expect(count.disabled).toBe(1);
     });
   });
@@ -240,7 +240,7 @@ describe('Hook Composer', () => {
       expect(result).toBeDefined();
       expect(result.success).toBe(true);
       expect(result.results).toBeDefined();
-      expect(Object.keys(result.results)).toHaveLength(3);
+      expect(Object.keys(result.results)).toHaveLength(8);
     });
 
     it('should exclude disabled hooks', async () => {
@@ -252,7 +252,7 @@ describe('Hook Composer', () => {
         pluginRoot: '',
         action: 'validate',
       });
-      expect(Object.keys(result.results)).toHaveLength(2);
+      expect(Object.keys(result.results)).toHaveLength(7);
     });
   });
 
@@ -266,7 +266,7 @@ describe('Hook Composer', () => {
       };
       composer.addHook('custom_hook' as any, customHook);
       const count = composer.getHookCount();
-      expect(count.total).toBe(4);
+      expect(count.total).toBe(9);
     });
 
     it('should add hook at specific position', () => {
@@ -287,7 +287,7 @@ describe('Hook Composer', () => {
       composer.initialize();
       composer.removeHook('guard');
       const count = composer.getHookCount();
-      expect(count.total).toBe(2);
+      expect(count.total).toBe(7);
     });
 
     it('should not affect other hooks', () => {
@@ -319,7 +319,7 @@ describe('Utility Functions', () => {
       expect(names).toContain('guard');
       expect(names).toContain('artifact_validation');
       expect(names).toContain('state_transition');
-      expect(names).toHaveLength(3);
+      expect(names).toHaveLength(8);
     });
   });
 

@@ -6,6 +6,15 @@
 import type { McpServer } from './skill-loader.js';
 
 /**
+ * Allowed executable names for MCP server commands.
+ * Blocks arbitrary command injection from config files.
+ */
+const ALLOWED_MCP_COMMANDS = new Set([
+  'node', 'bun', 'deno', 'python', 'python3',
+  'npx', 'uvx',
+]);
+
+/**
  * MCP server state
  */
 export type McpServerState = 'stopped' | 'starting' | 'running' | 'error';
@@ -48,6 +57,21 @@ export class McpManager {
     const existing = this.servers.get(serverKey);
     if (existing?.state === 'running') {
       return existing;
+    }
+
+    // Validate command against allowlist
+    const cmdName = config.command.split(/[/\\]/).pop() || config.command;
+    if (!ALLOWED_MCP_COMMANDS.has(cmdName) && !cmdName.startsWith('.')) {
+      const instance: McpServerInstance = {
+        name,
+        command: config.command,
+        args: config.args,
+        env: config.env,
+        state: 'error',
+        error: `Command "${cmdName}" not in allowed list and is not a relative path`,
+      };
+      this.servers.set(serverKey, instance);
+      return instance;
     }
 
     const instance: McpServerInstance = {

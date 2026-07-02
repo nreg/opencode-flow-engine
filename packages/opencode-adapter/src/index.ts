@@ -71,7 +71,10 @@ export {
 export {
   createWorkflowManager,
   createStateManager,
+  BuiltinMcpRegistry,
+  createValidatorMcpServer,
 } from './features/index.js';
+export type { BuiltinMcpServer } from './features/index.js';
 
 // Shared
 export { deepMerge, fileExists, readFile, writeFile, listFiles } from '@opencode-sflow/shared';

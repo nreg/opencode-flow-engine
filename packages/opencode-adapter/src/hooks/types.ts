@@ -3,12 +3,18 @@
  */
 
 /**
- * Available hook names
+ * Available hook names (extensible for custom hooks)
  */
 export type HookName =
   | 'state_transition'
   | 'artifact_validation'
-  | 'guard';
+  | 'guard'
+  | 'session_start'
+  | 'session_end'
+  | 'pre_process'
+  | 'post_process'
+  | 'continuation'
+  | (string & {});
 
 /**
  * Hook handler interface

@@ -13,7 +13,7 @@ export type AgentMode = 'primary' | 'subagent' | 'all';
 /**
  * Agent factory function with static mode property
  */
-export type AgentFactory = ((model: string) => AgentConfig) & {
+export type AgentFactory = ((model: string, skillContent?: string) => AgentConfig) & {
   mode: AgentMode;
 };
 

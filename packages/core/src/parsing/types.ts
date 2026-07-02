@@ -46,20 +46,10 @@ export interface DeltaPlan {
 }
 
 /**
- * Parsed delta operation
+ * Parsed delta operation - extends base Delta with source locations
  */
-export interface ParsedDelta {
-  /** Operation type */
-  type: 'ADDED' | 'MODIFIED' | 'REMOVED' | 'RENAMED';
-  /** Requirement name */
-  requirementName: string;
-  /** New requirement text (for ADDED/MODIFIED) */
-  text?: string;
-  /** New scenarios (for ADDED/MODIFIED) */
-  scenarios?: Scenario[];
-  /** Rename details (for RENAMED) */
-  rename?: { from: string; to: string };
-  /** Line numbers */
+export interface ParsedDelta extends Delta {
+  /** Line numbers in original file */
   lineStart: number;
   lineEnd: number;
 }

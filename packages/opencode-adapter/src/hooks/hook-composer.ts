@@ -8,6 +8,11 @@ import {
   createStateTransitionHook,
   createArtifactValidationHook,
   createGuardHook,
+  createSessionStartHook,
+  createSessionEndHook,
+  createPreProcessHook,
+  createPostProcessHook,
+  createContinuationHook,
 } from './index.js';
 
 /**
@@ -17,6 +22,11 @@ const HOOK_REGISTRY: Record<HookName, () => HookHandler> = {
   state_transition: createStateTransitionHook,
   artifact_validation: createArtifactValidationHook,
   guard: createGuardHook,
+  session_start: createSessionStartHook,
+  session_end: createSessionEndHook,
+  pre_process: createPreProcessHook,
+  post_process: createPostProcessHook,
+  continuation: createContinuationHook,
 };
 
 /**
@@ -36,8 +46,7 @@ export class HookComposer {
    * Initialize the hook composer
    */
   initialize(): void {
-    // Initialize hooks in order
-    this.hookOrder = ['guard', 'artifact_validation', 'state_transition'];
+    this.hookOrder = ['session_start', 'pre_process', 'guard', 'artifact_validation', 'state_transition', 'post_process', 'session_end', 'continuation'];
 
     for (const name of this.hookOrder) {
       const factory = HOOK_REGISTRY[name];
@@ -136,8 +145,8 @@ export class HookComposer {
    * Check if hook is enabled
    */
   isHookEnabled(name: string): boolean {
-    if (!this.hooks.has(name as HookName)) return false;
-    return !this.disabledHooks.has(name as HookName);
+    if (!this.hooks.has(name)) return false;
+    return !this.disabledHooks.has(name);
   }
 
   /**
@@ -206,6 +215,6 @@ export function getHookNames(): HookName[] {
 /**
  * Check if hook exists
  */
-export function hookExists(name: string): name is HookName {
+export function hookExists(name: string): boolean {
   return name in HOOK_REGISTRY;
 }

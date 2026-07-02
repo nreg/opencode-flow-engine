@@ -5,6 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory, AgentMode, BuiltinAgentName, AgentOverrides } from './types.js';
+import type { SFlowConfig } from './config-loader.js';
 import {
   createSFlowAgent,
   createNeedExplorerAgent,
@@ -21,12 +22,51 @@ import {
   agentOverridesFromConfig,
   mergeOverrides,
 } from './config-loader.js';
+import { getSkillContentWithoutFrontmatter } from '../features/skill-loader.js';
+import { readFileSync, existsSync } from 'fs';
+import { join, resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 /**
- * Cached config to avoid redundant file I/O when createAgent and createAllAgents
- * are called multiple times. Invalidated by calling clearConfigCache().
+ * Resolve package root by looking for package.json
  */
-let _cascadedConfigCache: ReturnType<typeof loadCascadedSFlowConfig extends (...args: any[]) => infer R ? R : never> | null = null;
+function resolvePackageRoot(): string {
+  let current = resolve(__dirname, '..');
+  for (let i = 0; i < 10; i++) {
+    if (existsSync(join(current, 'package.json'))) {
+      return current;
+    }
+    current = resolve(current, '..');
+  }
+  return resolve(__dirname, '..', '..', '..', '..');
+}
+
+const PACKAGE_ROOT = resolvePackageRoot();
+
+/**
+ * Load skill content from skills/<name>/SKILL.md if it exists.
+ * Returns the content without frontmatter, or null if unavailable.
+ */
+function loadSkillInstructions(name: string): string | null {
+  const skillFile = join(PACKAGE_ROOT, 'skills', name, 'SKILL.md');
+  try {
+    if (existsSync(skillFile)) {
+      const content = readFileSync(skillFile, 'utf-8');
+      return getSkillContentWithoutFrontmatter(content);
+    }
+  } catch {
+    // Silently fall back to hardcoded instructions
+  }
+  return null;
+}
+
+/**
+ * Cached config to avoid redundant file I/O
+ */
+let _cascadedConfigCache: SFlowConfig | null = null;
 
 async function getCascadedConfig() {
   if (!_cascadedConfigCache) {
@@ -97,6 +137,12 @@ export async function createAgent(
 
   const agentConfig = factory(resolvedModel);
 
+  // Load SKILL.md content as instructions if available
+  const skillContent = loadSkillInstructions(name);
+  if (skillContent) {
+    agentConfig.instructions = skillContent;
+  }
+
   if (agentOverride) {
     return {
       ...agentConfig,
@@ -130,6 +176,12 @@ export async function createAllAgents(
     const resolvedModel = programmaticModel || model || configModel || DEFAULT_MODELS[name];
 
     const agentConfig = factory(resolvedModel);
+
+    // Load SKILL.md content as instructions if available
+    const skillContent = loadSkillInstructions(name);
+    if (skillContent) {
+      agentConfig.instructions = skillContent;
+    }
 
     const merged = mergeOverrides(configOverrides, overrides || {});
     const agentOverride = merged[name];

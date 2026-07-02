@@ -66,8 +66,9 @@ async function listFiles(dirPath, extension) {
 }
 async function directoryExists(dirPath) {
   try {
-    const dir = Bun.file(dirPath);
-    return await dir.exists();
+    const { stat } = await import("fs/promises");
+    const stats = await stat(dirPath);
+    return stats.isDirectory();
   } catch {
     return false;
   }

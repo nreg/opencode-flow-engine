@@ -30,7 +30,7 @@ export class FeatureManager {
   constructor(config: FeatureManagerConfig = {}) {
     this.config = config;
     this.workflowManager = createWorkflowManager(config.workflowManager);
-    this.stateManager = createStateManager(config.stateManager);
+    this.stateManager = createStateManager(config.stateManager, this.workflowManager);
     this.skillLoader = null as unknown as SkillLoader;
     this.mcpManager = createMcpManager();
   }

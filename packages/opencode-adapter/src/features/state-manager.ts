@@ -1,36 +1,27 @@
-/**
- * State Manager feature - Manage workflow state
- */
-
 import type { FeatureConfig, FeatureResult } from './types.js';
 import { createWorkflowManager } from './workflow-manager.js';
 
-/**
- * Create the state manager feature
- * Delegates state persistence to WorkflowManager for consistency.
- */
-export function createStateManager(config: FeatureConfig = { enabled: true }) {
-  const wf = createWorkflowManager(config);
+type WorkflowManager = ReturnType<typeof createWorkflowManager>;
+
+export function createStateManager(
+  config: FeatureConfig = { enabled: true },
+  workflowManager?: WorkflowManager
+) {
+  const wf = workflowManager || createWorkflowManager(config);
 
   return {
     name: 'state_manager',
     config,
-    
-    /**
-     * Initialize the state manager
-     */
+    getWorkflowManager: () => wf,
+
     async initialize(): Promise<FeatureResult> {
       if (!config.enabled) {
         return { success: true, data: { message: 'State manager disabled' } };
       }
-
       console.log('State manager initialized');
       return { success: true };
     },
 
-    /**
-     * Get current state
-     */
     async getState(changeDir: string): Promise<FeatureResult> {
       try {
         return await wf.getState(changeDir);
@@ -42,9 +33,6 @@ export function createStateManager(config: FeatureConfig = { enabled: true }) {
       }
     },
 
-    /**
-     * Update state
-     */
     async updateState(changeDir: string, updates: Record<string, unknown>): Promise<FeatureResult> {
       try {
         return await wf.transitionState(changeDir, updates.state as string || 'exploring');
@@ -56,9 +44,6 @@ export function createStateManager(config: FeatureConfig = { enabled: true }) {
       }
     },
 
-    /**
-     * Check if contract is approved
-     */
     async isContractApproved(changeDir: string): Promise<FeatureResult> {
       try {
         const state = await wf.getState(changeDir);
@@ -75,9 +60,6 @@ export function createStateManager(config: FeatureConfig = { enabled: true }) {
       }
     },
 
-    /**
-     * Approve contract
-     */
     async approveContract(changeDir: string): Promise<FeatureResult> {
       try {
         const current = await wf.getState(changeDir);
@@ -95,9 +77,6 @@ export function createStateManager(config: FeatureConfig = { enabled: true }) {
       }
     },
 
-    /**
-     * Check if contract is stale
-     */
     async isContractStale(changeDir: string): Promise<FeatureResult> {
       try {
         return { success: true, data: { stale: false } };

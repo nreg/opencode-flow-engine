@@ -5,11 +5,29 @@
 
 import { readFile, readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import * as yaml from 'js-yaml';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+/**
+ * Resolve skills directory relative to package root.
+ * Detected by looking for package.json in parent chain.
+ */
+function resolveSkillsDir(givenDir?: string): string {
+  if (givenDir) return givenDir;
+  let current = resolve(__dirname, '..');
+  for (let i = 0; i < 10; i++) {
+    const skillsPath = join(current, 'skills');
+    if (existsSync(skillsPath)) {
+      return skillsPath;
+    }
+    current = resolve(current, '..');
+  }
+  return join(__dirname, '..', '..', '..', '..', 'skills');
+}
 
 /**
  * Skill metadata from YAML frontmatter
@@ -57,7 +75,7 @@ export class SkillLoader {
   private skillsDir: string;
 
   constructor(skillsDir?: string) {
-    this.skillsDir = skillsDir || join(__dirname, '..', '..', '..', '..', 'skills');
+    this.skillsDir = resolveSkillsDir(skillsDir);
   }
 
   /**
@@ -177,28 +195,46 @@ export class SkillLoader {
       description: '',
     };
 
-    // Parse simple key-value pairs
-    const lines = frontmatter.split('\n');
-    for (const line of lines) {
-      const match = line.match(/^(\w+):\s*(.+)$/);
-      if (match) {
-        const [, key, value] = match;
-        switch (key) {
-          case 'name':
-            metadata.name = value;
-            break;
-          case 'description':
-            metadata.description = value;
-            break;
-          case 'version':
-            metadata.version = value;
-            break;
-          case 'author':
-            metadata.author = value;
-            break;
-          case 'tags':
-            metadata.tags = value.split(',').map(t => t.trim());
-            break;
+    try {
+      const parsed = yaml.load(frontmatter) as Record<string, unknown>;
+      if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.name === 'string') metadata.name = parsed.name;
+        if (typeof parsed.description === 'string') metadata.description = parsed.description;
+        if (typeof parsed.version === 'string') metadata.version = parsed.version;
+        if (typeof parsed.author === 'string') metadata.author = parsed.author;
+        if (Array.isArray(parsed.tags)) {
+          metadata.tags = parsed.tags.map(t => String(t).trim()).filter(Boolean);
+        } else if (typeof parsed.tags === 'string') {
+          metadata.tags = parsed.tags.split(',').map(t => t.trim()).filter(Boolean);
+        }
+        if (parsed.mcp && typeof parsed.mcp === 'object') {
+          metadata.mcp = parsed.mcp as McpConfig;
+        }
+      }
+    } catch {
+      // Fallback to simple regex-based parsing if YAML fails
+      const lines = frontmatter.split('\n');
+      for (const line of lines) {
+        const match = line.match(/^(\w+):\s*(.+)$/);
+        if (match) {
+          const [, key, value] = match;
+          switch (key) {
+            case 'name':
+              if (!metadata.name) metadata.name = value;
+              break;
+            case 'description':
+              if (!metadata.description) metadata.description = value;
+              break;
+            case 'version':
+              if (!metadata.version) metadata.version = value;
+              break;
+            case 'author':
+              if (!metadata.author) metadata.author = value;
+              break;
+            case 'tags':
+              if (!metadata.tags) metadata.tags = value.split(',').map(t => t.trim());
+              break;
+          }
         }
       }
     }

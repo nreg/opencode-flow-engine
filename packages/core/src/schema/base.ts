@@ -102,22 +102,11 @@ export interface Change {
 }
 
 /**
- * Workflow states
- */
-export type WorkflowState =
-  | 'exploring'
-  | 'specifying'
-  | 'bridging'
-  | 'approved-for-build'
-  | 'executing'
-  | 'debugging'
-  | 'closing'
-  | 'abandoned';
-
-/**
  * Workflow modes
  */
 export type WorkflowMode = 'full' | 'hotfix' | 'tweak';
+
+import type { WorkflowState } from '../constants.js';
 
 /**
  * Represents the state of a workflow

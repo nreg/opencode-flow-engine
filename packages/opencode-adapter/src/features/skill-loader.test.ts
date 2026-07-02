@@ -152,10 +152,10 @@ tags: "test, demo"
 # Test Skill`;
       const metadata = parseSkillMetadata(content);
       expect(metadata.name).toBe('test-skill');
-      expect(metadata.description).toBe('"A test skill"');
-      expect(metadata.version).toBe('"1.0.0"');
-      expect(metadata.author).toBe('"test"');
-      expect(metadata.tags).toEqual(['"test', 'demo"']);
+      expect(metadata.description).toBe('A test skill');
+      expect(metadata.version).toBe('1.0.0');
+      expect(metadata.author).toBe('test');
+      expect(metadata.tags).toEqual(['test', 'demo']);
     });
 
     it('should handle missing frontmatter', () => {

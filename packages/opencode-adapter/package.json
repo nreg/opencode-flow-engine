@@ -15,9 +15,11 @@
     "@opencode-sflow/shared": "workspace:*",
     "@opencode-ai/plugin": "latest",
     "@opencode-ai/sdk": "latest",
+    "js-yaml": "^4.1.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "typescript": "^5.4.0"
   },
   "license": "MIT"
