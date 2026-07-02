@@ -23,6 +23,23 @@ import {
 } from './config-loader.js';
 
 /**
+ * Cached config to avoid redundant file I/O when createAgent and createAllAgents
+ * are called multiple times. Invalidated by calling clearConfigCache().
+ */
+let _cascadedConfigCache: ReturnType<typeof loadCascadedSFlowConfig extends (...args: any[]) => infer R ? R : never> | null = null;
+
+async function getCascadedConfig() {
+  if (!_cascadedConfigCache) {
+    _cascadedConfigCache = await loadCascadedSFlowConfig();
+  }
+  return _cascadedConfigCache;
+}
+
+export function clearConfigCache(): void {
+  _cascadedConfigCache = null;
+}
+
+/**
  * Agent registry with factory functions
  */
 const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
@@ -56,17 +73,17 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
  * Create an agent by name
  * Priority chain: AgentOverrides.model > model param > .sflow/config.json > DEFAULT_MODELS
  */
-export function createAgent(
+export async function createAgent(
   name: BuiltinAgentName,
   model?: string,
   overrides?: AgentOverrides
-): AgentConfig {
+): Promise<AgentConfig> {
   const factory = AGENT_REGISTRY[name];
   if (!factory) {
     throw new Error(`Unknown agent: ${name}`);
   }
 
-  const config = await loadCascadedSFlowConfig();
+  const config = await getCascadedConfig();
   const configOverrides = agentOverridesFromConfig(config);
 
   // Merge config + programmatic overrides for non-model fields
@@ -99,10 +116,10 @@ export function createAgent(
 export async function createAllAgents(
   model?: string,
   overrides?: AgentOverrides
-): Record<BuiltinAgentName, AgentConfig> {
+): Promise<Record<BuiltinAgentName, AgentConfig>> {
   const agents: Record<string, AgentConfig> = {};
 
-  const config = await loadCascadedSFlowConfig();
+  const config = await getCascadedConfig();
   const configOverrides = agentOverridesFromConfig(config);
 
   for (const name of Object.keys(AGENT_REGISTRY) as BuiltinAgentName[]) {

@@ -28,7 +28,7 @@
     "@biomejs/biome": "^2.5.0"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "bun": ">=1.0.0"
   },
   "license": "MIT",
   "keywords": [

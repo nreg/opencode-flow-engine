@@ -7,4 +7,5 @@ export { VALIDATION_MESSAGES, MIN_WHY_SECTION_LENGTH, MIN_PURPOSE_LENGTH, MAX_WH
 export { Validator } from './validation/validator.js';
 export type { RequirementBlock, RequirementsSectionParts, DeltaPlan, ParsedDelta, ParsedChange } from './parsing/types.js';
 export { REQUIREMENT_HEADER_REGEX, normalizeRequirementName, extractRequirementsSection, parseDeltaSpec, parseRequirementBlocks, parseChangeMarkdown } from './parsing/requirement-blocks.js';
+export { VALID_TRANSITIONS, ALL_STATES, isValidTransition, getValidTransitions } from './constants.js';
 //# sourceMappingURL=index.d.ts.map

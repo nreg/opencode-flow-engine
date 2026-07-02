@@ -26,6 +26,10 @@ export declare class Validator {
      */
     validateTasks(content: string): ValidationReport;
     /**
+     * Validate a design markdown file
+     */
+    validateDesign(content: string): ValidationReport;
+    /**
      * Validate an execution contract
      */
     validateExecutionContract(content: string): ValidationReport;

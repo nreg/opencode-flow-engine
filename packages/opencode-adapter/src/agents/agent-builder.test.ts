@@ -14,86 +14,86 @@ import {
 
 describe('Agent Builder', () => {
   describe('createAgent', () => {
-    it('should create sFlow agent', () => {
-      const agent = createAgent('sflow', 'gpt-5.5');
+    it('should create sFlow agent', async () => {
+      const agent = await createAgent('sflow', 'gpt-5.5');
       expect(agent).toBeDefined();
       expect(agent.id).toBe('sflow');
       expect(agent.name).toBe('sFlow');
       expect(agent.model).toBe('gpt-5.5');
     });
 
-    it('should create need-explorer agent', () => {
-      const agent = createAgent('need-explorer', 'claude-opus-4-7');
+    it('should create need-explorer agent', async () => {
+      const agent = await createAgent('need-explorer', 'claude-opus-4-7');
       expect(agent).toBeDefined();
       expect(agent.id).toBe('need-explorer');
       expect(agent.name).toBe('Need Explorer');
       expect(agent.model).toBe('claude-opus-4-7');
     });
 
-    it('should create spec-writer agent', () => {
-      const agent = createAgent('spec-writer', 'claude-opus-4-7');
+    it('should create spec-writer agent', async () => {
+      const agent = await createAgent('spec-writer', 'claude-opus-4-7');
       expect(agent).toBeDefined();
       expect(agent.id).toBe('spec-writer');
       expect(agent.name).toBe('Spec Writer');
     });
 
-    it('should create contract-builder agent', () => {
-      const agent = createAgent('contract-builder');
+    it('should create contract-builder agent', async () => {
+      const agent = await createAgent('contract-builder');
       expect(agent).toBeDefined();
       expect(agent.id).toBe('contract-builder');
       expect(agent.name).toBe('Contract Builder');
     });
 
-    it('should create build-executor agent', () => {
-      const agent = createAgent('build-executor');
+    it('should create build-executor agent', async () => {
+      const agent = await createAgent('build-executor');
       expect(agent).toBeDefined();
       expect(agent.id).toBe('build-executor');
       expect(agent.name).toBe('Build Executor');
     });
 
-    it('should create bug-investigator agent', () => {
-      const agent = createAgent('bug-investigator');
+    it('should create bug-investigator agent', async () => {
+      const agent = await createAgent('bug-investigator');
       expect(agent).toBeDefined();
       expect(agent.id).toBe('bug-investigator');
       expect(agent.name).toBe('Bug Investigator');
     });
 
-    it('should create code-reviewer agent', () => {
-      const agent = createAgent('code-reviewer');
+    it('should create code-reviewer agent', async () => {
+      const agent = await createAgent('code-reviewer');
       expect(agent).toBeDefined();
       expect(agent.id).toBe('code-reviewer');
       expect(agent.name).toBe('Code Reviewer');
     });
 
-    it('should create release-archivist agent', () => {
-      const agent = createAgent('release-archivist');
+    it('should create release-archivist agent', async () => {
+      const agent = await createAgent('release-archivist');
       expect(agent).toBeDefined();
       expect(agent.id).toBe('release-archivist');
       expect(agent.name).toBe('Release Archivist');
     });
 
-    it('should create spec-merger agent', () => {
-      const agent = createAgent('spec-merger');
+    it('should create spec-merger agent', async () => {
+      const agent = await createAgent('spec-merger');
       expect(agent).toBeDefined();
       expect(agent.id).toBe('spec-merger');
       expect(agent.name).toBe('Spec Merger');
     });
 
-    it('should use default model when not specified', () => {
-      const agent = createAgent('sflow');
+    it('should use default model when not specified', async () => {
+      const agent = await createAgent('sflow');
       expect(agent.model).toBe('deepseek-v4-flash');
     });
   });
 
   describe('createAllAgents', () => {
-    it('should create all agents', () => {
-      const agents = createAllAgents();
+    it('should create all agents', async () => {
+      const agents = await createAllAgents();
       expect(agents).toBeDefined();
       expect(Object.keys(agents)).toHaveLength(9);
     });
 
-    it('should have all required agents', () => {
-      const agents = createAllAgents();
+    it('should have all required agents', async () => {
+      const agents = await createAllAgents();
       expect(agents.sflow).toBeDefined();
       expect(agents['need-explorer']).toBeDefined();
       expect(agents['spec-writer']).toBeDefined();
@@ -105,8 +105,8 @@ describe('Agent Builder', () => {
       expect(agents['spec-merger']).toBeDefined();
     });
 
-    it('should use specified model for all agents', () => {
-      const agents = createAllAgents('gpt-5.5');
+    it('should use specified model for all agents', async () => {
+      const agents = await createAllAgents('gpt-5.5');
       expect(agents.sflow.model).toBe('gpt-5.5');
       expect(agents['need-explorer'].model).toBe('gpt-5.5');
       expect(agents['spec-writer'].model).toBe('gpt-5.5');
@@ -225,21 +225,21 @@ describe('Agent Builder', () => {
   });
 
   describe('Agent Configuration', () => {
-    it('should have valid instructions', () => {
-      const agent = createAgent('sflow');
+    it('should have valid instructions', async () => {
+      const agent = await createAgent('sflow');
       expect(agent.instructions).toBeDefined();
       expect(agent.instructions.length).toBeGreaterThan(0);
     });
 
-    it('should have valid temperature', () => {
-      const agent = createAgent('sflow');
+    it('should have valid temperature', async () => {
+      const agent = await createAgent('sflow');
       expect(agent.temperature).toBeDefined();
       expect(agent.temperature).toBeGreaterThanOrEqual(0);
       expect(agent.temperature).toBeLessThanOrEqual(1);
     });
 
-    it('should have valid tools configuration', () => {
-      const agent = createAgent('sflow');
+    it('should have valid tools configuration', async () => {
+      const agent = await createAgent('sflow');
       expect(agent.tools).toBeDefined();
       expect(typeof agent.tools).toBe('object');
     });

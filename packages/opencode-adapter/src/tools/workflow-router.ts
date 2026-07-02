@@ -4,7 +4,7 @@
 
 import type { ToolDefinition, ToolContext, ToolResult } from './types.js';
 import { Validator } from '@opencode-sflow/core';
-import { fileExists, directoryExists } from '@opencode-sflow/shared';
+import { fileExists, directoryExists, readJsonFile } from '@opencode-sflow/shared';
 
 /**
  * Create the workflow router tool
@@ -89,11 +89,23 @@ export function createWorkflowRouterTool(): ToolDefinition {
 }
 
 async function isContractApproved(changeDir: string): Promise<boolean> {
-  // TODO: Read state file and check if contract is approved
+  const state = await readJsonFile<{ state?: string; contractApproved?: boolean }>(`${changeDir}/.sflow/state.json`);
+  if (state?.contractApproved === true) return true;
+  if (state?.state === 'approved-for-build' || state?.state === 'executing' || state?.state === 'closing') return true;
   return false;
 }
 
 async function isContractStale(changeDir: string): Promise<boolean> {
-  // TODO: Compare proposal scope vs contract intent lock
-  return false;
+  const contractPath = `${changeDir}/execution-contract.md`;
+  const proposalPath = `${changeDir}/proposal.md`;
+  const contractExists = await fileExists(contractPath);
+  const proposalExists = await fileExists(proposalPath);
+  if (!contractExists || !proposalExists) return false;
+  try {
+    const contractMod = Bun.file(contractPath).lastModified;
+    const proposalMod = Bun.file(proposalPath).lastModified;
+    return proposalMod > contractMod;
+  } catch {
+    return false;
+  }
 }

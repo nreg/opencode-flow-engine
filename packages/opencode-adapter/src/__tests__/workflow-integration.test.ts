@@ -5,11 +5,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { createWorkflowManager } from '../features/workflow-manager.js';
 import { createStateTransitionHook } from '../hooks/state-transition.js';
 import { VALID_TRANSITIONS, ALL_STATES } from '@opencode-sflow/core';
+import { rm, mkdir } from 'fs/promises';
+import { join } from 'path';
 
 const TRANSITION_TABLE = VALID_TRANSITIONS;
 
 function tempDir(name: string): string {
-  return `${import.meta.dir}/../__test_workdir__/${name}`;
+  return join(import.meta.dir, '..', '__test_workdir__', name);
 }
 
 async function readStateFile(changeDir: string): Promise<Record<string, unknown> | null> {
@@ -25,13 +27,11 @@ async function writeStateFile(changeDir: string, state: Record<string, unknown>)
 }
 
 async function cleanupDir(dir: string): Promise<void> {
-  const rm = Bun.spawn(['cmd', '/c', 'rd', '/s', '/q', dir.replace(/\//g, '\\')], { stdio: ['pipe', 'pipe', 'pipe'] });
-  await rm.exited;
+  try { await rm(dir, { recursive: true, force: true }); } catch {}
 }
 
 async function ensureDir(dir: string): Promise<void> {
-  const mkdir = Bun.spawn(['cmd', '/c', 'md', dir.replace(/\//g, '\\')], { stdio: ['pipe', 'pipe', 'pipe'] });
-  await mkdir.exited;
+  try { await mkdir(dir, { recursive: true }); } catch {}
 }
 
 // =============================================================================

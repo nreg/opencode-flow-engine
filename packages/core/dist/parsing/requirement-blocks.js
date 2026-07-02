@@ -297,7 +297,7 @@ export function parseChangeMarkdown(content) {
                 continue;
             }
             // Add content to current delta
-            if (currentType && currentType !== 'REMOVED' && line.trim()) {
+            if (currentType && line.trim()) {
                 if (currentText) {
                     currentText += '\n' + line;
                 }
@@ -307,7 +307,7 @@ export function parseChangeMarkdown(content) {
             }
         }
         // Save last delta
-        if (currentType && currentType !== 'REMOVED' && currentRequirement) {
+        if (currentType && currentRequirement) {
             deltas.push({
                 type: currentType,
                 requirementName: currentRequirement,

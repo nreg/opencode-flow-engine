@@ -4,6 +4,7 @@
 
 import type { HookHandler, HookContext, HookResult } from './types.js';
 import { fileExists, readFile, readJsonFile } from '@opencode-sflow/shared';
+import { getValidTransitions } from '@opencode-sflow/core';
 
 /**
  * Create the guard hook
@@ -53,7 +54,22 @@ async function checkArtifactExistence(changeDir: string): Promise<HookResult> {
   const dirExists = await fileExists(changeDir);
   if (!dirExists) return { success: true };
 
-  const requiredArtifacts = ['proposal.md', 'specs', 'design.md', 'tasks.md'];
+  // Get current workflow state to determine which artifacts are relevant
+  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
+  const currentState = stateData?.state || 'exploring';
+
+  const artifactByState: Record<string, string[]> = {
+    exploring: [],
+    specifying: ['proposal.md'],
+    bridging: ['proposal.md', 'specs', 'design.md', 'tasks.md'],
+    'approved-for-build': ['proposal.md', 'specs', 'design.md', 'tasks.md', 'execution-contract.md'],
+    executing: ['proposal.md', 'specs', 'design.md', 'tasks.md', 'execution-contract.md'],
+    debugging: ['proposal.md', 'specs', 'design.md', 'tasks.md', 'execution-contract.md'],
+    closing: ['proposal.md', 'specs', 'design.md', 'tasks.md', 'execution-contract.md'],
+    abandoned: [],
+  };
+
+  const requiredArtifacts = artifactByState[currentState] || [];
   const missingArtifacts: string[] = [];
 
   for (const artifact of requiredArtifacts) {

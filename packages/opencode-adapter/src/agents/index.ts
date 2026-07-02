@@ -22,6 +22,20 @@ export {
   USER_CONFIG_FILE,
 } from './config-loader.js';
 
+export {
+  createAgent,
+  createAllAgents,
+  getAgent,
+  getAgentNames,
+  getAgentMode,
+  getPrimaryAgents,
+  getSubagentAgents,
+  agentExists,
+  getDefaultModel,
+  getAllDefaultModels,
+  clearConfigCache,
+} from './agent-builder.js';
+
 export type {
   AgentConfigEntry,
   SFlowConfig,

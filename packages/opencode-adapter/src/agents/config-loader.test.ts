@@ -14,7 +14,7 @@ import {
   generateConfigTemplate,
   USER_CONFIG_FILE,
 } from './config-loader.js';
-import { createAgent, createAllAgents } from './agent-builder.js';
+import { createAgent, createAllAgents, clearConfigCache } from './agent-builder.js';
 
 const TEST_DIR = `${import.meta.dir}/../__test_cfg__`;
 const TEST_CONFIG = join(TEST_DIR, '.sflow', 'config.json');
@@ -142,7 +142,7 @@ describe('Config Loader', () => {
     it('should convert agent config to override format', () => {
       const overrides = agentOverridesFromConfig({
         agents: {
-          sflow: { model: 'gpt-4o', temperature: 0.3, fallbackModels: ['claude-3-5-sonnet'] },
+          sflow: { model: 'gpt-4o', temperature: 0.3, fallback_models: ['claude-3-5-sonnet'] },
           'build-executor': { model: 'claude-sonnet-4-6' },
         },
       });
@@ -183,11 +183,11 @@ describe('Config Loader', () => {
       expect(Object.keys(tmpl.agents!)).toHaveLength(9);
     });
 
-    it('should include fallbackModels for all agents', () => {
+    it('should include fallback_models for all agents', () => {
       const tmpl = generateConfigTemplate();
       for (const [name, cfg] of Object.entries(tmpl.agents!)) {
-        expect(cfg.fallbackModels).toBeDefined();
-        expect(cfg.fallbackModels!.length).toBeGreaterThan(0);
+        expect(cfg.fallback_models).toBeDefined();
+        expect(cfg.fallback_models!.length).toBeGreaterThan(0);
       }
     });
 
@@ -216,27 +216,33 @@ describe('Config File Integration with Agent Builder', () => {
     try { rmdirSync(CWD_SFLOW); } catch {}
   }
 
-  beforeEach(cleanCwdConfig);
-  afterEach(cleanCwdConfig);
+  beforeEach(() => {
+    cleanCwdConfig();
+    clearConfigCache();
+  });
+  afterEach(() => {
+    cleanCwdConfig();
+    clearConfigCache();
+  });
 
-  it('should load config file and apply to agent when .sflow/config.json exists', () => {
+  it('should load config file and apply to agent when .sflow/config.json exists', async () => {
     writeCwdConfig({
       agents: { sflow: { model: 'claude-3-opus-20240229' } },
     });
-    const agent = createAgent('sflow');
+    const agent = await createAgent('sflow');
     expect(agent.model).toBe('claude-3-opus-20240229');
   });
 
-  it('should use fallbackModels from config file', () => {
+  it('should use fallback_models from config file', async () => {
     writeCwdConfig({
       agents: {
         sflow: {
           model: 'claude-opus-4-7',
-          fallbackModels: ['gpt-4o', 'claude-sonnet-4-7'],
+          fallback_models: ['gpt-4o', 'claude-sonnet-4-7'],
         },
       },
     });
-    const agent = createAgent('sflow');
+    const agent = await createAgent('sflow');
     expect(agent.model).toBe('claude-opus-4-7');
     expect(agent.fallback_models).toEqual(['gpt-4o', 'claude-sonnet-4-7']);
   });
@@ -248,7 +254,7 @@ describe('Config File Integration with Agent Builder', () => {
     const config = await loadSFlowConfig();
     expect(config.agents?.sflow?.model).toBe('from-config');
     expect(config.agents?.sflow?.model).not.toBe('from-code');
-    const agent = createAgent('sflow', 'from-code');
+    const agent = await createAgent('sflow', 'from-code');
     expect(agent.model).toBe('from-code');
   });
 
@@ -256,7 +262,7 @@ describe('Config File Integration with Agent Builder', () => {
     writeCwdConfig({
       agents: { sflow: { model: 'from-config' } },
     });
-    const agent = createAgent('sflow', undefined, {
+    const agent = await createAgent('sflow', undefined, {
       sflow: { model: 'from-override' },
     });
     expect(agent.model).toBe('from-override');

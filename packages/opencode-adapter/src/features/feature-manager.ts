@@ -44,7 +44,8 @@ export class FeatureManager {
       await this.stateManager.initialize();
 
       this.skillLoader = await createSkillLoader(this.config.skillsDir);
-      console.log(`Loaded ${skills.length} skills`);
+      const loadedSkills = this.skillLoader.getAllSkills();
+      console.log(`Loaded ${loadedSkills.length} skills`);
 
       // Start MCP servers for skills with MCP config
       const skillsWithMcp = this.skillLoader.getSkillsWithMcp();
@@ -58,7 +59,7 @@ export class FeatureManager {
       return {
         success: true,
         data: {
-          skillsLoaded: skills.length,
+          skillsLoaded: loadedSkills.length,
           mcpServersStarted: skillsWithMcp.length,
         },
       };

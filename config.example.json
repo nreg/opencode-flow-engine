@@ -5,47 +5,47 @@
     "sflow": {
       "model": "deepseek-v4-flash",
       "temperature": 0.6,
-      "fallbackModels": ["glm-5.1", "kimi-k2.6"]
+      "fallback_models": ["glm-5.1", "kimi-k2.6"]
     },
     "need-explorer": {
       "model": "kimi-k2.6",
       "temperature": 0.6,
-      "fallbackModels": ["glm-5.1", "deepseek-v4-flash"]
+      "fallback_models": ["glm-5.1", "deepseek-v4-flash"]
     },
     "spec-writer": {
       "model": "glm-5.1",
       "temperature": 0.6,
-      "fallbackModels": ["kimi-k2.6", "deepseek-v4-flash"]
+      "fallback_models": ["kimi-k2.6", "deepseek-v4-flash"]
     },
     "contract-builder": {
       "model": "glm-5",
       "temperature": 0.6,
-      "fallbackModels": ["glm-5.1", "deepseek-v4-flash"]
+      "fallback_models": ["glm-5.1", "deepseek-v4-flash"]
     },
     "build-executor": {
       "model": "step-3.7-flash",
       "temperature": 0.7,
-      "fallbackModels": ["deepseek-v4-flash", "glm-5.1"]
+      "fallback_models": ["deepseek-v4-flash", "glm-5.1"]
     },
     "bug-investigator": {
       "model": "minimax-m2.7",
       "temperature": 0.6,
-      "fallbackModels": ["deepseek-v4-flash", "glm-5.1"]
+      "fallback_models": ["deepseek-v4-flash", "glm-5.1"]
     },
     "code-reviewer": {
       "model": "deepseek-v4-flash",
       "temperature": 0.6,
-      "fallbackModels": ["glm-5.1", "kimi-k2.6"]
+      "fallback_models": ["glm-5.1", "kimi-k2.6"]
     },
     "release-archivist": {
       "model": "mimo-v2.5-pro",
       "temperature": 0.7,
-      "fallbackModels": ["mimo-v2.5", "glm-5.1"]
+      "fallback_models": ["mimo-v2.5", "glm-5.1"]
     },
     "spec-merger": {
       "model": "mimo-v2.5",
       "temperature": 0.7,
-      "fallbackModels": ["mimo-v2.5-pro", "glm-5.1"]
+      "fallback_models": ["mimo-v2.5-pro", "glm-5.1"]
     }
   },
   "features": {

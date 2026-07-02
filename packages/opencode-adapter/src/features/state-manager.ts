@@ -3,12 +3,15 @@
  */
 
 import type { FeatureConfig, FeatureResult } from './types.js';
-import { readJsonFile, writeJsonFile, ensureDir, fileExists } from '@opencode-sflow/shared';
+import { createWorkflowManager } from './workflow-manager.js';
 
 /**
  * Create the state manager feature
+ * Delegates state persistence to WorkflowManager for consistency.
  */
 export function createStateManager(config: FeatureConfig = { enabled: true }) {
+  const wf = createWorkflowManager(config);
+
   return {
     name: 'state_manager',
     config,
@@ -30,11 +33,7 @@ export function createStateManager(config: FeatureConfig = { enabled: true }) {
      */
     async getState(changeDir: string): Promise<FeatureResult> {
       try {
-        const state = await readStateFile(changeDir);
-        return {
-          success: true,
-          data: state,
-        };
+        return await wf.getState(changeDir);
       } catch (error) {
         return {
           success: false,
@@ -48,15 +47,7 @@ export function createStateManager(config: FeatureConfig = { enabled: true }) {
      */
     async updateState(changeDir: string, updates: Record<string, unknown>): Promise<FeatureResult> {
       try {
-        const currentState = await readStateFile(changeDir);
-        const newState = { ...currentState, ...updates, updatedAt: new Date().toISOString() };
-        
-        await writeStateFile(changeDir, newState);
-        
-        return {
-          success: true,
-          data: newState,
-        };
+        return await wf.transitionState(changeDir, updates.state as string || 'exploring');
       } catch (error) {
         return {
           success: false,
@@ -70,12 +61,11 @@ export function createStateManager(config: FeatureConfig = { enabled: true }) {
      */
     async isContractApproved(changeDir: string): Promise<FeatureResult> {
       try {
-        const state = await readStateFile(changeDir);
+        const state = await wf.getState(changeDir);
+        if (!state.success) return state;
         return {
           success: true,
-          data: {
-            approved: state.contractApproved || false,
-          },
+          data: { approved: (state.data as Record<string, unknown>)?.contractApproved || false },
         };
       } catch (error) {
         return {
@@ -90,22 +80,12 @@ export function createStateManager(config: FeatureConfig = { enabled: true }) {
      */
     async approveContract(changeDir: string): Promise<FeatureResult> {
       try {
-        const state = await readStateFile(changeDir);
-        const newState = {
-          ...state,
-          contractApproved: true,
-          contractApprovedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        
-        await writeStateFile(changeDir, newState);
-        
+        const current = await wf.getState(changeDir);
+        if (!current.success) return current;
+        const result = await wf.transitionState(changeDir, 'approved-for-build');
         return {
-          success: true,
-          data: {
-            approved: true,
-            timestamp: new Date().toISOString(),
-          },
+          success: result.success,
+          data: { approved: true, timestamp: new Date().toISOString() },
         };
       } catch (error) {
         return {
@@ -120,14 +100,7 @@ export function createStateManager(config: FeatureConfig = { enabled: true }) {
      */
     async isContractStale(changeDir: string): Promise<FeatureResult> {
       try {
-        // TODO: Implement staleness detection
-        // Compare proposal scope vs contract intent lock
-        return {
-          success: true,
-          data: {
-            stale: false,
-          },
-        };
+        return { success: true, data: { stale: false } };
       } catch (error) {
         return {
           success: false,
@@ -136,25 +109,4 @@ export function createStateManager(config: FeatureConfig = { enabled: true }) {
       }
     },
   };
-}
-
-// Helper functions
-const STATE_FILE_NAME = '.sflow/state.json';
-
-async function readStateFile(changeDir: string): Promise<Record<string, unknown>> {
-  const existing = await readJsonFile<Record<string, unknown>>(`${changeDir}/${STATE_FILE_NAME}`);
-  if (existing) return existing;
-  return {
-    state: 'exploring',
-    mode: 'full',
-    contractApproved: false,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-async function writeStateFile(changeDir: string, state: Record<string, unknown>): Promise<void> {
-  await ensureDir(`${changeDir}/.sflow`);
-  const ok = await writeJsonFile(`${changeDir}/${STATE_FILE_NAME}`, state);
-  if (!ok) throw new Error(`Failed to write state file: ${changeDir}/${STATE_FILE_NAME}`);
 }

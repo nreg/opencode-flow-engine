@@ -3,6 +3,11 @@
  * Ported from spec-superflow/src/validation/validator.ts
  */
 import { VALIDATION_MESSAGES, MIN_WHY_SECTION_LENGTH, MAX_WHY_SECTION_LENGTH, MAX_REQUIREMENT_TEXT_LENGTH, MAX_DELTAS_PER_CHANGE, } from './constants.js';
+const DESIGN_REQUIRED_SECTIONS = [
+    { key: 'Architecture Decision', pattern: /## Architecture\b|### Architecture\b/i },
+    { key: 'Design Constraints', pattern: /## Constraints\b|## Design Constraints\b/i },
+    { key: 'Implementation Approach', pattern: /## Approach\b|## Implementation\b/i },
+];
 /**
  * Main validator class
  */
@@ -235,6 +240,27 @@ export class Validator {
             valid: issues.filter(i => i.level === 'ERROR').length === 0,
             issues,
             summary: issues.length === 0 ? 'Tasks validation passed' : `Found ${issues.length} issues`,
+        };
+    }
+    /**
+     * Validate a design markdown file
+     */
+    validateDesign(content) {
+        const issues = [];
+        for (const section of DESIGN_REQUIRED_SECTIONS) {
+            if (!section.pattern.test(content)) {
+                issues.push({
+                    level: 'ERROR',
+                    path: 'design.md',
+                    message: `Missing section: ${section.key}`,
+                    suggestion: `Add a section describing ${section.key.toLowerCase()}`,
+                });
+            }
+        }
+        return {
+            valid: issues.filter(i => i.level === 'ERROR').length === 0,
+            issues,
+            summary: issues.length === 0 ? 'Design validation passed' : `Found ${issues.length} issues`,
         };
     }
     /**

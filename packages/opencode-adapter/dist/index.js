@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 var __defProp = Object.defineProperty;
 var __returnValue = (v) => v;
 function __exportSetter(name, newValue) {
@@ -12,6 +13,7 @@ var __export = (target, all) => {
       set: __exportSetter.bind(all, name)
     });
 };
+var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // src/index.ts
 import { tool } from "@opencode-ai/plugin";
@@ -12331,7 +12333,7 @@ function date4(params) {
 
 // ../../node_modules/zod/v4/classic/external.js
 config(en_default());
-// ../core/src/validation/constants.js
+// ../core/src/validation/constants.ts
 var MIN_WHY_SECTION_LENGTH = 50;
 var MAX_WHY_SECTION_LENGTH = 5000;
 var MAX_REQUIREMENT_TEXT_LENGTH = 1000;
@@ -12363,9 +12365,20 @@ var VALIDATION_MESSAGES = {
     invalidState: "Invalid state transition",
     missingArtifact: "Required artifact is missing",
     staleContract: "Execution contract is stale and needs regeneration"
+  },
+  design: {
+    missingArchitecture: "Design must include architecture decisions",
+    missingConstraints: "Design must include technical constraints",
+    missingApproach: "Design must include implementation approach"
   }
 };
-// ../core/src/validation/validator.js
+// ../core/src/validation/validator.ts
+var DESIGN_REQUIRED_SECTIONS = [
+  { key: "Architecture Decision", pattern: /## Architecture\b|### Architecture\b/i },
+  { key: "Design Constraints", pattern: /## Constraints\b|## Design Constraints\b/i },
+  { key: "Implementation Approach", pattern: /## Approach\b|## Implementation\b/i }
+];
+
 class Validator {
   strictMode;
   constructor(strictMode = false) {
@@ -12574,6 +12587,24 @@ class Validator {
       summary: issues.length === 0 ? "Tasks validation passed" : `Found ${issues.length} issues`
     };
   }
+  validateDesign(content) {
+    const issues = [];
+    for (const section of DESIGN_REQUIRED_SECTIONS) {
+      if (!section.pattern.test(content)) {
+        issues.push({
+          level: "ERROR",
+          path: "design.md",
+          message: `Missing section: ${section.key}`,
+          suggestion: `Add a section describing ${section.key.toLowerCase()}`
+        });
+      }
+    }
+    return {
+      valid: issues.filter((i) => i.level === "ERROR").length === 0,
+      issues,
+      summary: issues.length === 0 ? "Design validation passed" : `Found ${issues.length} issues`
+    };
+  }
   validateExecutionContract(content) {
     const issues = [];
     const requiredSections = ["Intent Lock", "Approved Behavior", "Design Constraints", "Task Batches"];
@@ -12602,6 +12633,138 @@ class Validator {
     };
   }
 }
+// ../core/src/constants.ts
+var VALID_TRANSITIONS = {
+  exploring: ["specifying", "abandoned"],
+  specifying: ["bridging", "exploring", "abandoned"],
+  bridging: ["approved-for-build", "specifying", "abandoned"],
+  "approved-for-build": ["executing", "bridging", "abandoned"],
+  executing: ["debugging", "closing", "abandoned"],
+  debugging: ["executing", "abandoned"],
+  closing: ["abandoned"],
+  abandoned: []
+};
+var ALL_STATES = Object.keys(VALID_TRANSITIONS);
+function isValidTransition(from, to) {
+  const allowed = VALID_TRANSITIONS[from];
+  if (!allowed)
+    return false;
+  return allowed.includes(to);
+}
+function getValidTransitions(from) {
+  return VALID_TRANSITIONS[from] || [];
+}
+// src/agents/agent-tools.ts
+var COMMON_TOOLS = {
+  read: true,
+  glob: true,
+  grep: true
+};
+var AGENT_TOOLS = {
+  sflow: {
+    ...COMMON_TOOLS,
+    write: false,
+    edit: false,
+    bash: true,
+    call_omo_agent: true,
+    task: true,
+    skill: true,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true,
+    session_list: true,
+    session_read: true,
+    session_search: true,
+    session_info: true,
+    background_output: true,
+    background_cancel: true
+  },
+  "need-explorer": {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: false,
+    bash: false,
+    call_omo_agent: false,
+    task: false,
+    skill: false
+  },
+  "spec-writer": {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: true,
+    bash: true,
+    call_omo_agent: false,
+    task: false,
+    skill: false
+  },
+  "contract-builder": {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: true,
+    bash: true,
+    call_omo_agent: false,
+    task: false,
+    skill: false
+  },
+  "build-executor": {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: true,
+    bash: true,
+    call_omo_agent: false,
+    task: false,
+    skill: false,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true
+  },
+  "bug-investigator": {
+    ...COMMON_TOOLS,
+    write: false,
+    edit: true,
+    bash: true,
+    call_omo_agent: false,
+    task: false,
+    skill: false,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true
+  },
+  "code-reviewer": {
+    ...COMMON_TOOLS,
+    write: false,
+    edit: false,
+    bash: true,
+    call_omo_agent: false,
+    task: false,
+    skill: false,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true
+  },
+  "release-archivist": {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: false,
+    bash: true,
+    call_omo_agent: false,
+    task: false,
+    skill: false
+  },
+  "spec-merger": {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: true,
+    bash: true,
+    call_omo_agent: false,
+    task: false,
+    skill: false
+  }
+};
+function getAgentTools(name) {
+  return AGENT_TOOLS[name] || { ...COMMON_TOOLS };
+}
+
 // src/agents/spec-flow.ts
 var MODE = "primary";
 var createSFlowAgent = (model) => ({
@@ -12702,26 +12865,7 @@ Always start your response with:
 
 When delegating, use \`call_omo_agent\` with the appropriate \`subagent_type\`.`,
   temperature: 0.6,
-  tools: {
-    read: true,
-    write: false,
-    edit: false,
-    glob: true,
-    grep: true,
-    bash: true,
-    call_omo_agent: true,
-    task: true,
-    skill: true,
-    lsp_diagnostics: true,
-    lsp_goto_definition: true,
-    lsp_find_references: true,
-    session_list: true,
-    session_read: true,
-    session_search: true,
-    session_info: true,
-    background_output: true,
-    background_cancel: true
-  }
+  tools: getAgentTools("sflow")
 });
 createSFlowAgent.mode = MODE;
 // src/agents/need-explorer.ts
@@ -12775,17 +12919,7 @@ You have access to:
 
 Use these to understand the current context before asking questions.`,
   temperature: 0.6,
-  tools: {
-    read: true,
-    write: true,
-    edit: false,
-    glob: true,
-    grep: true,
-    bash: false,
-    call_omo_agent: false,
-    task: false,
-    skill: false
-  }
+  tools: getAgentTools("need-explorer")
 });
 createNeedExplorerAgent.mode = MODE2;
 // src/agents/spec-writer.ts
@@ -12860,17 +12994,7 @@ You have access to:
 
 Use validation scripts to ensure quality.`,
   temperature: 0.6,
-  tools: {
-    read: true,
-    write: true,
-    edit: true,
-    glob: true,
-    grep: true,
-    bash: true,
-    call_omo_agent: false,
-    task: false,
-    skill: false
-  }
+  tools: getAgentTools("spec-writer")
 });
 createSpecWriterAgent.mode = MODE3;
 // src/agents/contract-builder.ts
@@ -12955,17 +13079,7 @@ You have access to:
 - \`edit\` - Edit contract
 - \`bash\` - Run validation scripts`,
   temperature: 0.6,
-  tools: {
-    read: true,
-    write: true,
-    edit: true,
-    glob: true,
-    grep: true,
-    bash: true,
-    call_omo_agent: false,
-    task: false,
-    skill: false
-  }
+  tools: getAgentTools("contract-builder")
 });
 createContractBuilderAgent.mode = MODE4;
 // src/agents/build-executor.ts
@@ -13047,20 +13161,7 @@ You have access to:
 - \`lsp_diagnostics\` - Check for errors
 - \`lsp_goto_definition\` - Navigate code`,
   temperature: 0.7,
-  tools: {
-    read: true,
-    write: true,
-    edit: true,
-    glob: true,
-    grep: true,
-    bash: true,
-    call_omo_agent: false,
-    task: false,
-    skill: false,
-    lsp_diagnostics: true,
-    lsp_goto_definition: true,
-    lsp_find_references: true
-  }
+  tools: getAgentTools("build-executor")
 });
 createBuildExecutorAgent.mode = MODE5;
 // src/agents/bug-investigator.ts
@@ -13139,20 +13240,7 @@ You have access to:
 - \`lsp_goto_definition\` - Navigate code
 - \`lsp_find_references\` - Find usages`,
   temperature: 0.6,
-  tools: {
-    read: true,
-    write: false,
-    edit: true,
-    glob: true,
-    grep: true,
-    bash: true,
-    call_omo_agent: false,
-    task: false,
-    skill: false,
-    lsp_diagnostics: true,
-    lsp_goto_definition: true,
-    lsp_find_references: true
-  }
+  tools: getAgentTools("bug-investigator")
 });
 createBugInvestigatorAgent.mode = MODE6;
 // src/agents/code-reviewer.ts
@@ -13248,20 +13336,7 @@ You have access to:
 - \`lsp_goto_definition\` - Navigate code
 - \`lsp_find_references\` - Find usages`,
   temperature: 0.6,
-  tools: {
-    read: true,
-    write: false,
-    edit: false,
-    glob: true,
-    grep: true,
-    bash: true,
-    call_omo_agent: false,
-    task: false,
-    skill: false,
-    lsp_diagnostics: true,
-    lsp_goto_definition: true,
-    lsp_find_references: true
-  }
+  tools: getAgentTools("code-reviewer")
 });
 createCodeReviewerAgent.mode = MODE7;
 // src/agents/release-archivist.ts
@@ -13357,17 +13432,7 @@ You have access to:
 - \`bash\` - Run tests and commands
 - \`glob\` - Search for files`,
   temperature: 0.7,
-  tools: {
-    read: true,
-    write: true,
-    edit: false,
-    glob: true,
-    grep: true,
-    bash: true,
-    call_omo_agent: false,
-    task: false,
-    skill: false
-  }
+  tools: getAgentTools("release-archivist")
 });
 createReleaseArchivistAgent.mode = MODE8;
 // src/agents/spec-merger.ts
@@ -13467,70 +13532,144 @@ You have access to:
 - \`edit\` - Edit specs
 - \`bash\` - Run validation scripts`,
   temperature: 0.7,
-  tools: {
-    read: true,
-    write: true,
-    edit: true,
-    glob: true,
-    grep: true,
-    bash: true,
-    call_omo_agent: false,
-    task: false,
-    skill: false
-  }
+  tools: getAgentTools("spec-merger")
 });
 createSpecMergerAgent.mode = MODE9;
 // src/agents/config-loader.ts
-import { readFileSync, existsSync } from "fs";
+import { existsSync } from "fs";
+import { readFile as readFile2 } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
+
+// ../shared/src/deep-merge.ts
+function deepMerge(target, source) {
+  const result = { ...target };
+  for (const key in source) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      const sourceValue = source[key];
+      const targetValue = result[key];
+      if (isPlainObject2(sourceValue) && isPlainObject2(targetValue)) {
+        result[key] = deepMerge(targetValue, sourceValue);
+      } else if (sourceValue !== undefined) {
+        result[key] = sourceValue;
+      }
+    }
+  }
+  return result;
+}
+function isPlainObject2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+// ../shared/src/file-utils.ts
+async function fileExists(path) {
+  try {
+    const file2 = Bun.file(path);
+    return await file2.exists();
+  } catch {
+    return false;
+  }
+}
+async function readFile(path) {
+  try {
+    const file2 = Bun.file(path);
+    if (await file2.exists()) {
+      return await file2.text();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+async function writeFile(path, content) {
+  try {
+    await Bun.write(path, content);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function listFiles(dirPath, extension) {
+  try {
+    const dir = Bun.dir(dirPath);
+    const files = [];
+    for await (const file2 of dir) {
+      if (file2.isFile()) {
+        if (!extension || file2.name.endsWith(extension)) {
+          files.push(file2.name);
+        }
+      }
+    }
+    return files;
+  } catch {
+    return [];
+  }
+}
+async function directoryExists(dirPath) {
+  try {
+    const dir = Bun.file(dirPath);
+    return await dir.exists();
+  } catch {
+    return false;
+  }
+}
+async function readJsonFile(path) {
+  const content = await readFile(path);
+  if (!content)
+    return null;
+  try {
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+async function writeJsonFile(path, data) {
+  try {
+    await Bun.write(path, JSON.stringify(data, null, 2));
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function ensureDir(dirPath) {
+  try {
+    const { mkdir } = await import("fs/promises");
+    await mkdir(dirPath, { recursive: true });
+  } catch {}
+}
+// src/agents/config-loader.ts
 var USER_CONFIG_FILE = join(homedir(), ".sFlow", "config.json");
-function loadSFlowConfig(projectDir) {
+async function loadSFlowConfig(projectDir) {
   const dir = projectDir || process.cwd();
   const configPath = join(dir, ".sflow", "config.json");
   if (!existsSync(configPath)) {
     return {};
   }
   try {
-    const raw = readFileSync(configPath, "utf-8");
+    const raw = await readFile2(configPath, "utf-8");
     return JSON.parse(raw);
   } catch {
     console.warn(`[sflow] Failed to parse ${configPath}`);
     return {};
   }
 }
-function loadUserSFlowConfig() {
+async function loadUserSFlowConfig() {
   if (!existsSync(USER_CONFIG_FILE)) {
     return {};
   }
   try {
-    const raw = readFileSync(USER_CONFIG_FILE, "utf-8");
+    const raw = await readFile2(USER_CONFIG_FILE, "utf-8");
     return JSON.parse(raw);
   } catch {
     console.warn(`[sflow] Failed to parse user config: ${USER_CONFIG_FILE}`);
     return {};
   }
 }
-function loadCascadedSFlowConfig(projectDir) {
-  const user = loadUserSFlowConfig();
-  const project = loadSFlowConfig(projectDir);
+async function loadCascadedSFlowConfig(projectDir) {
+  const user = await loadUserSFlowConfig();
+  const project = await loadSFlowConfig(projectDir);
   if (Object.keys(project).length === 0)
     return user;
-  const mergedAgents = {};
-  for (const [name, cfg] of Object.entries(user.agents || {})) {
-    mergedAgents[name] = { ...cfg };
-  }
-  for (const [name, cfg] of Object.entries(project.agents || {})) {
-    mergedAgents[name] = { ...mergedAgents[name] || {}, ...cfg };
-  }
-  return {
-    ...user,
-    ...project,
-    agents: mergedAgents,
-    features: { ...user.features || {}, ...project.features || {} },
-    hooks: { ...user.hooks || {}, ...project.hooks || {} },
-    tools: { ...user.tools || {}, ...project.tools || {} }
-  };
+  return deepMerge(user, project);
 }
 var BUILTIN_AGENTS = [
   "sflow",
@@ -13554,14 +13693,48 @@ function agentOverridesFromConfig(config2) {
       override.model = entry.model;
     if (entry.temperature !== undefined)
       override.temperature = entry.temperature;
-    if (entry.fallbackModels && entry.fallbackModels.length > 0) {
-      override.fallback_models = entry.fallbackModels;
+    const fb = entry.fallback_models || entry.fallbackModels;
+    if (fb && fb.length > 0) {
+      override.fallback_models = fb;
     }
     if (Object.keys(override).length > 0) {
       overrides[name] = override;
     }
   }
   return overrides;
+}
+// src/agents/agent-builder.ts
+var AGENT_REGISTRY = {
+  sflow: createSFlowAgent,
+  "need-explorer": createNeedExplorerAgent,
+  "spec-writer": createSpecWriterAgent,
+  "contract-builder": createContractBuilderAgent,
+  "build-executor": createBuildExecutorAgent,
+  "bug-investigator": createBugInvestigatorAgent,
+  "code-reviewer": createCodeReviewerAgent,
+  "release-archivist": createReleaseArchivistAgent,
+  "spec-merger": createSpecMergerAgent
+};
+var DEFAULT_MODELS = {
+  sflow: "deepseek-v4-flash",
+  "need-explorer": "kimi-k2.6",
+  "spec-writer": "glm-5.1",
+  "contract-builder": "glm-5",
+  "build-executor": "step-3.7-flash",
+  "bug-investigator": "minimax-m2.7",
+  "code-reviewer": "deepseek-v4-flash",
+  "release-archivist": "mimo-v2.5-pro",
+  "spec-merger": "mimo-v2.5"
+};
+function getAgentNames() {
+  return Object.keys(AGENT_REGISTRY);
+}
+function getAgentMode(name) {
+  const factory = AGENT_REGISTRY[name];
+  return factory?.mode || "subagent";
+}
+function getDefaultModel(name) {
+  return DEFAULT_MODELS[name];
 }
 // src/tools/workflow-router.ts
 function createWorkflowRouterTool() {
@@ -13634,27 +13807,28 @@ function createWorkflowRouterTool() {
     }
   };
 }
-async function fileExists(path) {
-  try {
-    await Bun.file(path).exists();
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function directoryExists(path) {
-  try {
-    const dir = Bun.file(path);
-    return await dir.exists();
-  } catch {
-    return false;
-  }
-}
 async function isContractApproved(changeDir) {
+  const state = await readJsonFile(`${changeDir}/.sflow/state.json`);
+  if (state?.contractApproved === true)
+    return true;
+  if (state?.state === "approved-for-build" || state?.state === "executing" || state?.state === "closing")
+    return true;
   return false;
 }
 async function isContractStale(changeDir) {
-  return false;
+  const contractPath = `${changeDir}/execution-contract.md`;
+  const proposalPath = `${changeDir}/proposal.md`;
+  const contractExists = await fileExists(contractPath);
+  const proposalExists = await fileExists(proposalPath);
+  if (!contractExists || !proposalExists)
+    return false;
+  try {
+    const contractMod = Bun.file(contractPath).lastModified;
+    const proposalMod = Bun.file(proposalPath).lastModified;
+    return proposalMod > contractMod;
+  } catch {
+    return false;
+  }
 }
 // src/tools/contract-validator.ts
 function createContractValidatorTool() {
@@ -13704,17 +13878,6 @@ function createContractValidatorTool() {
     }
   };
 }
-async function readFile(path) {
-  try {
-    const file2 = Bun.file(path);
-    if (await file2.exists()) {
-      return await file2.text();
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
 async function checkContractStaleness(changeDir, contractContent, proposalContent) {
   if (!proposalContent) {
     return false;
@@ -13757,7 +13920,7 @@ function createArtifactInspectorTool() {
       try {
         const results = {};
         if (!artifactType || artifactType === "proposal") {
-          const proposalContent = await readFile2(`${changeDir}/proposal.md`);
+          const proposalContent = await readFile(`${changeDir}/proposal.md`);
           if (proposalContent) {
             results.proposal = validator.validateProposal(proposalContent);
           } else {
@@ -13769,14 +13932,14 @@ function createArtifactInspectorTool() {
           const specFiles = await listFiles(specsDir);
           results.specs = {};
           for (const specFile of specFiles) {
-            const specContent = await readFile2(`${specsDir}/${specFile}`);
+            const specContent = await readFile(`${specsDir}/${specFile}`);
             if (specContent) {
               results.specs[specFile] = validator.validateSpec(specContent, specFile.replace(".md", ""));
             }
           }
         }
         if (!artifactType || artifactType === "design") {
-          const designContent = await readFile2(`${changeDir}/design.md`);
+          const designContent = await readFile(`${changeDir}/design.md`);
           if (designContent) {
             results.design = { valid: true, message: "Design file exists" };
           } else {
@@ -13784,7 +13947,7 @@ function createArtifactInspectorTool() {
           }
         }
         if (!artifactType || artifactType === "tasks") {
-          const tasksContent = await readFile2(`${changeDir}/tasks.md`);
+          const tasksContent = await readFile(`${changeDir}/tasks.md`);
           if (tasksContent) {
             results.tasks = validator.validateTasks(tasksContent);
           } else {
@@ -13809,31 +13972,6 @@ function createArtifactInspectorTool() {
       }
     }
   };
-}
-async function readFile2(path) {
-  try {
-    const file2 = Bun.file(path);
-    if (await file2.exists()) {
-      return await file2.text();
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-async function listFiles(dirPath) {
-  try {
-    const dir = Bun.dir(dirPath);
-    const files = [];
-    for await (const file2 of dir) {
-      if (file2.isFile() && file2.name.endsWith(".md")) {
-        files.push(file2.name);
-      }
-    }
-    return files;
-  } catch {
-    return [];
-  }
 }
 function generateInspectionSummary(results) {
   const issues = [];
@@ -13877,16 +14015,6 @@ function generateInspectionRecommendations(results) {
   return recommendations;
 }
 // src/hooks/state-transition.ts
-var VALID_TRANSITIONS = {
-  exploring: ["specifying", "abandoned"],
-  specifying: ["bridging", "exploring", "abandoned"],
-  bridging: ["approved-for-build", "specifying", "abandoned"],
-  "approved-for-build": ["executing", "bridging", "abandoned"],
-  executing: ["debugging", "closing", "abandoned"],
-  debugging: ["executing", "abandoned"],
-  closing: ["abandoned"],
-  abandoned: []
-};
 function createStateTransitionHook() {
   return {
     name: "state_transition",
@@ -13906,13 +14034,13 @@ function createStateTransitionHook() {
             data: { from: null, to: newState, timestamp: new Date().toISOString() }
           };
         }
-        const validTransitions = VALID_TRANSITIONS[currentState] || [];
-        if (!validTransitions.includes(newState)) {
+        if (!isValidTransition(currentState, newState)) {
+          const valid = getValidTransitions(currentState);
           return {
             success: false,
             error: `Invalid transition from ${currentState} to ${newState}`,
             block: true,
-            blockReason: `Cannot transition from ${currentState} to ${newState}. Valid transitions: ${validTransitions.join(", ")}`
+            blockReason: `Cannot transition from ${currentState} to ${newState}. Valid transitions: ${valid.join(", ")}`
           };
         }
         await updateState(changeDir, newState);
@@ -13933,34 +14061,34 @@ function createStateTransitionHook() {
     }
   };
 }
+var STATE_FILE_PATH = ".sflow/state.json";
 async function getCurrentState(changeDir) {
   if (!changeDir)
     return null;
-  const stateFilePath = `${changeDir}/.sflow/state.json`;
-  try {
-    const file2 = Bun.file(stateFilePath);
-    if (await file2.exists()) {
-      const content = await file2.text();
-      const state = JSON.parse(content);
-      return state.state || state.currentState || "exploring";
-    }
-  } catch {}
+  const state = await readJsonFile(`${changeDir}/${STATE_FILE_PATH}`);
+  if (state) {
+    return state.state || state.currentState || "exploring";
+  }
   return null;
 }
 async function updateState(changeDir, newState) {
-  const stateFilePath = `${changeDir}/.sflow/state.json`;
+  const stateFilePath = `${changeDir}/${STATE_FILE_PATH}`;
   const now = new Date().toISOString();
-  const file2 = Bun.file(stateFilePath);
   let state = {};
-  if (await file2.exists()) {
-    const content = await file2.text();
-    state = JSON.parse(content);
+  const existing = await readJsonFile(stateFilePath);
+  if (existing) {
+    state = existing;
   } else {
-    state = { mode: "full", createdAt: now };
+    state = { mode: "full", createdAt: now, timestamps: { createdAt: now, updatedAt: now } };
+    await ensureDir(`${changeDir}/.sflow`);
   }
   state.state = newState;
   state.updatedAt = now;
-  await Bun.write(stateFilePath, JSON.stringify(state, null, 2));
+  if (!state.timestamps)
+    state.timestamps = {};
+  state.timestamps.lastTransition = now;
+  state.timestamps.updatedAt = now;
+  await writeJsonFile(stateFilePath, state);
 }
 // src/hooks/artifact-validation.ts
 function createArtifactValidationHook() {
@@ -13994,7 +14122,7 @@ function createArtifactValidationHook() {
   };
 }
 async function validateForSpecifying(changeDir, validator) {
-  const proposalContent = await readFile3(`${changeDir}/proposal.md`);
+  const proposalContent = await readFile(`${changeDir}/proposal.md`);
   if (!proposalContent) {
     return {
       success: false,
@@ -14016,7 +14144,7 @@ async function validateForSpecifying(changeDir, validator) {
 }
 async function validateForBridging(changeDir, validator) {
   const specsDir = `${changeDir}/specs`;
-  const specFiles = await listFiles2(specsDir);
+  const specFiles = await listFiles(specsDir);
   if (specFiles.length === 0) {
     return {
       success: false,
@@ -14026,7 +14154,7 @@ async function validateForBridging(changeDir, validator) {
     };
   }
   for (const specFile of specFiles) {
-    const specContent = await readFile3(`${specsDir}/${specFile}`);
+    const specContent = await readFile(`${specsDir}/${specFile}`);
     if (specContent) {
       const report = validator.validateSpec(specContent, specFile.replace(".md", ""));
       if (!report.valid) {
@@ -14042,7 +14170,7 @@ async function validateForBridging(changeDir, validator) {
   return { success: true };
 }
 async function validateForExecution(changeDir, validator) {
-  const contractContent = await readFile3(`${changeDir}/execution-contract.md`);
+  const contractContent = await readFile(`${changeDir}/execution-contract.md`);
   if (!contractContent) {
     return {
       success: false,
@@ -14063,7 +14191,7 @@ async function validateForExecution(changeDir, validator) {
   return { success: true };
 }
 async function validateForClosing(changeDir, validator) {
-  const tasksContent = await readFile3(`${changeDir}/tasks.md`);
+  const tasksContent = await readFile(`${changeDir}/tasks.md`);
   if (!tasksContent) {
     return {
       success: false,
@@ -14082,31 +14210,6 @@ async function validateForClosing(changeDir, validator) {
     };
   }
   return { success: true };
-}
-async function readFile3(path) {
-  try {
-    const file2 = Bun.file(path);
-    if (await file2.exists()) {
-      return await file2.text();
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-async function listFiles2(dirPath) {
-  try {
-    const dir = Bun.dir(dirPath);
-    const files = [];
-    for await (const file2 of dir) {
-      if (file2.isFile() && file2.name.endsWith(".md")) {
-        files.push(file2.name);
-      }
-    }
-    return files;
-  } catch {
-    return [];
-  }
 }
 // src/hooks/guard.ts
 function createGuardHook() {
@@ -14144,13 +14247,25 @@ function createGuardHook() {
 async function checkArtifactExistence(changeDir) {
   if (!changeDir)
     return { success: true };
-  const dirExists = await fileExists2(changeDir);
+  const dirExists = await fileExists(changeDir);
   if (!dirExists)
     return { success: true };
-  const requiredArtifacts = ["proposal.md", "specs", "design.md", "tasks.md"];
+  const stateData = await readJsonFile(`${changeDir}/.sflow/state.json`);
+  const currentState = stateData?.state || "exploring";
+  const artifactByState = {
+    exploring: [],
+    specifying: ["proposal.md"],
+    bridging: ["proposal.md", "specs", "design.md", "tasks.md"],
+    "approved-for-build": ["proposal.md", "specs", "design.md", "tasks.md", "execution-contract.md"],
+    executing: ["proposal.md", "specs", "design.md", "tasks.md", "execution-contract.md"],
+    debugging: ["proposal.md", "specs", "design.md", "tasks.md", "execution-contract.md"],
+    closing: ["proposal.md", "specs", "design.md", "tasks.md", "execution-contract.md"],
+    abandoned: []
+  };
+  const requiredArtifacts = artifactByState[currentState] || [];
   const missingArtifacts = [];
   for (const artifact of requiredArtifacts) {
-    const exists = await fileExists2(`${changeDir}/${artifact}`);
+    const exists = await fileExists(`${changeDir}/${artifact}`);
     if (!exists) {
       missingArtifacts.push(artifact);
     }
@@ -14165,21 +14280,61 @@ async function checkArtifactExistence(changeDir) {
   return { success: true };
 }
 async function checkContractStaleness2(changeDir) {
+  if (!changeDir)
+    return { success: true };
+  const contractPath = `${changeDir}/execution-contract.md`;
+  const proposalPath = `${changeDir}/proposal.md`;
+  const contractExists = await fileExists(contractPath);
+  const proposalExists = await fileExists(proposalPath);
+  if (!contractExists || !proposalExists)
+    return { success: true };
+  try {
+    const contractModTime = Bun.file(contractPath).lastModified;
+    const proposalModTime = Bun.file(proposalPath).lastModified;
+    if (proposalModTime > contractModTime) {
+      return {
+        success: false,
+        block: true,
+        blockReason: "Contract is stale: proposal.md was modified after execution-contract.md was created"
+      };
+    }
+  } catch {
+    return { success: true };
+  }
   return { success: true };
 }
 async function checkTaskCompletion(changeDir) {
+  if (!changeDir)
+    return { success: true };
+  const tasksContent = await readFile(`${changeDir}/tasks.md`);
+  if (!tasksContent)
+    return { success: true };
+  const taskLines = tasksContent.split(`
+`).filter((line) => line.match(/^-\s*\[.\]\s+/));
+  if (taskLines.length === 0)
+    return { success: true };
+  const incompleteTasks = taskLines.filter((line) => line.match(/^-\s*\[\s\]/));
+  if (incompleteTasks.length > 0) {
+    return {
+      success: false,
+      block: true,
+      blockReason: `${incompleteTasks.length} task(s) are incomplete. Complete all tasks before closing.`
+    };
+  }
   return { success: true };
 }
 async function checkDebuggingState(changeDir) {
-  return { success: true };
-}
-async function fileExists2(path) {
-  try {
-    const file2 = Bun.file(path);
-    return await file2.exists();
-  } catch {
-    return false;
+  if (!changeDir)
+    return { success: true };
+  const stateData = await readJsonFile(`${changeDir}/.sflow/state.json`);
+  if (stateData?.state === "debugging") {
+    return {
+      success: false,
+      block: true,
+      blockReason: "Workflow is in debugging state. Fix the bug and transition back to executing before continuing."
+    };
   }
+  return { success: true };
 }
 // src/features/workflow-manager.ts
 function createWorkflowManager(config2 = { enabled: true }) {
@@ -14229,8 +14384,7 @@ function createWorkflowManager(config2 = { enabled: true }) {
     async transitionState(changeDir, newState) {
       try {
         const currentState = await readStateFile(changeDir);
-        const validTransitions = getValidTransitions(currentState.state);
-        if (!validTransitions.includes(newState)) {
+        if (!isValidTransition(currentState.state, newState)) {
           return {
             success: false,
             error: `Invalid transition from ${currentState.state} to ${newState}`
@@ -14275,64 +14429,45 @@ function createWorkflowManager(config2 = { enabled: true }) {
     }
   };
 }
+var STATE_FILE = ".sflow/state.json";
 async function createChangeDirectory(changeDir) {
   const stateDir = `${changeDir}/.sflow`;
-  await Bun.write(`${stateDir}/state.json`, JSON.stringify({
+  await ensureDir(stateDir);
+  await writeJsonFile(`${changeDir}/${STATE_FILE}`, {
     state: "exploring",
     mode: "full",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
-  }, null, 2));
+  });
 }
 async function initializeStateFile(changeDir) {
-  const stateDir = `${changeDir}/.sflow`;
-  const stateFile = `${stateDir}/state.json`;
-  const file2 = Bun.file(stateFile);
-  if (!await file2.exists()) {
-    await Bun.write(stateFile, JSON.stringify({
+  const stateFile = `${changeDir}/${STATE_FILE}`;
+  const existing = await readJsonFile(stateFile);
+  if (!existing) {
+    await ensureDir(`${changeDir}/.sflow`);
+    await writeJsonFile(stateFile, {
       state: "exploring",
       mode: "full",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    }, null, 2));
+    });
   }
 }
 async function readStateFile(changeDir) {
-  const stateFile = `${changeDir}/.sflow/state.json`;
-  const file2 = Bun.file(stateFile);
-  if (await file2.exists()) {
-    const content = await file2.text();
-    return JSON.parse(content);
-  }
-  return {
-    state: "exploring",
-    mode: "full",
-    updatedAt: new Date().toISOString()
-  };
+  const state = await readJsonFile(`${changeDir}/${STATE_FILE}`);
+  return state || { state: "exploring", mode: "full", updatedAt: new Date().toISOString() };
 }
 async function updateStateFile(changeDir, state) {
-  const stateFile = `${changeDir}/.sflow/state.json`;
-  await Bun.write(stateFile, JSON.stringify(state, null, 2));
+  await writeJsonFile(`${changeDir}/${STATE_FILE}`, state);
 }
 async function archiveChange(changeDir) {
   const archiveDir = `${changeDir}/.sflow/archive`;
+  await ensureDir(archiveDir);
   await Bun.write(`${archiveDir}/archived-at.txt`, new Date().toISOString());
-}
-function getValidTransitions(currentState) {
-  const transitions = {
-    exploring: ["specifying", "abandoned"],
-    specifying: ["bridging", "exploring", "abandoned"],
-    bridging: ["approved-for-build", "specifying", "abandoned"],
-    "approved-for-build": ["executing", "bridging", "abandoned"],
-    executing: ["debugging", "closing", "abandoned"],
-    debugging: ["executing", "abandoned"],
-    closing: ["abandoned"],
-    abandoned: []
-  };
-  return transitions[currentState] || [];
 }
 // src/features/state-manager.ts
 function createStateManager(config2 = { enabled: true }) {
+  const wf = createWorkflowManager(config2);
   return {
     name: "state_manager",
     config: config2,
@@ -14345,11 +14480,7 @@ function createStateManager(config2 = { enabled: true }) {
     },
     async getState(changeDir) {
       try {
-        const state = await readStateFile2(changeDir);
-        return {
-          success: true,
-          data: state
-        };
+        return await wf.getState(changeDir);
       } catch (error45) {
         return {
           success: false,
@@ -14359,13 +14490,7 @@ function createStateManager(config2 = { enabled: true }) {
     },
     async updateState(changeDir, updates) {
       try {
-        const currentState = await readStateFile2(changeDir);
-        const newState = { ...currentState, ...updates, updatedAt: new Date().toISOString() };
-        await writeStateFile(changeDir, newState);
-        return {
-          success: true,
-          data: newState
-        };
+        return await wf.transitionState(changeDir, updates.state || "exploring");
       } catch (error45) {
         return {
           success: false,
@@ -14375,12 +14500,12 @@ function createStateManager(config2 = { enabled: true }) {
     },
     async isContractApproved(changeDir) {
       try {
-        const state = await readStateFile2(changeDir);
+        const state = await wf.getState(changeDir);
+        if (!state.success)
+          return state;
         return {
           success: true,
-          data: {
-            approved: state.contractApproved || false
-          }
+          data: { approved: state.data?.contractApproved || false }
         };
       } catch (error45) {
         return {
@@ -14391,20 +14516,13 @@ function createStateManager(config2 = { enabled: true }) {
     },
     async approveContract(changeDir) {
       try {
-        const state = await readStateFile2(changeDir);
-        const newState = {
-          ...state,
-          contractApproved: true,
-          contractApprovedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        await writeStateFile(changeDir, newState);
+        const current = await wf.getState(changeDir);
+        if (!current.success)
+          return current;
+        const result = await wf.transitionState(changeDir, "approved-for-build");
         return {
-          success: true,
-          data: {
-            approved: true,
-            timestamp: new Date().toISOString()
-          }
+          success: result.success,
+          data: { approved: true, timestamp: new Date().toISOString() }
         };
       } catch (error45) {
         return {
@@ -14415,12 +14533,7 @@ function createStateManager(config2 = { enabled: true }) {
     },
     async isContractStale(changeDir) {
       try {
-        return {
-          success: true,
-          data: {
-            stale: false
-          }
-        };
+        return { success: true, data: { stale: false } };
       } catch (error45) {
         return {
           success: false,
@@ -14430,125 +14543,30 @@ function createStateManager(config2 = { enabled: true }) {
     }
   };
 }
-async function readStateFile2(changeDir) {
-  return {
-    state: "exploring",
-    mode: "full",
-    contractApproved: false,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-}
-async function writeStateFile(changeDir, state) {
-  console.log(`Writing state file in: ${changeDir}`, state);
-}
-// ../shared/src/deep-merge.js
-function deepMerge(target, source) {
-  const result = { ...target };
-  for (const key in source) {
-    if (Object.prototype.hasOwnProperty.call(source, key)) {
-      const sourceValue = source[key];
-      const targetValue = result[key];
-      if (isPlainObject2(sourceValue) && isPlainObject2(targetValue)) {
-        result[key] = deepMerge(targetValue, sourceValue);
-      } else if (sourceValue !== undefined) {
-        result[key] = sourceValue;
-      }
-    }
-  }
-  return result;
-}
-function isPlainObject2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-// ../shared/src/file-utils.js
-async function fileExists3(path) {
-  try {
-    const file2 = Bun.file(path);
-    return await file2.exists();
-  } catch {
-    return false;
-  }
-}
-async function readFile4(path) {
-  try {
-    const file2 = Bun.file(path);
-    if (await file2.exists()) {
-      return await file2.text();
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-async function writeFile(path, content) {
-  try {
-    await Bun.write(path, content);
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function listFiles3(dirPath, extension) {
-  try {
-    const dir = Bun.dir(dirPath);
-    const files = [];
-    for await (const file2 of dir) {
-      if (file2.isFile()) {
-        if (!extension || file2.name.endsWith(extension)) {
-          files.push(file2.name);
-        }
-      }
-    }
-    return files;
-  } catch {
-    return [];
-  }
-}
 // src/index.ts
 var PLUGIN_ID = "opencode-sflow";
 var PLUGIN_VERSION = "0.1.0";
 async function sflowPlugin(input, _options) {
-  const cascadedConfig = loadCascadedSFlowConfig();
+  const cascadedConfig = await loadCascadedSFlowConfig();
   const configOverrides = agentOverridesFromConfig(cascadedConfig);
   console.log(`[sFlow] Initializing in ${input.directory}`);
-  const AGENT_FACTORIES = {
-    sflow: { factory: createSFlowAgent, mode: "primary" },
-    "need-explorer": { factory: createNeedExplorerAgent, mode: "subagent" },
-    "spec-writer": { factory: createSpecWriterAgent, mode: "subagent" },
-    "contract-builder": { factory: createContractBuilderAgent, mode: "subagent" },
-    "build-executor": { factory: createBuildExecutorAgent, mode: "subagent" },
-    "bug-investigator": { factory: createBugInvestigatorAgent, mode: "subagent" },
-    "code-reviewer": { factory: createCodeReviewerAgent, mode: "subagent" },
-    "release-archivist": { factory: createReleaseArchivistAgent, mode: "subagent" },
-    "spec-merger": { factory: createSpecMergerAgent, mode: "subagent" }
-  };
-  const DEFAULT_MODELS = {
-    sflow: "deepseek-v4-flash",
-    "need-explorer": "kimi-k2.6",
-    "spec-writer": "glm-5.1",
-    "contract-builder": "glm-5",
-    "build-executor": "step-3.7-flash",
-    "bug-investigator": "minimax-m2.7",
-    "code-reviewer": "deepseek-v4-flash",
-    "release-archivist": "mimo-v2.5-pro",
-    "spec-merger": "mimo-v2.5"
-  };
+  const DEFAULT_MODELS2 = {};
+  for (const name of getAgentNames()) {
+    DEFAULT_MODELS2[name] = getDefaultModel(name);
+  }
   return {
     dispose: async () => {
       console.log("[sFlow] Plugin disposed");
     },
     config: async (cfg) => {
       cfg.agent = cfg.agent || {};
-      for (const [name, entry] of Object.entries(AGENT_FACTORIES)) {
+      for (const name of getAgentNames()) {
         const override = configOverrides[name];
-        const model = override?.model || DEFAULT_MODELS[name];
-        const agentConfig = entry.factory(model);
+        const model = override?.model || DEFAULT_MODELS2[name];
         cfg.agent[name] = {
           model,
-          mode: entry.mode,
-          description: agentConfig.name ? `${agentConfig.name} - sFlow workflow agent` : `sFlow workflow agent`,
-          prompt: agentConfig.instructions,
+          mode: getAgentMode(name),
+          description: `sFlow workflow agent`,
           ...override?.temperature ? { temperature: override.temperature } : {}
         };
       }
@@ -14601,9 +14619,9 @@ var sflowPluginModule = {
 var src_default = sflowPluginModule;
 export {
   writeFile,
-  readFile4 as readFile,
-  listFiles3 as listFiles,
-  fileExists3 as fileExists,
+  readFile,
+  listFiles,
+  fileExists,
   src_default as default,
   deepMerge,
   createWorkflowRouterTool,

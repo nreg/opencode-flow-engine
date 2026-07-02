@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { HookComposer, createHookComposer, getHookNames, hookExists } from './hook-composer.js';
 import type { HookHandler, HookResult } from './types.js';
+import { mkdtempSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 describe('Hook Composer', () => {
   let composer: HookComposer;
@@ -200,12 +203,13 @@ describe('Hook Composer', () => {
 
     it('should execute state_transition hook', async () => {
       composer.initialize();
+      const tmpDir = mkdtempSync(join(tmpdir(), 'sflow-hook-test-'));
       const result = await composer.executeHook('state_transition', {
-        changeDir: '/path/to/change',
+        changeDir: tmpDir,
         stateFile: '',
         pluginRoot: '',
         action: 'transition',
-        data: { oldState: 'specifying', newState: 'bridging' },
+        data: { newState: 'specifying' },
       });
       expect(result).toBeDefined();
       expect(result.success).toBe(true);

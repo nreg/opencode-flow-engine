@@ -14,7 +14,8 @@
     "@opencode-sflow/core": "workspace:*",
     "@opencode-sflow/shared": "workspace:*",
     "@opencode-ai/plugin": "latest",
-    "@opencode-ai/sdk": "latest"
+    "@opencode-ai/sdk": "latest",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0"

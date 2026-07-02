@@ -62,5 +62,10 @@ export declare const VALIDATION_MESSAGES: {
         readonly missingArtifact: "Required artifact is missing";
         readonly staleContract: "Execution contract is stale and needs regeneration";
     };
+    readonly design: {
+        readonly missingArchitecture: "Design must include architecture decisions";
+        readonly missingConstraints: "Design must include technical constraints";
+        readonly missingApproach: "Design must include implementation approach";
+    };
 };
 //# sourceMappingURL=constants.d.ts.map

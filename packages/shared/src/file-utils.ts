@@ -101,14 +101,12 @@ export async function writeJsonFile(path: string, data: unknown): Promise<boolea
 }
 
 /**
- * Ensure directory exists
+ * Ensure directory exists (creates parent directories if needed)
  */
 export async function ensureDir(dirPath: string): Promise<void> {
   try {
-    const dir = Bun.dir(dirPath);
-    if (!(await dir.exists())) {
-      await Bun.write(`${dirPath}/.gitkeep`, '');
-    }
+    const { mkdir } = await import('fs/promises');
+    await mkdir(dirPath, { recursive: true });
   } catch {
   }
 }
