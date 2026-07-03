@@ -4,7 +4,8 @@
  */
 
 // Schema types
-export type { Scenario, Requirement, Spec, DeltaOperationType, Rename, Delta, Change, WorkflowMode, WorkflowStateFile } from './schema/base.js';
+export type { Scenario, Requirement, Spec, DeltaOperationType, Rename, Delta, Change, WorkflowMode, WorkflowStateFile, WorkflowStateRecord } from './schema/base.js';
+export { isValidStateRecord } from './schema/base.js';
 export type { WorkflowState } from './constants.js';
 
 // Validation

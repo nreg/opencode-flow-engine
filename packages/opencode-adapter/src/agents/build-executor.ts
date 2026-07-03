@@ -4,10 +4,8 @@
  */
 
 import type { AgentConfig } from '@opencode-ai/sdk';
-import type { AgentFactory, AgentMode } from './types.js';
+import type { AgentFactory } from './types.js';
 import { getAgentTools } from './agent-tools.js';
-
-const MODE: AgentMode = 'subagent';
 
 /**
  * Create the build-executor agent configuration
@@ -92,4 +90,4 @@ You have access to:
   tools: getAgentTools('build-executor'),
 });
 
-createBuildExecutorAgent.mode = MODE;
+// Mode is managed by AGENT_MODES registry in agent-builder.ts

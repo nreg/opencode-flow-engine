@@ -30,7 +30,7 @@ export function createArtifactInspectorTool(): ToolDefinition {
         changeDir?: string;
         artifactType?: string;
       };
-      const resolvedDir = changeDir || context.changeDir;
+      const resolvedDir = changeDir || context.directory;
 
       try {
         const results: Record<string, unknown> = {};
@@ -83,20 +83,23 @@ export function createArtifactInspectorTool(): ToolDefinition {
         }
 
         const summary = generateInspectionSummary(results);
+        const recommendations = generateInspectionRecommendations(results);
 
         return {
-          success: true,
-          data: {
+          title: 'Artifact Inspector',
+          output: JSON.stringify({
             results,
             summary,
-            recommendations: generateInspectionRecommendations(results),
-          },
+            recommendations,
+          }),
         };
       } catch (error) {
         return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-          suggestions: ['Check file permissions', 'Verify directory structure'],
+          title: 'Artifact Inspector',
+          output: JSON.stringify({
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          }),
         };
       }
     },

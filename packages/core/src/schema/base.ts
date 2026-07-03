@@ -99,3 +99,33 @@ export interface WorkflowStateFile {
     lastTransition?: Date;
   };
 }
+
+/**
+ * Minimal runtime state shape used for file I/O.
+ * All fields optional since the file may be partially written.
+ */
+export interface WorkflowStateRecord {
+  state?: string;
+  mode?: string;
+  changeDir?: string;
+  dp0Confirmed?: boolean;
+  contractApproved?: boolean;
+  verificationStatus?: string;
+  dp_0_confirmed?: boolean;
+  dp_1_result?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Check if a raw JSON value conforms to WorkflowStateRecord shape.
+ * This is a runtime validation, not a TypeScript type guard for the full interface.
+ */
+export function isValidStateRecord(value: unknown): value is WorkflowStateRecord {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  if (record.state !== undefined && typeof record.state !== 'string') return false;
+  if (record.mode !== undefined && !['full', 'hotfix', 'tweak'].includes(record.mode as string)) return false;
+  return true;
+}

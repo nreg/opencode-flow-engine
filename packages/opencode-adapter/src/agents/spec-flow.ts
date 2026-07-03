@@ -4,10 +4,8 @@
  */
 
 import type { AgentConfig } from '@opencode-ai/sdk';
-import type { AgentFactory, AgentMode } from './types.js';
+import type { AgentFactory } from './types.js';
 import { getAgentTools } from './agent-tools.js';
-
-const MODE: AgentMode = 'primary';
 
 /**
  * Create the sflow agent configuration
@@ -113,4 +111,4 @@ When delegating, use \`call_omo_agent\` with the appropriate \`subagent_type\`.`
   tools: getAgentTools('sflow'),
 });
 
-createSFlowAgent.mode = MODE;
+// Mode is managed by AGENT_MODES registry in agent-builder.ts

@@ -4,10 +4,8 @@
  */
 
 import type { AgentConfig } from '@opencode-ai/sdk';
-import type { AgentFactory, AgentMode } from './types.js';
+import type { AgentFactory } from './types.js';
 import { getAgentTools } from './agent-tools.js';
-
-const MODE: AgentMode = 'subagent';
 
 /**
  * Create the spec-writer agent configuration
@@ -85,4 +83,4 @@ Use validation scripts to ensure quality.`,
   tools: getAgentTools('spec-writer'),
 });
 
-createSpecWriterAgent.mode = MODE;
+// Mode is managed by AGENT_MODES registry in agent-builder.ts

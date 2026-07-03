@@ -93,15 +93,19 @@ export async function directoryExists(dirPath: string): Promise<boolean> {
 }
 
 /**
- * Read and parse JSON file
+ * Read and parse JSON file.
+ * Returns { content: T } on success, null on file not found,
+ * throws on parse error to distinguish between "missing" and "corrupt".
  */
 export async function readJsonFile<T = Record<string, unknown>>(path: string): Promise<T | null> {
   const content = await readFile(path);
   if (!content) return null;
   try {
     return JSON.parse(content) as T;
-  } catch {
-    return null;
+  } catch (parseError) {
+    throw new Error(
+      `Failed to parse JSON file: ${path}. Reason: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+    );
   }
 }
 

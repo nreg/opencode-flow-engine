@@ -137,46 +137,7 @@ function isModelAvailable(model: string): boolean {
 }
 
 /**
- * Resolve model with fallback chain.
- *
- * Priority: override.model > model param > configModel > DEFAULT_MODELS[name]
- * If the resolved model is unavailable, try fallback_models in order:
- *   config fallback_models > DEFAULT_FALLBACKS[name]
- * Returns the first available model, or the last-resort default if all fail.
- */
-export function resolveModelWithFallback(
-  name: BuiltinAgentName,
-  model?: string,
-  configOverrides?: AgentOverrides,
-  overrides?: AgentOverrides,
-): string {
-  const programmaticModel = overrides?.[name]?.model;
-  const configModel = configOverrides?.[name]?.model;
-  const primary = programmaticModel || model || configModel || DEFAULT_MODELS[name];
-
-  if (isModelAvailable(primary)) {
-    return primary;
-  }
-
-  // Collect fallback list: config fallback_models first, then defaults
-  const configFallback = configOverrides?.[name]?.fallback_models;
-  const configFallbackList = normalizeFallbackList(configFallback);
-  const defaultFallbackList = DEFAULT_FALLBACKS[name] || [];
-  const fallbacks = [...configFallbackList, ...defaultFallbackList];
-
-  for (const fbModel of fallbacks) {
-    if (isModelAvailable(fbModel)) {
-      return fbModel;
-    }
-  }
-
-  // All fallbacks exhausted — return primary anyway (let the caller handle the error)
-  return primary;
-}
-
-/**
  * Normalize fallback_models to a flat string array.
- * The type allows string | (string | { model: string; variant?: string })[].
  */
 function normalizeFallbackList(
   fb: string | (string | { model: string; variant?: string })[] | undefined,
@@ -187,10 +148,73 @@ function normalizeFallbackList(
 }
 
 /**
- * Create an agent by name
- * Priority chain: AgentOverrides.model > model param > .sflow/config.json > DEFAULT_MODELS
- * Falls back through fallback_models if the resolved model is unavailable.
+ * Model resolution provenance — traces how a model was selected.
  */
+export type ModelProvenance =
+  | 'override'
+  | 'category-default'
+  | 'provider-fallback'
+  | 'system-default';
+
+/**
+ * Model resolution result with provenance tracking
+ */
+export interface ModelResolutionResult {
+  model: string;
+  provenance: ModelProvenance;
+  fallbackAttempted?: string[];
+}
+
+/**
+ * Resolve model with fallback chain and provenance tracking.
+ *
+ * Priority: override.model > model param > configModel > DEFAULT_MODELS[name]
+ * Provenance is tracked to help diagnose model selection issues.
+ */
+export function resolveModelWithFallback(
+  name: BuiltinAgentName,
+  model?: string,
+  configOverrides?: AgentOverrides,
+  overrides?: AgentOverrides,
+): ModelResolutionResult {
+  const programmaticModel = overrides?.[name]?.model;
+  const configModel = configOverrides?.[name]?.model;
+
+  if (programmaticModel) {
+    return { model: programmaticModel, provenance: 'override' };
+  }
+
+  if (model) {
+    return { model, provenance: 'override' };
+  }
+
+  if (configModel) {
+    if (isModelAvailable(configModel)) {
+      return { model: configModel, provenance: 'category-default' };
+    }
+  }
+
+  const configFallback = configOverrides?.[name]?.fallback_models;
+  const configFallbackList = normalizeFallbackList(configFallback);
+  const defaultFallbackList = DEFAULT_FALLBACKS[name] || [];
+  const fallbacks = [...configFallbackList, ...defaultFallbackList];
+
+  const attempted: string[] = [];
+  for (const fbModel of fallbacks) {
+    attempted.push(fbModel);
+    if (isModelAvailable(fbModel)) {
+      return { model: fbModel, provenance: 'provider-fallback', fallbackAttempted: attempted };
+    }
+  }
+
+  const systemDefault = DEFAULT_MODELS[name];
+  return {
+    model: systemDefault,
+    provenance: 'system-default',
+    fallbackAttempted: attempted.length > 0 ? attempted : undefined,
+  };
+}
+
 export async function createAgent(
   name: BuiltinAgentName,
   model?: string,
@@ -205,16 +229,13 @@ export async function createAgent(
   const config = await getCascadedConfig();
   const configOverrides = agentOverridesFromConfig(config);
 
-  // Merge config + programmatic overrides
   const merged = mergeOverrides(configOverrides, overrides || {});
   const agentOverride = merged[name];
 
-  // Resolve model with fallback chain
-  const resolvedModel = resolveModelWithFallback(name, model, configOverrides, overrides);
+  const resolved = resolveModelWithFallback(name, model, configOverrides, overrides);
 
-  const agentConfig = factory(resolvedModel);
+  const agentConfig = factory(resolved.model);
 
-  // Use skill content if provided (from unified SkillLoader)
   if (skillContent) {
     agentConfig.instructions = skillContent;
   }
@@ -223,7 +244,7 @@ export async function createAgent(
     return {
       ...agentConfig,
       ...agentOverride,
-      model: resolvedModel,
+      model: resolved.model,
       id: agentConfig.id,
       name: agentConfig.name,
     };
@@ -248,9 +269,9 @@ export async function createAllAgents(
   for (const name of Object.keys(AGENT_REGISTRY) as BuiltinAgentName[]) {
     const factory = AGENT_REGISTRY[name];
 
-    const resolvedModel = resolveModelWithFallback(name, model, configOverrides, overrides);
+    const resolved = resolveModelWithFallback(name, model, configOverrides, overrides);
 
-    const agentConfig = factory(resolvedModel);
+    const agentConfig = factory(resolved.model);
 
     // Use skill content from SkillLoader if available
     const content = skillContents?.[name];
@@ -265,7 +286,7 @@ export async function createAllAgents(
       agents[name] = {
         ...agentConfig,
         ...agentOverride,
-        model: resolvedModel,
+        model: resolved.model,
         id: agentConfig.id,
         name: agentConfig.name,
       };

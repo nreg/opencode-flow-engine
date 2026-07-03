@@ -6,7 +6,9 @@ import type { FeatureConfig, FeatureResult } from './types.js';
 import { isValidTransition } from '@opencode-sflow/core';
 import { readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir } from '@opencode-sflow/shared';
 
-const STATE_FILE = '.sflow/state.json';
+const SFLOW_DIR = '.sflow';
+const STATE_FILE = `${SFLOW_DIR}/state.json`;
+const ARCHIVE_DIR = `${SFLOW_DIR}/archive`;
 
 /**
  * Create the workflow manager feature
@@ -27,8 +29,7 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
 
     async startWorkflow(changeDir: string): Promise<FeatureResult> {
       try {
-        await createChangeDirectory(changeDir);
-        await initializeStateFile(changeDir);
+        await initializeState(changeDir);
 
         return {
           success: true,
@@ -96,7 +97,7 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
 
     async completeWorkflow(changeDir: string): Promise<FeatureResult> {
       try {
-        await archiveChange(changeDir);
+        await archiveWorkflow(changeDir);
 
         return {
           success: true,
@@ -115,22 +116,11 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
   };
 }
 
-async function createChangeDirectory(changeDir: string): Promise<void> {
-  const stateDir = `${changeDir}/.sflow`;
-  await ensureDir(stateDir);
-  await writeJsonFile(`${changeDir}/${STATE_FILE}`, {
-    state: 'exploring',
-    mode: 'full',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-}
-
-async function initializeStateFile(changeDir: string): Promise<void> {
+async function initializeState(changeDir: string): Promise<void> {
   const stateFile = `${changeDir}/${STATE_FILE}`;
-  const existing = await readJsonFile(stateFile);
+  const existing = await readJsonFile(stateFile).catch(() => null);
   if (!existing) {
-    await ensureDir(`${changeDir}/.sflow`);
+    await ensureDir(`${changeDir}/${SFLOW_DIR}`);
     await writeJsonFile(stateFile, {
       state: 'exploring',
       mode: 'full',
@@ -146,16 +136,18 @@ async function readStateFile(changeDir: string): Promise<{
   updatedAt: string;
   [key: string]: unknown;
 }> {
-  const state = await readJsonFile<{ state: string; mode: string; updatedAt: string; [key: string]: unknown }>(`${changeDir}/${STATE_FILE}`);
+  const state = await readJsonFile<{ state: string; mode: string; updatedAt: string; [key: string]: unknown }>(
+    `${changeDir}/${STATE_FILE}`,
+  ).catch(() => null);
   return state || { state: 'exploring', mode: 'full', updatedAt: new Date().toISOString() };
 }
 
 async function updateStateFile(changeDir: string, state: Record<string, unknown>): Promise<void> {
+  await ensureDir(`${changeDir}/${SFLOW_DIR}`);
   await atomicWriteJsonFile(`${changeDir}/${STATE_FILE}`, state);
 }
 
-async function archiveChange(changeDir: string): Promise<void> {
-  const archiveDir = `${changeDir}/.sflow/archive`;
-  await ensureDir(archiveDir);
-  await Bun.write(`${archiveDir}/archived-at.txt`, new Date().toISOString());
+async function archiveWorkflow(changeDir: string): Promise<void> {
+  await ensureDir(`${changeDir}/${ARCHIVE_DIR}`);
+  await Bun.write(`${changeDir}/${ARCHIVE_DIR}/archived-at.txt`, new Date().toISOString());
 }

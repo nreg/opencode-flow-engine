@@ -47,7 +47,7 @@ export function createPreProcessHook(): HookHandler {
 export function createPostProcessHook(): HookHandler {
   return {
     name: 'post_process',
-    description: 'Transform agent responses before returning to user',
+    description: 'Detect state transitions from agent responses and trigger state_transition hook',
     execute: async (context: HookContext): Promise<HookResult> => {
       const { changeDir, data } = context;
 
@@ -65,6 +65,18 @@ export function createPostProcessHook(): HookHandler {
       const currentState = (await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`))?.state;
 
       if (detectedState !== currentState) {
+        // Trigger state_transition hook directly from here, since this hook
+        // runs after tool.execute.after and is the last chance to detect transitions.
+        const { createStateTransitionHook } = await import('./state-transition.js');
+        const transitionHook = createStateTransitionHook();
+        await transitionHook.execute({
+          changeDir,
+          stateFile: `${changeDir}/.sflow/state.json`,
+          pluginRoot: context.pluginRoot,
+          action: 'state-transition',
+          data: { newState: detectedState },
+        });
+
         return {
           success: true,
           data: {

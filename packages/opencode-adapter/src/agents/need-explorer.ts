@@ -4,10 +4,8 @@
  */
 
 import type { AgentConfig } from '@opencode-ai/sdk';
-import type { AgentFactory, AgentMode } from './types.js';
+import type { AgentFactory } from './types.js';
 import { getAgentTools } from './agent-tools.js';
-
-const MODE: AgentMode = 'subagent';
 
 /**
  * Create the need-explorer agent configuration
@@ -64,4 +62,4 @@ Use these to understand the current context before asking questions.`,
   tools: getAgentTools('need-explorer'),
 });
 
-createNeedExplorerAgent.mode = MODE;
+// Mode is managed by AGENT_MODES registry in agent-builder.ts

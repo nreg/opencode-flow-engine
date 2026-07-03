@@ -20,7 +20,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
       },
     },
     execute: async (params, context) => {
-      const changeDir = (params as { changeDir?: string }).changeDir || context.changeDir;
+      const changeDir = (params as { changeDir?: string }).changeDir || context.directory;
 
       try {
         // Check for planning artifacts
@@ -67,19 +67,25 @@ export function createWorkflowRouterTool(): ToolDefinition {
         }
 
         return {
-          success: true,
-          data: {
-            state,
-            skill,
-            reasons,
-            artifacts,
-          },
+          title: 'Workflow Router',
+          output: JSON.stringify({
+            success: true,
+            data: {
+              state,
+              skill,
+              reasons,
+              artifacts,
+            },
+          }),
         };
       } catch (error) {
         return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-          suggestions: ['Check if the change directory exists', 'Verify file permissions'],
+          title: 'Workflow Router',
+          output: JSON.stringify({
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+            suggestions: ['Check if the change directory exists', 'Verify file permissions'],
+          }),
         };
       }
     },

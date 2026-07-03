@@ -22,37 +22,40 @@ export function createContractValidatorTool(): ToolDefinition {
       },
     },
     execute: async (params, context) => {
-      const changeDir = (params as { changeDir?: string }).changeDir || context.changeDir;
+      const changeDir = (params as { changeDir?: string }).changeDir || context.directory;
 
       try {
         const contractContent = await readFile(`${changeDir}/execution-contract.md`);
         if (!contractContent) {
           return {
-            success: true,
-            data: {
+            title: 'Contract Validator',
+            output: JSON.stringify({
               validation: { valid: false, issues: [], summary: { errors: 0, warnings: 0, info: 0 } },
               isStale: false,
               recommendations: ['execution-contract.md not found - run contract-builder to create the contract'],
-            },
+            }),
           };
         }
 
         const report = sharedValidator.validateExecutionContract(contractContent);
         const isStale = await checkContractStaleness(changeDir);
 
+        const recommendations: string[] = [];
+        if (isStale) recommendations.push('Contract is stale - regenerate with contract-builder');
+        if (!report.valid) recommendations.push('Fix validation errors before proceeding');
+        report.issues.filter(i => i.level === 'ERROR').forEach(i => recommendations.push(`Fix: ${i.message}`));
+
         return {
-          success: true,
-          data: {
-            validation: report,
-            isStale,
-            recommendations: generateRecommendations(report, isStale),
-          },
+          title: 'Contract Validator',
+          output: JSON.stringify({ validation: report, isStale, recommendations }),
         };
       } catch (error) {
         return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-          suggestions: ['Check file permissions', 'Verify file format'],
+          title: 'Contract Validator',
+          output: JSON.stringify({
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          }),
         };
       }
     },

@@ -52,3 +52,8 @@ export type {
   AgentOverrideConfig,
   AgentOverrides,
 } from './types.js';
+
+export type {
+  ModelProvenance,
+  ModelResolutionResult,
+} from './agent-builder.js';

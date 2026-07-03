@@ -56,18 +56,16 @@ export class ToolRegistry {
   ): Promise<ToolResult> {
     const tool = this.getTool(name);
     if (!tool) {
-      return {
-        success: false,
-        error: `Tool not found or disabled: ${name}`,
-      };
+      return { title: 'Tool Registry', output: `Tool not found or disabled: ${name}` };
     }
 
     try {
-      return await tool.execute(params, context);
+      const result = await tool.execute(params, context);
+      return result;
     } catch (error) {
       return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
+        title: 'Tool Registry',
+        output: error instanceof Error ? error.message : String(error),
       };
     }
   }

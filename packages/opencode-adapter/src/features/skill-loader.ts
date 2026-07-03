@@ -292,8 +292,67 @@ export async function createSkillLoader(skillsDir?: string): Promise<SkillLoader
  * Parse skill metadata from content
  */
 export function parseSkillMetadata(content: string): SkillMetadata {
-  const loader = new SkillLoader();
-  return loader['parseMetadata'](content);
+  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!frontmatterMatch) {
+    return { name: 'unknown', description: '' };
+  }
+
+  const frontmatterRaw = frontmatterMatch[1];
+  if (!frontmatterRaw) {
+    return { name: '', description: '' };
+  }
+
+  const metadata: SkillMetadata = {
+    name: '',
+    description: '',
+  };
+
+  try {
+    const parsed = yaml.load(frontmatterRaw) as Record<string, unknown> | undefined;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      if (typeof parsed.name === 'string') metadata.name = parsed.name;
+      if (typeof parsed.description === 'string') metadata.description = parsed.description;
+      if (typeof parsed.version === 'string') metadata.version = parsed.version;
+      if (typeof parsed.author === 'string') metadata.author = parsed.author;
+      if (Array.isArray(parsed.tags)) {
+        metadata.tags = parsed.tags.map(t => String(t).trim()).filter(Boolean);
+      } else if (typeof parsed.tags === 'string') {
+        metadata.tags = parsed.tags.split(',').map(t => t.trim()).filter(Boolean);
+      }
+      if (parsed.mcp && typeof parsed.mcp === 'object' && !Array.isArray(parsed.mcp)) {
+        metadata.mcp = parsed.mcp as McpConfig;
+      }
+    }
+  } catch {
+    // Fallback to simple regex-based parsing if YAML fails
+    const lines = frontmatterRaw.split('\n');
+    for (const line of lines) {
+      const match = line.match(/^(\w+):\s*(.+)$/);
+      if (match && match[1] && match[2]) {
+        const key = match[1];
+        const value = match[2];
+        switch (key) {
+          case 'name':
+            if (!metadata.name) metadata.name = value;
+            break;
+          case 'description':
+            if (!metadata.description) metadata.description = value;
+            break;
+          case 'version':
+            if (!metadata.version) metadata.version = value;
+            break;
+          case 'author':
+            if (!metadata.author) metadata.author = value;
+            break;
+          case 'tags':
+            if (!metadata.tags) metadata.tags = value.split(',').map(t => t.trim());
+            break;
+        }
+      }
+    }
+  }
+
+  return metadata;
 }
 
 /**

@@ -7,7 +7,8 @@ import type { McpServer } from './skill-loader.js';
 
 /**
  * Allowed executable names for MCP server commands.
- * Blocks arbitrary command injection from config files.
+ * Only known-safe runtimes and package runners are allowed.
+ * Relative paths must start with ./ and resolve to an existing file.
  */
 const ALLOWED_MCP_COMMANDS = new Set([
   'node', 'bun', 'deno', 'python', 'python3',
@@ -61,17 +62,40 @@ export class McpManager {
 
     // Validate command against allowlist
     const cmdName = config.command.split(/[/\\]/).pop() || config.command;
-    if (!ALLOWED_MCP_COMMANDS.has(cmdName) && !cmdName.startsWith('.')) {
+    const isAllowedCommand = ALLOWED_MCP_COMMANDS.has(cmdName);
+    const isExplicitRelativePath = config.command.startsWith('./') || config.command.startsWith('.\\');
+    if (!isAllowedCommand && !isExplicitRelativePath) {
       const instance: McpServerInstance = {
         name,
         command: config.command,
         args: config.args,
         env: config.env,
         state: 'error',
-        error: `Command "${cmdName}" not in allowed list and is not a relative path`,
+        error: `Command "${cmdName}" not in allowed list and is not a relative path (./...). Allowed: ${[...ALLOWED_MCP_COMMANDS].join(', ')}`,
       };
       this.servers.set(serverKey, instance);
       return instance;
+    }
+
+    // For relative paths, verify the resolved path exists as a file
+    if (isExplicitRelativePath) {
+      try {
+        const { access } = await import('fs/promises');
+        const { resolve } = await import('path');
+        const resolvedPath = resolve(config.command);
+        await access(resolvedPath);
+      } catch {
+        const instance: McpServerInstance = {
+          name,
+          command: config.command,
+          args: config.args,
+          env: config.env,
+          state: 'error',
+          error: `Relative command path does not exist or is not accessible: "${config.command}"`,
+        };
+        this.servers.set(serverKey, instance);
+        return instance;
+      }
     }
 
     const instance: McpServerInstance = {
@@ -94,7 +118,7 @@ export class McpManager {
     try {
       const proc = Bun.spawn([config.command, ...(config.args || [])], {
         env: { ...process.env, ...config.env },
-        stdio: ['pipe', 'ignore', 'ignore'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
 
       instance.pid = proc.pid;
@@ -102,10 +126,16 @@ export class McpManager {
       const processHandle = { proc, exited: false };
       this.processes.set(serverKey, processHandle);
 
+      // Read initial stdout/stderr to detect startup errors
+      const stdoutReader = proc.stdout.getReader();
+      const stderrReader = proc.stderr.getReader();
+      const startupOutput: string[] = [];
+      const startupErrors: string[] = [];
+
       const timeout = options?.startupTimeout ?? DEFAULT_STARTUP_TIMEOUT;
       const deadline = Date.now() + timeout;
 
-      // Check process health
+      // Check process health during startup window
       while (Date.now() < deadline) {
         if (proc.exitCode !== null) {
           instance.state = 'error';
@@ -114,12 +144,32 @@ export class McpManager {
           return instance;
         }
 
-        // Give the process a moment to settle
-        await Bun.sleep(50);
+        // Read available stdout/stderr without blocking
+        const stdoutResult = await Promise.race([
+          stdoutReader.read().catch(() => ({ done: true, value: undefined })),
+          Bun.sleep(50).then(() => ({ done: false, value: undefined })),
+        ]);
+        if (stdoutResult.value) {
+          startupOutput.push(new TextDecoder().decode(stdoutResult.value));
+        }
+
+        const stderrResult = await Promise.race([
+          stderrReader.read().catch(() => ({ done: true, value: undefined })),
+          Bun.sleep(50).then(() => ({ done: false, value: undefined })),
+        ]);
+        if (stderrResult.value) {
+          startupErrors.push(new TextDecoder().decode(stderrResult.value));
+        }
+
+        // Check if process is still alive
         if (proc.exitCode === null) {
           break;
         }
       }
+
+      // Release readers after startup check
+      stdoutReader.releaseLock();
+      stderrReader.releaseLock();
 
       if (proc.exitCode !== null) {
         instance.state = 'error';

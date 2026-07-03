@@ -11,11 +11,11 @@ import type { AgentConfig } from '@opencode-ai/sdk';
 export type AgentMode = 'primary' | 'subagent' | 'all';
 
 /**
- * Agent factory function with static mode property
+ * Agent factory function.
+ * Mode is managed by AGENT_MODES registry in agent-builder.ts,
+ * not as a static property on the function object.
  */
-export type AgentFactory = ((model: string, skillContent?: string) => AgentConfig) & {
-  mode: AgentMode;
-};
+export type AgentFactory = (model: string, skillContent?: string) => AgentConfig;
 
 /**
  * Agent category for grouping in prompt sections

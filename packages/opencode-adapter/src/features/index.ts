@@ -12,6 +12,5 @@ export { createWorkflowManager } from './workflow-manager.js';
 export { createStateManager } from './state-manager.js';
 export {
   BuiltinMcpRegistry,
-  createValidatorMcpServer,
+  createValidatorTools,
 } from './builtin-mcp.js';
-export type { BuiltinMcpServer } from './builtin-mcp.js';

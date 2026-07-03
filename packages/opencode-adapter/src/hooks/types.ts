@@ -3,7 +3,7 @@
  */
 
 /**
- * Available hook names (extensible for custom hooks)
+ * Available hook names
  */
 export type HookName =
   | 'state_transition'
@@ -13,8 +13,7 @@ export type HookName =
   | 'session_end'
   | 'pre_process'
   | 'post_process'
-  | 'continuation'
-  | (string & {});
+  | 'continuation';
 
 /**
  * Hook handler interface
