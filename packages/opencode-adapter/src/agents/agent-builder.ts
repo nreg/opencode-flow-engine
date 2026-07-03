@@ -28,7 +28,7 @@ import {
  * This avoids the unsafe pattern of assigning .mode to a function object
  */
 const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
-  sflow: 'primary',
+  sFlow: 'primary',
   'need-explorer': 'subagent',
   'spec-writer': 'subagent',
   'contract-builder': 'subagent',
@@ -44,7 +44,7 @@ const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
  * 国产模型默认配置
  */
 const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
-  sflow: 'deepseek-v4-flash',
+  sFlow: 'deepseek-v4-flash',
   'need-explorer': 'kimi-k2.6',
   'spec-writer': 'glm-5.1',
   'contract-builder': 'glm-5',
@@ -60,7 +60,7 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
  * When the primary model is unavailable, try these in order
  */
 const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
-  sflow: ['glm-5.1', 'kimi-k2.6'],
+  sFlow: ['glm-5.1', 'kimi-k2.6'],
   'need-explorer': ['glm-5.1', 'deepseek-v4-flash'],
   'spec-writer': ['kimi-k2.6', 'deepseek-v4-flash'],
   'contract-builder': ['glm-5.1', 'deepseek-v4-flash'],
@@ -75,7 +75,7 @@ const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
  * Agent registry with factory functions
  */
 const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
-  sflow: createSFlowAgent,
+  sFlow: createSFlowAgent,
   'need-explorer': createNeedExplorerAgent,
   'spec-writer': createSpecWriterAgent,
   'contract-builder': createContractBuilderAgent,

@@ -75,7 +75,7 @@ export interface AgentPromptMetadata {
  * Built-in agent names for sFlow
  */
 export type BuiltinAgentName =
-  | 'sflow'              // Main orchestrator (primary)
+  | 'sFlow'              // Main orchestrator (primary)
   | 'need-explorer'      // Requirement clarification (subagent)
   | 'spec-writer'        // Artifact generation (subagent)
   | 'contract-builder'   // Bridge contract (subagent)

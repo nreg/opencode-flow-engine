@@ -15,10 +15,10 @@ import {
 describe('Agent Builder', () => {
   describe('createAgent', () => {
     it('should create sFlow agent', async () => {
-      const agent = await createAgent('sflow', 'gpt-5.5');
+      const agent = await createAgent('sFlow', 'gpt-5.5');
       expect(agent).toBeDefined();
-      expect(agent.id).toBe('sflow');
-      expect(agent.name).toBe('sFlow');
+      expect(agent.id).toBe('sFlow');
+      expect(agent.name).toBe('SFlow');
       expect(agent.model).toBe('gpt-5.5');
     });
 
@@ -80,7 +80,7 @@ describe('Agent Builder', () => {
     });
 
     it('should use default model when not specified', async () => {
-      const agent = await createAgent('sflow');
+      const agent = await createAgent('sFlow');
       expect(agent.model).toBe('deepseek-v4-flash');
     });
   });
@@ -94,7 +94,7 @@ describe('Agent Builder', () => {
 
     it('should have all required agents', async () => {
       const agents = await createAllAgents();
-      expect(agents.sflow).toBeDefined();
+      expect(agents.sFlow).toBeDefined();
       expect(agents['need-explorer']).toBeDefined();
       expect(agents['spec-writer']).toBeDefined();
       expect(agents['contract-builder']).toBeDefined();
@@ -107,7 +107,7 @@ describe('Agent Builder', () => {
 
     it('should use specified model for all agents', async () => {
       const agents = await createAllAgents('gpt-5.5');
-      expect(agents.sflow.model).toBe('gpt-5.5');
+      expect(agents.sFlow.model).toBe('gpt-5.5');
       expect(agents['need-explorer'].model).toBe('gpt-5.5');
       expect(agents['spec-writer'].model).toBe('gpt-5.5');
     });
@@ -115,10 +115,10 @@ describe('Agent Builder', () => {
 
   describe('getAgent', () => {
     it('should return factory for sFlow agent', () => {
-      const factory = getAgent('sflow');
+      const factory = getAgent('sFlow');
       expect(factory).toBeDefined();
       // Mode is managed by AGENT_MODES registry, tested via getAgentMode()
-      expect(getAgentMode('sflow')).toBe('primary');
+      expect(getAgentMode('sFlow')).toBe('primary');
     });
 
     it('should return factory for need-explorer agent', () => {
@@ -136,7 +136,7 @@ describe('Agent Builder', () => {
   describe('getAgentNames', () => {
     it('should return all agent names', () => {
       const names = getAgentNames();
-      expect(names).toContain('sflow');
+      expect(names).toContain('sFlow');
       expect(names).toContain('need-explorer');
       expect(names).toContain('spec-writer');
       expect(names).toContain('contract-builder');
@@ -151,7 +151,7 @@ describe('Agent Builder', () => {
 
   describe('getAgentMode', () => {
     it('should return primary for sFlow', () => {
-      expect(getAgentMode('sflow')).toBe('primary');
+      expect(getAgentMode('sFlow')).toBe('primary');
     });
 
     it('should return subagent for other agents', () => {
@@ -170,7 +170,7 @@ describe('Agent Builder', () => {
     it('should return only sFlow as primary', () => {
       const primaries = getPrimaryAgents();
       expect(primaries).toHaveLength(1);
-      expect(primaries).toContain('sflow');
+      expect(primaries).toContain('sFlow');
     });
   });
 
@@ -186,13 +186,13 @@ describe('Agent Builder', () => {
       expect(subagents).toContain('code-reviewer');
       expect(subagents).toContain('release-archivist');
       expect(subagents).toContain('spec-merger');
-      expect(subagents).not.toContain('sflow');
+      expect(subagents).not.toContain('sFlow');
     });
   });
 
   describe('agentExists', () => {
     it('should return true for existing agents', () => {
-      expect(agentExists('sflow')).toBe(true);
+      expect(agentExists('sFlow')).toBe(true);
       expect(agentExists('need-explorer')).toBe(true);
       expect(agentExists('spec-writer')).toBe(true);
     });
@@ -205,7 +205,7 @@ describe('Agent Builder', () => {
 
   describe('getDefaultModel', () => {
     it('should return default model for sFlow', () => {
-      const model = getDefaultModel('sflow');
+      const model = getDefaultModel('sFlow');
       expect(model).toBe('deepseek-v4-flash');
     });
 
@@ -219,7 +219,7 @@ describe('Agent Builder', () => {
     it('should return models for all agents', () => {
       const models = getAllDefaultModels();
       expect(Object.keys(models)).toHaveLength(9);
-      expect(models.sflow).toBe('deepseek-v4-flash');
+      expect(models.sFlow).toBe('deepseek-v4-flash');
       expect(models['need-explorer']).toBe('kimi-k2.6');
       expect(models['spec-writer']).toBe('glm-5.1');
     });
@@ -227,20 +227,20 @@ describe('Agent Builder', () => {
 
   describe('Agent Configuration', () => {
     it('should have valid instructions', async () => {
-      const agent = await createAgent('sflow');
+      const agent = await createAgent('sFlow');
       expect(agent.instructions).toBeDefined();
       expect(agent.instructions.length).toBeGreaterThan(0);
     });
 
     it('should have valid temperature', async () => {
-      const agent = await createAgent('sflow');
+      const agent = await createAgent('sFlow');
       expect(agent.temperature).toBeDefined();
       expect(agent.temperature).toBeGreaterThanOrEqual(0);
       expect(agent.temperature).toBeLessThanOrEqual(1);
     });
 
     it('should have valid tools configuration', async () => {
-      const agent = await createAgent('sflow');
+      const agent = await createAgent('sFlow');
       expect(agent.tools).toBeDefined();
       expect(typeof agent.tools).toBe('object');
     });

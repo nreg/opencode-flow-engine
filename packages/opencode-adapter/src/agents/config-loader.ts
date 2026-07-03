@@ -90,7 +90,7 @@ export async function loadCascadedSFlowConfig(projectDir?: string): Promise<SFlo
  * Known built-in agent names
  */
 const BUILTIN_AGENTS: BuiltinAgentName[] = [
-  'sflow',
+  'sFlow',
   'need-explorer',
   'spec-writer',
   'contract-builder',

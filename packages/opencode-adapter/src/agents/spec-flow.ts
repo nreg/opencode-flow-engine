@@ -11,7 +11,7 @@ import { getAgentTools } from './agent-tools.js';
  * Create the sflow agent configuration
  */
 export const createSFlowAgent: AgentFactory = (model: string): AgentConfig => ({
-  id: 'sflow',
+  id: 'sFlow',
   name: 'SFlow',
   model,
   instructions: `<Role>
@@ -108,7 +108,7 @@ Always start your response with:
 
 When delegating, use \`call_omo_agent\` with the appropriate \`subagent_type\`.`,
       temperature: 0.6,
-  tools: getAgentTools('sflow'),
+  tools: getAgentTools('sFlow'),
 });
 
 // Mode is managed by AGENT_MODES registry in agent-builder.ts

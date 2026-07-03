@@ -13,7 +13,7 @@ const COMMON_TOOLS = {
 
 export const AGENT_TOOLS: Record<string, AgentTools> = {
   /** Main orchestrator - needs delegation tools */
-  sflow: {
+  sFlow: {
     ...COMMON_TOOLS,
     write: false,
     edit: false,

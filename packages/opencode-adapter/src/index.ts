@@ -466,7 +466,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
               sessionID: '',
               role: 'user',
               time: { created: Date.now() },
-              agent: 'sflow',
+              agent: 'sFlow',
               model: { providerID: '', modelID: '' },
             } satisfies Message,
             parts: [{
