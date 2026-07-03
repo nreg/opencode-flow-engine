@@ -84,13 +84,11 @@ async function updateState(changeDir: string, newState: string): Promise<void> {
   if (existing) {
     state = existing;
   } else {
-    state = { mode: 'full', createdAt: now, timestamps: { createdAt: now, updatedAt: now } };
+    state = { state: 'exploring', mode: 'full', artifacts_hash: '', contract_hash: '', batches_completed: 0, dp_0_confirmed: false, contractApproved: false, verificationStatus: 'pending', createdAt: now, updatedAt: now };
     await ensureDir(`${changeDir}/.sflow`);
   }
   state.state = newState;
   state.updatedAt = now;
-  if (!state.timestamps) state.timestamps = {};
-  (state.timestamps as Record<string, string>).lastTransition = now;
-  (state.timestamps as Record<string, string>).updatedAt = now;
+  
   await writeJsonFile(`${changeDir}/${STATE_FILE_PATH}`, state);
 }

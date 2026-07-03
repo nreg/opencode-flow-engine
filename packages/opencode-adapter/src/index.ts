@@ -57,11 +57,12 @@ import { sharedValidator } from '@opencode-sflow/core';
 import { fileExists as sflowFileExists, directoryExists, readFile as sflowReadFile } from '@opencode-sflow/shared';
 import { isContractStale } from '@opencode-sflow/shared';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
+import { createValidatorTools } from './features/builtin-mcp.js';
 
 export const PLUGIN_ID = 'opencode-sflow';
 export const PLUGIN_VERSION = '0.1.0';
 
-const SFLOW_TOOLS = new Set(['workflow_router', 'contract_validator', 'artifact_inspector']);
+const SFLOW_TOOLS = new Set(['workflow_router', 'contract_validator', 'artifact_inspector', 'validate_spec', 'validate_proposal', 'validate_delta_spec', 'validate_tasks', 'validate_contract', 'validate_design', 'validate_implementation', 'detect_sync_conflicts']);
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -278,10 +279,19 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
 
   // Build tool definitions using @opencode-ai/plugin format
   const tools = createSFlowTools(workDir);
+  const validatorTools = createValidatorTools();
+  Object.assign(tools, validatorTools);
 
   return {
     dispose: async () => {
       console.log('[sFlow] Plugin disposed');
+      for (const [name, server] of mcpManager.getRunningServers().entries()) {
+        try {
+          await mcpManager.stopServer(name);
+        } catch (err) {
+          console.warn(`[sFlow] Failed to stop MCP server ${name}: `, err);
+        }
+      }
     },
 
     // event hook: session lifecycle events (S14 fix)
