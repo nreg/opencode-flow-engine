@@ -1,62 +1,207 @@
 ---
 name: release-archivist
-description: Verify completion and archive changes. Invoke when implementation is complete and verification is done.
+description: Close out a sflow change with verification, summary, and archive readiness. Invoke when implementation is complete, verification is underway, or the user asks for a final wrap-up.
 ---
 
 # Release Archivist
 
-This skill verifies completion and archives changes.
+Use this skill to finish a `sflow` change cleanly.
 
 ## Use This Skill When
 
-Invoke this skill when:
+Invoke this skill when the user says things like:
 
-- implementation is complete
-- verification is complete or nearly complete
-- the user wants a final summary, archive, or wrap-up
+- "wrap this up"
+- "give me the final summary"
+- "is this ready to close"
+- "what remains before we ship"
+- "prepare the handoff"
 
-## Verification Before Completion Iron Law
+## The Iron Law: Verification Before Completion
 
-**NO COMPLETION CLAIMS WITHOUT FRESH EVIDENCE**
+```
+NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE
+```
 
-### Required Evidence
-1. All tests pass
-2. All tasks marked complete
-3. Spec compliance verified
-4. Code review passed
+Claiming work is complete without verification is dishonesty, not efficiency.
 
-### Verification Process
-1. Run full test suite
-2. Read test output
-3. Confirm all tests pass
-4. Check task completion in tasks.md
-5. Verify spec compliance
+**Violating the letter of this rule is violating the spirit of this rule.**
 
-## Closure Process
+If you haven't run the verification command in this session, you cannot claim anything passes.
 
-### 1. Verify All Tasks Complete
-- Check tasks.md for unchecked items
-- Verify each task has evidence
-- Confirm no pending work
+### The Gate Function
 
-### 2. Run Final Tests
-- Execute full test suite
-- Verify all tests pass
-- Check for regressions
+```
+BEFORE claiming any status or expressing satisfaction:
 
-### 3. Generate Verification Report
-- Document verification results
-- List any issues found
-- Provide risk summary
+1. IDENTIFY: What command proves this claim?
+2. RUN: Execute the FULL command (fresh, complete)
+3. READ: Full output, check exit code, count failures
+4. VERIFY: Does output confirm the claim?
+   - If NO: State actual status with evidence
+   - If YES: State claim WITH evidence
+5. ONLY THEN: Make the claim
 
-### 4. Archive Change
-- Move change to archive directory
-- Update status to archived
-- Generate archive metadata
+Skip any step = lying, not verifying
+```
 
-## Guardrails
+### Forbidden Words
 
-- Do NOT archive incomplete changes
-- Do NOT skip test verification
-- Do NOT archive without evidence
-- Do NOT skip verification report
+These words MUST NOT appear in your output until AFTER verification evidence is presented:
+
+- "should" (as in "tests should pass")
+- "probably" (as in "it probably works")
+- "seems to" (as in "it seems to be done")
+- "Great!" / "Perfect!" / "Done!" (before verification output)
+- Any expression of satisfaction without evidence
+
+### Rationalization Prevention
+
+| Excuse | Reality |
+|--------|---------|
+| "Should work now" | RUN the verification |
+| "I'm confident" | Confidence ≠ evidence |
+| "Just this once" | No exceptions |
+| "Linter passed" | Linter ≠ compiler |
+| "Partial check is enough" | Partial proves nothing |
+| "Different words so rule doesn't apply" | Spirit over letter |
+
+## Verification Evidence Requirements
+
+| Claim | Requires | Not Sufficient |
+|-------|----------|----------------|
+| Tests pass | Test command output: 0 failures | Previous run, "should pass" |
+| Linter clean | Linter output: 0 errors | Partial check, extrapolation |
+| Build succeeds | Build command: exit 0 | Linter passing, logs look good |
+| Bug fixed | Test original symptom: passes | Code changed, assumed fixed |
+| Regression test works | Red-green cycle verified | Test passes once |
+| Requirements met | Line-by-line checklist | Tests passing |
+
+## Responsibilities
+
+1. verify that the approved behavior was actually implemented
+2. summarize what changed
+3. identify remaining risks or follow-up work
+4. prepare the change for archive or handoff
+5. check for delta specs that need syncing
+
+## Required Inputs
+
+Read:
+
+- `execution-contract.md`
+- `tasks.md`
+- relevant `specs/`
+- change summary notes, if any
+
+## Verification Steps
+
+### Step 1: Test Suite Verification (Correctness)
+
+Run the full test suite. Record:
+- Total tests, passed, failed, skipped
+- Zero failures required for PASS
+- Any failure = CRITICAL finding in Correctness dimension
+
+### Step 2: Completeness Verification
+
+Compare the execution contract's task batches against the actual diff:
+1. List all tasks from the execution contract
+2. For each task, verify a corresponding code change exists in the diff
+3. For each SHALL/MUST requirement in specs, verify at least one implementation artifact
+4. Missing items = CRITICAL findings in Completeness dimension
+
+### Step 3: Coherence Verification
+
+Compare design.md decisions against the implementation:
+1. Extract each decision's Choice from design.md
+2. Verify the choice is reflected in the code (naming, patterns, architecture)
+3. Check naming consistency between specs and implementation
+4. Inconsistencies = IMPORTANT findings in Coherence dimension
+
+### Step 4: Unintended Scope Detection
+
+Check the diff for unplanned changes:
+- Files modified that are not in the execution contract's scope fence
+- New dependencies added that are not in the design's constraints
+- Unplanned changes = WARN findings in Completeness dimension
+
+### Step 5: Verification Report
+
+Produce a structured report:
+
+| Dimension | Status | Findings |
+|-----------|--------|----------|
+| Completeness | PASS/FAIL/WARN | [list] |
+| Correctness | PASS/FAIL/WARN | [list] |
+| Coherence | PASS/FAIL/WARN | [list] |
+
+**Overall verdict**: PASS (all PASS) / CONDITIONAL (WARN only) / FAIL (any FAIL)
+
+If FAIL → do not claim completion. Fix issues or route back to build-executor.
+If CONDITIONAL → present WARN findings to user, proceed only with explicit acceptance.
+If PASS → proceed to final checks.
+
+## Final Checks
+
+- Are required tests passing? (cite the command and output)
+- Are execution batches complete? (cite batch-by-batch status)
+- Was any scope added without artifact updates? (cite specific files if yes)
+- Are there unresolved blockers or known risks?
+- Is the change ready to archive, or should it remain active?
+- Do delta specs exist that need merging into main specs?
+- **Has `artifact_inspector` been run?** If not, run it now and include the decision-point audit in the archive.
+
+## Decision-Point Audit Report
+
+Before final closure, use `artifact_inspector` to verify the change directory's planning artifacts for completeness and consistency.
+
+This generates a decision-point audit from `.sflow/state.json`. Include this report in the archive so the full decision history is preserved.
+
+- If the audit report is missing, prompt the user to run `artifact_inspector` before DP-7 confirmation.
+- The audit is read-only and safe to run multiple times.
+
+## Output
+
+1. Verification report table (three dimensions with status and findings)
+2. Overall verdict
+3. If PASS: summary of all contract obligations met
+4. If CONDITIONAL: list of accepted warnings
+5. Risks and follow-ups
+6. Archive readiness assessment
+
+## Archive Rule
+
+Do not archive blindly.
+
+If implementation diverged from the contract, return to `bridging` before closure.
+
+## Post-Verification Routing
+
+After verification completes:
+
+1. Update `.sflow/state.json` with `state: closing` and record the transition timestamp
+2. If delta specs were created, route to `spec-merger` before final archiving
+3. If no delta specs exist, the change is ready to archive
+
+The closure is not complete until delta specs are merged. Specs that aren't synced become lies.
+
+## Output Standard
+
+Your response should include:
+
+1. verification evidence (command run, output excerpt, exit code)
+2. contract obligation status (which passed, which didn't)
+3. delivered behavior summary
+4. residual risks
+5. delta spec status (exist or not)
+6. recommended routing (to `spec-merger` or archive)
+
+## Lightweight Closure (hotfix/tweak mode)
+
+When workflow is `hotfix` or `tweak`, release-archivist performs lightweight verification:
+1. Verify all changed files exist and are non-empty
+2. Run syntax check on code files (`node --check` for .mjs/.js)
+3. Skip the full 5-step three-dimensional verification
+4. Still record DP-6 (验证失败) and DP-7 (归档确认) decision points
+5. Delta specs are NOT generated in lightweight closure (no specs to sync)

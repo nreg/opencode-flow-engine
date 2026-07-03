@@ -1,5 +1,6 @@
 import type { FeatureConfig, FeatureResult } from './types.js';
 import { createWorkflowManager } from './workflow-manager.js';
+import { fileExists, readJsonFile } from '@opencode-sflow/shared';
 
 type WorkflowManager = ReturnType<typeof createWorkflowManager>;
 
@@ -79,7 +80,20 @@ export function createStateManager(
 
     async isContractStale(changeDir: string): Promise<FeatureResult> {
       try {
-        return { success: true, data: { stale: false } };
+        const stateExists = await fileExists(`${changeDir}/.sflow/state.json`);
+        const contractPath = `${changeDir}/execution-contract.md`;
+        const contractExists = await fileExists(contractPath);
+
+        if (!stateExists || !contractExists) {
+          return { success: true, data: { stale: false } };
+        }
+
+        const { stat } = await import('fs/promises');
+        const stateStats = await stat(`${changeDir}/.sflow/state.json`);
+        const contractStats = await stat(contractPath);
+
+        const stale = contractStats.mtimeMs > stateStats.mtimeMs;
+        return { success: true, data: { stale } };
       } catch (error) {
         return {
           success: false,

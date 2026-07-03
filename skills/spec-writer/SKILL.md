@@ -1,54 +1,226 @@
 ---
 name: spec-writer
-description: Generate planning artifacts with schema validation. Invoke when creating proposal, specs, design, or tasks.
+description: Create or refine sflow planning artifacts. Invoke when the change is understood well enough to write proposal.md, specs/, design.md, and tasks.md.
 ---
 
 # Spec Writer
 
-This skill generates planning artifacts with schema validation.
+Use this skill when the change has moved beyond exploration and is ready to become concrete artifacts.
 
 ## Use This Skill When
 
-Invoke this skill when:
+Invoke this skill when the user says things like:
 
-- the user knows what they want
-- planning artifacts are missing or incomplete
-- proposal, specs, design, or tasks need to be created or revised
+- "write the proposal"
+- "turn this into specs"
+- "create the design doc"
+- "break the work into tasks"
+- "formalize the plan"
 
-## Artifact Generation
+## Required Inputs
 
-### proposal.md
-- **Why section**: Explain motivation (minimum 50 characters)
-- **What Changes section**: Describe changes clearly
+Before generating or revising artifacts, read:
 
-### specs/
-- Each requirement must contain SHALL or MUST statement
-- Each requirement must have at least 1 scenario
-- Use #### Requirement: Name format
+- `.sflow/state.json` — especially `dp_0_decisions` and `dp_0_confirmed`
+- Any existing planning artifacts in the change folder
 
-### design.md
-- Architecture decisions
-- Technical constraints
-- Implementation approach
+If `dp_0_confirmed` is not `true` for a new/incomplete change, stop and route back to `workflow-start` to complete DP-0.
 
-### tasks.md
-- Task breakdown with completion definitions
-- Dependencies between tasks
-- Estimated effort
+## Required Artifacts
+
+Create or refine:
+
+- `proposal.md`
+- `specs/`
+- `design.md`
+- `tasks.md`
+
+### Config Check
+
+Before generating artifacts, check the project configuration in `.sflow/config.json` (if it exists):
+- Generate artifacts in the configured order (default: proposal → specs → design → tasks)
+- Skip any artifacts listed in the `artifacts.skip` configuration
+
+Use OpenSpec-style artifact roles:
+
+- `proposal.md` defines why and scope
+- `specs/` define required behavior
+- `design.md` defines how and why at the architecture level
+- `tasks.md` defines dependency-aware implementation steps
+
+## Working Rules
+
+### Honor DP-0 Decisions
+
+- Read `dp_0_decisions` from `.sflow/state.json` before writing.
+- Respect confirmed constraints (e.g., naming style, scope inclusions, communication preference).
+- Do not silently expand scope beyond what was confirmed in DP-0.
+- If you encounter an unconfirmed decision, pause artifact generation and ask the user.
+
+### `proposal.md`
+
+Must clearly state:
+
+- the problem
+- what changes
+- capabilities affected
+- impact areas
+
+### `specs/`
+
+Must be testable.
+
+Every requirement should be written so that a later test can prove it.
+
+### `design.md`
+
+Must explain architectural decisions and trade-offs, not line-by-line implementation.
+
+### `tasks.md`
+
+Must be ordered, verifiable, and small enough to become execution batches later.
+
+**File Structure section**: Every tasks.md MUST begin with a `## File Structure` section listing all files to be created or modified, with each file's responsibility stated in one sentence. Format:
+- `Create: path/to/file.ts` — One-sentence responsibility
+- `Modify: path/to/existing.ts` — What changes
+
+**Interfaces section**: Every tasks.md MUST include a `## Interfaces` section declaring cross-batch dependencies. Format:
+```
+### Batch N → Batch M
+- **Produces**: `type/function name` — consumed by Batch M for purpose
+```
+
+**Per-task format**: Each task MUST include:
+1. **Exact file paths**: `Create: path/to/file.ts` or `Modify: path/to/file.ts:line-range` for every file the task touches
+2. **TDD phases expanded** (for code-producing tasks):
+   - Write the failing test with exact test code
+   - Run the test and confirm it fails for the expected reason
+   - Implement the minimal code with exact implementation
+   - Run the test and confirm it passes
+   - Commit with descriptive message
+3. **Interfaces block**: If the task produces output consumed by later tasks, declare `Consumes` (inputs from earlier tasks) and `Produces` (outputs for later tasks) with exact function names, parameter types, and return types
+4. **Dependency declaration**: Each batch header states `Depends on: Batch N` if it consumes output from an earlier batch
+
+**Granularity requirement**: Each task step MUST be completable in 2-5 minutes of focused work. This means:
+- A task step is one atomic operation: write one function, add one test case, update one config value
+- A task step is NOT "implement the authentication module" — that's a batch of steps
+- If a step takes longer than 5 minutes to describe, it should be decomposed further
+
+**Zero placeholder rule**: Tasks MUST NOT contain "TBD", "TODO", "implement later", "figure out", "add appropriate", "we'll decide", or similar placeholder language. Every task must be concrete and immediately actionable. If there is uncertainty, resolve it during specification — do not push it to implementation.
+
+**Task Dependency Ordering**: Tasks must be ordered so that:
+- Each task depends only on tasks listed before it
+- No task references work that hasn't been described yet
+- The dependency chain is explicit: "Depends on: Batch N"
+- Every batch ends with a commit step
+
+## Quality Bar
+
+The artifact set must be internally aligned:
+
+- `proposal.md` sets scope
+- `specs/` define observable behavior
+- `design.md` explains the chosen technical shape
+- `tasks.md` converts that shape into execution order
+
+If any artifact cannot support the others, revise before handoff.
 
 ## Schema Validation
 
-After generating each artifact, run validation:
+After creating or modifying any artifact, run these validation checks. Do not hand off broken artifacts.
 
-```bash
-node scripts/validate-artifacts.js <change-dir>
+### `proposal.md` Validation
+
+- [ ] Has `## Why` section with > 50 characters of problem description
+- [ ] Has `## What Changes` section listing concrete changes
+- [ ] Has `## Scope` with `### In Scope` and `### Out of Scope` sub-sections
+- [ ] Has `## Impact` section listing affected code areas, APIs, and dependencies
+- [ ] Has `## Capabilities` section (New Capabilities and Modified Capabilities)
+- [ ] No TBD/TODO/placeholder language in any section
+
+### `specs/` Validation
+
+- [ ] Every requirement uses SHALL or MUST (no "should", "may" for required behavior)
+- [ ] Every requirement has at least one `#### Scenario:` with WHEN/THEN clauses
+- [ ] Requirements are grouped under ADDED, MODIFIED, or REMOVED headers
+- [ ] Each scenario is independently testable
+- [ ] No requirement contradicts another requirement
+
+### `design.md` Validation
+
+- [ ] Has `## Context` section describing current state, constraints, stakeholders
+- [ ] Has `## Goals` section stating what the design must achieve
+- [ ] Has `## Decisions` section with at least one decision (Choice + Rationale + Alternatives)
+- [ ] Has `## Risks And Trade-Offs` section
+- [ ] Architectural decisions are justified with trade-off analysis
+
+### `tasks.md` Validation
+
+- [ ] Has `## File Structure` section listing all files with responsibilities
+- [ ] Has `## Interfaces` section with Consumes/Produces between batches
+- [ ] Tasks are numbered (1.1, 1.2, 2.1, etc.)
+- [ ] Each task has exact file paths (Create/Modify with line ranges)
+- [ ] Each code-producing task has expanded TDD phases (5 steps)
+- [ ] Each task step is ≤ 5 minutes of focused work
+- [ ] No TBD, TODO, or placeholder language in any task
+- [ ] Every requirement from specs/ maps to at least one task
+- [ ] Dependencies are explicit (Depends on: Batch N)
+- [ ] Every batch ends with a commit step
+
+## Quality Gate
+
+**If any artifact fails validation, fix it before handing off to `contract-builder`.**
+
+Do not hand off broken artifacts. The validation checks above are not advisory — they are the minimum bar for the next stage to function. If you skip validation, the contract-builder will produce a contract with holes, and execution will drift.
+
+## Self-Review Checklist
+
+Before handing off:
+
+- [ ] Remove all placeholders — no "TBD", "TODO", "we'll figure it out"
+- [ ] Resolve all contradictions — no requirement conflicts with another
+- [ ] Ensure tasks align with specs — every requirement has a corresponding task
+- [ ] Ensure design supports the required behavior — constraints don't block requirements
+- [ ] Run schema validation on all four artifacts — all checks pass
+- [ ] Verify task granularity — each task is 2-5 min, atomic, and concretely actionable
+- [ ] Verify File Structure — every file referenced in any task appears in the File Structure section
+- [ ] Verify Interfaces — every cross-batch dependency is declared in the Interfaces section
+- [ ] Verify zero placeholders — grep for TBD, TODO, "implement later", "figure out", "add appropriate"
+- [ ] Verify task granularity — each step is 2-5 min, atomic, concretely actionable
+
+## DP-2: Artifact Review Gate
+
+Before handing off to `contract-builder`, present a summary of all artifacts to the user for review. Do not assume the artifacts are correct just because validation passed — the user is the domain expert.
+
+1. **Summarize each artifact** in 2-3 sentences:
+   - `proposal.md`: what problem, what changes, scope boundaries
+   - `specs/`: key requirements and scenarios
+   - `design.md`: architecture decisions and trade-offs
+   - `tasks.md`: batch breakdown and dependency chain
+
+2. **Ask the user** if anything needs adjustment before the contract is generated.
+
+3. **Record DP-2** after user approval in `.sflow/state.json`:
+
+```json
+{
+  "dp_2_result": "approved: <one-line summary>",
+  "dp_2_timestamp": "<ISO-8601 timestamp>"
+}
 ```
 
-Fix any errors before proceeding.
+If the user requests changes, make them and re-present. Do not hand off until DP-2 is recorded.
 
-## Guardrails
+## Handoff Rule
 
-- Do NOT skip schema validation
-- Do NOT generate incomplete artifacts
-- Do NOT proceed with validation errors
-- Ensure all requirements have scenarios
+Do not start implementation after writing planning artifacts.
+
+Once the artifacts are stable, validated, and DP-2 is recorded, hand off to `contract-builder`.
+
+## Output Standard
+
+When handing off, report:
+
+1. which artifacts were created or modified
+2. validation results (pass/fail for each artifact)
+3. a one-sentence summary of what the change does

@@ -1,18 +1,20 @@
 ---
 name: workflow-start
-description: Primary entry point for sFlow. Invoke when the user says start, continue, resume, implement, plan, or when the current workflow stage is unclear.
+description: Primary entry point for SFlow. Invoke when the user says start, continue, resume, implement, plan, or when the current workflow stage is unclear.
 ---
 
 # Workflow Start
 
-This is the primary entry point for `sFlow`.
+This is the primary entry point for `sflow`.
 
 Its job is not to implement anything directly. Its job is to:
 
 1. inspect the current change context
-2. determine the current workflow state
-3. route to the correct next skill
-4. block invalid transitions
+2. check whether the installed plugin is outdated and remind the user if so
+3. confirm key decisions with the user before design (DP-0)
+4. determine the current workflow state
+5. route to the correct next skill
+6. block invalid transitions
 
 ## Use This Skill When
 
@@ -39,6 +41,8 @@ Use it whenever the correct next skill is not obvious from the current artifacts
 - `closing`
 - `abandoned`
 
+Read the state machine documentation before making a state decision if the transition is ambiguous.
+
 ## Required Inspection
 
 Before routing, inspect the current change folder if it exists.
@@ -60,6 +64,134 @@ Then answer these questions in order:
 5. Is execution in progress or blocked by a bug?
 6. Is the change already in verification or wrap-up?
 
+## Update Check Reminder
+
+Before doing anything else, check for plugin updates:
+
+```bash
+npm view opencode-sflow version
+```
+
+### How to surface the result
+
+- If a newer version exists → prepend a non-blocking upgrade reminder to your response, then continue normally:
+  > A new version of sflow is available. Upgrade with `npm install -g opencode-sflow@latest`.
+- If already up to date → silently skip.
+
+Do not block workflow progress on an available upgrade; simply inform the user.
+
+## DP-0: User Confirmation Gate (Design-Preparation)
+
+Before routing to `spec-writer` for a new or incomplete change, confirm key decisions with the user. Do not generate planning artifacts until this gate is passed.
+
+### When to run DP-0
+
+Run DP-0 when **all** of the following are true:
+- The change folder does not exist, OR
+- Planning artifacts (`proposal.md`, `specs/`, `design.md`, `tasks.md`) are missing or empty, OR
+- `.sflow/state.json` does not contain `dp_0_confirmed: true`.
+
+If `dp_0_confirmed` is `true`, skip this gate and proceed with normal state detection.
+
+### Required Questions
+
+Ask the user at least these questions. Record the answers in `.sflow/state.json`.
+
+1. **Scope**: What is the change name and one-sentence intent?
+2. **Constraints**: Are there known constraints (naming style, compatibility policy, platforms affected)?
+3. **Related optimizations**: Should this change include related optimizations or stay focused?
+4. **Communication preference**: Do you prefer to be asked before each design decision, or receive a draft for review?
+
+### Recording DP-0
+
+After the user confirms, update `.sflow/state.json`:
+
+```json
+{
+  "dp_0_decisions": "<summary>",
+  "dp_0_confirmed": true,
+  "dp_0_timestamp": "<ISO-8601 timestamp>"
+}
+```
+
+Then proceed to normal state detection and routing.
+
+### Config-Aware Routing
+
+Before routing, check project configuration in `.sflow/config.json` (if it exists):
+- If `artifacts.order` is specified, follow it when checking artifact completeness
+- If `artifacts.skip` is specified, do not require those artifacts for state transitions
+
+## Mode Detection
+
+Before routing, determine the workflow mode.
+
+### Auto-Detection
+
+If `.sflow/state.json` workflow is `auto`, `null`, or unset:
+
+1. Inspect `proposal.md` scope and `tasks.md` to infer `hotfix`, `tweak`, or `full`.
+2. Update `.sflow/state.json` with the inferred `workflow` value.
+3. Output the inferred mode and reason to the user.
+
+Inference rules:
+
+- **hotfix**: 2 or fewer tasks, 2 or fewer files, no schema/API changes, no new modules.
+- **tweak**: 4 or fewer tasks, only config/doc files (`.md`, `.json`, `.yaml`, etc.), no schema/API changes, no new modules.
+- **full**: anything larger, or changes that touch code files, schemas, APIs, or add new modules.
+
+### Explicit Override
+
+If workflow is already set to `hotfix`, `tweak`, or `full`, do **not** overwrite it unless the user explicitly asks to re-detect.
+
+### Validation
+
+After the mode is known, validate it against artifact content:
+
+1. If workflow is `full` → standard routing (no fast-path)
+2. If workflow is `hotfix`:
+   - Validate: 2 or fewer files? No new modules? No schema changes?
+   - All pass → use hotfix fast-path routing
+   - Any fail → upgrade to `full`, update `.sflow/state.json`, output upgrade reason
+3. If workflow is `tweak`:
+   - Validate: 4 or fewer files? Single module? Config/doc/prompt only?
+   - All pass → use tweak fast-path routing
+   - Any fail → upgrade to `full`, update `.sflow/state.json`, output upgrade reason
+
+### Example
+
+- A one-line fix in `src/lib/utils.ts` with 2 or fewer tasks → infer `hotfix`.
+- Updating `README.md` and `CHANGELOG.md` with 4 or fewer tasks → infer `tweak`.
+- Adding a new feature with new files, tests, and schema changes → infer `full`.
+
+## Enhanced Stale Detection via Content Inspection
+
+Do not rely solely on file existence to determine staleness. Inspect file **contents** to detect drift:
+
+### Detecting stale `execution-contract.md`
+
+Compare the **intent lock** in the contract against the current proposal:
+
+- Open `proposal.md` and read the scope (## What Changes, ## Scope sections)
+- Open `execution-contract.md` and read the **Intent Lock** section
+- If the proposal's scope has expanded beyond what the contract's scope fence allows → **stale**
+- If the contract references capabilities no longer in the proposal → **stale**
+
+### Detecting stale planning artifacts
+
+Compare the proposal's scope against spec files:
+
+- Open `proposal.md` and note which capabilities are in scope
+- Open `specs/<capability>/spec.md` for each listed capability
+- If a proposal-listed capability has no spec file → **stale artifacts**
+- If a spec file exists for a capability not in the proposal scope → **drift detected**
+
+### Detecting stale spec vs. tasks
+
+- Open `specs/` and list all requirement names (SHALL/MUST statements)
+- Open `tasks.md` and check that each spec requirement is represented in at least one task
+- If a requirement has no corresponding task → **stale tasks**
+
 ## Routing Rules
 
 ### Route to `need-explorer` when:
@@ -71,34 +203,54 @@ Then answer these questions in order:
 
 ### Route to `spec-writer` when:
 
+- **Guard check**: Use `contract_validator` to verify the change directory has sufficient artifacts for the `specifying` state
+  - If validation fails → BLOCK. Report failures, do not route.
+  - If validation passes → proceed.
 - the user knows what they want
 - planning artifacts are missing or incomplete
 - proposal, specs, design, or tasks need to be created or revised
 
 ### Route to `contract-builder` when:
 
+- **Guard check**: Use `contract_validator` to verify the change directory has sufficient artifacts for the `bridging` state
+  - If validation fails → BLOCK. Report failures, do not route.
+  - If validation passes → proceed.
 - planning artifacts exist
 - implementation is requested or about to begin
 - the execution contract is missing or stale
+- planning artifacts changed after the last contract draft
 
 ### Route to `build-executor` when:
 
+- **Guard check**: Use `contract_validator` to verify the change directory has sufficient artifacts for the `approved-for-build` state
+  - If validation fails → BLOCK. Report failures, do not route.
+  - If validation passes → proceed.
 - `execution-contract.md` exists
 - the user has explicitly approved it
 - implementation is the active task
+- the contract still matches the current planning artifacts
 
 ### Route to `bug-investigator` when:
 
 - execution is in the `executing` state but has hit a blockage
 - a test failure, unexpected behavior, or build error has stopped progress
+- the build-executor reports a task cannot proceed
+- the user reports a bug during active implementation
+
+After debugging completes, route back to `build-executor` to resume the executing state.
 
 ### Route to `code-reviewer` when:
 
 - an execution batch has been completed
 - the build-executor has finished a group of related tasks
+- a full batch is ready for spec-compliance and code-quality verification
+- the user asks for a review checkpoint
 
 ### Route to `release-archivist` when:
 
+- **Guard check**: Use `contract_validator` to verify the change directory has sufficient artifacts for the `closing` state
+  - If validation fails → BLOCK. Report failures, do not route.
+  - If validation passes → proceed.
 - implementation is complete
 - verification is complete or nearly complete
 - the user wants a final summary, archive, or wrap-up
@@ -107,6 +259,51 @@ Then answer these questions in order:
 
 - release-archivist reports delta specs exist that need merging
 - the change is closing and has ADDED/MODIFIED/REMOVED/RENAMED specs
+- multiple changes have accumulated unsynced delta specs
+- the user asks about spec consistency
+
+### Route to `abandonment` when:
+
+- the user explicitly requests to abandon the change
+- bug-investigator has escalated after 3+ consecutive fix failures AND the user chooses to abandon
+- scope change during specifying makes the change no longer worthwhile AND the user confirms abandonment
+- the current state is NOT `closing` or `abandoned` (terminal states block abandonment transition)
+
+### Hotfix Fast-Path Routing
+
+When workflow is `hotfix`:
+- Route to `contract-builder` with minimal contract mode (intent + task list only)
+- Skip `need-explorer` and full `spec-writer`
+- Use `contract_validator` with hotfix mode
+- After bridge: DP-3 契约批准
+- After approval: route to `build-executor` (inline mode)
+- After execution: route to `release-archivist` (lightweight closure)
+
+### Tweak Fast-Path Routing
+
+When workflow is `tweak`:
+- Route directly to `build-executor` (direct edit mode)
+- Skip `need-explorer`, `spec-writer`, and `contract-builder`
+- Use `contract_validator` with tweak mode
+- After execution: route to `release-archivist` (lightweight closure: file exists + syntax check)
+
+## Staleness Rules
+
+Treat `execution-contract.md` as stale if:
+
+- `proposal.md` changed scope (confirmed by content comparison, not just timestamp)
+- `specs/` changed approved behavior
+- `design.md` changed architecture constraints
+- `tasks.md` changed execution batches materially
+- the contract's intent lock no longer matches the proposal's scope (content-level check)
+
+If stale, do not continue implementation. Route back to `contract-builder`.
+
+Treat planning artifacts as stale if:
+
+- A requirement in `specs/` has no corresponding task in `tasks.md`
+- A capability listed in `proposal.md` has no spec file
+- The design references decisions no longer valid given current specs
 
 ## Guardrails
 
@@ -116,6 +313,15 @@ Then answer these questions in order:
 - Do not allow continued implementation if scope or core behavior changed without artifact updates.
 - If the user is in `executing` but the contract is stale, route backward to `contract-builder`.
 - Do not allow implementation to continue past a bug without `bug-investigator` investigation.
+- Do not move from execution batches to closure without code review first.
+- Do not close a change with unsynced delta specs without routing to `spec-merger`.
+- If the detected state is `debugging`, ensure `bug-investigator` completes before routing back.
+- If the user asks to skip a review gate, explain why the gate exists and ask for confirmation.
+- Do not allow any state transitions FROM `abandoned` — it is a terminal state.
+- Do not allow transition to `abandoned` from `closing` or `abandoned` — these are already terminal.
+- Do not auto-abandon without user confirmation — even if bug-investigator recommends it.
+- When transitioning to `abandoned`, prompt for abandonment summary generation before confirming.
+- Do not merge delta specs from an abandoned change — spec-merger must block this.
 
 ## Output Standard
 
@@ -126,3 +332,19 @@ Your response should always make three things explicit:
 3. which skill should run next
 
 If transition blocking is required, explain the missing artifact or approval clearly.
+
+If content-level inspection was performed, include a brief note on what was compared (e.g., "Compared proposal scope (3 capabilities) against contract intent lock (2 capabilities) — contract is stale").
+
+### Decision Point References
+
+When routing to a skill that has an associated decision point, include the decision point number in the output:
+- Route to contract-builder → include `DP-3: 契约批准 — 用户需明确批准 execution-contract.md`
+- Route to build-executor → include `DP-4: 执行模式选择 — 用户选择 TDD 或 SDD`
+- Route to bug-investigator (escalation) → include `DP-5: 调试升级`
+- Route to release-archivist → include `DP-7: 归档确认`
+
+## Preferred User Experience
+
+- Keep the user on one visible workflow.
+- Avoid making them choose between upstream mental models.
+- Treat OpenSpec ideas as planning inputs and Superpowers ideas as execution discipline, but keep `sflow` as the only workflow owner.

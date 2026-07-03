@@ -56,6 +56,22 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
 };
 
 /**
+ * Default fallback models for each agent
+ * When the primary model is unavailable, try these in order
+ */
+const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
+  sflow: ['glm-5.1', 'kimi-k2.6'],
+  'need-explorer': ['glm-5.1', 'deepseek-v4-flash'],
+  'spec-writer': ['kimi-k2.6', 'deepseek-v4-flash'],
+  'contract-builder': ['glm-5.1', 'deepseek-v4-flash'],
+  'build-executor': ['deepseek-v4-flash', 'glm-5.1'],
+  'bug-investigator': ['deepseek-v4-flash', 'glm-5.1'],
+  'code-reviewer': ['glm-5.1', 'kimi-k2.6'],
+  'release-archivist': ['mimo-v2.5', 'glm-5.1'],
+  'spec-merger': ['mimo-v2.5-pro', 'glm-5.1'],
+};
+
+/**
  * Agent registry with factory functions
  */
 const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
@@ -93,8 +109,87 @@ export function clearConfigCache(): void {
 }
 
 /**
+ * Set of known-unavailable models (populated at runtime when a model request fails).
+ * External callers can register a model as unavailable via markModelUnavailable().
+ */
+const UNAVAILABLE_MODELS = new Set<string>();
+
+/**
+ * Mark a model as unavailable (e.g. after an API error).
+ * Once marked, resolveModelWithFallback will skip it and try fallbacks.
+ */
+export function markModelUnavailable(model: string): void {
+  UNAVAILABLE_MODELS.add(model);
+}
+
+/**
+ * Clear the unavailable-model set (e.g. for testing or after a refresh).
+ */
+export function clearUnavailableModels(): void {
+  UNAVAILABLE_MODELS.clear();
+}
+
+/**
+ * Check whether a model is currently considered available.
+ */
+function isModelAvailable(model: string): boolean {
+  return !UNAVAILABLE_MODELS.has(model);
+}
+
+/**
+ * Resolve model with fallback chain.
+ *
+ * Priority: override.model > model param > configModel > DEFAULT_MODELS[name]
+ * If the resolved model is unavailable, try fallback_models in order:
+ *   config fallback_models > DEFAULT_FALLBACKS[name]
+ * Returns the first available model, or the last-resort default if all fail.
+ */
+export function resolveModelWithFallback(
+  name: BuiltinAgentName,
+  model?: string,
+  configOverrides?: AgentOverrides,
+  overrides?: AgentOverrides,
+): string {
+  const programmaticModel = overrides?.[name]?.model;
+  const configModel = configOverrides?.[name]?.model;
+  const primary = programmaticModel || model || configModel || DEFAULT_MODELS[name];
+
+  if (isModelAvailable(primary)) {
+    return primary;
+  }
+
+  // Collect fallback list: config fallback_models first, then defaults
+  const configFallback = configOverrides?.[name]?.fallback_models;
+  const configFallbackList = normalizeFallbackList(configFallback);
+  const defaultFallbackList = DEFAULT_FALLBACKS[name] || [];
+  const fallbacks = [...configFallbackList, ...defaultFallbackList];
+
+  for (const fbModel of fallbacks) {
+    if (isModelAvailable(fbModel)) {
+      return fbModel;
+    }
+  }
+
+  // All fallbacks exhausted — return primary anyway (let the caller handle the error)
+  return primary;
+}
+
+/**
+ * Normalize fallback_models to a flat string array.
+ * The type allows string | (string | { model: string; variant?: string })[].
+ */
+function normalizeFallbackList(
+  fb: string | (string | { model: string; variant?: string })[] | undefined,
+): string[] {
+  if (!fb) return [];
+  if (typeof fb === 'string') return [fb];
+  return fb.map(item => typeof item === 'string' ? item : item.model);
+}
+
+/**
  * Create an agent by name
  * Priority chain: AgentOverrides.model > model param > .sflow/config.json > DEFAULT_MODELS
+ * Falls back through fallback_models if the resolved model is unavailable.
  */
 export async function createAgent(
   name: BuiltinAgentName,
@@ -114,10 +209,8 @@ export async function createAgent(
   const merged = mergeOverrides(configOverrides, overrides || {});
   const agentOverride = merged[name];
 
-  // Model priority: AgentOverrides > model param > config file > default
-  const programmaticModel = overrides?.[name]?.model;
-  const configModel = configOverrides[name]?.model;
-  const resolvedModel = programmaticModel || model || configModel || DEFAULT_MODELS[name];
+  // Resolve model with fallback chain
+  const resolvedModel = resolveModelWithFallback(name, model, configOverrides, overrides);
 
   const agentConfig = factory(resolvedModel);
 
@@ -155,9 +248,7 @@ export async function createAllAgents(
   for (const name of Object.keys(AGENT_REGISTRY) as BuiltinAgentName[]) {
     const factory = AGENT_REGISTRY[name];
 
-    const programmaticModel = overrides?.[name]?.model;
-    const configModel = configOverrides[name]?.model;
-    const resolvedModel = programmaticModel || model || configModel || DEFAULT_MODELS[name];
+    const resolvedModel = resolveModelWithFallback(name, model, configOverrides, overrides);
 
     const agentConfig = factory(resolvedModel);
 
@@ -240,4 +331,18 @@ export function getDefaultModel(name: BuiltinAgentName): string {
  */
 export function getAllDefaultModels(): Record<BuiltinAgentName, string> {
   return { ...DEFAULT_MODELS };
+}
+
+/**
+ * Get default fallbacks for agent
+ */
+export function getDefaultFallbacks(name: BuiltinAgentName): string[] {
+  return DEFAULT_FALLBACKS[name] ? [...DEFAULT_FALLBACKS[name]] : [];
+}
+
+/**
+ * Get all default fallbacks
+ */
+export function getAllDefaultFallbacks(): Record<BuiltinAgentName, string[]> {
+  return { ...DEFAULT_FALLBACKS };
 }
