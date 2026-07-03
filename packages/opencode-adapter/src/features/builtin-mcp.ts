@@ -1,9 +1,10 @@
 /**
- * Built-in validation tools for sFlow
+ * Built-in validation and workflow tools for sFlow.
  *
  * Rather than implementing a custom MCP protocol server (which would require
- * stdio JSON-RPC framing), validation logic is exposed as OpenCode ToolDefinition
- * objects registered through the standard tool registration path.
+ * stdio JSON-RPC framing), validation and state-tracking logic is exposed as
+ * OpenCode ToolDefinition objects registered through the standard tool
+ * registration path.
  *
  * This follows oh-my-openagent's principle: if a capability fits naturally as
  * a tool, serve it as a tool — not as an MCP server.
@@ -151,6 +152,65 @@ export function createValidatorTools(): Record<string, ToolDefinition> {
 }
 
 /**
+ * Built-in workflow tools: state mutation operations.
+ */
+export function createWorkflowTools(): Record<string, ToolDefinition> {
+  return {
+    record_decision_point: {
+      description: 'Record a decision point (DP-0 .. DP-5) in the workflow state',
+      args: {
+        dp_id: z.enum(['dp-0', 'dp-1', 'dp-2', 'dp-3', 'dp-4', 'dp-5']).describe('Decision point identifier'),
+        state: z.enum(['exploring', 'specifying', 'bridging', 'approved-for-build', 'executing', 'debugging', 'closing', 'abandoned']).describe('Current workflow state when the decision was confirmed'),
+        target_state: z.enum(['exploring', 'specifying', 'bridging', 'approved-for-build', 'executing', 'debugging', 'closing', 'abandoned']).describe('State the workflow will transition to after confirmation'),
+        metadata: z.string().optional().describe('Optional JSON-encoded metadata (e.g. {"notes": "..."})'),
+      },
+      execute: async (args: { dp_id: string; state: string; target_state: string; metadata?: string }) => {
+        let parsedMeta: Record<string, unknown> | undefined;
+        if (args.metadata) {
+          try {
+            parsedMeta = JSON.parse(args.metadata);
+          } catch {
+            return {
+              title: 'Record Decision Point',
+              output: JSON.stringify({ success: false, error: 'Invalid JSON in metadata' }, null, 2),
+            };
+          }
+        }
+
+        const { readJsonFile, writeJsonFile, ensureDir } = await import('@opencode-sflow/shared');
+        const changeDir = (globalThis as Record<string, unknown>).__sflow_change_dir__ as string | undefined;
+        if (!changeDir) {
+          return {
+            title: 'Record Decision Point',
+            output: JSON.stringify({ success: false, error: 'sFlow change directory not set' }, null, 2),
+          };
+        }
+
+        const statePath = `${changeDir}/.sflow/state.json`;
+        await ensureDir(`${changeDir}/.sflow`);
+        const state = await readJsonFile<Record<string, unknown>>(statePath) || {};
+
+        const dps = (state.decisionPoints as Array<Record<string, unknown>> || []);
+        const record = {
+          id: args.dp_id,
+          confirmedInState: args.state,
+          targetState: args.target_state,
+          timestamp: new Date().toISOString(),
+          metadata: parsedMeta,
+        };
+        dps.push(record);
+
+        await writeJsonFile(statePath, { ...state, decisionPoints: dps });
+        return {
+          title: 'Record Decision Point',
+          output: JSON.stringify({ success: true, dp: record, totalDPs: dps.length }, null, 2),
+        };
+      },
+    },
+  };
+}
+
+/**
  * Builtin MCP registry (retained for backward compatibility)
  * Now wraps ToolDefinitions instead of a custom MCP protocol.
  */
@@ -158,7 +218,7 @@ export class BuiltinMcpRegistry {
   private tools: Record<string, ToolDefinition> = {};
 
   constructor() {
-    this.tools = createValidatorTools();
+    this.tools = { ...createValidatorTools(), ...createWorkflowTools() };
   }
 
   getTool(name: string): ToolDefinition | undefined {

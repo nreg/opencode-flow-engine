@@ -57,12 +57,12 @@ import { sharedValidator } from '@opencode-sflow/core';
 import { fileExists as sflowFileExists, directoryExists, readFile as sflowReadFile } from '@opencode-sflow/shared';
 import { isContractStale } from '@opencode-sflow/shared';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
-import { createValidatorTools } from './features/builtin-mcp.js';
+import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
 
 export const PLUGIN_ID = 'opencode-sflow';
 export const PLUGIN_VERSION = '0.1.0';
 
-const SFLOW_TOOLS = new Set(['workflow_router', 'contract_validator', 'artifact_inspector', 'validate_spec', 'validate_proposal', 'validate_delta_spec', 'validate_tasks', 'validate_contract', 'validate_design', 'validate_implementation', 'detect_sync_conflicts']);
+const SFLOW_TOOLS = new Set(['workflow_router', 'contract_validator', 'artifact_inspector', 'validate_spec', 'validate_proposal', 'validate_delta_spec', 'validate_tasks', 'validate_contract', 'validate_design', 'validate_implementation', 'detect_sync_conflicts', 'record_decision_point']);
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -280,16 +280,19 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
   // Build tool definitions using @opencode-ai/plugin format
   const tools = createSFlowTools(workDir);
   const validatorTools = createValidatorTools();
-  Object.assign(tools, validatorTools);
+  const workflowTools = createWorkflowTools();
+  Object.assign(tools, validatorTools, workflowTools);
+  // Expose change dir to tools via globalThis
+  (globalThis as Record<string, unknown>).__sflow_change_dir__ = workDir;
 
   return {
     dispose: async () => {
       console.log('[sFlow] Plugin disposed');
-      for (const [name, server] of mcpManager.getRunningServers().entries()) {
+      for (const server of mcpManager.getRunningServers()) {
         try {
-          await mcpManager.stopServer(name);
+          await mcpManager.stopServer(server.name);
         } catch (err) {
-          console.warn(`[sFlow] Failed to stop MCP server ${name}: `, err);
+          console.warn(`[sFlow] Failed to stop MCP server ${server.name}: `, err);
         }
       }
     },
@@ -354,6 +357,8 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
             // Start the MCP server process (S15 fix)
             mcpManager.startServer(server.name, server).catch(err => {
               console.warn(`[sFlow] Failed to start MCP server ${server.name}: ${err.message}`);
+              // Rollback: remove from cfg.mcp so OpenCode doesn't try to connect to a dead server
+              if (cfg.mcp) delete cfg.mcp[server.name];
             });
           }
         }
@@ -375,6 +380,8 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
           if (cmd) {
             mcpManager.startServer(name, { name, command: cmd, args: cmdArgs, env: srv.environment }).catch(err => {
               console.warn(`[sFlow] Failed to start project MCP server ${name}: ${err.message}`);
+              // Rollback: remove from cfg.mcp so OpenCode doesn't try to connect to a dead server
+              if (cfg.mcp) delete cfg.mcp[name];
             });
           }
         }

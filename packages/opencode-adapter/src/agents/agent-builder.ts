@@ -215,6 +215,19 @@ export function resolveModelWithFallback(
   };
 }
 
+/**
+ * Append skill content to agent instructions if not already present.
+ */
+function applySkillContent(agentConfig: AgentConfig, skillContent?: string): AgentConfig {
+  if (!skillContent) return agentConfig;
+  const instructions: string = String(agentConfig.instructions || agentConfig.prompt || '');
+  if (!instructions.includes('Skill-Specific Instructions')) {
+    agentConfig.instructions = instructions + '\n\n---\n\n## Skill-Specific Instructions\n\n' + skillContent;
+  }
+  return agentConfig;
+}
+
+
 export async function createAgent(
   name: BuiltinAgentName,
   model?: string,
@@ -236,7 +249,7 @@ export async function createAgent(
 
   // Resolve temperature: override > config > factory default
   const resolvedTemperature = agentOverride?.temperature ?? configOverrides?.[name]?.temperature ?? undefined;
-  const agentConfig = factory(resolved.model, { temperature: resolvedTemperature, skillContent });
+  let agentConfig = factory(resolved.model, { temperature: resolvedTemperature, skillContent });
 
   if (agentOverride) {
     return {
@@ -248,13 +261,7 @@ export async function createAgent(
     };
   }
 
-  // Append skill content if provided
-  if (skillContent) {
-    const instructions: string = String(agentConfig.instructions || agentConfig.prompt || '');
-    if (!instructions.includes('Skill-Specific Instructions')) {
-      agentConfig.instructions = instructions + '\n\n---\n\n## Skill-Specific Instructions\n\n' + skillContent;
-    }
-  }
+  agentConfig = applySkillContent(agentConfig, skillContent);
 
   return agentConfig;
 }
@@ -296,13 +303,7 @@ export async function createAllAgents(
       agents[name] = agentConfig;
     }
 
-    // Append skill content if provided
-    if (content) {
-      const instructions: string = String(agents[name].instructions || agents[name].prompt || '');
-      if (!instructions.includes('Skill-Specific Instructions')) {
-        agents[name].instructions = instructions + '\n\n---\n\n## Skill-Specific Instructions\n\n' + content;
-      }
-    }
+    agents[name] = applySkillContent(agents[name], content);
   }
 
   return agents as Record<BuiltinAgentName, AgentConfig>;

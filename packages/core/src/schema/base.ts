@@ -84,6 +84,25 @@ export type WorkflowMode = 'full' | 'hotfix' | 'tweak';
 import type { WorkflowState } from '../constants.js';
 
 /**
+ * A decision point record — captures a confirmed transition gate in the workflow.
+ * DPs are persisted to .sflow/state.json for audit and cross-session recovery.
+ */
+export interface DecisionPoint {
+  /** Unique identifier: 'dp-0' through 'dp-5' */
+  id: string;
+  /** Human-readable name */
+  name: string;
+  /** State the workflow was in when this DP was confirmed */
+  confirmedInState: WorkflowState;
+  /** State the workflow transitioned to after confirmation */
+  targetState: WorkflowState;
+  /** ISO-8601 timestamp */
+  timestamp: string;
+  /** Optional metadata (e.g. approvedBy, notes) */
+  metadata?: Record<string, unknown>;
+}
+
+/**
  * Represents the state of a workflow
  */
 export interface WorkflowStateFile {
@@ -91,6 +110,7 @@ export interface WorkflowStateFile {
   mode: WorkflowMode;
   changeDir: string;
   dp0Confirmed: boolean;
+  decisionPoints: DecisionPoint[];
   contractApproved: boolean;
   verificationStatus: 'pending' | 'passed' | 'failed';
   timestamps: {
@@ -109,6 +129,7 @@ export interface WorkflowStateRecord {
   mode?: string;
   changeDir?: string;
   dp0Confirmed?: boolean;
+  decisionPoints?: DecisionPoint[];
   contractApproved?: boolean;
   verificationStatus?: string;
   dp_0_confirmed?: boolean;
