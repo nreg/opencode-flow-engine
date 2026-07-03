@@ -15,7 +15,7 @@ export type AgentMode = 'primary' | 'subagent' | 'all';
  * Mode is managed by AGENT_MODES registry in agent-builder.ts,
  * not as a static property on the function object.
  */
-export type AgentFactory = (model: string, skillContent?: string) => AgentConfig;
+export type AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }) => AgentConfig;
 
 /**
  * Agent category for grouping in prompt sections

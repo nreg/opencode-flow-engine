@@ -10,7 +10,7 @@ import { getAgentTools } from './agent-tools.js';
 /**
  * Create the bug-investigator agent configuration
  */
-export const createBugInvestigatorAgent: AgentFactory = (model: string): AgentConfig => ({
+export const createBugInvestigatorAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'bug-investigator',
   name: 'Bug Investigator',
   model,
@@ -83,7 +83,7 @@ You have access to:
 - \`lsp_diagnostics\` - Check for errors
 - \`lsp_goto_definition\` - Navigate code
 - \`lsp_find_references\` - Find usages`,
-      temperature: 0.6,
+      temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('bug-investigator'),
 });
 

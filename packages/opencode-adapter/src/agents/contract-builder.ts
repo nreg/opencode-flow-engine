@@ -10,7 +10,7 @@ import { getAgentTools } from './agent-tools.js';
 /**
  * Create the contract-builder agent configuration
  */
-export const createContractBuilderAgent: AgentFactory = (model: string): AgentConfig => ({
+export const createContractBuilderAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'contract-builder',
   name: 'Contract Builder',
   model,
@@ -89,7 +89,7 @@ You have access to:
 - \`write\` - Write execution contract
 - \`edit\` - Edit contract
 - \`bash\` - Run validation scripts`,
-      temperature: 0.6,
+      temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('contract-builder'),
 });
 

@@ -10,7 +10,7 @@ import { getAgentTools } from './agent-tools.js';
 /**
  * Create the sflow agent configuration
  */
-export const createSFlowAgent: AgentFactory = (model: string): AgentConfig => ({
+export const createSFlowAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'sFlow',
   name: 'SFlow',
   model,
@@ -107,7 +107,7 @@ Always start your response with:
 3. **Next Action**: [which subagent to invoke or what to ask user]
 
 When delegating, use \`call_omo_agent\` with the appropriate \`subagent_type\`.`,
-      temperature: 0.6,
+      temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('sFlow'),
 });
 

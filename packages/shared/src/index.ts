@@ -10,3 +10,5 @@ export type {
 
 export { deepMerge } from './deep-merge.js';
 export { fileExists, readFile, writeFile, atomicWriteFile, listFiles, directoryExists, readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir } from './file-utils.js';
+export { isContractStale, getContractStalenessReport } from './contract-staleness.js';
+export type { StalenessReport } from './contract-staleness.js';

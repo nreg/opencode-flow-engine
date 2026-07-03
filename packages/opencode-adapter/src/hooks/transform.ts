@@ -1,21 +1,21 @@
-import type { HookHandler, HookContext, HookResult } from './types.js';
-import { readJsonFile } from '@opencode-sflow/shared';
+import type { HookHandler, HookContext, HookResult } from "./types.js";
+import { readJsonFile } from "@opencode-sflow/shared";
 
 const STATE_SUMMARIES: Record<string, string> = {
-  exploring: 'Exploring requirements — gathering and clarifying needs',
-  specifying: 'Specifying — writing proposals and specs',
-  bridging: 'Bridging — building execution contract from specs',
-  'approved-for-build': 'Approved for build — contract approved, ready for implementation',
-  executing: 'Executing — implementing tasks with TDD',
-  debugging: 'Debugging — investigating and fixing bugs',
-  closing: 'Closing — verifying and archiving',
-  abandoned: 'Abandoned — workflow was abandoned',
+  exploring: "Exploring requirements — gathering and clarifying needs",
+  specifying: "Specifying — writing proposals and specs",
+  bridging: "Bridging — building execution contract from specs",
+  "approved-for-build": "Approved for build — contract approved, ready for implementation",
+  executing: "Executing — implementing tasks with TDD",
+  debugging: "Debugging — investigating and fixing bugs",
+  closing: "Closing — verifying and archiving",
+  abandoned: "Abandoned — workflow was abandoned",
 };
 
 export function createPreProcessHook(): HookHandler {
   return {
-    name: 'pre_process',
-    description: 'Transform user messages before agent processing',
+    name: "pre_process",
+    description: "Transform user messages before agent processing",
     execute: async (context: HookContext): Promise<HookResult> => {
       const { changeDir, data } = context;
 
@@ -30,24 +30,31 @@ export function createPreProcessHook(): HookHandler {
       const contextLines = [
         `[sFlow Workflow] State: ${currentState}`,
         summary,
-        'Follow state-specific rules and only produce artifacts appropriate for this phase.',
+        "Follow state-specific rules and only produce artifacts appropriate for this phase.",
       ];
 
       return {
         success: true,
         data: {
           transformed: true,
-          context: contextLines.join('\n'),
+          context: contextLines.join("\n"),
         },
       };
     },
   };
 }
 
+/**
+ * Post-process hook — detects state transitions from agent responses.
+ *
+ * IMPORTANT: This hook only DETECTS transitions and returns a signal.
+ * It does NOT execute state_transition directly (that would violate tier isolation).
+ * The caller (index.ts tool.execute.after) is responsible for invoking state_transition.
+ */
 export function createPostProcessHook(): HookHandler {
   return {
-    name: 'post_process',
-    description: 'Detect state transitions from agent responses and trigger state_transition hook',
+    name: "post_process",
+    description: "Detect state transitions from agent responses and return signal",
     execute: async (context: HookContext): Promise<HookResult> => {
       const { changeDir, data } = context;
 
@@ -62,21 +69,11 @@ export function createPostProcessHook(): HookHandler {
       }
 
       const detectedState = stateMatch[1];
-      const currentState = (await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`))?.state;
+      const currentState =
+        (await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`))?.state;
 
       if (detectedState !== currentState) {
-        // Trigger state_transition hook directly from here, since this hook
-        // runs after tool.execute.after and is the last chance to detect transitions.
-        const { createStateTransitionHook } = await import('./state-transition.js');
-        const transitionHook = createStateTransitionHook();
-        await transitionHook.execute({
-          changeDir,
-          stateFile: `${changeDir}/.sflow/state.json`,
-          pluginRoot: context.pluginRoot,
-          action: 'state-transition',
-          data: { newState: detectedState },
-        });
-
+        // Return signal only — let the caller handle the actual transition
         return {
           success: true,
           data: {

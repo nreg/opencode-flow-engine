@@ -10,7 +10,7 @@ import { getAgentTools } from './agent-tools.js';
 /**
  * Create the spec-merger agent configuration
  */
-export const createSpecMergerAgent: AgentFactory = (model: string): AgentConfig => ({
+export const createSpecMergerAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'spec-merger',
   name: 'Spec Merger',
   model,
@@ -104,7 +104,7 @@ You have access to:
 - \`write\` - Write updated specs
 - \`edit\` - Edit specs
 - \`bash\` - Run validation scripts`,
-      temperature: 0.7,
+      temperature: options?.temperature ?? 0.7,
   tools: getAgentTools('spec-merger'),
 });
 

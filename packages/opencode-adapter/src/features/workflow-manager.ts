@@ -182,5 +182,17 @@ async function updateStateFile(changeDir: string, state: Record<string, unknown>
 
 async function archiveWorkflow(changeDir: string): Promise<void> {
   await ensureDir(`${changeDir}/${ARCHIVE_DIR}`);
-  await Bun.write(`${changeDir}/${ARCHIVE_DIR}/archived-at.txt`, new Date().toISOString());
+  const statePath = `${changeDir}/${STATE_FILE}`;
+  let stateSnapshot = null;
+  try {
+    stateSnapshot = await readJsonFile<Record<string, unknown>>(statePath);
+  } catch {}
+  const archiveData = {
+    archivedAt: new Date().toISOString(),
+    state: stateSnapshot,
+    artifacts_hash: stateSnapshot?.artifacts_hash,
+    contract_hash: stateSnapshot?.contract_hash,
+    batches_completed: stateSnapshot?.batches_completed,
+  };
+  await writeJsonFile(`${changeDir}/${ARCHIVE_DIR}/archive.json`, archiveData);
 }

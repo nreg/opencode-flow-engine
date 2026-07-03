@@ -49,7 +49,7 @@ describe('Config Loader', () => {
       });
       const config = await loadSFlowConfig(TEST_DIR);
       expect(config.version).toBe('0.1.0');
-      expect(config.agents?.sflow?.model).toBe('gpt-4o');
+      expect(config.agents?.sFlow?.model).toBe('gpt-4o');
     });
 
     it('should return empty object on malformed JSON', async () => {
@@ -79,7 +79,7 @@ describe('Config Loader', () => {
       }));
       try {
         const config = await loadUserSFlowConfig();
-        expect(config.agents?.sflow?.model).toBe('user-model');
+        expect(config.agents?.sFlow?.model).toBe('user-model');
       } finally {
         try { unlinkSync(USER_CONFIG_FILE); } catch {}
         try { rmdirSync(userDir); } catch {}
@@ -94,7 +94,7 @@ describe('Config Loader', () => {
         agents: { sFlow: { model: 'project-model' } },
       });
       const config = await loadCascadedSFlowConfig(TEST_DIR);
-      expect(config.agents?.sflow?.model).toBe('project-model');
+      expect(config.agents?.sFlow?.model).toBe('project-model');
     });
 
     it('should merge user and project config with project winning', async () => {
@@ -119,9 +119,9 @@ describe('Config Loader', () => {
       try {
         const config = await loadCascadedSFlowConfig(TEST_DIR);
         // Project overrides user for sFlow
-        expect(config.agents?.sflow?.model).toBe('project-sFlow');
+        expect(config.agents?.sFlow?.model).toBe('project-sFlow');
         // But user's temperature for sFlow should merge through
-        expect(config.agents?.sflow?.temperature).toBe(0.8);
+        expect(config.agents?.sFlow?.temperature).toBe(0.8);
         // User-only agent preserved
         expect(config.agents?.['need-explorer']?.model).toBe('user-need');
         // Project-only agent added
@@ -146,9 +146,9 @@ describe('Config Loader', () => {
           'build-executor': { model: 'claude-sonnet-4-6' },
         },
       });
-      expect(overrides.sflow?.model).toBe('gpt-4o');
-      expect(overrides.sflow?.temperature).toBe(0.3);
-      expect(overrides.sflow?.fallback_models).toEqual(['claude-3-5-sonnet']);
+      expect(overrides.sFlow?.model).toBe('gpt-4o');
+      expect(overrides.sFlow?.temperature).toBe(0.3);
+      expect(overrides.sFlow?.fallback_models).toEqual(['claude-3-5-sonnet']);
       expect(overrides['build-executor']?.model).toBe('claude-sonnet-4-6');
     });
 
@@ -165,8 +165,8 @@ describe('Config Loader', () => {
       const base = { sFlow: { model: 'claude-opus-4-7' } };
       const higher = { sFlow: { temperature: 0.5 }, 'need-explorer': { model: 'gpt-4o' } };
       const merged = mergeOverrides(base as any, higher as any);
-      expect(merged.sflow?.model).toBe('claude-opus-4-7');
-      expect(merged.sflow?.temperature).toBe(0.5);
+      expect(merged.sFlow?.model).toBe('claude-opus-4-7');
+      expect(merged.sFlow?.temperature).toBe(0.5);
       expect(merged['need-explorer']?.model).toBe('gpt-4o');
     });
 
@@ -252,8 +252,8 @@ describe('Config File Integration with Agent Builder', () => {
       agents: { sFlow: { model: 'from-config' } },
     });
     const config = await loadSFlowConfig();
-    expect(config.agents?.sflow?.model).toBe('from-config');
-    expect(config.agents?.sflow?.model).not.toBe('from-code');
+    expect(config.agents?.sFlow?.model).toBe('from-config');
+    expect(config.agents?.sFlow?.model).not.toBe('from-code');
     const agent = await createAgent('sFlow', 'from-code');
     expect(agent.model).toBe('from-code');
   });
@@ -276,8 +276,8 @@ describe('Config File Integration with Agent Builder', () => {
       },
     });
     const agents = await createAllAgents();
-    expect(agents.sflow.model).toBe('gpt-5');
+    expect(agents.sFlow.model).toBe('gpt-5');
     expect(agents['build-executor'].model).toBe('claude-4-opus');
-    expect(agents['code-reviewer'].model).toBe('deepseek-v4-flash');
+    expect(agents['code-reviewer'].model).toBe('glm-5.1');
   });
 });

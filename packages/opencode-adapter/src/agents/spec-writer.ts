@@ -10,7 +10,7 @@ import { getAgentTools } from './agent-tools.js';
 /**
  * Create the spec-writer agent configuration
  */
-export const createSpecWriterAgent: AgentFactory = (model: string): AgentConfig => ({
+export const createSpecWriterAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'spec-writer',
   name: 'Spec Writer',
   model,
@@ -79,7 +79,7 @@ You have access to:
 - \`bash\` - Run validation scripts
 
 Use validation scripts to ensure quality.`,
-      temperature: 0.6,
+      temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('spec-writer'),
 });
 

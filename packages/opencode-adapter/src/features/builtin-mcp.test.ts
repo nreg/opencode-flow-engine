@@ -1,66 +1,51 @@
 import { describe, it, expect } from 'bun:test';
-import { BuiltinMcpRegistry, createValidatorMcpServer } from './builtin-mcp.js';
+import { createValidatorTools } from './builtin-mcp.js';
 
-describe('BuiltinMcpRegistry', () => {
-  it('should register validator MCP server on construction', () => {
-    const registry = new BuiltinMcpRegistry();
-    const servers = registry.getAll();
-    expect(servers).toHaveLength(1);
-    expect(servers[0].name).toBe('spec-validator');
+describe('BuiltinValidatorTools', () => {
+  it('should create validator tools with expected keys', () => {
+    const tools = createValidatorTools();
+    const keys = Object.keys(tools);
+    expect(keys).toContain('validate_spec');
+    expect(keys).toContain('validate_proposal');
+    expect(keys).toContain('validate_delta_spec');
+    expect(keys).toContain('validate_tasks');
   });
 
-  it('should call validate-proposal method', async () => {
-    const registry = new BuiltinMcpRegistry();
-    const result = await registry.call('spec-validator', 'validate-proposal', {
+  it('should validate proposal content', async () => {
+    const tools = createValidatorTools();
+    const result = await tools.validate_proposal.execute({
       content: '# Why\n\nSome reason\n\n# What Changes\n\nSome changes',
     });
-    expect(result.success).toBe(true);
-    expect(result.data).toBeDefined();
+    expect(result).toBeDefined();
+    expect(result.output).toBeDefined();
   });
 
-  it('should call validate-spec method', async () => {
-    const registry = new BuiltinMcpRegistry();
-    const result = await registry.call('spec-validator', 'validate-spec', {
+  it('should validate spec content', async () => {
+    const tools = createValidatorTools();
+    const result = await tools.validate_spec.execute({
+      name: 'auth-service',
       content: '#### Requirement: Login\nSHALL support login\n\n### Scenario: Basic login\ngiven a user\nwhen they login\nthen they are authenticated',
     });
-    expect(result.success).toBe(true);
-    expect(result.data).toBeDefined();
+    expect(result).toBeDefined();
+    expect(result.output).toBeDefined();
   });
 
-  it('should call validate-contract method', async () => {
-    const registry = new BuiltinMcpRegistry();
-    const result = await registry.call('spec-validator', 'validate-contract', {
-      content: '# Execution Contract\n\n## Test Plan\n\nTest cases defined\n\n## Acceptance Criteria\n\nCriteria defined',
+  it('should validate delta spec content', async () => {
+    const tools = createValidatorTools();
+    const result = await tools.validate_delta_spec.execute({
+      content: '## ADDED Requirements\n\n### Requirement: Login\nSHALL support login',
+      changeName: 'test-change',
     });
-    expect(result.success).toBe(true);
-    expect(result.data).toBeDefined();
+    expect(result).toBeDefined();
+    expect(result.output).toBeDefined();
   });
 
-  it('should return error for unknown method', async () => {
-    const registry = new BuiltinMcpRegistry();
-    const result = await registry.call('spec-validator', 'unknown-method', {});
-    expect(result.success).toBe(false);
-    expect(result.error).toBeDefined();
-  });
-
-  it('should return error for unknown server', async () => {
-    const registry = new BuiltinMcpRegistry();
-    const result = await registry.call('non-existent', 'validate-proposal', {});
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('not found');
-  });
-
-  it('should support registering custom MCP servers', () => {
-    const registry = new BuiltinMcpRegistry();
-    const customServer = createValidatorMcpServer();
-    registry.register(customServer);
-    expect(registry.get('spec-validator')).toBeDefined();
-  });
-
-  it('should return error for missing content parameter', async () => {
-    const registry = new BuiltinMcpRegistry();
-    const result = await registry.call('spec-validator', 'validate-proposal', {});
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('Missing content');
+  it('should validate tasks content', async () => {
+    const tools = createValidatorTools();
+    const result = await tools.validate_tasks.execute({
+      content: '- [ ] Task 1: description — completion criteria\n- [x] Task 2: done',
+    });
+    expect(result).toBeDefined();
+    expect(result.output).toBeDefined();
   });
 });

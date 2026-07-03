@@ -18,15 +18,15 @@ const __dirname = dirname(__filename);
  */
 function resolveSkillsDir(givenDir?: string): string {
   if (givenDir) return givenDir;
-  let current = resolve(__dirname, '..');
-  for (let i = 0; i < 10; i++) {
-    const skillsPath = join(current, 'skills');
-    if (existsSync(skillsPath)) {
-      return skillsPath;
-    }
-    current = resolve(current, '..');
+  const candidates = [
+    join(__dirname, '..', '..', '..', 'skills'),
+    join(__dirname, '..', '..', '..', '..', 'skills'),
+    join(process.cwd(), 'skills'),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(dir)) return dir;
   }
-  return join(__dirname, '..', '..', '..', '..', 'skills');
+  return candidates[0]!;
 }
 
 /**

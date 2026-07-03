@@ -10,7 +10,7 @@ import { getAgentTools } from './agent-tools.js';
 /**
  * Create the release-archivist agent configuration
  */
-export const createReleaseArchivistAgent: AgentFactory = (model: string): AgentConfig => ({
+export const createReleaseArchivistAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'release-archivist',
   name: 'Release Archivist',
   model,
@@ -100,7 +100,7 @@ You have access to:
 - \`write\` - Write verification report and archive
 - \`bash\` - Run tests and commands
 - \`glob\` - Search for files`,
-      temperature: 0.7,
+      temperature: options?.temperature ?? 0.7,
   tools: getAgentTools('release-archivist'),
 });
 

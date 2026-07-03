@@ -38,7 +38,7 @@ export function extractRequirementsSection(content: string): RequirementsSection
     const headerLine = '## Requirements';
     return {
       before: before ? before + '\n\n' : '',
-      headerLine,
+      headerLine: headerLine!,
       preamble: '',
       bodyBlocks: [],
       after: '\n',
@@ -47,7 +47,7 @@ export function extractRequirementsSection(content: string): RequirementsSection
 
   let endIndex = lines.length;
   for (let i = reqHeaderIndex + 1; i < lines.length; i++) {
-    if (/^##\s+/.test(lines[i])) {
+    if (/^##\s+/.test(lines[i]!)) {
       endIndex = i;
       break;
     }
@@ -63,40 +63,40 @@ export function extractRequirementsSection(content: string): RequirementsSection
 
   while (
     cursor < sectionBodyLines.length &&
-    !REQUIREMENT_HEADER_REGEX.test(sectionBodyLines[cursor])
+    !REQUIREMENT_HEADER_REGEX.test(sectionBodyLines[cursor]!)
   ) {
-    preambleLines.push(sectionBodyLines[cursor]);
+    preambleLines.push(sectionBodyLines[cursor]!);
     cursor++;
   }
 
   while (cursor < sectionBodyLines.length) {
-    const headerLineCandidate = sectionBodyLines[cursor];
+    const headerLineCandidate = sectionBodyLines[cursor]!;
     const headerMatch = headerLineCandidate.match(REQUIREMENT_HEADER_REGEX);
     if (!headerMatch) {
       cursor++;
       continue;
     }
-    const name = normalizeRequirementName(headerMatch[1]);
+    const name = normalizeRequirementName(headerMatch[1]!);
     cursor++;
     const bodyLines: string[] = [headerLineCandidate];
     while (
       cursor < sectionBodyLines.length &&
-      !REQUIREMENT_HEADER_REGEX.test(sectionBodyLines[cursor]) &&
-      !/^##\s+/.test(sectionBodyLines[cursor])
+      !REQUIREMENT_HEADER_REGEX.test(sectionBodyLines[cursor]!) &&
+      !/^##\s+/.test(sectionBodyLines[cursor]!)
     ) {
-      bodyLines.push(sectionBodyLines[cursor]);
+      bodyLines.push(sectionBodyLines[cursor]!);
       cursor++;
     }
     const raw = bodyLines.join('\n').trimEnd();
-    blocks.push({ headerLine: headerLineCandidate, name, raw });
+    blocks.push({ headerLine: headerLineCandidate!, name, raw });
   }
 
   const after = lines.slice(endIndex).join('\n');
   const preamble = preambleLines.join('\n').trimEnd();
 
   return {
-    before: before.trimEnd() ? before + '\n' : before,
-    headerLine,
+    before: before!.trimEnd() ? before + '\n' : before,
+    headerLine: headerLine!,
     preamble,
     bodyBlocks: blocks,
     after: after.startsWith('\n') ? after : '\n' + after,
@@ -112,23 +112,23 @@ function parseRequirementBlocksFromSection(sectionBody: string): RequirementBloc
   const blocks: RequirementBlock[] = [];
   let i = 0;
   while (i < lines.length) {
-    while (i < lines.length && !REQUIREMENT_HEADER_REGEX.test(lines[i])) i++;
+    while (i < lines.length && !REQUIREMENT_HEADER_REGEX.test(lines[i]!)) i++;
     if (i >= lines.length) break;
-    const headerLine = lines[i];
+    const headerLine = lines[i]!;
     const m = headerLine.match(REQUIREMENT_HEADER_REGEX);
     if (!m) {
       i++;
       continue;
     }
-    const name = normalizeRequirementName(m[1]);
+    const name = normalizeRequirementName(m[1]!);
     const buf: string[] = [headerLine];
     i++;
     while (
       i < lines.length &&
-      !REQUIREMENT_HEADER_REGEX.test(lines[i]) &&
-      !/^##\s+/.test(lines[i])
+      !REQUIREMENT_HEADER_REGEX.test(lines[i]!) &&
+      !/^##\s+/.test(lines[i]!)
     ) {
-      buf.push(lines[i]);
+      buf.push(lines[i]!);
       i++;
     }
     blocks.push({ headerLine, name, raw: buf.join('\n').trimEnd() });
@@ -146,12 +146,12 @@ function parseRemovedNames(sectionBody: string): string[] {
   for (const line of lines) {
     const m = line.match(REQUIREMENT_HEADER_REGEX);
     if (m) {
-      names.push(normalizeRequirementName(m[1]));
+      names.push(normalizeRequirementName(m[1]!));
       continue;
     }
     const bullet = line.match(/^\s*-\s*`?###\s*Requirement:\s*(.+?)`?\s*$/);
     if (bullet) {
-      names.push(normalizeRequirementName(bullet[1]));
+      names.push(normalizeRequirementName(bullet[1]!));
     }
   }
   return names;
@@ -169,9 +169,9 @@ function parseRenamedPairs(sectionBody: string): Array<{ from: string; to: strin
     const fromMatch = line.match(/^\s*-?\s*FROM:\s*`?###\s*Requirement:\s*(.+?)`?\s*$/);
     const toMatch = line.match(/^\s*-?\s*TO:\s*`?###\s*Requirement:\s*(.+?)`?\s*$/);
     if (fromMatch) {
-      current.from = normalizeRequirementName(fromMatch[1]);
+      current.from = normalizeRequirementName(fromMatch[1]!);
     } else if (toMatch) {
-      current.to = normalizeRequirementName(toMatch[1]);
+      current.to = normalizeRequirementName(toMatch[1]!);
       if (current.from && current.to) {
         pairs.push({ from: current.from, to: current.to });
         current = {};
@@ -189,13 +189,13 @@ function splitTopLevelSections(content: string): Record<string, string> {
   const result: Record<string, string> = {};
   const indices: Array<{ title: string; index: number }> = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^##\s+(.+)$/);
+    const m = lines[i]!.match(/^##\s+(.+)$/);
     if (m) {
-      indices.push({ title: m[1].trim(), index: i });
+      indices.push({ title: m[1]!.trim(), index: i });
     }
   }
   for (let i = 0; i < indices.length; i++) {
-    const current = indices[i];
+    const current = indices[i]!;
     const next = indices[i + 1];
     const body = lines
       .slice(current.index + 1, next ? next.index : lines.length)
@@ -263,7 +263,7 @@ function extractSection(content: string, heading: string): string {
 
   let endIdx = lines.length;
   for (let i = idx + 1; i < lines.length; i++) {
-    if (/^##\s+/.test(lines[i])) {
+    if (i < lines.length && /^##\s+/.test(lines[i]!)) {
       endIdx = i;
       break;
     }
@@ -289,7 +289,7 @@ export function parseChangeMarkdown(content: string, changeName: string): Parsed
   for (const section of sections) {
     const match = section.match(deltaSectionRegex);
     if (match) {
-      const operation = match[1].toUpperCase();
+      const operation = match[1]!.toUpperCase();
       const body = section.substring(match[0].length).trim();
       const descLines: string[] = [];
       for (const line of body.split('\n')) {

@@ -10,7 +10,7 @@ import { getAgentTools } from './agent-tools.js';
 /**
  * Create the code-reviewer agent configuration
  */
-export const createCodeReviewerAgent: AgentFactory = (model: string): AgentConfig => ({
+export const createCodeReviewerAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'code-reviewer',
   name: 'Code Reviewer',
   model,
@@ -100,7 +100,7 @@ You have access to:
 - \`lsp_diagnostics\` - Check for errors
 - \`lsp_goto_definition\` - Navigate code
 - \`lsp_find_references\` - Find usages`,
-      temperature: 0.6,
+      temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('code-reviewer'),
 });
 

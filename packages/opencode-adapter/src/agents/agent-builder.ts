@@ -152,7 +152,7 @@ function normalizeFallbackList(
  */
 export type ModelProvenance =
   | 'override'
-  | 'category-default'
+  | 'config-override'
   | 'provider-fallback'
   | 'system-default';
 
@@ -190,7 +190,7 @@ export function resolveModelWithFallback(
 
   if (configModel) {
     if (isModelAvailable(configModel)) {
-      return { model: configModel, provenance: 'category-default' };
+      return { model: configModel, provenance: 'config-override' };
     }
   }
 
@@ -234,11 +234,9 @@ export async function createAgent(
 
   const resolved = resolveModelWithFallback(name, model, configOverrides, overrides);
 
-  const agentConfig = factory(resolved.model);
-
-  if (skillContent) {
-    agentConfig.instructions = (agentConfig.instructions || '') + '\n\n---\n\n## Skill-Specific Instructions\n\n' + skillContent;
-  }
+  // Resolve temperature: override > config > factory default
+  const resolvedTemperature = agentOverride?.temperature ?? configOverrides?.[name]?.temperature ?? undefined;
+  const agentConfig = factory(resolved.model, { temperature: resolvedTemperature, skillContent });
 
   if (agentOverride) {
     return {
@@ -248,6 +246,14 @@ export async function createAgent(
       id: agentConfig.id,
       name: agentConfig.name,
     };
+  }
+
+  // Append skill content if provided
+  if (skillContent) {
+    const instructions: string = String(agentConfig.instructions || agentConfig.prompt || '');
+    if (!instructions.includes('Skill-Specific Instructions')) {
+      agentConfig.instructions = instructions + '\n\n---\n\n## Skill-Specific Instructions\n\n' + skillContent;
+    }
   }
 
   return agentConfig;
@@ -271,16 +277,12 @@ export async function createAllAgents(
 
     const resolved = resolveModelWithFallback(name, model, configOverrides, overrides);
 
-    const agentConfig = factory(resolved.model);
-
-    // Use skill content from SkillLoader if available
     const content = skillContents?.[name];
-    if (content) {
-      agentConfig.instructions = (agentConfig.instructions || '') + '\n\n---\n\n## Skill-Specific Instructions\n\n' + content;
-    }
 
     const merged = mergeOverrides(configOverrides, overrides || {});
     const agentOverride = merged[name];
+    const resolvedTemperature = agentOverride?.temperature ?? configOverrides?.[name]?.temperature ?? undefined;
+    const agentConfig = factory(resolved.model, { temperature: resolvedTemperature, skillContent: content });
 
     if (agentOverride) {
       agents[name] = {
@@ -292,6 +294,14 @@ export async function createAllAgents(
       };
     } else {
       agents[name] = agentConfig;
+    }
+
+    // Append skill content if provided
+    if (content) {
+      const instructions: string = String(agents[name].instructions || agents[name].prompt || '');
+      if (!instructions.includes('Skill-Specific Instructions')) {
+        agents[name].instructions = instructions + '\n\n---\n\n## Skill-Specific Instructions\n\n' + content;
+      }
     }
   }
 

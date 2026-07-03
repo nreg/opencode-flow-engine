@@ -15,8 +15,9 @@ export function deepMerge<T extends Record<string, unknown>>(
 ): T {
   const result = { ...target };
 
+  const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
   for (const key in source) {
-    if (Object.prototype.hasOwnProperty.call(source, key)) {
+    if (!DANGEROUS_KEYS.has(key) && Object.prototype.hasOwnProperty.call(source, key)) {
       const sourceValue = source[key];
       const targetValue = result[key];
 

@@ -38,7 +38,7 @@ function extractSection(content: string, heading: string): string | undefined {
 
   let endIdx = lines.length;
   for (let i = idx + 1; i < lines.length; i++) {
-    if (/^##\s+/.test(lines[i])) {
+    if (i < lines.length && /^##\s+/.test(lines[i]!)) {
       endIdx = i;
       break;
     }
@@ -59,7 +59,7 @@ function countScenarios(blockRaw: string): number {
 function extractRequirementText(blockRaw: string): string | undefined {
   const lines = blockRaw.split('\n');
   for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
+    const line = lines[i]!;
     if (/^####\s+/.test(line)) break;
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
@@ -579,7 +579,7 @@ export class Validator {
     const tasks: string[] = [];
 
     while ((match = taskRegex.exec(content)) !== null) {
-      tasks.push(match[1]);
+      tasks.push(match[1]!);
     }
 
     if (tasks.length === 0) {
@@ -676,7 +676,7 @@ export class Validator {
     const names: string[] = [];
     let match: RegExpExecArray | null;
     while ((match = regex.exec(specContent)) !== null) {
-      names.push(match[1].trim());
+      names.push(match[1]!.trim());
     }
     return names;
   }
@@ -686,7 +686,7 @@ export class Validator {
     const names: string[] = [];
     let match: RegExpExecArray | null;
     while ((match = regex.exec(designContent)) !== null) {
-      names.push(match[1].trim());
+      names.push(match[1]!.trim());
     }
     return names;
   }

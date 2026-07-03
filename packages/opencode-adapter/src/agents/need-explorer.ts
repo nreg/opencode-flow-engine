@@ -10,7 +10,7 @@ import { getAgentTools } from './agent-tools.js';
 /**
  * Create the need-explorer agent configuration
  */
-export const createNeedExplorerAgent: AgentFactory = (model: string): AgentConfig => ({
+export const createNeedExplorerAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'need-explorer',
   name: 'Need Explorer',
   model,
@@ -58,7 +58,7 @@ You have access to:
 - \`grep\` - Search file contents
 
 Use these to understand the current context before asking questions.`,
-      temperature: 0.6,
+      temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('need-explorer'),
 });
 

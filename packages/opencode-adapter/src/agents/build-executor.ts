@@ -10,7 +10,7 @@ import { getAgentTools } from './agent-tools.js';
 /**
  * Create the build-executor agent configuration
  */
-export const createBuildExecutorAgent: AgentFactory = (model: string): AgentConfig => ({
+export const createBuildExecutorAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'build-executor',
   name: 'Build Executor',
   model,
@@ -86,7 +86,7 @@ You have access to:
 - \`bash\` - Run tests and commands
 - \`lsp_diagnostics\` - Check for errors
 - \`lsp_goto_definition\` - Navigate code`,
-      temperature: 0.7,
+      temperature: options?.temperature ?? 0.7,
   tools: getAgentTools('build-executor'),
 });
 

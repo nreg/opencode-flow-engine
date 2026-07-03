@@ -81,7 +81,7 @@ describe('Agent Builder', () => {
 
     it('should use default model when not specified', async () => {
       const agent = await createAgent('sFlow');
-      expect(agent.model).toBe('deepseek-v4-flash');
+      expect(agent.model).toBe('glm-5.1');
     });
   });
 

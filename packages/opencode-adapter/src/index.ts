@@ -55,7 +55,8 @@ import { readJsonFile } from '@opencode-sflow/shared';
 import type { HookContext } from './hooks/types.js';
 import { sharedValidator } from '@opencode-sflow/core';
 import { fileExists as sflowFileExists, directoryExists, readFile as sflowReadFile } from '@opencode-sflow/shared';
-import { checkContractStaleness } from './tools/workflow-router.js';
+import { isContractStale } from '@opencode-sflow/shared';
+import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 
 export const PLUGIN_ID = 'opencode-sflow';
 export const PLUGIN_VERSION = '0.1.0';
@@ -161,7 +162,7 @@ async function executeWorkflowRouter(changeDir: string) {
   }
 
   if (artifacts.contract) {
-    const isStale = await checkContractStaleness(changeDir);
+    const isStale = await isContractStale(changeDir);
     if (isStale) {
       state = 'bridging';
       skill = 'contract-builder';
@@ -183,7 +184,7 @@ async function executeContractValidator(changeDir: string) {
   }
 
   const report = sharedValidator.validateExecutionContract(contractContent);
-  const isStale = await checkContractStaleness(changeDir);
+  const isStale = await isContractStale(changeDir);
 
   const recommendations: string[] = [];
   if (isStale) recommendations.push('Contract is stale — regenerate with contract-builder');
@@ -273,6 +274,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
 
   const hookComposer = createHookComposer();
   const skillLoader = await createSkillLoader();
+  const mcpManager = createMcpManager();
 
   // Build tool definitions using @opencode-ai/plugin format
   const tools = createSFlowTools(workDir);
@@ -280,6 +282,32 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
   return {
     dispose: async () => {
       console.log('[sFlow] Plugin disposed');
+    },
+
+    // event hook: session lifecycle events (S14 fix)
+    event: async (input) => {
+      const event = input.event;
+      if (event.type === 'session.created') {
+        const sessionStartHook = hookComposer.getHook('session_start');
+        if (sessionStartHook) {
+          await sessionStartHook.execute({
+            changeDir: workDir,
+            stateFile: `${workDir}/${STATE_FILE_PATH}`,
+            pluginRoot: '',
+            action: 'session.created',
+          });
+        }
+      } else if (event.type === 'session.deleted') {
+        const sessionEndHook = hookComposer.getHook('session_end');
+        if (sessionEndHook) {
+          await sessionEndHook.execute({
+            changeDir: workDir,
+            stateFile: `${workDir}/${STATE_FILE_PATH}`,
+            pluginRoot: '',
+            action: 'session.deleted',
+          });
+        }
+      }
     },
 
     // ── config hook: register agents and MCP servers ──
@@ -292,7 +320,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
         const agentCfg = await createAgent(name, undefined, undefined, skill?.content);
         cfg.agent[name] = {
           model: agentCfg.model,
-          prompt: agentCfg.instructions as string | undefined,
+          prompt: (agentCfg.instructions as string) || agentCfg.prompt,
           mode: getAgentMode(name),
           tools: agentCfg.tools,
           temperature: override?.temperature ?? agentCfg.temperature,
@@ -313,6 +341,31 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
               command: [server.command, ...(server.args || [])],
               environment: server.env,
             };
+            // Start the MCP server process (S15 fix)
+            mcpManager.startServer(server.name, server).catch(err => {
+              console.warn(`[sFlow] Failed to start MCP server ${server.name}: ${err.message}`);
+            });
+          }
+        }
+      }
+
+      // --- Register project-level MCPs (Tier 2) (S15 fix) ---
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const projectMcpConfig = (await loadProjectMcpConfig()) as any;
+      for (const [name, server] of Object.entries(projectMcpConfig)) {
+        const srv = server as { command: string | string[]; environment?: Record<string, string> };
+        if (srv && srv.command) {
+          cfg.mcp[name] = {
+            type: 'local',
+            command: Array.isArray(srv.command) ? srv.command : [srv.command],
+            environment: srv.environment,
+          };
+          const cmd = Array.isArray(srv.command) ? srv.command[0] : srv.command;
+          const cmdArgs = Array.isArray(srv.command) ? srv.command.slice(1) : [];
+          if (cmd) {
+            mcpManager.startServer(name, { name, command: cmd, args: cmdArgs, env: srv.environment }).catch(err => {
+              console.warn(`[sFlow] Failed to start project MCP server ${name}: ${err.message}`);
+            });
           }
         }
       }
@@ -491,3 +544,4 @@ const sflowPluginModule: PluginModule = {
 };
 
 export default sflowPluginModule;
+

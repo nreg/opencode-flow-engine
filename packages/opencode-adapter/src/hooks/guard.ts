@@ -2,18 +2,17 @@
  * Guard hook - Guard state transitions and block invalid operations
  */
 
-import type { HookHandler, HookContext, HookResult } from './types.js';
-import { fileExists, readFile, readJsonFile } from '@opencode-sflow/shared';
-import { sharedValidator } from '@opencode-sflow/core';
-import { checkContractStaleness } from '../tools/workflow-router.js';
+import type { HookHandler, HookContext, HookResult } from "./types.js";
+import { fileExists, readFile, readJsonFile, isContractStale } from "@opencode-sflow/shared";
+import { sharedValidator } from "@opencode-sflow/core";
 
 /**
  * Create the guard hook
  */
 export function createGuardHook(): HookHandler {
   return {
-    name: 'guard',
-    description: 'Guard state transitions and block invalid operations',
+    name: "guard",
+    description: "Guard state transitions and block invalid operations",
     execute: async (context) => {
       const { changeDir } = context;
 
@@ -25,13 +24,13 @@ export function createGuardHook(): HookHandler {
           await checkDebuggingState(changeDir, context.action),
         ];
 
-        const blockingGuards = guards.filter(g => g.block);
+        const blockingGuards = guards.filter((g) => g.block);
         if (blockingGuards.length > 0) {
           return {
             success: false,
-            error: 'Guard conditions not met',
+            error: "Guard conditions not met",
             block: true,
-            blockReason: blockingGuards.map(g => g.blockReason).join('; '),
+            blockReason: blockingGuards.map((g) => g.blockReason).join("; "),
           };
         }
 
@@ -53,16 +52,16 @@ async function checkArtifactExistence(changeDir: string): Promise<HookResult> {
   if (!dirExists) return { success: true };
 
   const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
-  const currentState = stateData?.state || 'exploring';
+  const currentState = stateData?.state || "exploring";
 
   const artifactByState: Record<string, string[]> = {
     exploring: [],
-    specifying: ['proposal.md'],
-    bridging: ['proposal.md', 'specs', 'design.md', 'tasks.md'],
-    'approved-for-build': ['proposal.md', 'specs', 'design.md', 'tasks.md', 'execution-contract.md'],
-    executing: ['proposal.md', 'specs', 'design.md', 'tasks.md', 'execution-contract.md'],
-    debugging: ['proposal.md', 'specs', 'design.md', 'tasks.md', 'execution-contract.md'],
-    closing: ['proposal.md', 'specs', 'design.md', 'tasks.md', 'execution-contract.md'],
+    specifying: ["proposal.md"],
+    bridging: ["proposal.md", "specs", "design.md", "tasks.md"],
+    "approved-for-build": ["proposal.md", "specs", "design.md", "tasks.md", "execution-contract.md"],
+    executing: ["proposal.md", "specs", "design.md", "tasks.md", "execution-contract.md"],
+    debugging: ["proposal.md", "specs", "design.md", "tasks.md", "execution-contract.md"],
+    closing: ["proposal.md", "specs", "design.md", "tasks.md", "execution-contract.md"],
     abandoned: [],
   };
 
@@ -80,7 +79,7 @@ async function checkArtifactExistence(changeDir: string): Promise<HookResult> {
     return {
       success: false,
       block: true,
-      blockReason: `Missing required artifacts: ${missingArtifacts.join(', ')}`,
+      blockReason: `Missing required artifacts: ${missingArtifacts.join(", ")}`,
     };
   }
 
@@ -90,12 +89,12 @@ async function checkArtifactExistence(changeDir: string): Promise<HookResult> {
 async function checkContractStalenessGuard(changeDir: string): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
-  const isStale = await checkContractStaleness(changeDir);
-  if (isStale) {
+  const stale = await isContractStale(changeDir);
+  if (stale) {
     return {
       success: false,
       block: true,
-      blockReason: 'Contract is stale: proposal.md was modified after execution-contract.md was created',
+      blockReason: "Contract is stale: proposal.md was modified after execution-contract.md was created",
     };
   }
   return { success: true };
@@ -107,10 +106,10 @@ async function checkTaskCompletion(changeDir: string): Promise<HookResult> {
   const tasksContent = await readFile(`${changeDir}/tasks.md`);
   if (!tasksContent) return { success: true };
 
-  const taskLines = tasksContent.split('\n').filter(line => line.match(/^-\s*\[.\]\s+/));
+  const taskLines = tasksContent.split("\n").filter((line: string) => line.match(/^-\s*\[.\]\s+/));
   if (taskLines.length === 0) return { success: true };
 
-  const incompleteTasks = taskLines.filter(line => line.match(/^-\s*\[\s\]/));
+  const incompleteTasks = taskLines.filter((line: string) => line.match(/^-\s*\[\s\]/));
   if (incompleteTasks.length > 0) {
     return {
       success: false,
@@ -125,15 +124,17 @@ async function checkDebuggingState(changeDir: string, action?: string): Promise<
   if (!changeDir) return { success: true };
 
   const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
-  if (stateData?.state === 'debugging') {
-    const isDebugAction = action?.includes('bug-investigator') ||
-                          action?.includes('debugging') ||
-                          action?.includes('tool:workflow_router');
+  if (stateData?.state === "debugging") {
+    const isDebugAction =
+      action?.includes("bug-investigator") ||
+      action?.includes("debugging") ||
+      action?.includes("tool:workflow_router");
     if (!isDebugAction) {
       return {
         success: false,
         block: true,
-        blockReason: 'Workflow is in debugging state. Only bug-investigator can operate. Fix the bug and transition back to executing before continuing.',
+        blockReason:
+          "Workflow is in debugging state. Only bug-investigator can operate. Fix the bug and transition back to executing before continuing.",
       };
     }
   }

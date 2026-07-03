@@ -213,14 +213,14 @@ export class HookComposer {
   addHook(name: HookName, hook: HookHandler, tier: HookTier = 'skill', position?: number): void {
     this.hooks.set(name, hook);
     // Insert into hookOrder at the right tier boundary
-    const tierStartIdx = this.hookOrder.findIndex(n => {
+    const tierEndIdx = this.hookOrder.findIndex(n => {
       const entry = TIERED_HOOKS.find(e => e.name === n);
-      return entry && TIER_ORDER.indexOf(entry.tier) >= TIER_ORDER.indexOf(tier);
+      return entry && TIER_ORDER.indexOf(entry.tier) > TIER_ORDER.indexOf(tier);
     });
     if (position !== undefined && position >= 0 && position <= this.hookOrder.length) {
       this.hookOrder.splice(position, 0, name);
-    } else if (tierStartIdx >= 0) {
-      this.hookOrder.splice(tierStartIdx, 0, name);
+    } else if (tierEndIdx >= 0) {
+      this.hookOrder.splice(tierEndIdx, 0, name);
     } else {
       this.hookOrder.push(name);
     }

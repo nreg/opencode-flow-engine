@@ -94,9 +94,9 @@ export interface WorkflowStateFile {
   contractApproved: boolean;
   verificationStatus: 'pending' | 'passed' | 'failed';
   timestamps: {
-    createdAt: Date;
-    updatedAt: Date;
-    lastTransition?: Date;
+    createdAt: string;
+    updatedAt: string;
+    lastTransition?: string;
   };
 }
 
