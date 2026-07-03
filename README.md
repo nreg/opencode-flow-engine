@@ -9,6 +9,8 @@ sFlow 是一个 OpenCode 插件，融合了两大核心能力：
 - **OpenSpec** — 需求、规格说明书与提案的规划引擎
 - **Superpowers** — TDD、代码审查与系统化调试的执行纪律
 
+> **架构说明**：sFlow 的核心验证引擎（schema、validation、parsing）从 [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) 移植。Agent 工厂模式、5 层钩子系统、MCP 工具注册、boulder-state 状态管理等运行时架构为适配 OpenCode 插件机制而全新设计，借鉴了 [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) 的架构模式。spec-superflow 原始项目采用 markdown-driven + zero-runtime 设计哲学，sFlow 在此基础上增加了运行时框架层以接入 OpenCode。
+
 ## 功能特性
 
 ### 工作流管理

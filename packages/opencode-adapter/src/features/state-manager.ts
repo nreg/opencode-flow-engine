@@ -100,6 +100,9 @@ export function createStateManager(
           ...state,
           persistedAt: new Date().toISOString(),
           version: 1,
+          artifacts_hash: state.artifacts_hash || '',
+          contract_hash: state.contract_hash || '',
+          batches_completed: state.batches_completed || 0,
         });
 
         return {

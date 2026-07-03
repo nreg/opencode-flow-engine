@@ -22,7 +22,7 @@ export function createGuardHook(): HookHandler {
           await checkArtifactExistence(changeDir),
           await checkContractStalenessGuard(changeDir),
           await checkTaskCompletion(changeDir),
-          await checkDebuggingState(changeDir),
+          await checkDebuggingState(changeDir, context.action),
         ];
 
         const blockingGuards = guards.filter(g => g.block);
@@ -121,16 +121,21 @@ async function checkTaskCompletion(changeDir: string): Promise<HookResult> {
   return { success: true };
 }
 
-async function checkDebuggingState(changeDir: string): Promise<HookResult> {
+async function checkDebuggingState(changeDir: string, action?: string): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
   const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
   if (stateData?.state === 'debugging') {
-    return {
-      success: false,
-      block: true,
-      blockReason: 'Workflow is in debugging state. Fix the bug and transition back to executing before continuing.',
-    };
+    const isDebugAction = action?.includes('bug-investigator') ||
+                          action?.includes('debugging') ||
+                          action?.includes('tool:workflow_router');
+    if (!isDebugAction) {
+      return {
+        success: false,
+        block: true,
+        blockReason: 'Workflow is in debugging state. Only bug-investigator can operate. Fix the bug and transition back to executing before continuing.',
+      };
+    }
   }
   return { success: true };
 }

@@ -1,5 +1,5 @@
 import type { HookHandler, HookContext, HookResult } from './types.js';
-import { readJsonFile, fileExists } from '@opencode-sflow/shared';
+import { readJsonFile, fileExists, writeJsonFile, ensureDir } from '@opencode-sflow/shared';
 
 /**
  * Session start hook — recovers workflow state from boulder state on session start.
@@ -27,7 +27,15 @@ export function createSessionStartHook(): HookHandler {
         if (boulderExists) {
           const boulderState = await readJsonFile<{ state?: string }>(boulderPath);
           if (boulderState?.state) {
-            // Recovery is done by state-manager; this hook just signals readiness
+            // Actually restore the state: copy boulder-state to state.json
+            const statePath = `${changeDir}/.sflow/state.json`;
+            await ensureDir(`${changeDir}/.sflow`);
+            await writeJsonFile(statePath, {
+              ...boulderState,
+              restoredAt: new Date().toISOString(),
+              restoredFrom: 'boulder-state.json',
+            });
+
             return {
               success: true,
               data: {

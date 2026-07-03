@@ -9,6 +9,7 @@
  */
 
 import type { PluginInput, PluginOptions, Hooks, PluginModule, ToolDefinition } from '@opencode-ai/plugin';
+import type { Message, Part } from '@opencode-ai/sdk';
 import { z } from 'zod';
 
 export { Validator, isValidStateRecord } from '@opencode-sflow/core';
@@ -291,10 +292,14 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
         const agentCfg = await createAgent(name, undefined, undefined, skill?.content);
         cfg.agent[name] = {
           model: agentCfg.model,
+          prompt: agentCfg.instructions as string | undefined,
           mode: getAgentMode(name),
-          prompt: agentCfg.instructions,
-          ...(override?.temperature ? { temperature: override.temperature } : {}),
-        } as any;
+          tools: agentCfg.tools,
+          temperature: override?.temperature ?? agentCfg.temperature,
+          description: (agentCfg.name as string | undefined)
+            ? `${agentCfg.name} agent from sFlow plugin`
+            : undefined,
+        };
       }
 
       // --- Register skill-embedded MCPs (Tier 3) ---
@@ -305,10 +310,9 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
           for (const server of skill.metadata.mcp.servers) {
             cfg.mcp[server.name] = {
               type: 'local',
-              command: server.command,
-              args: server.args,
-              env: server.env,
-            } as any;
+              command: [server.command, ...(server.args || [])],
+              environment: server.env,
+            };
           }
         }
       }
@@ -332,9 +336,12 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       if (!skillContent) return;
 
       output.parts.push({
+        id: `sflow-skill-${Date.now()}`,
+        sessionID: input.sessionID,
+        messageID: '',
         type: 'text',
         text: skillContent,
-      } as any);
+      });
     },
 
     // ── tool.execute.before hook ──
@@ -456,13 +463,19 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
           output.messages.push({
             info: {
               id: 'sflow-context',
+              sessionID: '',
               role: 'user',
-              createdAt: new Date().toISOString(),
-            } as any,
+              time: { created: Date.now() },
+              agent: 'sflow',
+              model: { providerID: '', modelID: '' },
+            } satisfies Message,
             parts: [{
+              id: `sflow-ctx-${Date.now()}`,
+              sessionID: '',
+              messageID: '',
               type: 'text',
               text: transformData.context,
-            } as any],
+            }] satisfies Part[],
           });
         }
       }

@@ -9,6 +9,8 @@ sFlow is an OpenCode plugin that combines:
 - **OpenSpec** - A planning engine for creating proposals, specifications, designs, and tasks
 - **Superpowers** - An execution discipline with TDD, code review, and systematic debugging
 
+> **Architecture Note**: The core validation engine (schema, validation, parsing) is ported from spec-superflow. The runtime architecture (agent factories, 5-tier hook system, MCP tool registration, boulder-state persistence) is newly designed to adapt to OpenCode's plugin mechanism, inspired by oh-my-openagent's architecture patterns.
+
 This integration provides a complete workflow from idea to implementation, with guard conditions to ensure quality and consistency.
 
 ## Features

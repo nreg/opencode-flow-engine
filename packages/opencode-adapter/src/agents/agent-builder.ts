@@ -237,7 +237,7 @@ export async function createAgent(
   const agentConfig = factory(resolved.model);
 
   if (skillContent) {
-    agentConfig.instructions = skillContent;
+    agentConfig.instructions = (agentConfig.instructions || '') + '\n\n---\n\n## Skill-Specific Instructions\n\n' + skillContent;
   }
 
   if (agentOverride) {
@@ -276,7 +276,7 @@ export async function createAllAgents(
     // Use skill content from SkillLoader if available
     const content = skillContents?.[name];
     if (content) {
-      agentConfig.instructions = content;
+      agentConfig.instructions = (agentConfig.instructions || '') + '\n\n---\n\n## Skill-Specific Instructions\n\n' + content;
     }
 
     const merged = mergeOverrides(configOverrides, overrides || {});

@@ -124,6 +124,12 @@ async function initializeState(changeDir: string): Promise<void> {
     await writeJsonFile(stateFile, {
       state: 'exploring',
       mode: 'full',
+      artifacts_hash: '',
+      contract_hash: '',
+      batches_completed: 0,
+      dp_0_confirmed: false,
+      contractApproved: false,
+      verificationStatus: 'pending',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -134,12 +140,39 @@ async function readStateFile(changeDir: string): Promise<{
   state: string;
   mode: string;
   updatedAt: string;
+  artifacts_hash: string;
+  contract_hash: string;
+  batches_completed: number;
+  dp_0_confirmed: boolean;
+  contractApproved: boolean;
+  verificationStatus: string;
   [key: string]: unknown;
 }> {
-  const state = await readJsonFile<{ state: string; mode: string; updatedAt: string; [key: string]: unknown }>(
+  const state = await readJsonFile<{
+    state: string;
+    mode: string;
+    updatedAt: string;
+    artifacts_hash: string;
+    contract_hash: string;
+    batches_completed: number;
+    dp_0_confirmed: boolean;
+    contractApproved: boolean;
+    verificationStatus: string;
+    [key: string]: unknown;
+  }>(
     `${changeDir}/${STATE_FILE}`,
   ).catch(() => null);
-  return state || { state: 'exploring', mode: 'full', updatedAt: new Date().toISOString() };
+  return state || {
+    state: 'exploring',
+    mode: 'full',
+    updatedAt: new Date().toISOString(),
+    artifacts_hash: '',
+    contract_hash: '',
+    batches_completed: 0,
+    dp_0_confirmed: false,
+    contractApproved: false,
+    verificationStatus: 'pending',
+  };
 }
 
 async function updateStateFile(changeDir: string, state: Record<string, unknown>): Promise<void> {

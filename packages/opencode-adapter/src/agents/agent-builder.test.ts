@@ -117,13 +117,14 @@ describe('Agent Builder', () => {
     it('should return factory for sFlow agent', () => {
       const factory = getAgent('sflow');
       expect(factory).toBeDefined();
-      expect(factory!.mode).toBe('primary');
+      // Mode is managed by AGENT_MODES registry, tested via getAgentMode()
+      expect(getAgentMode('sflow')).toBe('primary');
     });
 
     it('should return factory for need-explorer agent', () => {
       const factory = getAgent('need-explorer');
       expect(factory).toBeDefined();
-      expect(factory!.mode).toBe('subagent');
+      expect(getAgentMode('need-explorer')).toBe('subagent');
     });
 
     it('should return undefined for unknown agent', () => {
