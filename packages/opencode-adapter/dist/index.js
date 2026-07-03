@@ -13587,12 +13587,12 @@ function getAgentTools(name) {
 var MODE = "primary";
 var createSFlowAgent = (model) => ({
   id: "sflow",
-  name: "sFlow",
+  name: "SFlow",
   model,
   instructions: `<Role>
-You are "sFlow" — Workflow Orchestration Agent from sFlow Plugin.
+You are "SFlow" — Workflow Orchestration Agent from sflow Plugin.
 
-**Why sFlow?**: s = Spec/planning, Flow = workflow execution. You orchestrate the entire development lifecycle from idea to delivery.
+**Why SFlow?**: S = Spec/planning, Flow = workflow execution. You orchestrate the entire development lifecycle from idea to delivery.
 
 **Identity**: Workflow engineer. You don't write code yourself — you plan, delegate, verify, and ship through specialized subagents.
 
@@ -14489,6 +14489,7 @@ async function loadUserSFlowConfig() {
   try {
     await access(USER_CONFIG_FILE);
   } catch {
+    console.warn(`[sflow] No user-level config found at ${USER_CONFIG_FILE}. Run 'sflow init --user' to create one.`);
     return {};
   }
   try {
@@ -14571,6 +14572,17 @@ var DEFAULT_MODELS = {
   "release-archivist": "mimo-v2.5-pro",
   "spec-merger": "mimo-v2.5"
 };
+var DEFAULT_FALLBACKS = {
+  sflow: ["glm-5.1", "kimi-k2.6"],
+  "need-explorer": ["glm-5.1", "deepseek-v4-flash"],
+  "spec-writer": ["kimi-k2.6", "deepseek-v4-flash"],
+  "contract-builder": ["glm-5.1", "deepseek-v4-flash"],
+  "build-executor": ["deepseek-v4-flash", "glm-5.1"],
+  "bug-investigator": ["deepseek-v4-flash", "glm-5.1"],
+  "code-reviewer": ["glm-5.1", "kimi-k2.6"],
+  "release-archivist": ["mimo-v2.5", "glm-5.1"],
+  "spec-merger": ["mimo-v2.5-pro", "glm-5.1"]
+};
 var AGENT_REGISTRY = {
   sflow: createSFlowAgent,
   "need-explorer": createNeedExplorerAgent,
@@ -14594,6 +14606,35 @@ async function getCascadedConfig() {
   _cascadedConfigTimestamp = now;
   return _cascadedConfigCache;
 }
+var UNAVAILABLE_MODELS = new Set;
+function isModelAvailable(model) {
+  return !UNAVAILABLE_MODELS.has(model);
+}
+function resolveModelWithFallback(name, model, configOverrides, overrides) {
+  const programmaticModel = overrides?.[name]?.model;
+  const configModel = configOverrides?.[name]?.model;
+  const primary = programmaticModel || model || configModel || DEFAULT_MODELS[name];
+  if (isModelAvailable(primary)) {
+    return primary;
+  }
+  const configFallback = configOverrides?.[name]?.fallback_models;
+  const configFallbackList = normalizeFallbackList(configFallback);
+  const defaultFallbackList = DEFAULT_FALLBACKS[name] || [];
+  const fallbacks = [...configFallbackList, ...defaultFallbackList];
+  for (const fbModel of fallbacks) {
+    if (isModelAvailable(fbModel)) {
+      return fbModel;
+    }
+  }
+  return primary;
+}
+function normalizeFallbackList(fb) {
+  if (!fb)
+    return [];
+  if (typeof fb === "string")
+    return [fb];
+  return fb.map((item) => typeof item === "string" ? item : item.model);
+}
 async function createAgent(name, model, overrides, skillContent) {
   const factory = AGENT_REGISTRY[name];
   if (!factory) {
@@ -14603,9 +14644,7 @@ async function createAgent(name, model, overrides, skillContent) {
   const configOverrides = agentOverridesFromConfig(config2);
   const merged = mergeOverrides(configOverrides, overrides || {});
   const agentOverride = merged[name];
-  const programmaticModel = overrides?.[name]?.model;
-  const configModel = configOverrides[name]?.model;
-  const resolvedModel = programmaticModel || model || configModel || DEFAULT_MODELS[name];
+  const resolvedModel = resolveModelWithFallback(name, model, configOverrides, overrides);
   const agentConfig = factory(resolvedModel);
   if (skillContent) {
     agentConfig.instructions = skillContent;
@@ -15229,12 +15268,40 @@ function createSessionEndHook() {
   };
 }
 // src/hooks/transform.ts
+var STATE_SUMMARIES = {
+  exploring: "Exploring requirements — gathering and clarifying needs",
+  specifying: "Specifying — writing proposals and specs",
+  bridging: "Bridging — building execution contract from specs",
+  "approved-for-build": "Approved for build — contract approved, ready for implementation",
+  executing: "Executing — implementing tasks with TDD",
+  debugging: "Debugging — investigating and fixing bugs",
+  closing: "Closing — verifying and archiving",
+  abandoned: "Abandoned — workflow was abandoned"
+};
 function createPreProcessHook() {
   return {
     name: "pre_process",
     description: "Transform user messages before agent processing",
     execute: async (context) => {
-      return { success: true, data: { transformed: false } };
+      const { changeDir, data } = context;
+      const currentState = data?.currentState ?? (await readJsonFile(`${changeDir}/.sflow/state.json`))?.state;
+      if (!currentState) {
+        return { success: true, data: { transformed: false } };
+      }
+      const summary = STATE_SUMMARIES[currentState] ?? `Unknown state: ${currentState}`;
+      const contextLines = [
+        `[sFlow Workflow] State: ${currentState}`,
+        summary,
+        "Follow state-specific rules and only produce artifacts appropriate for this phase."
+      ];
+      return {
+        success: true,
+        data: {
+          transformed: true,
+          context: contextLines.join(`
+`)
+        }
+      };
     }
   };
 }
@@ -15243,19 +15310,54 @@ function createPostProcessHook() {
     name: "post_process",
     description: "Transform agent responses before returning to user",
     execute: async (context) => {
+      const { changeDir, data } = context;
+      const outputText = data?.output;
+      if (!outputText) {
+        return { success: true, data: { transformed: false } };
+      }
+      const stateMatch = outputText.match(/"state"\s*:\s*"(\w[\w-]*)"/);
+      if (!stateMatch) {
+        return { success: true, data: { transformed: false } };
+      }
+      const detectedState = stateMatch[1];
+      const currentState = (await readJsonFile(`${changeDir}/.sflow/state.json`))?.state;
+      if (detectedState !== currentState) {
+        return {
+          success: true,
+          data: {
+            transformed: true,
+            stateTransitionSignal: { from: currentState, to: detectedState }
+          }
+        };
+      }
       return { success: true, data: { transformed: false } };
     }
   };
 }
 // src/hooks/continuation.ts
+var TERMINAL_STATES = new Set(["closing", "abandoned"]);
 function createContinuationHook() {
   return {
     name: "continuation",
     description: "Check if workflow should auto-continue to next state",
     execute: async (context) => {
+      const { changeDir } = context;
+      const stateData = await readJsonFile(`${changeDir}/.sflow/state.json`);
+      if (!stateData?.state) {
+        return {
+          success: true,
+          data: { shouldContinue: false, reason: "No workflow state found" }
+        };
+      }
+      if (TERMINAL_STATES.has(stateData.state)) {
+        return {
+          success: true,
+          data: { shouldContinue: false, reason: `Workflow is in terminal state: ${stateData.state}` }
+        };
+      }
       return {
         success: true,
-        data: { shouldContinue: false, reason: "No continuation requested" }
+        data: { shouldContinue: true, reason: `Workflow state ${stateData.state} is active` }
       };
     }
   };
@@ -15458,7 +15560,17 @@ function createStateManager(config2 = { enabled: true }, workflowManager) {
     },
     async isContractStale(changeDir) {
       try {
-        return { success: true, data: { stale: false } };
+        const stateExists = await fileExists(`${changeDir}/.sflow/state.json`);
+        const contractPath = `${changeDir}/execution-contract.md`;
+        const contractExists = await fileExists(contractPath);
+        if (!stateExists || !contractExists) {
+          return { success: true, data: { stale: false } };
+        }
+        const { stat } = await import("fs/promises");
+        const stateStats = await stat(`${changeDir}/.sflow/state.json`);
+        const contractStats = await stat(contractPath);
+        const stale = contractStats.mtimeMs > stateStats.mtimeMs;
+        return { success: true, data: { stale } };
       } catch (error45) {
         return {
           success: false,
@@ -19094,10 +19206,16 @@ async function createSkillLoader(skillsDir) {
 // src/index.ts
 var PLUGIN_ID = "opencode-sflow";
 var PLUGIN_VERSION = "0.1.0";
+var SFLOW_TOOLS = new Set(["workflow_router", "contract_validator", "artifact_inspector"]);
+async function getCurrentWorkflowState(changeDir) {
+  const state = await readJsonFile(`${changeDir}/.sflow/state.json`);
+  return state?.state ?? null;
+}
 async function sflowPlugin(input, _options) {
   const cascadedConfig = await loadCascadedSFlowConfig();
   const configOverrides = agentOverridesFromConfig(cascadedConfig);
-  console.log(`[sFlow] Initializing in ${input.directory}`);
+  const workDir = input.directory;
+  console.log(`[sFlow] Initializing in ${workDir}`);
   const toolRegistry = createToolRegistry();
   const hookComposer = createHookComposer();
   const skillLoader = await createSkillLoader();
@@ -19141,6 +19259,141 @@ async function sflowPlugin(input, _options) {
               env: server.env
             };
           }
+        }
+      }
+    },
+    "command.execute.before": async (_input, output) => {
+      const command = _input.command;
+      if (!command.startsWith("/"))
+        return;
+      const skillName = command.slice(1);
+      const skill = skillLoader.getSkill(skillName);
+      if (!skill)
+        return;
+      const skillContent = skill.content;
+      if (!skillContent)
+        return;
+      output.parts.push({
+        type: "text",
+        text: skillContent
+      });
+    },
+    "tool.execute.before": async (_input, output) => {
+      const toolName = _input.tool;
+      if (!SFLOW_TOOLS.has(toolName))
+        return;
+      const guardHook = hookComposer.getHook("guard");
+      if (!guardHook)
+        return;
+      const guardResult = await guardHook.execute({
+        changeDir: workDir,
+        stateFile: `${workDir}/.sflow/state.json`,
+        pluginRoot: "",
+        action: `tool:${toolName}`,
+        data: { toolName }
+      });
+      if (guardResult.block) {
+        const existingArgs = output.args ?? {};
+        output.args = {
+          ...existingArgs,
+          _sflow_guard_blocked: true,
+          _sflow_guard_reason: guardResult.blockReason ?? guardResult.error ?? "Guard condition not met"
+        };
+      }
+    },
+    "tool.execute.after": async (_input, output) => {
+      const toolName = _input.tool;
+      if (!SFLOW_TOOLS.has(toolName))
+        return;
+      const validationHook = hookComposer.getHook("artifact_validation");
+      if (validationHook) {
+        const currentState = await getCurrentWorkflowState(workDir);
+        const validationCtx = {
+          changeDir: workDir,
+          stateFile: `${workDir}/.sflow/state.json`,
+          pluginRoot: "",
+          action: `tool:${toolName}:after`,
+          data: { newState: currentState }
+        };
+        const validationRes = await validationHook.execute(validationCtx);
+        if (!validationRes.success && validationRes.block) {
+          output.output = `[sFlow validation] ${validationRes.blockReason ?? validationRes.error ?? "Artifact validation failed"}
+${output.output}`;
+        }
+      }
+      const outputStr = output.output ?? "";
+      const stateMatch = outputStr.match(/"state"\s*:\s*"(\w[\w-]*)"/);
+      if (stateMatch) {
+        const newState = stateMatch[1];
+        const transitionHook = hookComposer.getHook("state_transition");
+        if (transitionHook) {
+          await transitionHook.execute({
+            changeDir: workDir,
+            stateFile: `${workDir}/.sflow/state.json`,
+            pluginRoot: "",
+            action: "state-transition",
+            data: { newState }
+          });
+        }
+      }
+    },
+    "chat.message": async (_input, output) => {
+      const agent = _input.agent;
+      if (!agent)
+        return;
+      const currentState = await getCurrentWorkflowState(workDir);
+      if (!currentState)
+        return;
+      const stateInfo = `[sFlow] Current workflow state: ${currentState}`;
+      const textParts = output.parts.filter((p) => p.type === "text");
+      const firstText = textParts[0];
+      if (firstText) {
+        firstText.text = `${stateInfo}
+
+${firstText.text}`;
+      }
+    },
+    "experimental.compaction.autocontinue": async (_input, output) => {
+      const continuationHook = hookComposer.getHook("continuation");
+      if (!continuationHook)
+        return;
+      const result = await continuationHook.execute({
+        changeDir: workDir,
+        stateFile: `${workDir}/.sflow/state.json`,
+        pluginRoot: "",
+        action: "autocontinue"
+      });
+      const shouldContinue = result.success && result.data?.shouldContinue === true;
+      output.enabled = shouldContinue;
+    },
+    "experimental.chat.messages.transform": async (_input, output) => {
+      const currentState = await getCurrentWorkflowState(workDir);
+      if (!currentState)
+        return;
+      const transformHook = hookComposer.getHook("pre_process");
+      if (!transformHook)
+        return;
+      const result = await transformHook.execute({
+        changeDir: workDir,
+        stateFile: `${workDir}/.sflow/state.json`,
+        pluginRoot: "",
+        action: "messages.transform",
+        data: { currentState }
+      });
+      if (result.success) {
+        const transformData = result.data;
+        if (transformData?.context) {
+          output.messages.push({
+            info: {
+              id: "sflow-context",
+              role: "user",
+              createdAt: new Date().toISOString()
+            },
+            parts: [{
+              type: "text",
+              text: transformData.context
+            }]
+          });
         }
       }
     },
