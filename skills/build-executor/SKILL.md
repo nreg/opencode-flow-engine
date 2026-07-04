@@ -101,6 +101,33 @@ Return to `specifying` or `bridging` if:
 - design assumptions fail
 - the current artifacts no longer define the intended implementation
 
+### Runtime Preset Upgrade Check
+
+During execution, if the workflow is `hotfix` or `tweak`, continuously monitor scope. If any task execution exceeds preset constraints, **upgrade to `full`**:
+
+**hotfix → full** (upgrade if any condition met during execution):
+- Task modifies 3+ files
+- Task introduces a new module, new interface, or new dependency
+- Task changes database schema
+- Task creates a new public API
+- Task scope exceeds a single function/module
+- Cross-module coordination becomes necessary
+
+**tweak → full** (upgrade if any condition met during execution):
+- Task modifies 5+ files
+- Task requires cross-module coordination
+- Task needs 5+ new test cases
+- Task adds or removes config items (not just value changes)
+- Task requires new capability not in original scope
+- Task impacts existing specs (delta spec needed)
+
+**Upgrade procedure:**
+1. Output: `[SFLOW] Runtime preset upgrade: <hotfix|tweak> — <reason>`
+2. Update `.sflow/state.json`: set `mode` to `full`
+3. If in hotfix fast-path: route back to `contract-builder` to create proper execution contract
+4. If in tweak direct-edit mode: pause and ask user to confirm full workflow with proper planning artifacts
+5. Record the upgrade in `.sflow/progress.md`
+
 ## Execution Mode Selection
 
 Before starting implementation, determine the execution mode:
@@ -196,6 +223,16 @@ Before starting execution, check the current branch:
 
 If `git worktree` is unavailable → silently skip, continue in current directory.
 
+### Dirty Worktree Check
+
+Before starting or resuming execution, if the worktree has uncommitted changes, follow the protocol at `skills/workflow-start/dirty-worktree.md`. This protocol defines:
+
+1. **Checks**: `git status --short`, `git diff --stat`, `git ls-files --others`
+2. **Attribution**: Classify changes as belongs-to-change / unrelated / unclear
+3. **Prohibitions**: Do not overwrite user changes, do not advance state without attribution**
+
+If attribution is unclear, pause and ask the user before proceeding with any file modifications.
+
 ### Model Selection Strategy
 
 Use the least powerful model that can handle each role:
@@ -230,9 +267,93 @@ Keep your context lean by handing artifacts as files, not pasted text:
 - **Report file**: Named after the brief (`task-N-report.md`) — implementer writes full report there, returns only status summary
 - **Review package**: Write diff to a unique file; reviewer reads one file instead of running git commands
 
+### Subagent Progress Checkpoint
+
+Maintain a structured checkpoint at `.sflow/subagent-progress.md` for durable progress tracking across context compactions. This file stores **only coordinator recovery state** — it does not replace `tasks.md` checkboxes or the progress ledger.
+
+#### Checkpoint File Format
+
+```markdown
+# Subagent Progress Checkpoint
+
+## Current Task
+- **Plan task**: <full task text from execution-contract.md>
+- **Mapped spec task**: <corresponding spec requirement, if any>
+- **Stage**: implementing | spec-review | quality-review | checkoff | done | blocked | final-review | final-fix
+- **Review-fix round**: <current round, max 3>
+
+## Implementation
+- **Commit**: <commit hash>
+- **Changed files**: <file list>
+- **RED evidence**: <failing test command + summary>
+- **GREEN evidence**: <passing test command + summary>
+
+## Review Status
+- **Spec compliance**: pending | pass | fail (<round>)
+- **Code quality**: pending | pass | fail (<round>)
+- **Unresolved feedback**: <list of unresolved reviewer comments>
+
+## History
+- <timestamp>: Dispatched implementer for task N
+- <timestamp>: Implementer returned DONE (commit <hash>)
+- <timestamp>: Spec review pass (round 1)
+- <timestamp>: Quality review pass (round 1)
+- <timestamp>: Task checked off
+```
+
+#### Stage Transitions
+
+| From | To | Trigger |
+|------|-----|---------|
+| `implementing` | `spec-review` | Implementer returns DONE/DONE_WITH_CONCERNS |
+| `spec-review` | `quality-review` | Spec compliance = pass |
+| `quality-review` | `checkoff` | Code quality = pass |
+| `checkoff` | `done` | Task checked off in plan + spec tasks |
+| `spec-review` | `implementing` | Spec compliance = fail, dispatch fix agent |
+| `quality-review` | `implementing` | Code quality = fail, dispatch fix agent |
+| `done` | `implementing` | Dispatch implementer for next task |
+| `implementing` | `blocked` | 3 review-fix rounds exhausted OR implementer returns BLOCKED |
+| `done` | `final-review` | All tasks complete, dispatch final reviewer |
+| `final-review` | `final-fix` | CRITICAL issues found, dispatch fix agent |
+| `final-fix` | `final-review` | Fix agent complete, re-review |
+| `final-review` | `closing` | Final review passes |
+
+#### Review-Fix Round Limit
+
+Each task allows at most **3 review-fix rounds**. When either reviewer finds an issue:
+1. Increment the round counter in the checkpoint
+2. Dispatch a fresh background fix agent with the reviewer's complete feedback
+3. Re-review after fixes
+4. If the task still does not pass after 3 rounds, mark it **BLOCKED**, pause, and hand the accumulated feedback to the user
+
+#### Per-Task Checkoff
+
+After both reviews pass:
+1. Change the task from `- [ ]` to `- [x]` in the execution-contract.md plan
+2. If a mapping exists, also check off the corresponding spec task
+3. Commit this progress update
+4. Update the checkpoint: set stage to `done`, record checkoff timestamp
+5. Append a one-line summary to `.sflow/progress.md`: `Task N: complete (commits <base7>..<head7>, review clean)`
+
+#### Context Recovery
+
+On every context resume:
+1. Read `.sflow/subagent-progress.md`
+2. Compare the checkpoint against the first unchecked task in the plan and the current worktree:
+   - **Checkpoint matches unchecked task** → resume from the exact recorded stage, preserving the implementation commit, RED/GREEN evidence, review stages already passed, unresolved feedback, and current review-fix round. **Never reset the round or repeat an already passed stage.**
+   - **Checkpoint missing or does not match** → create a new checkpoint for the first unchecked task, begin with implementer dispatch
+   - **Recorded commit or file not visible in worktree** → pull, merge, or recover the corresponding changes before proceeding; never assume the implementation exists
+3. When all tasks are checked and the checkpoint stage is `final-review` or `final-fix`, resume the exact final-review stage while preserving final feedback and its review-fix round; never re-enter completed tasks
+
+#### Wrap-up
+
+- After both reviews pass and the task is checked off, **immediately dispatch the next unchecked task**. Do NOT summarize, do NOT ask the user whether to continue, do NOT wait for user input between tasks.
+- After all tasks complete, switch the checkpoint to `final-review`, then dispatch a fresh final code quality reviewer. For CRITICAL issues, switch to `final-fix`, record feedback and the round, dispatch a fresh fix agent, and re-review. Final review also has a maximum of 3 rounds; when exhausted, mark the checkpoint `blocked` and pause. Non-CRITICAL findings may be accepted with rationale recorded.
+- After final review passes, return control to `workflow-start` for state transition to `closing`.
+
 ### Progress Ledger
 
-Track progress in `.sflow/progress.md`. At skill start, check for an existing ledger — tasks marked complete there are done, do not re-dispatch them. After each clean review, append one line to the ledger.
+Track high-level progress in `.sflow/progress.md`. At skill start, check for an existing ledger — tasks marked complete there are done, do not re-dispatch them. After each clean review, append one line to the ledger.
 
 The ledger survives context compaction. If `git clean -fdx` destroys it, recover from `git log`.
 

@@ -64,6 +64,47 @@ Then answer these questions in order:
 5. Is execution in progress or blocked by a bug?
 6. Is the change already in verification or wrap-up?
 
+## Auto-Transition & State Repair
+
+On every context resume, do **NOT** trust conversation history. Always re-run full inspection from scratch.
+
+### State ↔ Artifact Consistency Check
+
+After reading `.sflow/state.json` and inspecting artifacts, check for mismatches:
+
+| State says | But artifacts show | Auto-repair action |
+|------------|-------------------|-------------------|
+| `exploring` | `proposal.md` exists with content | → transition to `specifying` |
+| `specifying` | `design.md` + `tasks.md` exist and non-empty | → transition to `bridging` |
+| `bridging` | `execution-contract.md` exists + `contractApproved: true` | → transition to `approved-for-build` |
+| `approved-for-build` | all tasks checked in `tasks.md` | → transition to `closing` |
+| `executing` | all tasks checked in `tasks.md` | → transition to `closing` |
+| `specifying` | `proposal.md` missing or empty | → transition back to `exploring` |
+| `bridging` | `design.md` missing or `tasks.md` missing | → transition back to `specifying` |
+| `approved-for-build` | `execution-contract.md` missing | → transition back to `bridging` |
+
+### Repair Execution
+
+When a mismatch is detected:
+
+1. Output: `[SFLOW] Detected state mismatch: state=<current> but artifacts indicate <corrected>. Auto-repairing.`
+2. Call the `record_decision_point` tool to record the repair (dp_id: `dp-0`, metadata: `{"repair": "auto-transition", "from": "<current>", "to": "<corrected>"}`)
+3. Update `.sflow/state.json` with the corrected state via the state-transition hook
+4. Continue with normal routing using the **corrected** state
+5. If the repair transitions **backward** (e.g., `executing` → `bridging`), warn the user: "Scope change detected — artifacts no longer match implementation state. Routed back to `<state>`."
+
+### Stale State Detection
+
+Treat state as stale and repair when:
+
+- `state: executing` but `.sflow/progress.md` shows all tasks complete → repair to `closing`
+- `state: approved-for-build` but `tasks.md` has unchecked tasks AND `.sflow/progress.md` shows active execution → repair to `executing`
+- `state: bridging` but `execution-contract.md` content hash differs from `contract_hash` in state.json → re-validate contract for staleness
+- `state: specifying` but `proposal.md` has been updated since `last_transition` timestamp → re-check artifact completeness
+- `state: executing` but worktree has no uncommitted changes and no progress entries for > 10 minutes → unclear state, prompt user
+
+After repairing, always re-run the routing rules from the corrected state.
+
 ## Update Check Reminder
 
 Before doing anything else, check for plugin updates:
@@ -79,6 +120,12 @@ npm view opencode-sflow version
 - If already up to date → silently skip.
 
 Do not block workflow progress on an available upgrade; simply inform the user.
+
+## Dirty Worktree Protocol
+
+When resuming or continuing in a change directory that may have uncommitted work, follow the protocol at `skills/workflow-start/dirty-worktree.md`. This protocol defines how to detect, attribute, and handle uncommitted changes before advancing state or modifying code.
+
+**Key rule:** A dirty worktree is code evidence only — it does not automatically advance `.sflow/state.json` state. Attribution must happen first.
 
 ## DP-0: User Confirmation Gate (Design-Preparation)
 
@@ -144,19 +191,41 @@ Inference rules:
 
 If workflow is already set to `hotfix`, `tweak`, or `full`, do **not** overwrite it unless the user explicitly asks to re-detect.
 
-### Validation
+### Validation with Upgrade Criteria
 
-After the mode is known, validate it against artifact content:
+After the mode is known, validate it against actual artifact content. Use the detailed criteria below — if **any** criterion fails, upgrade to `full`.
 
 1. If workflow is `full` → standard routing (no fast-path)
 2. If workflow is `hotfix`:
-   - Validate: 2 or fewer files? No new modules? No schema changes?
-   - All pass → use hotfix fast-path routing
-   - Any fail → upgrade to `full`, update `.sflow/state.json`, output upgrade reason
+   - Validate against hotfix constraints:
+     - [ ] 2 or fewer files changed
+     - [ ] No new modules or new public API introduced
+     - [ ] No database schema changes
+     - [ ] No architectural changes (no new interfaces, no new dependencies)
+     - [ ] Fix scope confined to a single function or module
+     - [ ] No cross-module coordination required
+   - **All pass** → use hotfix fast-path routing
+   - **Any fail** → **upgrade to `full`**, update `.sflow/state.json`, output upgrade reason citing the specific failed criterion
 3. If workflow is `tweak`:
-   - Validate: 4 or fewer files? Single module? Config/doc/prompt only?
-   - All pass → use tweak fast-path routing
-   - Any fail → upgrade to `full`, update `.sflow/state.json`, output upgrade reason
+   - Validate against tweak constraints:
+     - [ ] 4 or fewer files changed
+     - [ ] Only config/doc/prompt files (`.md`, `.json`, `.yaml`, `.txt`, `.toml`)
+     - [ ] No schema/API/no new modules
+     - [ ] Single module scope
+     - [ ] 4 or fewer new test cases needed
+     - [ ] No config item additions or deletions (value-only changes are OK)
+     - [ ] No new capability required
+     - [ ] No delta spec impact (existing specs not affected)
+   - **All pass** → use tweak fast-path routing
+   - **Any fail** → **upgrade to `full`**, update `.sflow/state.json`, output upgrade reason citing the specific failed criterion
+
+### Upgrade Output Format
+
+```
+[SFLOW] Preset upgrade: <hotfix|tweak> → full
+Reason: <specific criterion that failed>
+"<human-readable explanation>"
+Routing as full workflow.
 
 ### Example
 
