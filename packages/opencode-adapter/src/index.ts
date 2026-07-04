@@ -9,8 +9,10 @@
  */
 
 import type { PluginInput, PluginOptions, Hooks, PluginModule, ToolDefinition } from '@opencode-ai/plugin';
-import type { Message, Part } from '@opencode-ai/sdk';
+import type { Message, Part, TextPartInput } from '@opencode-ai/sdk';
 import { z } from 'zod';
+
+type SFlowClient = PluginInput['client'];
 
 export { Validator, isValidStateRecord } from '@opencode-sflow/core';
 export type {
@@ -77,7 +79,7 @@ async function getCurrentWorkflowState(changeDir: string): Promise<string | null
 
 // ─── Tool definitions using @opencode-ai/plugin ToolDefinition format ──────────
 
-function createSFlowTools(): Record<string, ToolDefinition> {
+function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
   return {
     workflow_router: {
       description: 'Detect current workflow state and route to the appropriate agent',
@@ -120,27 +122,85 @@ function createSFlowTools(): Record<string, ToolDefinition> {
     },
 
     sflow_delegate: {
-      description: 'Delegate a task to a specialized sFlow subagent. Subagents are registered via the config hook and run as child sessions.',
+      description: 'Synchronously invoke a specialized sFlow subagent. Creates a child session, dispatches the task to the target agent, waits for completion, and returns the agent output.',
       args: {
-        subagent: z.enum(['need-explorer', 'spec-writer', 'contract-builder', 'build-executor', 'bug-investigator', 'code-reviewer', 'release-archivist', 'spec-merger']).describe('The subagent to delegate to'),
-        prompt: z.string().describe('Detailed task description for the subagent'),
+        subagent: z.enum(['need-explorer', 'spec-writer', 'contract-builder', 'build-executor', 'bug-investigator', 'code-reviewer', 'release-archivist', 'spec-merger']).describe('The subagent to invoke'),
+        prompt: z.string().describe('Detailed task description with workflow context'),
       },
       execute: async (args: { subagent: string; prompt: string }, context) => {
         const changeDir = context.directory || '';
-        const msg = [
-          `[sFlow Delegate] Routing to "${args.subagent}"`,
-          `Working Directory: ${changeDir}`,
-          ``,
-          `## Task`,
-          args.prompt,
-          ``,
-          `## Instructions`,
-          `You are the ${args.subagent} agent. Read the relevant .sflow/ artifacts in ${changeDir} and perform the task described above.`,
-        ].join('\n');
-        return {
-          title: `sFlow → ${args.subagent}`,
-          output: JSON.stringify({ delegated: true, subagent: args.subagent, changeDir, instructions: msg }, null, 2),
-        };
+        const sessionLabel = `sFlow → ${args.subagent}`;
+        const MAX_WAIT_MS = 120_000;
+        const POLL_INTERVAL_MS = 1_000;
+
+        try {
+          // 1. Create a new session for the subagent
+          const sessionResult = await client.session.create({
+            body: { title: sessionLabel },
+            query: { directory: changeDir },
+          });
+          const sessionID = sessionResult.data?.id;
+          if (!sessionID) {
+            return { title: sessionLabel, output: JSON.stringify({ success: false, error: 'Failed to create subagent session' }, null, 2) };
+          }
+
+          // 2. Dispatch the task prompt to the subagent
+          const promptParts: TextPartInput[] = [{ type: 'text', text: args.prompt }];
+          await client.session.promptAsync({
+            path: { id: sessionID },
+            body: { agent: args.subagent, parts: promptParts },
+            query: { directory: changeDir },
+          });
+
+          // 3. Poll session status until idle or timeout
+          const startTime = Date.now();
+          while (Date.now() - startTime < MAX_WAIT_MS) {
+            const statusResult = await client.session.status({ query: { directory: changeDir } });
+            const sessions = statusResult.data as Record<string, { type: string }> | undefined;
+            const sessionStatus = sessions?.[sessionID];
+            if (sessionStatus?.type === 'idle') {
+              break;
+            }
+            if (sessionStatus?.type === 'retry') {
+              await Bun.sleep(POLL_INTERVAL_MS);
+              continue;
+            }
+            await Bun.sleep(POLL_INTERVAL_MS);
+          }
+
+          // 4. Retrieve messages from the subagent session
+          const messagesResult = await client.session.messages({
+            path: { id: sessionID },
+            query: { directory: changeDir },
+          });
+          const messages = messagesResult.data as Array<{ parts: Array<{ type: string; text?: string }> }> | undefined;
+
+          // 5. Extract the last assistant text
+          const allText: string[] = [];
+          if (messages) {
+            for (const msg of messages) {
+              if (msg.parts) {
+                for (const part of msg.parts) {
+                  if (part.type === 'text' && part.text) {
+                    allText.push(part.text);
+                  }
+                }
+              }
+            }
+          }
+
+          const lastOutput = allText.length > 0 ? allText[allText.length - 1] : '(no output)';
+
+          return {
+            title: sessionLabel,
+            output: JSON.stringify({ success: true, subagent: args.subagent, sessionID, output: lastOutput }, null, 2),
+          };
+        } catch (error) {
+          return {
+            title: sessionLabel,
+            output: JSON.stringify({ success: false, subagent: args.subagent, error: error instanceof Error ? error.message : String(error) }, null, 2),
+          };
+        }
       },
     },
   };
@@ -296,6 +356,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
   const configOverrides = agentOverridesFromConfig(cascadedConfig);
 
   const workDir = input.directory;
+  const sflowClient = input.client;
   console.log(`[sFlow] Initializing in ${workDir}`);
 
   const hookComposer = createHookComposer();
@@ -303,7 +364,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
   const mcpManager = createMcpManager();
 
   // Build tool definitions using @opencode-ai/plugin format
-  const tools = createSFlowTools();
+  const tools = createSFlowTools(sflowClient);
   const validatorTools = createValidatorTools();
   const workflowTools = createWorkflowTools();
   Object.assign(tools, validatorTools, workflowTools);

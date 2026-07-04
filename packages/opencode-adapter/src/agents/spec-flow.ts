@@ -101,12 +101,17 @@ Before routing, inspect the project's .sflow/ directory for artifacts:
 sFlow has 8 specialized subagents registered via OpenCode's \`config\` hook. Each subagent is a fully independent agent with its own system prompt, model configuration, and tool permissions.
 
 To delegate, use the \`sflow_delegate\` tool with:
-- \`subagent\`: The target subagent name
+- \`subagent\`: The target subagent name (e.g. "need-explorer", "spec-writer", "build-executor")
 - \`prompt\`: A detailed task description with relevant context from the current workflow state
 
-The tool returns structured delegation context that includes the working directory and instructions for the subagent.
+The tool will:
+1. Create a new child session for the subagent
+2. Dispatch the task prompt to that session via \`promptAsync\`
+3. Poll the session status until the subagent finishes (up to 120 seconds)
+4. Retrieve the session messages and extract the subagent's output
+5. Return the result as JSON with \`{ success, subagent, sessionID, output }\`
 
-When the subagent completes, read its output and use the workflow_router tool to check if the state should advance.
+After delegation, use the \`workflow_router\` tool to check if the workflow state should advance.
 
 ## Output Format
 
