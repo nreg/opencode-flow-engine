@@ -1,45 +1,14 @@
 import type { HookHandler, HookContext, HookResult } from './types.js';
 import { readJsonFile, fileExists, writeJsonFile, ensureDir, directoryExists, readFile } from '@opencode-sflow/shared';
+import { detectStateMismatch } from '../features/state-manager.js';
 
 /**
  * Session start hook — recovers workflow state from boulder state on session start.
  *
- * C14 fix: After recovering state, runs detectStateMismatch to auto-repair
+ * C14+R4-2: Uses canonical detectStateMismatch from state-manager.ts
  * state ↔ artifact inconsistencies (same logic as state-manager.restoreState).
  */
 
-/** Simple forward-compatible mismatch detection (C14 — unified with state-manager) */
-async function detectStateMismatch(changeDir: string, currentState: string): Promise<string> {
-  const hasProposal = await fileExists(`${changeDir}/proposal.md`);
-  const hasDesign = await fileExists(`${changeDir}/design.md`);
-  const hasTasks = await fileExists(`${changeDir}/tasks.md`);
-  const hasSpecs = await directoryExists(`${changeDir}/specs`);
-  const hasContract = await fileExists(`${changeDir}/execution-contract.md`);
-
-  const tasksContent = hasTasks ? await readFile(`${changeDir}/tasks.md`) : null;
-  const incompleteTasks = tasksContent
-    ? tasksContent.split("\n").filter((line) => line.match(/^-\s*\[\s\]/)).length
-    : 0;
-  const taskLines = tasksContent
-    ? tasksContent.split("\n").filter((line) => line.match(/^-\s*\[.\]\s+/))
-    : [];
-  const allTasksChecked = taskLines.length > 0 && incompleteTasks === 0;
-
-  // Backward repair: artifacts suggest earlier state
-  if (currentState === "specifying" && !hasProposal) return "exploring";
-  if (currentState === "bridging" && (!hasDesign || !hasTasks || !hasSpecs)) return "specifying";
-  if (currentState === "approved-for-build" && !hasContract) return "bridging";
-  if (currentState === "executing" && !hasContract) return "bridging";
-  if (currentState === "debugging" && !hasContract) return "bridging";
-
-  // Forward repair: artifacts suggest later state
-  if (currentState === "exploring" && hasProposal) return "specifying";
-  if (currentState === "specifying" && hasDesign && hasTasks && hasSpecs) return "bridging";
-  if (currentState === "bridging" && hasContract) return "approved-for-build";
-  if ((currentState === "approved-for-build" || currentState === "executing") && allTasksChecked) return "closing";
-
-  return currentState;
-}
 
 export function createSessionStartHook(): HookHandler {
   return {

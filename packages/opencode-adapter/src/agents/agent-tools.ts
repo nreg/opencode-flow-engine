@@ -61,13 +61,21 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     skill: false,
   },
 
-  /** Build executor - full dev tools */
+  /**
+   * Build executor - full dev tools + subagent dispatch
+   * R4-3: Added call_sub_agent/background_output/background_cancel for SDD mode support.
+   * The build-executor agent can now dispatch implementer/reviewer subagents
+   * in Subagent-Driven Development mode.
+   */
   'build-executor': {
     ...COMMON_TOOLS,
     write: true,
     edit: true,
     bash: true,
     skill: false,
+    call_sub_agent: true,
+    background_output: true,
+    background_cancel: true,
     lsp_diagnostics: true,
     lsp_goto_definition: true,
     lsp_find_references: true,

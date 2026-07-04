@@ -57,7 +57,7 @@ If you catch yourself thinking:
 ## Dispatch Enforcement
 
 - This session is the coordinator only. Do not execute tasks directly when the workflow is in subagent-driven-development mode.
-- Dispatch a fresh implementer subagent for every task using the implementer prompt template.
+- Dispatch a fresh implementer subagent for every task using call_sub_agent with subagent_type="build-executor".
 - Never reuse implementers, reviewers, or fix agents across tasks or roles.
 - Before dispatching, write the task brief to a uniquely named file and the report target path to .sflow/subagent-progress.md.
 

@@ -6,6 +6,51 @@ const BOULDER_STATE_FILE = ".sflow/boulder-state.json";
 
 type WorkflowManager = ReturnType<typeof createWorkflowManager>;
 
+
+// -- Standalone helpers (exported for reuse by session.ts) --
+
+export async function simpleHash(content: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(content);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+}
+
+/**
+ * Canonical detectStateMismatch - single source of truth for state/artifact consistency.
+ * Used by session.ts and state-manager.restoreState.
+ */
+export async function detectStateMismatch(changeDir: string, currentState: string): Promise<string> {
+  const hp = await fileExists(changeDir + '/proposal.md');
+  const hd = await fileExists(changeDir + '/design.md');
+  const ht = await fileExists(changeDir + '/tasks.md');
+  const hsp = await directoryExists(changeDir + '/specs');
+  const hc = await fileExists(changeDir + '/execution-contract.md');
+  const pc = hp ? await readFile(changeDir + '/proposal.md') : null;
+  const tc = ht ? await readFile(changeDir + '/tasks.md') : null;
+  const inc = tc ? tc.split('\n').filter((l: string) => l.match(/^-\s*\[\s\]/)).length : 0;
+  const allDone = tc ? tc.split('\n').filter((l: string) => l.match(/^-\s*\[.\]+\s/)).length > 0 && inc === 0 : false;
+  if (hc && (currentState === 'approved-for-build' || currentState === 'executing')) {
+    const sd = await readJsonFile<Record<string, unknown>>(changeDir + '/.sflow/state.json');
+    const sh = (sd?.contract_hash as string) || '';
+    if (sh) {
+      const cc = await readFile(changeDir + '/execution-contract.md');
+      const ch = await simpleHash(cc || '');
+      if (ch !== sh) return 'bridging';
+    }
+  }
+  if (currentState === 'exploring' && hp && pc && pc.trim().length > 100) return 'specifying';
+  if (currentState === 'specifying' && hd && ht && hsp) return 'bridging';
+  if (currentState === 'bridging' && hc) return 'approved-for-build';
+  if ((currentState === 'approved-for-build' || currentState === 'executing') && allDone) return 'closing';
+  if (currentState === 'specifying' && !hp) return 'exploring';
+  if (currentState === 'bridging' && (!hd || !ht || !hsp)) return 'specifying';
+  if (currentState === 'approved-for-build' && !hc) return 'bridging';
+  if (currentState === 'executing' && !hc) return 'bridging';
+  if (currentState === 'debugging' && !hc) return 'bridging';
+  return currentState;
+}
 export function createStateManager(
   config: FeatureConfig = { enabled: true },
   workflowManager?: WorkflowManager,
@@ -73,74 +118,9 @@ export function createStateManager(
       }
     },
 
-async detectStateMismatch(changeDir: string, currentState: string): Promise<string> {
-      const hasProposal = await fileExists(`${changeDir}/proposal.md`);
-      const hasDesign = await fileExists(`${changeDir}/design.md`);
-      const hasTasks = await fileExists(`${changeDir}/tasks.md`);
-      const hasSpecs = await directoryExists(`${changeDir}/specs`);
-      const hasContract = await fileExists(`${changeDir}/execution-contract.md`);
-
-      const proposalContent = hasProposal ? await readFile(`${changeDir}/proposal.md`) : null;
-      const tasksContent = hasTasks ? await readFile(`${changeDir}/tasks.md`) : null;
-
-      const incompleteTasks = tasksContent
-        ? tasksContent.split("\n").filter((line) => line.match(/^-\s*\[\s\]/)).length
-        : 0;
-      const allTasksChecked = tasksContent
-        ? tasksContent.split("\n").filter((line) => line.match(/^-\s*\[.\]\s+/)).length > 0 &&
-          incompleteTasks === 0
-        : false;
-
-      // Forward mismatch: contract changed after approval → route back to bridging
-      if (hasContract && (currentState === "approved-for-build" || currentState === "executing")) {
-        const stateData = await readJsonFile<Record<string, unknown>>(`${changeDir}/.sflow/state.json`);
-        const storedHash = (stateData?.contract_hash as string) || "";
-        if (storedHash) {
-          const contractContent = await readFile(`${changeDir}/execution-contract.md`);
-          const currentHash = await simpleHash(contractContent || "");
-          if (currentHash !== storedHash) {
-            return "bridging";
-          }
-        }
-      }
-
-      if (currentState === "exploring" && hasProposal && proposalContent && proposalContent.trim().length > 100) {
-        return "specifying";
-      }
-
-      if (currentState === "specifying" && !hasProposal) {
-        return "exploring";
-      }
-      if (currentState === "specifying" && hasDesign && hasTasks && hasSpecs) {
-        return "bridging";
-      }
-
-      if (currentState === "bridging" && (!hasDesign || !hasTasks || !hasSpecs)) {
-        return "specifying";
-      }
-      if (currentState === "bridging" && hasContract) {
-        return "approved-for-build";
-      }
-
-      if (currentState === "approved-for-build" && !hasContract) {
-        return "bridging";
-      }
-      if (currentState === "approved-for-build" && allTasksChecked) {
-        return "closing";
-      }
-
-      if (currentState === "executing" && !hasContract) {
-        return "bridging";
-      }
-      if (currentState === "executing" && allTasksChecked) {
-        return "closing";
-      }
-
-      if (currentState === "debugging" && !hasContract) {
-        return "bridging";
-      }
-
-      return currentState;
+    async detectStateMismatch(changeDir: string, currentState: string): Promise<string> {
+      // R4-2: Delegate to canonical standalone function
+      return detectStateMismatch(changeDir, currentState);
     },
 
     async persistState(changeDir: string): Promise<FeatureResult> {
@@ -317,7 +297,54 @@ async detectStateMismatch(changeDir: string, currentState: string): Promise<stri
       }
     },
 
-    async isContractStale(changeDir: string): Promise<FeatureResult> {
+    
+    async updateSubagentProgress(
+      changeDir: string,
+      checkpoint: {
+        planTask: string;
+        specTask?: string;
+        stage: 'implementing' | 'spec-review' | 'quality-review' | 'checkoff' | 'done' | 'blocked' | 'final-review' | 'final-fix';
+        reviewFixRound?: number;
+        commitHash?: string;
+        changedFiles?: string[];
+        redEvidence?: string;
+        greenEvidence?: string;
+        specCompliance?: 'pending' | 'pass' | 'fail';
+        qualityStatus?: 'pending' | 'pass' | 'fail';
+        unresolvedFeedback?: string[];
+      },
+    ): Promise<FeatureResult> {
+      try {
+        const progressPath = changeDir + '/.sflow/subagent-progress.md';
+        const now = new Date().toISOString();
+        const lines: string[] = [];
+        lines.push('# Subagent Progress Checkpoint', '');
+        lines.push('## Current Task');
+        lines.push('- **Plan task**: ' + checkpoint.planTask);
+        if (checkpoint.specTask) lines.push('- **Mapped spec task**: ' + checkpoint.specTask);
+        lines.push('- **Stage**: ' + checkpoint.stage);
+        if (checkpoint.reviewFixRound !== undefined) lines.push('- **Review-fix round**: ' + checkpoint.reviewFixRound);
+        lines.push('', '## Implementation');
+        if (checkpoint.commitHash) lines.push('- **Commit**: ' + checkpoint.commitHash);
+        if (checkpoint.changedFiles) lines.push('- **Changed files**: ' + checkpoint.changedFiles.join(', '));
+        if (checkpoint.redEvidence) lines.push('- **RED evidence**: ' + checkpoint.redEvidence);
+        if (checkpoint.greenEvidence) lines.push('- **GREEN evidence**: ' + checkpoint.greenEvidence);
+        lines.push('', '## Review Status');
+        lines.push('- **Spec compliance**: ' + (checkpoint.specCompliance || 'pending'));
+        lines.push('- **Code quality**: ' + (checkpoint.qualityStatus || 'pending'));
+        if (checkpoint.unresolvedFeedback && checkpoint.unresolvedFeedback.length > 0) {
+          lines.push('- **Unresolved feedback**: ' + checkpoint.unresolvedFeedback.join('; '));
+        }
+        lines.push('', '_Updated: ' + now + '_');
+        await ensureDir(changeDir + '/.sflow');
+        const { writeFile } = await import('fs/promises');
+        await writeFile(progressPath, lines.join('\n'), 'utf-8');
+        return { success: true, data: { written: true, stage: checkpoint.stage, timestamp: now } };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+async isContractStale(changeDir: string): Promise<FeatureResult> {
       try {
         const stateExists = await fileExists(`${changeDir}/.sflow/state.json`);
         const contractPath = `${changeDir}/execution-contract.md`;

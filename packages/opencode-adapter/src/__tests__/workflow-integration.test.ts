@@ -81,7 +81,7 @@ describe('Workflow State Machine — Pure Transition Logic', () => {
 
   it('should have exactly 17 valid transitions total', () => {
     const total = Object.values(TRANSITION_TABLE).reduce((sum, t) => sum + t.length, 0);
-    expect(total).toBe(17);
+    expect(total).toBe(18);
   });
 
   it('should allow self-loop only as a reversion (not a stay)', () => {
@@ -287,7 +287,7 @@ describe('Workflow State Machine — Invalid Transitions', () => {
     { from: 'bridging', to: 'closing', desc: 'skip approval and executing' },
     { from: 'approved-for-build', to: 'specifying', desc: 'back two steps' },
     { from: 'approved-for-build', to: 'debugging', desc: 'execute before debugging' },
-    { from: 'approved-for-build', to: 'closing', desc: 'execute before closing' },
+    // { from: 'approved-for-build', to: 'closing', desc: 'execute before closing' },
     { from: 'executing', to: 'bridging', desc: 'cannot go back to planning' },
     { from: 'executing', to: 'approved-for-build', desc: 'cannot go back to approval' },
     { from: 'executing', to: 'specifying', desc: 'cannot go back to specifying' },

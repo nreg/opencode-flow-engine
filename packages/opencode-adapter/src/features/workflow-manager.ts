@@ -114,41 +114,16 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       }
     },
 
-    async inferStateFromArtifacts(changeDir: string): Promise<{ state: string; mode: string }> {
-      const hasProposal = await fileExists(`${changeDir}/proposal.md`);
-      const hasDesign = await fileExists(`${changeDir}/design.md`);
-      const hasTasks = await fileExists(`${changeDir}/tasks.md`);
-      const hasSpecs = await directoryExists(`${changeDir}/specs`);
-      const hasContract = await fileExists(`${changeDir}/execution-contract.md`);
-
-      const proposalContent = hasProposal ? await readFile(`${changeDir}/proposal.md`) : null;
-      const tasksContent = hasTasks ? await readFile(`${changeDir}/tasks.md`) : null;
-
-      const taskLines = tasksContent
-        ? tasksContent.split("\n").filter((line) => line.match(/^-\s*\[.\]\s+/))
-        : [];
-      const incompleteTasks = tasksContent
-        ? tasksContent.split("\n").filter((line) => line.match(/^-\s*\[\s\]/)).length
-        : 0;
-      const allTasksChecked = taskLines.length > 0 && incompleteTasks === 0;
-
+        async inferStateFromArtifacts(changeDir: string): Promise<{ state: string; mode: string }> {
+      const { detectStateMismatch } = await import('./state-manager.js');
+      const state = await detectStateMismatch(changeDir, 'exploring');
+      const hasProposal = await fileExists(changeDir + '/proposal.md');
+      const hasContract = await fileExists(changeDir + '/execution-contract.md');
+      const tasksContent = await readFile(changeDir + '/tasks.md').catch(() => null);
+      const taskLines = tasksContent ? tasksContent.split('\\n').filter((line: string) => line.match(/^-\\s*\\[.\\]\\s+/)) : [];
       const changedFileCount = await countChangedFiles(changeDir);
       const mode = inferModeFromArtifacts(hasProposal, hasContract, changedFileCount, taskLines.length);
-
-      if (!hasProposal && !hasSpecs) {
-        return { state: 'exploring', mode };
-      }
-      if (!hasContract && (hasDesign || hasTasks || hasSpecs)) {
-        return { state: 'specifying', mode };
-      }
-      if (hasContract && !allTasksChecked) {
-        return { state: 'approved-for-build', mode };
-      }
-      if (hasContract && allTasksChecked) {
-        return { state: 'closing', mode };
-      }
-
-      return { state: 'exploring', mode };
+      return { state, mode };
     },
   };
 }

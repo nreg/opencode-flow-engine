@@ -58,6 +58,7 @@ import type { HookContext } from './hooks/types.js';
 import { sharedValidator } from '@opencode-sflow/core';
 import { fileExists as sflowFileExists, directoryExists, readFile as sflowReadFile } from '@opencode-sflow/shared';
 import { isContractStale } from '@opencode-sflow/shared';
+import { detectStateMismatch, simpleHash } from './features/state-manager.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
 
@@ -970,4 +971,7 @@ const sflowPluginModule: PluginModule = {
 };
 
 export default sflowPluginModule;
+
+
+
 
