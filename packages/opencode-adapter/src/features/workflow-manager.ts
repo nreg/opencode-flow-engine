@@ -4,7 +4,7 @@
 
 import type { FeatureConfig, FeatureResult } from './types.js';
 import { isValidTransition } from '@opencode-sflow/core';
-import { readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir } from '@opencode-sflow/shared';
+import { readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, stateFileMutex } from '@opencode-sflow/shared';
 
 const SFLOW_DIR = '.sflow';
 const STATE_FILE = `${SFLOW_DIR}/state.json`;
@@ -64,29 +64,31 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
 
     async transitionState(changeDir: string, newState: string): Promise<FeatureResult> {
       try {
-        const currentState = await readStateFile(changeDir);
+        return await stateFileMutex.runExclusive(async () => {
+          const currentState = await readStateFile(changeDir);
 
-        if (!isValidTransition(currentState.state, newState)) {
+          if (!isValidTransition(currentState.state, newState)) {
+            return {
+              success: false,
+              error: `Invalid transition from ${currentState.state} to ${newState}`,
+            } as FeatureResult;
+          }
+
+          await updateStateFile(changeDir, {
+            ...currentState,
+            state: newState,
+            updatedAt: new Date().toISOString(),
+          });
+
           return {
-            success: false,
-            error: `Invalid transition from ${currentState.state} to ${newState}`,
+            success: true,
+            data: {
+              from: currentState.state,
+              to: newState,
+              timestamp: new Date().toISOString(),
+            },
           };
-        }
-
-        await updateStateFile(changeDir, {
-          ...currentState,
-          state: newState,
-          updatedAt: new Date().toISOString(),
         });
-
-        return {
-          success: true,
-          data: {
-            from: currentState.state,
-            to: newState,
-            timestamp: new Date().toISOString(),
-          },
-        };
       } catch (error) {
         return {
           success: false,
@@ -177,7 +179,9 @@ async function readStateFile(changeDir: string): Promise<{
 
 async function updateStateFile(changeDir: string, state: Record<string, unknown>): Promise<void> {
   await ensureDir(`${changeDir}/${SFLOW_DIR}`);
-  await atomicWriteJsonFile(`${changeDir}/${STATE_FILE}`, state);
+  await stateFileMutex.runExclusive(async () => {
+    await atomicWriteJsonFile(`${changeDir}/${STATE_FILE}`, state);
+  });
 }
 
 async function archiveWorkflow(changeDir: string): Promise<void> {

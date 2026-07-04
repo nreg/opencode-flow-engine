@@ -4,7 +4,7 @@
 
 import type { HookHandler, HookContext, HookResult } from './types.js';
 import { isValidTransition, getValidTransitions } from '@opencode-sflow/core';
-import { ensureDir, readJsonFile, writeJsonFile } from '@opencode-sflow/shared';
+import { ensureDir, readJsonFile, writeJsonFile, stateFileMutex } from '@opencode-sflow/shared';
 
 const STATE_FILE_PATH = '.sflow/state.json';
 
@@ -79,16 +79,23 @@ async function readStateFile(changeDir: string): Promise<Record<string, unknown>
 
 async function updateState(changeDir: string, newState: string): Promise<void> {
   const now = new Date().toISOString();
-  let state: Record<string, unknown> = {};
-  const existing = await readStateFile(changeDir);
-  if (existing) {
-    state = existing;
-  } else {
-    state = { state: 'exploring', mode: 'full', artifacts_hash: '', contract_hash: '', batches_completed: 0, dp_0_confirmed: false, contractApproved: false, verificationStatus: 'pending', createdAt: now, updatedAt: now };
-    await ensureDir(`${changeDir}/.sflow`);
-  }
-  state.state = newState;
-  state.updatedAt = now;
-  
-  await writeJsonFile(`${changeDir}/${STATE_FILE_PATH}`, state);
+  await ensureDir(`${changeDir}/.sflow`);
+
+  await stateFileMutex.runExclusive(async () => {
+    const existing = await readStateFile(changeDir);
+    const state: Record<string, unknown> = existing ?? {
+      state: 'exploring',
+      mode: 'full',
+      artifacts_hash: '',
+      contract_hash: '',
+      batches_completed: 0,
+      dp_0_confirmed: false,
+      contractApproved: false,
+      verificationStatus: 'pending',
+      createdAt: now,
+    };
+    state.state = newState;
+    state.updatedAt = now;
+    await writeJsonFile(`${changeDir}/${STATE_FILE_PATH}`, state);
+  });
 }

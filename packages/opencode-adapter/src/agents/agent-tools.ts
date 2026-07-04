@@ -1,6 +1,9 @@
 /**
  * Centralized agent tool configurations
  * Each agent type defines which tools it has access to
+ *
+ * NOTE: sflow_delegate is sFlow's native subagent routing tool registered
+ * via the Hooks.tool path — no dependency on oh-my-openagent's call_omo_agent.
  */
 
 type AgentTools = Record<string, boolean>;
@@ -12,14 +15,13 @@ const COMMON_TOOLS = {
 } as const;
 
 export const AGENT_TOOLS: Record<string, AgentTools> = {
-  /** Main orchestrator - needs delegation tools */
+  /** Main orchestrator - uses sflow_delegate for subagent routing */
   sFlow: {
     ...COMMON_TOOLS,
     write: false,
     edit: false,
     bash: true,
-    call_omo_agent: true,
-    task: true,
+    sflow_delegate: true,
     skill: true,
     lsp_diagnostics: true,
     lsp_goto_definition: true,
@@ -28,8 +30,6 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     session_read: true,
     session_search: true,
     session_info: true,
-    background_output: true,
-    background_cancel: true,
   },
 
   /** Need explorer - needs write but no bash */
@@ -38,8 +38,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: true,
     edit: false,
     bash: false,
-    call_omo_agent: false,
-    task: false,
+    sflow_delegate: false,
     skill: false,
   },
 
@@ -49,8 +48,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: true,
     edit: true,
     bash: true,
-    call_omo_agent: false,
-    task: false,
+    sflow_delegate: false,
     skill: false,
   },
 
@@ -60,8 +58,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: true,
     edit: true,
     bash: true,
-    call_omo_agent: false,
-    task: false,
+    sflow_delegate: false,
     skill: false,
   },
 
@@ -71,8 +68,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: true,
     edit: true,
     bash: true,
-    call_omo_agent: false,
-    task: false,
+    sflow_delegate: false,
     skill: false,
     lsp_diagnostics: true,
     lsp_goto_definition: true,
@@ -85,8 +81,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: false,
     edit: true,
     bash: true,
-    call_omo_agent: false,
-    task: false,
+    sflow_delegate: false,
     skill: false,
     lsp_diagnostics: true,
     lsp_goto_definition: true,
@@ -99,8 +94,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: false,
     edit: false,
     bash: true,
-    call_omo_agent: false,
-    task: false,
+    sflow_delegate: false,
     skill: false,
     lsp_diagnostics: true,
     lsp_goto_definition: true,
@@ -113,8 +107,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: true,
     edit: false,
     bash: true,
-    call_omo_agent: false,
-    task: false,
+    sflow_delegate: false,
     skill: false,
   },
 
@@ -124,8 +117,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: true,
     edit: true,
     bash: true,
-    call_omo_agent: false,
-    task: false,
+    sflow_delegate: false,
     skill: false,
   },
 };

@@ -71,6 +71,9 @@ opencode-sflow/
 - `workflow_router`：状态检测和路由
 - `contract_validator`：契约验证
 - `artifact_inspector`：工件检查
+- `sflow_delegate`：子 agent 任务路由（原生，无外部依赖）
+- `validate_*` 系列：制品校验工具集
+- `record_decision_point`：决策点记录
 
 #### 钩子系统
 
@@ -162,8 +165,8 @@ opencode-sflow/
 
 ### 3. 插件内置
 
-- **避免干扰**：所有功能内置到插件中
-- **独立运行**：不依赖 OpenCode 其他 agent
+- **零外部依赖**：子 agent 路由使用自注册的 `sflow_delegate` 工具，无需 oh-my-openagent
+- **自包含**：所有功能内置到插件中，仅需 OpenCode 本体
 - **隔离性**：每个 agent 有自己的工具和钩子
 
 ## 技术栈

@@ -163,8 +163,9 @@ export function createWorkflowTools(): Record<string, ToolDefinition> {
         state: z.enum(['exploring', 'specifying', 'bridging', 'approved-for-build', 'executing', 'debugging', 'closing', 'abandoned']).describe('Current workflow state when the decision was confirmed'),
         target_state: z.enum(['exploring', 'specifying', 'bridging', 'approved-for-build', 'executing', 'debugging', 'closing', 'abandoned']).describe('State the workflow will transition to after confirmation'),
         metadata: z.string().optional().describe('Optional JSON-encoded metadata (e.g. {"notes": "..."})'),
+        change_dir: z.string().optional().describe('Absolute path to the change directory (project root). Defaults to the current working directory.'),
       },
-      execute: async (args: { dp_id: string; state: string; target_state: string; metadata?: string }) => {
+      execute: async (args: { dp_id: string; state: string; target_state: string; metadata?: string; change_dir?: string }, context) => {
         let parsedMeta: Record<string, unknown> | undefined;
         if (args.metadata) {
           try {
@@ -177,34 +178,44 @@ export function createWorkflowTools(): Record<string, ToolDefinition> {
           }
         }
 
-        const { readJsonFile, writeJsonFile, ensureDir } = await import('@opencode-sflow/shared');
-        const changeDir = (globalThis as Record<string, unknown>).__sflow_change_dir__ as string | undefined;
+        const changeDir = args.change_dir || context.directory || '';
         if (!changeDir) {
           return {
             title: 'Record Decision Point',
-            output: JSON.stringify({ success: false, error: 'sFlow change directory not set' }, null, 2),
+            output: JSON.stringify({ success: false, error: 'sFlow change directory not detected. Pass change_dir explicitly.' }, null, 2),
           };
         }
 
+        const { readJsonFile, writeJsonFile, ensureDir, stateFileMutex } = await import('@opencode-sflow/shared');
+
         const statePath = `${changeDir}/.sflow/state.json`;
         await ensureDir(`${changeDir}/.sflow`);
-        const state = await readJsonFile<Record<string, unknown>>(statePath) || {};
 
-        const dps = (state.decisionPoints as Array<Record<string, unknown>> || []);
-        const record = {
-          id: args.dp_id,
-          confirmedInState: args.state,
-          targetState: args.target_state,
-          timestamp: new Date().toISOString(),
-          metadata: parsedMeta,
-        };
-        dps.push(record);
-
-        await writeJsonFile(statePath, { ...state, decisionPoints: dps });
-        return {
-          title: 'Record Decision Point',
-          output: JSON.stringify({ success: true, dp: record, totalDPs: dps.length }, null, 2),
-        };
+        try {
+          const result = await stateFileMutex.runExclusive(async () => {
+            const state = await readJsonFile<Record<string, unknown>>(statePath) || {};
+            const dps = (state.decisionPoints as Array<Record<string, unknown>> || []);
+            const record = {
+              id: args.dp_id,
+              confirmedInState: args.state,
+              targetState: args.target_state,
+              timestamp: new Date().toISOString(),
+              metadata: parsedMeta,
+            };
+            dps.push(record);
+            await writeJsonFile(statePath, { ...state, decisionPoints: dps });
+            return { record, total: dps.length };
+          });
+          return {
+            title: 'Record Decision Point',
+            output: JSON.stringify({ success: true, dp: result.record, totalDPs: result.total }, null, 2),
+          };
+        } catch (error) {
+          return {
+            title: 'Record Decision Point',
+            output: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2),
+          };
+        }
       },
     },
   };

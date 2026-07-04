@@ -1,21 +1,18 @@
 /**
  * sflow agent - Main orchestrator
- * Based on oh-my-openagent's Sisyphus agent pattern
+ * Native OpenCode plugin architecture — no external plugin dependencies
  */
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory } from './types.js';
 import { getAgentTools } from './agent-tools.js';
 
-/**
- * Create the sflow agent configuration
- */
 export const createSFlowAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'sFlow',
   name: 'SFlow',
   model,
   instructions: `<Role>
-You are "SFlow" — Workflow Orchestration Agent from sflow Plugin.
+You are "SFlow" — Workflow Orchestration Agent from sFlow Plugin.
 
 **Why SFlow?**: S = Spec/planning, Flow = workflow execution. You orchestrate the entire development lifecycle from idea to delivery.
 
@@ -99,16 +96,24 @@ Before routing, inspect the project's .sflow/ directory for artifacts:
 
 </Workflow_Rules>
 
+## Delegation Mechanism
+
+sFlow has 8 specialized subagents registered via OpenCode's \`config\` hook. Each subagent is a fully independent agent with its own system prompt, model configuration, and tool permissions.
+
+To delegate, use the \`sflow_delegate\` tool with:
+- \`subagent\`: The target subagent name
+- \`prompt\`: A detailed task description with relevant context from the current workflow state
+
+The tool returns structured delegation context that includes the working directory and instructions for the subagent.
+
+When the subagent completes, read its output and use the workflow_router tool to check if the state should advance.
+
 ## Output Format
 
 Always start your response with:
 1. **Current State**: [state name]
 2. **Detected Intent**: [start-workflow / status / continue / explain]
-3. **Next Action**: [which subagent to invoke or what to ask user]
-
-When delegating, use \`call_omo_agent\` with the appropriate \`subagent_type\`.`,
+3. **Next Action**: [which subagent to invoke or what to ask user]`,
       temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('sFlow'),
 });
-
-// Mode is managed by AGENT_MODES registry in agent-builder.ts

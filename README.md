@@ -9,7 +9,7 @@ sFlow 是一个 OpenCode 插件，融合了两大核心能力：
 - **OpenSpec** — 需求、规格说明书与提案的规划引擎
 - **Superpowers** — TDD、代码审查与系统化调试的执行纪律
 
-> **架构说明**：sFlow 的核心验证引擎（schema、validation、parsing）从 [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) 移植。Agent 工厂模式、5 层钩子系统、MCP 工具注册、boulder-state 状态管理等运行时架构为适配 OpenCode 插件机制而全新设计，借鉴了 [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) 的架构模式。spec-superflow 原始项目采用 markdown-driven + zero-runtime 设计哲学，sFlow 在此基础上增加了运行时框架层以接入 OpenCode。
+> **架构说明**：sFlow 的核心验证引擎（schema、validation、parsing）从 [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) 移植。Agent 工厂模式、5 层钩子系统、工具注册、boulder-state 状态管理等运行时架构为适配 OpenCode 插件机制而全新设计，借鉴了 [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) 的架构模式（Agent 工厂、钩子组合、配置级联、状态持久化）。sFlow **零外部插件依赖**——子智能体路由使用自注册的 `sflow_delegate` 工具，无需安装 oh-my-openagent。
 
 ## 功能特性
 
@@ -35,9 +35,13 @@ sFlow 是一个 OpenCode 插件，融合了两大核心能力：
 
 ### 工具
 
-- `workflow_router` — 检测当前状态并路由到对应技能
+- `workflow_router` — 检测当前工作流状态并路由到对应子智能体
 - `contract_validator` — 校验执行合约
 - `artifact_inspector` — 审查规划制品
+- `sflow_delegate` — 向子智能体委派任务（原生路由，无需额外插件）
+- `validate_spec` / `validate_proposal` / `validate_delta_spec` / `validate_tasks` / `validate_contract` / `validate_design` / `validate_implementation` — 制品校验工具集
+- `detect_sync_conflicts` — 检测增量规格间的同步冲突
+- `record_decision_point` — 记录决策点（DP-0 至 DP-5）
 
 ### 钩子
 
@@ -180,16 +184,20 @@ sFlow 主智能体会：
 2. 路由到对应的子智能体
 3. 引导你逐步完成工作流
 
-### 继续工作流
+### 通过斜杠命令调用技能
+
+sFlow 内置技能可通过斜杠命令直接调用：
 
 ```
-/continue
-```
-
-### 查看状态
-
-```
-/status
+/workflow-start    # 进入工作流主入口
+/need-explorer     # 直接进入需求澄清
+/spec-writer       # 直接进入规格生成
+/contract-builder  # 直接进入合约构建
+/build-executor    # 直接进入实现
+/bug-investigator  # 直接进入调试
+/code-reviewer     # 直接进入代码审查
+/release-archivist # 直接进入归档
+/spec-merger       # 直接进入规格合并
 ```
 
 ## 工作流状态

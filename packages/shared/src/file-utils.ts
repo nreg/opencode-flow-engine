@@ -1,19 +1,50 @@
 /**
  * File utilities for sFlow
  *
- * Unified on Node.js fs/promises to avoid mixed Bun/Node runtime behavior.
+ * Uses Bun's native file API consistently throughout.
  */
 
-import { access, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'fs/promises';
-import { existsSync } from 'fs';
+/**
+ * Process-internal async mutex for serializing read-modify-write
+ * operations on shared files (e.g. state.json).
+ *
+ * OpenCode runs plugins in a single process, so a lightweight
+ * in-memory lock is sufficient to prevent concurrent write corruption.
+ */
+export class Mutex {
+  private chain: Promise<void> = Promise.resolve();
+
+  /** Acquire the lock. Resolves with a release function. */
+  async acquire(): Promise<() => void> {
+    let release!: () => void;
+    const next = new Promise<void>(resolve => { release = resolve; });
+    const prev = this.chain;
+    this.chain = this.chain.then(() => next);
+    await prev;
+    return release;
+  }
+
+  /** Run `fn` while holding the lock. */
+  async runExclusive<T>(fn: () => Promise<T> | T): Promise<T> {
+    const release = await this.acquire();
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+}
+
+/** Global mutex for .sflow/state.json */
+export const stateFileMutex = new Mutex();
 
 /**
  * Check if file exists
  */
 export async function fileExists(path: string): Promise<boolean> {
   try {
-    await access(path);
-    return true;
+    const file = Bun.file(path);
+    return await file.exists();
   } catch {
     return false;
   }
@@ -24,7 +55,11 @@ export async function fileExists(path: string): Promise<boolean> {
  */
 export async function readFile(path: string): Promise<string | null> {
   try {
-    return await readFile(path, 'utf-8');
+    const file = Bun.file(path);
+    if (await file.exists()) {
+      return await file.text();
+    }
+    return null;
   } catch {
     return null;
   }
@@ -35,7 +70,7 @@ export async function readFile(path: string): Promise<string | null> {
  */
 export async function writeFile(path: string, content: string): Promise<boolean> {
   try {
-    await writeFile(path, content, 'utf-8');
+    await Bun.write(path, content);
     return true;
   } catch {
     return false;
@@ -49,12 +84,14 @@ export async function writeFile(path: string, content: string): Promise<boolean>
 export async function atomicWriteFile(path: string, content: string): Promise<boolean> {
   const tmp = `${path}.tmp.${Date.now()}`;
   try {
-    await writeFile(tmp, content, 'utf-8');
+    await Bun.write(tmp, content);
+    const { rename } = await import('fs/promises');
     await rename(tmp, path);
     return true;
   } catch {
     // Clean up temp file on failure
     try {
+      const { unlink } = await import('fs/promises');
       await unlink(tmp);
     } catch {
       // Ignore cleanup failure
@@ -68,6 +105,7 @@ export async function atomicWriteFile(path: string, content: string): Promise<bo
  */
 export async function listFiles(dirPath: string, extension?: string): Promise<string[]> {
   try {
+    const { readdir } = await import('fs/promises');
     const entries = await readdir(dirPath, { withFileTypes: true });
     return entries
       .filter(e => e.isFile() && (!extension || e.name.endsWith(extension)))
@@ -82,6 +120,7 @@ export async function listFiles(dirPath: string, extension?: string): Promise<st
  */
 export async function directoryExists(dirPath: string): Promise<boolean> {
   try {
+    const { stat } = await import('fs/promises');
     const stats = await stat(dirPath);
     return stats.isDirectory();
   } catch {
@@ -111,7 +150,7 @@ export async function readJsonFile<T = Record<string, unknown>>(path: string): P
  */
 export async function writeJsonFile(path: string, data: unknown): Promise<boolean> {
   try {
-    await writeFile(path, JSON.stringify(data, null, 2), 'utf-8');
+    await Bun.write(path, JSON.stringify(data, null, 2));
     return true;
   } catch {
     return false;
@@ -130,6 +169,7 @@ export async function atomicWriteJsonFile(path: string, data: unknown): Promise<
  */
 export async function ensureDir(dirPath: string): Promise<void> {
   try {
+    const { mkdir } = await import('fs/promises');
     await mkdir(dirPath, { recursive: true });
   } catch {
     // Directory might already exist or be created concurrently

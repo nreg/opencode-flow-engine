@@ -77,7 +77,7 @@ async function getCurrentWorkflowState(changeDir: string): Promise<string | null
 
 // ─── Tool definitions using @opencode-ai/plugin ToolDefinition format ──────────
 
-function createSFlowTools(workDir: string): Record<string, ToolDefinition> {
+function createSFlowTools(): Record<string, ToolDefinition> {
   return {
     workflow_router: {
       description: 'Detect current workflow state and route to the appropriate agent',
@@ -85,7 +85,7 @@ function createSFlowTools(workDir: string): Record<string, ToolDefinition> {
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
       execute: async (args, context) => {
-        const resolvedDir = context.directory || workDir;
+        const resolvedDir = context.directory || '';
         const result = await executeWorkflowRouter(resolvedDir);
         return { title: 'Workflow Router', output: JSON.stringify(result, null, 2) };
       },
@@ -99,7 +99,7 @@ function createSFlowTools(workDir: string): Record<string, ToolDefinition> {
       execute: async (args: { contract_path?: string }, context) => {
         const changeDir = args.contract_path
           ? args.contract_path.replace(/[/\\]execution-contract\.md$/, '')
-          : context.directory || workDir;
+          : context.directory || '';
         const result = await executeContractValidator(changeDir);
         return { title: 'Contract Validator', output: JSON.stringify(result, null, 2) };
       },
@@ -113,9 +113,34 @@ function createSFlowTools(workDir: string): Record<string, ToolDefinition> {
       execute: async (args: { artifact_path?: string }, context) => {
         const changeDir = args.artifact_path
           ? args.artifact_path.replace(/[/\\](proposal|design|tasks)\.md$/, '').replace(/[/\\]specs$/, '')
-          : context.directory || workDir;
+          : context.directory || '';
         const result = await executeArtifactInspector(changeDir);
         return { title: 'Artifact Inspector', output: JSON.stringify(result, null, 2) };
+      },
+    },
+
+    sflow_delegate: {
+      description: 'Delegate a task to a specialized sFlow subagent. Subagents are registered via the config hook and run as child sessions.',
+      args: {
+        subagent: z.enum(['need-explorer', 'spec-writer', 'contract-builder', 'build-executor', 'bug-investigator', 'code-reviewer', 'release-archivist', 'spec-merger']).describe('The subagent to delegate to'),
+        prompt: z.string().describe('Detailed task description for the subagent'),
+      },
+      execute: async (args: { subagent: string; prompt: string }, context) => {
+        const changeDir = context.directory || '';
+        const msg = [
+          `[sFlow Delegate] Routing to "${args.subagent}"`,
+          `Working Directory: ${changeDir}`,
+          ``,
+          `## Task`,
+          args.prompt,
+          ``,
+          `## Instructions`,
+          `You are the ${args.subagent} agent. Read the relevant .sflow/ artifacts in ${changeDir} and perform the task described above.`,
+        ].join('\n');
+        return {
+          title: `sFlow → ${args.subagent}`,
+          output: JSON.stringify({ delegated: true, subagent: args.subagent, changeDir, instructions: msg }, null, 2),
+        };
       },
     },
   };
@@ -278,12 +303,10 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
   const mcpManager = createMcpManager();
 
   // Build tool definitions using @opencode-ai/plugin format
-  const tools = createSFlowTools(workDir);
+  const tools = createSFlowTools();
   const validatorTools = createValidatorTools();
   const workflowTools = createWorkflowTools();
   Object.assign(tools, validatorTools, workflowTools);
-  // Expose change dir to tools via globalThis
-  (globalThis as Record<string, unknown>).__sflow_change_dir__ = workDir;
 
   return {
     dispose: async () => {
@@ -325,20 +348,27 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
 
     // ── config hook: register agents and MCP servers ──
     config: async (cfg) => {
-      // --- Register agents ---
       if (!cfg.agent) cfg.agent = {};
+
       for (const name of getAgentNames()) {
         const override = configOverrides[name];
         const skill = skillLoader.getSkill(name);
         const agentCfg = await createAgent(name, undefined, undefined, skill?.content);
+
+        // Type-safe extraction of AgentConfig fields
+        const instructions = (typeof agentCfg.instructions === 'string' ? agentCfg.instructions : '') || (typeof agentCfg.prompt === 'string' ? agentCfg.prompt : '');
+        const modelName = typeof agentCfg.model === 'string' ? agentCfg.model : undefined;
+        const temperature = typeof agentCfg.temperature === 'number' ? agentCfg.temperature : undefined;
+        const tools = agentCfg.tools ?? undefined;
+
         cfg.agent[name] = {
-          model: agentCfg.model,
-          prompt: (agentCfg.instructions as string) || agentCfg.prompt,
+          model: modelName,
+          prompt: instructions,
           mode: getAgentMode(name),
-          tools: agentCfg.tools,
-          temperature: override?.temperature ?? agentCfg.temperature,
-          description: (agentCfg.name as string | undefined)
-            ? `${agentCfg.name} agent from sFlow plugin`
+          tools,
+          temperature: override?.temperature ?? temperature,
+          description: (typeof agentCfg.id === 'string')
+            ? `${agentCfg.id} agent from sFlow plugin`
             : undefined,
         };
       }
