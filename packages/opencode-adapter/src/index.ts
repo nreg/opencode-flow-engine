@@ -9,7 +9,7 @@
  */
 
 import type { PluginInput, PluginOptions, Hooks, PluginModule, ToolDefinition } from '@opencode-ai/plugin';
-import type { Message, Part, TextPartInput } from '@opencode-ai/sdk';
+import type { Message, Part } from '@opencode-ai/sdk';
 import { z } from 'zod';
 
 type SFlowClient = PluginInput['client'];
@@ -64,7 +64,25 @@ import { createValidatorTools, createWorkflowTools } from './features/builtin-mc
 export const PLUGIN_ID = 'opencode-sflow';
 export const PLUGIN_VERSION = '0.1.0';
 
-const SFLOW_TOOLS = new Set(['workflow_router', 'contract_validator', 'artifact_inspector', 'validate_spec', 'validate_proposal', 'validate_delta_spec', 'validate_tasks', 'validate_contract', 'validate_design', 'validate_implementation', 'detect_sync_conflicts', 'record_decision_point']);
+const SFLOW_TOOLS = new Set(['workflow_router', 'contract_validator', 'artifact_inspector', 'validate_spec', 'validate_proposal', 'validate_delta_spec', 'validate_tasks', 'validate_contract', 'validate_design', 'validate_implementation', 'detect_sync_conflicts', 'record_decision_point', 'call_sub_agent', 'background_output', 'background_cancel']);
+
+// Lightweight in-memory background task registry
+// Maps taskId → { sessionID, status, result, error }
+interface BackgroundTaskEntry {
+  sessionID: string;
+  status: 'running' | 'completed' | 'error';
+  result?: string;
+  error?: string;
+  createdAt: number;
+  completedAt?: number;
+}
+const backgroundTaskRegistry = new Map<string, BackgroundTaskEntry>();
+let backgroundTaskCounter = 0;
+
+function generateTaskId(): string {
+  backgroundTaskCounter++;
+  return `bg_${Date.now()}_${backgroundTaskCounter}`;
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -79,6 +97,19 @@ async function getCurrentWorkflowState(changeDir: string): Promise<string | null
 
 const SOURCE_CODE_PATTERNS = /\.(ts|js|tsx|jsx|mjs|cjs|mts|cts|py|java|kt|rs|go|rb|php|c|cpp|h|hpp|cs|swift|vue|svelte|css|scss|less)$/i;
 const ARTIFACT_NAMES = new Set(['proposal.md', 'design.md', 'tasks.md', 'execution-contract.md']);
+
+/** Promise-based sleep (cross-runtime compatible, replaces Bun.sleep) */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Format a tool error response */
+function formatToolOutput(title: string, success: boolean, data: Record<string, unknown>): { title: string; output: string } {
+  return { title, output: JSON.stringify({ success, ...data }, null, 2) };
+}
+function formatToolError(msg: string): { title: string; output: string } {
+  return formatToolOutput('Error', false, { error: msg });
+}
 
 function isArtifactPath(filePath: string, changeDir: string): boolean {
   const normalized = filePath.replace(/\\/g, '/');
@@ -142,84 +173,280 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
       },
     },
 
-    sflow_delegate: {
-      description: 'Synchronously invoke a specialized sFlow subagent. Creates a child session, dispatches the task to the target agent, waits for completion, and returns the agent output.',
+    call_sub_agent: {
+      description: 'Invoke a specialized sFlow subagent. Supports sync (run_in_background=false) and async (run_in_background=true) modes. Async mode returns a task_id; use background_output to retrieve results when complete.',
       args: {
-        subagent: z.enum(['need-explorer', 'spec-writer', 'contract-builder', 'build-executor', 'bug-investigator', 'code-reviewer', 'release-archivist', 'spec-merger']).describe('The subagent to invoke'),
-        prompt: z.string().describe('Detailed task description with workflow context'),
+        description: z.string().describe('Short (3-5 words) description of the task'),
+        prompt: z.string().describe('The task for the subagent to perform'),
+        subagent_type: z.string().describe('The subagent to invoke (e.g. build-executor, spec-writer)'),
+        run_in_background: z.boolean().describe('true=async (returns task_id for background_output), false=sync (waits for completion)'),
+        session_id: z.string().optional().describe('Existing session to continue (sync mode only)'),
       },
-      execute: async (args: { subagent: string; prompt: string }, context) => {
+      execute: async (args, context) => {
         const changeDir = context.directory || '';
-        const sessionLabel = `sFlow → ${args.subagent}`;
-        const MAX_WAIT_MS = 120_000;
-        const POLL_INTERVAL_MS = 1_000;
+        const { subagent_type, prompt, run_in_background, session_id, description } = args;
+        const sessionLabel = `sFlow → ${subagent_type}`;
+        const MAX_WAIT_MS = 300_000;
+        const POLL_INTERVAL_MS = 500;
 
         try {
-          // 1. Create a new session for the subagent
-          const sessionResult = await client.session.create({
-            body: { title: sessionLabel },
-            query: { directory: changeDir },
-          });
-          const sessionID = sessionResult.data?.id;
-          if (!sessionID) {
-            return { title: sessionLabel, output: JSON.stringify({ success: false, error: 'Failed to create subagent session' }, null, 2) };
+          // Resolve the session to use
+          let sessionID: string;
+          let isNew = false;
+
+          if (session_id) {
+            if (run_in_background) {
+              return await formatToolError('session_id is not supported in background mode. Use run_in_background=false to continue an existing session.');
+            }
+            sessionID = session_id;
+          } else {
+            const createResult = await client.session.create({
+              body: {
+                parentID: context.sessionID,
+                title: sessionLabel,
+                agent: subagent_type,
+              },
+              query: { directory: changeDir },
+            });
+            const id = createResult.data?.id;
+            if (!id) {
+              return await formatToolError('Failed to create subagent session');
+            }
+            sessionID = id;
+            isNew = true;
           }
 
-          // 2. Dispatch the task prompt to the subagent
-          const promptParts: TextPartInput[] = [{ type: 'text', text: args.prompt }];
-          await client.session.promptAsync({
+          // Send the prompt to the subagent
+          await client.session.prompt({
             path: { id: sessionID },
-            body: { agent: args.subagent, parts: promptParts },
-            query: { directory: changeDir },
+            body: {
+              agent: subagent_type,
+              parts: [{ type: 'text', text: prompt }],
+            },
+          }).catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            throw new Error(`Failed to send prompt: ${msg}`);
           });
 
-          // 3. Poll session status until idle or timeout
+          if (run_in_background) {
+            // Async mode: register task and return immediately
+            const taskId = generateTaskId();
+            backgroundTaskRegistry.set(taskId, {
+              sessionID,
+              status: 'running',
+              createdAt: Date.now(),
+            });
+            return {
+              title: sessionLabel,
+              output: JSON.stringify({
+                success: true,
+                task_id: taskId,
+                session_id: sessionID,
+                status: 'running',
+                description,
+                agent: subagent_type,
+              }, null, 2),
+            };
+          }
+
+          // Sync mode: poll for completion
           const startTime = Date.now();
+          let lastMsgCount = 0;
+          let stablePolls = 0;
+          const STABLE_REQUIRED = 3;
+          let sawActiveStatus = false;
+
           while (Date.now() - startTime < MAX_WAIT_MS) {
-            const statusResult = await client.session.status({ query: { directory: changeDir } });
-            const sessions = statusResult.data as Record<string, { type: string }> | undefined;
-            const sessionStatus = sessions?.[sessionID];
-            if (sessionStatus?.type === 'idle') {
+            await sleep(POLL_INTERVAL_MS);
+
+            let sessionStatus: { type: string } | undefined;
+            try {
+              const statusResult = await client.session.status();
+              const rawData = statusResult.data;
+              // Normalize: handle both array and object formats
+              if (Array.isArray(rawData)) {
+                const found = (rawData as Array<{ id: string; type: string }>).find(s => s.id === sessionID);
+                if (found) sessionStatus = { type: found.type };
+              } else if (rawData && typeof rawData === 'object') {
+                const obj = rawData as Record<string, { type: string }>;
+                sessionStatus = obj[sessionID];
+              }
+            } catch {
+              // status() might throw if session is not found; treat as idle
               break;
             }
-            if (sessionStatus?.type === 'retry') {
-              await Bun.sleep(POLL_INTERVAL_MS);
+
+            if (sessionStatus && sessionStatus.type !== 'idle') {
+              sawActiveStatus = true;
+              stablePolls = 0;
+              lastMsgCount = 0;
               continue;
             }
-            await Bun.sleep(POLL_INTERVAL_MS);
+
+            let currentMsgCount = 0;
+            try {
+              const messagesResult = await client.session.messages({ path: { id: sessionID } });
+              const msgs = messagesResult.data as Array<unknown> | undefined;
+              currentMsgCount = Array.isArray(msgs) ? msgs.length : 0;
+            } catch {
+              break;
+            }
+
+            if (isNew && !sawActiveStatus && currentMsgCount === 0) {
+              continue;
+            }
+
+            if (currentMsgCount > 0 && currentMsgCount === lastMsgCount) {
+              stablePolls++;
+              if (stablePolls >= STABLE_REQUIRED) break;
+            } else {
+              stablePolls = 0;
+              lastMsgCount = currentMsgCount;
+            }
           }
 
-          // 4. Retrieve messages from the subagent session
-          const messagesResult = await client.session.messages({
-            path: { id: sessionID },
-            query: { directory: changeDir },
-          });
-          const messages = messagesResult.data as Array<{ parts: Array<{ type: string; text?: string }> }> | undefined;
-
-          // 5. Extract the last assistant text
-          const allText: string[] = [];
-          if (messages) {
-            for (const msg of messages) {
-              if (msg.parts) {
-                for (const part of msg.parts) {
-                  if (part.type === 'text' && part.text) {
-                    allText.push(part.text);
+          // Retrieve messages
+          let lastOutput = '(no output)';
+          try {
+            const messagesResult = await client.session.messages({ path: { id: sessionID } });
+            const messages = messagesResult.data as Array<{ parts: Array<{ type: string; text?: string }> }> | undefined;
+            if (messages) {
+              for (const msg of messages) {
+                if (msg.parts) {
+                  for (const part of msg.parts) {
+                    if (part.type === 'text' && part.text) {
+                      lastOutput = part.text;
+                    }
                   }
                 }
               }
             }
+          } catch {
+            // messages() might fail; return what we have
           }
-
-          const lastOutput = allText.length > 0 ? allText[allText.length - 1] : '(no output)';
 
           return {
             title: sessionLabel,
-            output: JSON.stringify({ success: true, subagent: args.subagent, sessionID, output: lastOutput }, null, 2),
+            output: JSON.stringify({
+              success: true,
+              subagent: subagent_type,
+              sessionID,
+              output: lastOutput,
+            }, null, 2),
           };
         } catch (error) {
           return {
             title: sessionLabel,
-            output: JSON.stringify({ success: false, subagent: args.subagent, error: error instanceof Error ? error.message : String(error) }, null, 2),
+            output: JSON.stringify({
+              success: false,
+              subagent: subagent_type,
+              error: error instanceof Error ? error.message : String(error),
+            }, null, 2),
+          };
+        }
+      },
+    },
+
+    background_output: {
+      description: 'Retrieve results from a background subagent task. Call this when a <system-reminder> notifies you that a background task completed. Use block=true to wait for completion (timeout: 120s).',
+      args: {
+        task_id: z.string().describe('The task ID returned by call_sub_agent (run_in_background=true)'),
+        block: z.boolean().optional().describe('Wait for completion (default: false)'),
+      },
+      execute: async (args: { task_id: string; block?: boolean }, _context) => {
+        const { task_id, block } = args;
+
+        const waitForTask = async (): Promise<BackgroundTaskEntry | undefined> => {
+          const timeout = 120_000;
+          const start = Date.now();
+          while (Date.now() - start < timeout) {
+            const task = backgroundTaskRegistry.get(task_id);
+            if (!task) return undefined;
+            if (task.status !== 'running') return task;
+            await sleep(500);
+          }
+          return backgroundTaskRegistry.get(task_id);
+        };
+
+        try {
+          if (block) {
+            const task = await waitForTask();
+            if (!task) {
+              return { title: 'Background Output', output: JSON.stringify({ success: false, error: `Task ${task_id} not found` }, null, 2) };
+            }
+            return {
+              title: 'Background Output',
+              output: JSON.stringify({
+                success: task.status !== 'error',
+                task_id,
+                status: task.status,
+                session_id: task.sessionID,
+                result: task.result,
+                error: task.error,
+              }, null, 2),
+            };
+          }
+
+          // Non-blocking: return current status
+          const task = backgroundTaskRegistry.get(task_id);
+          if (!task) {
+            return { title: 'Background Output', output: JSON.stringify({ success: false, error: `Task ${task_id} not found` }, null, 2) };
+          }
+          return {
+            title: 'Background Output',
+            output: JSON.stringify({
+              success: true,
+              task_id,
+              status: task.status,
+              session_id: task.sessionID,
+              result: task.result,
+              error: task.error,
+            }, null, 2),
+          };
+        } catch (error) {
+          return {
+            title: 'Background Output',
+            output: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }, null, 2),
+          };
+        }
+      },
+    },
+
+    background_cancel: {
+      description: 'Cancel a running background subagent task by task_id. Use this when you no longer need the result of a call_sub_agent call.',
+      args: {
+        taskId: z.string().describe('Task ID to cancel (required)'),
+      },
+      execute: async (args: { taskId: string }, _context) => {
+        const { taskId } = args;
+        try {
+          const task = backgroundTaskRegistry.get(taskId);
+          if (!task) {
+            return { title: 'Background Cancel', output: JSON.stringify({ success: false, error: `Task ${taskId} not found` }, null, 2) };
+          }
+          if (task.status !== 'running') {
+            return { title: 'Background Cancel', output: JSON.stringify({ success: true, message: `Task ${taskId} already in status: ${task.status}` }, null, 2) };
+          }
+
+          // Abort the session if possible
+          try {
+            await client.session.abort({ path: { id: task.sessionID } });
+          } catch {
+            // session.abort may not be available; mark cancelled anyway
+          }
+
+          backgroundTaskRegistry.delete(taskId);
+          return { title: 'Background Cancel', output: JSON.stringify({ success: true, message: `Task ${taskId} cancelled and removed` }, null, 2) };
+        } catch (error) {
+          return {
+            title: 'Background Cancel',
+            output: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }, null, 2),
           };
         }
       },
@@ -529,9 +756,9 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
     // ── tool.execute.before hook ──
     "tool.execute.before": async (input, output) => {
       const toolName = input.tool;
+      const lowerTool = toolName?.toLowerCase();
 
       // Phase Guard: Intercept Write/Edit based on workflow state
-      const lowerTool = toolName?.toLowerCase();
       if (lowerTool === 'write' || lowerTool === 'edit') {
         const args = (output.args ?? {}) as Record<string, unknown>;
         const filePath = (args.filePath ?? args.path ?? args.file_path ?? '') as string;
@@ -564,10 +791,25 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
             return;
           }
 
-          // Illegal phase jump detection: full mode executing/debugging but missing design.md
+          // C5: Debugging state — only allow Write/Edit for bug-investigator and build-executor
+          if (state.state === 'debugging') {
+            const currentAgent = (input as Record<string, unknown>).agent as string | undefined;
+            const allowedAgents = ['bug-investigator', 'build-executor'];
+            const isAllowed = currentAgent && allowedAgents.some(a => currentAgent.toLowerCase().includes(a));
+            if (!isAllowed && isSourceCode) {
+              output.args = {
+                ...(output.args ?? {}),
+                _sflow_guard_blocked: true,
+                _sflow_guard_reason: `[SFLOW] Write blocked: workflow is in "debugging" state and current agent (${currentAgent || 'unknown'}) is not a debugging agent. Only bug-investigator and build-executor can modify source code during debugging.`,
+              };
+              return;
+            }
+          }
+
+          // Illegal phase jump detection: full mode executing but missing design.md
           if (
             state.mode === 'full' &&
-            (state.state === 'executing' || state.state === 'debugging') &&
+            state.state === 'executing' &&
             isSourceCode
           ) {
             const designExists = await sflowFileExists(`${workDir}/design.md`);
@@ -575,7 +817,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
               output.args = {
                 ...(output.args ?? {}),
                 _sflow_guard_blocked: true,
-                _sflow_guard_reason: `[SFLOW] Write blocked: illegal phase jump detected. Full workflow in "${state.state}" but design.md is missing. Route back to specifying to complete planning artifacts.`,
+                _sflow_guard_reason: `[SFLOW] Write blocked: illegal phase jump detected. Full workflow in "executing" but design.md is missing. Route back to specifying to complete planning artifacts.`,
               };
               return;
             }
@@ -583,27 +825,27 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
         }
       }
 
-      // Original guard for sflow tools
-      if (!SFLOW_TOOLS.has(toolName)) return;
-
+      // C18: Run guard on ALL direct tool invocations, not just sflow tools
       const guardHook = hookComposer.getHook('guard');
-      if (!guardHook) return;
+      if (guardHook) {
+        const guardResult = await guardHook.execute({
+          changeDir: workDir,
+          stateFile: `${workDir}/${STATE_FILE_PATH}`,
+          pluginRoot: '',
+          action: `tool:${toolName}`,
+          data: { toolName },
+        });
 
-      const guardResult = await guardHook.execute({
-        changeDir: workDir,
-        stateFile: `${workDir}/${STATE_FILE_PATH}`,
-        pluginRoot: '',
-        action: `tool:${toolName}`,
-        data: { toolName },
-      });
-
-      if (guardResult.block) {
-        output.args = {
-          ...(output.args ?? {}),
-          _sflow_guard_blocked: true,
-          _sflow_guard_reason: guardResult.blockReason ?? guardResult.error ?? 'Guard condition not met',
-        };
+        if (guardResult.block) {
+          output.args = {
+            ...(output.args ?? {}),
+            _sflow_guard_blocked: true,
+            _sflow_guard_reason: guardResult.blockReason ?? guardResult.error ?? 'Guard condition not met',
+          };
+          return;
+        }
       }
+
     },
 
     // ── tool.execute.after hook ──

@@ -259,6 +259,15 @@ For each task in the execution batch:
 4. **Fix**: If Critical or Important issues found, dispatch fix subagent. Re-review after fixes.
 5. **Mark complete**: Append one line to `.sflow/progress.md`: `Task N: complete (commits <base7>..<head7>, review clean)`
 
+### Subagent Dispatch via call_sub_agent
+
+Use the `call_sub_agent` tool for dispatching implementer and reviewer subagents (replaces `sflow_delegate`):
+
+- **Async mode** (`run_in_background=true`): Preferred for SDD. Returns a `task_id` immediately. When the task completes, a `<system-reminder>` is delivered. Use `background_output(task_id=...)` to retrieve results.
+- **Sync mode** (`run_in_background=false`): Waits for the subagent to finish. Use for short tasks.
+
+Concurrent dispatch: Launch multiple implementer subagents in parallel by calling `call_sub_agent` with `run_in_background=true` multiple times. Each returns a unique `task_id`.
+
 ### File Handoffs
 
 Keep your context lean by handing artifacts as files, not pasted text:

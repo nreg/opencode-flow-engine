@@ -2,8 +2,8 @@
  * Centralized agent tool configurations
  * Each agent type defines which tools it has access to
  *
- * NOTE: sflow_delegate is sFlow's native subagent routing tool registered
- * via the Hooks.tool path — no dependency on oh-my-openagent's call_omo_agent.
+ * call_sub_agent + background_output + background_cancel are sFlow's native
+ * subagent routing tools registered via the Hooks.tool path.
  */
 
 type AgentTools = Record<string, boolean>;
@@ -15,13 +15,15 @@ const COMMON_TOOLS = {
 } as const;
 
 export const AGENT_TOOLS: Record<string, AgentTools> = {
-  /** Main orchestrator - uses sflow_delegate for subagent routing */
+  /** Main orchestrator - uses call_sub_agent + background_output + background_cancel */
   sFlow: {
     ...COMMON_TOOLS,
     write: false,
     edit: false,
     bash: true,
-    sflow_delegate: true,
+    call_sub_agent: true,
+    background_output: true,
+    background_cancel: true,
     skill: true,
     lsp_diagnostics: true,
     lsp_goto_definition: true,
@@ -38,7 +40,6 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: true,
     edit: false,
     bash: false,
-    sflow_delegate: false,
     skill: false,
   },
 
@@ -48,7 +49,6 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: true,
     edit: true,
     bash: true,
-    sflow_delegate: false,
     skill: false,
   },
 
@@ -58,7 +58,6 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: true,
     edit: true,
     bash: true,
-    sflow_delegate: false,
     skill: false,
   },
 
@@ -68,7 +67,6 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: true,
     edit: true,
     bash: true,
-    sflow_delegate: false,
     skill: false,
     lsp_diagnostics: true,
     lsp_goto_definition: true,
@@ -81,7 +79,6 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: false,
     edit: true,
     bash: true,
-    sflow_delegate: false,
     skill: false,
     lsp_diagnostics: true,
     lsp_goto_definition: true,
@@ -94,7 +91,6 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: false,
     edit: false,
     bash: true,
-    sflow_delegate: false,
     skill: false,
     lsp_diagnostics: true,
     lsp_goto_definition: true,
@@ -107,7 +103,6 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: true,
     edit: false,
     bash: true,
-    sflow_delegate: false,
     skill: false,
   },
 
@@ -117,7 +112,6 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     write: true,
     edit: true,
     bash: true,
-    sflow_delegate: false,
     skill: false,
   },
 };

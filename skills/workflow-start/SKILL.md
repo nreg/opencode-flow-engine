@@ -30,6 +30,8 @@ Invoke this skill first when the user says things like:
 
 Use it whenever the correct next skill is not obvious from the current artifacts.
 
+> **Tool note**: Subagent delegation uses `call_sub_agent` (replaces `sflow_delegate`). Supports sync (`run_in_background=false`) and async (`run_in_background=true`) modes. Use `background_output` to retrieve async results and `background_cancel` to abort running tasks.
+
 ## Default States
 
 - `exploring`

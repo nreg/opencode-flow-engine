@@ -1,5 +1,5 @@
 import type { HookHandler, HookContext, HookResult } from './types.js';
-import { readJsonFile, fileExists, directoryExists } from '@opencode-sflow/shared';
+import { readJsonFile, fileExists } from '@opencode-sflow/shared';
 
 const TERMINAL_STATES = new Set(['closing', 'abandoned']);
 const DEFAULT_NEXT_SKILL: Record<string, string> = {
@@ -55,26 +55,64 @@ export function createContinuationHook(): HookHandler {
 
       const skill = DEFAULT_NEXT_SKILL[currentState] || 'need-explorer';
 
-      // Stale pause detection: build_pause set but isolation/build_mode already configured
+      // C15: Stale pause detection with 3 sub-states (inspired by comet SKILL.md Resume rules)
       const buildPause = stateData.build_pause;
       if (currentState === 'executing' && buildPause && buildPause !== null) {
         const isolation = stateData.isolation;
         const buildMode = stateData.build_mode;
-        if (isolation && buildMode) {
+        const contractExists = await fileExists(`${changeDir}/execution-contract.md`);
+
+        // Sub-state 1: Corrupted pause — build_pause set but contract file missing
+        if (!contractExists) {
           return {
             success: true,
             data: {
-              shouldContinue: true,
-              reason: `Detected stale pause (build_pause=${buildPause} but isolation/build_mode already set). Auto-clearing and continuing.`,
-              stale_pause_cleared: true,
-              phase_advanced: true,
-              auto_invoke: true,
-              next: 'auto',
-              skill,
-              hint: null,
+              shouldContinue: false,
+              reason: `Detected corrupted pause (build_pause=${buildPause} but execution-contract.md is missing). Route back to contract-builder to regenerate the contract.`,
+              stale_pause_cleared: false,
+              phase_advanced: false,
+              auto_invoke: false,
+              pause_state: 'corrupted',
+              next: 'manual',
+              skill: 'contract-builder',
+              hint: 'Contract file missing while build was paused. Regenerate before resuming.',
             },
           };
         }
+
+        // Sub-state 2: Normal pause — build_pause set but isolation/build_mode not yet configured
+        if (!isolation || !buildMode) {
+          return {
+            success: true,
+            data: {
+              shouldContinue: false,
+              reason: `Build paused (build_pause=${buildPause}). Isolation or build_mode not yet configured. Route to build-executor to complete setup.`,
+              stale_pause_cleared: false,
+              phase_advanced: false,
+              auto_invoke: false,
+              pause_state: 'normal',
+              next: 'manual',
+              skill: 'build-executor',
+              hint: 'Build is paused at plan-ready stage. Complete isolation/build_mode configuration before resuming.',
+            },
+          };
+        }
+
+        // Sub-state 3: Stale pause — build_pause set but isolation/build_mode already configured
+        return {
+          success: true,
+          data: {
+            shouldContinue: true,
+            reason: `Detected stale pause (build_pause=${buildPause} but isolation/build_mode already set). Auto-clearing and continuing.`,
+            stale_pause_cleared: true,
+            phase_advanced: true,
+            auto_invoke: true,
+            pause_state: 'stale',
+            next: 'auto',
+            skill,
+            hint: null,
+          },
+        };
       }
 
       // Read auto_transition config from .sflow/config.json (change-level) or default to true
