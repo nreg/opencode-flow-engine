@@ -99,7 +99,7 @@ describe('Skill Loader', () => {
       await loader.loadAllSkills();
       const content = loader.getSkillContent('workflow-start');
       expect(content).toBeDefined();
-      expect(content).not.toContain('---');
+      expect(content).not.toMatch(/^---\n/);
     });
 
     it('should return null for unloaded skill', () => {

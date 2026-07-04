@@ -1,12 +1,21 @@
 import type { HookHandler, HookContext, HookResult } from './types.js';
-import { readJsonFile } from '@opencode-sflow/shared';
+import { readJsonFile, fileExists, directoryExists } from '@opencode-sflow/shared';
 
 const TERMINAL_STATES = new Set(['closing', 'abandoned']);
+const DEFAULT_NEXT_SKILL: Record<string, string> = {
+  exploring: 'need-explorer',
+  specifying: 'spec-writer',
+  bridging: 'contract-builder',
+  'approved-for-build': 'build-executor',
+  executing: 'build-executor',
+  debugging: 'bug-investigator',
+  closing: 'release-archivist',
+};
 
 export function createContinuationHook(): HookHandler {
   return {
     name: 'continuation',
-    description: 'Check if workflow should auto-continue to next state',
+    description: 'Check if workflow should auto-continue to next state and report routing info',
     execute: async (context: HookContext): Promise<HookResult> => {
       const { changeDir } = context;
 
@@ -15,20 +24,30 @@ export function createContinuationHook(): HookHandler {
       if (!stateData?.state) {
         return {
           success: true,
-          data: { shouldContinue: false, reason: 'No workflow state found' },
+          data: { shouldContinue: false, reason: 'No workflow state found', next: 'manual', skill: 'need-explorer', hint: 'Start a new workflow or resume an existing change.' },
         };
       }
 
-      if (TERMINAL_STATES.has(stateData.state)) {
+      const currentState = stateData.state;
+
+      if (TERMINAL_STATES.has(currentState)) {
         return {
           success: true,
-          data: { shouldContinue: false, reason: `Workflow is in terminal state: ${stateData.state}` },
+          data: { shouldContinue: false, reason: `Workflow is in terminal state: ${currentState}`, next: 'done', skill: null, hint: null },
         };
       }
+
+      const skill = DEFAULT_NEXT_SKILL[currentState] || 'need-explorer';
 
       return {
         success: true,
-        data: { shouldContinue: true, reason: `Workflow state ${stateData.state} is active` },
+        data: {
+          shouldContinue: true,
+          reason: `Workflow state ${currentState} is active`,
+          next: 'auto',
+          skill,
+          hint: null,
+        },
       };
     },
   };

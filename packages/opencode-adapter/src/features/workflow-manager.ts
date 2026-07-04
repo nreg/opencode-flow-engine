@@ -4,15 +4,12 @@
 
 import type { FeatureConfig, FeatureResult } from './types.js';
 import { isValidTransition } from '@opencode-sflow/core';
-import { readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, stateFileMutex } from '@opencode-sflow/shared';
+import { readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, stateFileMutex, fileExists, directoryExists, readFile } from '@opencode-sflow/shared';
 
 const SFLOW_DIR = '.sflow';
 const STATE_FILE = `${SFLOW_DIR}/state.json`;
 const ARCHIVE_DIR = `${SFLOW_DIR}/archive`;
 
-/**
- * Create the workflow manager feature
- */
 export function createWorkflowManager(config: FeatureConfig = { enabled: true }) {
   return {
     name: 'workflow_manager',
@@ -74,10 +71,11 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
             } as FeatureResult;
           }
 
-          await updateStateFile(changeDir, {
+          const now = new Date().toISOString();
+          await writeJsonFile(`${changeDir}/${STATE_FILE}`, {
             ...currentState,
             state: newState,
-            updatedAt: new Date().toISOString(),
+            updatedAt: now,
           });
 
           return {
@@ -85,7 +83,7 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
             data: {
               from: currentState.state,
               to: newState,
-              timestamp: new Date().toISOString(),
+              timestamp: now,
             },
           };
         });
@@ -115,27 +113,91 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
         };
       }
     },
+
+    async inferStateFromArtifacts(changeDir: string): Promise<{ state: string; mode: string }> {
+      const hasProposal = await fileExists(`${changeDir}/proposal.md`);
+      const hasDesign = await fileExists(`${changeDir}/design.md`);
+      const hasTasks = await fileExists(`${changeDir}/tasks.md`);
+      const hasSpecs = await directoryExists(`${changeDir}/specs`);
+      const hasContract = await fileExists(`${changeDir}/execution-contract.md`);
+
+      const proposalContent = hasProposal ? await readFile(`${changeDir}/proposal.md`) : null;
+      const tasksContent = hasTasks ? await readFile(`${changeDir}/tasks.md`) : null;
+
+      const taskLines = tasksContent
+        ? tasksContent.split("\n").filter((line) => line.match(/^-\s*\[.\]\s+/))
+        : [];
+      const incompleteTasks = tasksContent
+        ? tasksContent.split("\n").filter((line) => line.match(/^-\s*\[\s\]/)).length
+        : 0;
+      const allTasksChecked = taskLines.length > 0 && incompleteTasks === 0;
+
+      const changedFileCount = await countChangedFiles(changeDir);
+      const mode = inferModeFromArtifacts(hasProposal, hasContract, changedFileCount, taskLines.length);
+
+      if (!hasProposal && !hasSpecs) {
+        return { state: 'exploring', mode };
+      }
+      if (!hasContract && (hasDesign || hasTasks || hasSpecs)) {
+        return { state: 'specifying', mode };
+      }
+      if (hasContract && !allTasksChecked) {
+        return { state: 'approved-for-build', mode };
+      }
+      if (hasContract && allTasksChecked) {
+        return { state: 'closing', mode };
+      }
+
+      return { state: 'exploring', mode };
+    },
   };
+}
+
+function inferModeFromArtifacts(hasProposal: boolean, hasContract: boolean, changedFiles: number, taskCount: number): string {
+  if (!hasProposal && !hasContract) {
+    return changedFiles <= 2 && taskCount <= 2 ? 'hotfix' : 'full';
+  }
+  if (hasContract) {
+    return 'full';
+  }
+  if (changedFiles <= 4 && taskCount <= 4) {
+    return 'tweak';
+  }
+  return 'full';
+}
+
+async function countChangedFiles(changeDir: string): Promise<number> {
+  try {
+    const { execSync } = await import("child_process");
+    const output = execSync("git diff --name-only HEAD", { cwd: changeDir, encoding: "utf8" }).trim();
+    if (!output) return 0;
+    return output.split("\n").filter((line) => line.trim().length > 0).length;
+  } catch {
+    return 0;
+  }
 }
 
 async function initializeState(changeDir: string): Promise<void> {
   const stateFile = `${changeDir}/${STATE_FILE}`;
   const existing = await readJsonFile(stateFile).catch(() => null);
-  if (!existing) {
-    await ensureDir(`${changeDir}/${SFLOW_DIR}`);
-    await writeJsonFile(stateFile, {
-      state: 'exploring',
-      mode: 'full',
-      artifacts_hash: '',
-      contract_hash: '',
-      batches_completed: 0,
-      dp_0_confirmed: false,
-      contractApproved: false,
-      verificationStatus: 'pending',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
+  if (existing) {
+    return;
   }
+
+  const inferred = await createWorkflowManager().inferStateFromArtifacts(changeDir);
+  await ensureDir(`${changeDir}/${SFLOW_DIR}`);
+  await writeJsonFile(stateFile, {
+    state: inferred.state,
+    mode: inferred.mode,
+    artifacts_hash: '',
+    contract_hash: '',
+    batches_completed: 0,
+    dp_0_confirmed: false,
+    contractApproved: false,
+    verificationStatus: 'pending',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 async function readStateFile(changeDir: string): Promise<{
@@ -175,13 +237,6 @@ async function readStateFile(changeDir: string): Promise<{
     contractApproved: false,
     verificationStatus: 'pending',
   };
-}
-
-async function updateStateFile(changeDir: string, state: Record<string, unknown>): Promise<void> {
-  await ensureDir(`${changeDir}/${SFLOW_DIR}`);
-  await stateFileMutex.runExclusive(async () => {
-    await atomicWriteJsonFile(`${changeDir}/${STATE_FILE}`, state);
-  });
 }
 
 async function archiveWorkflow(changeDir: string): Promise<void> {

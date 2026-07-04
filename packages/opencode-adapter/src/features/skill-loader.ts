@@ -193,8 +193,8 @@ export class SkillLoader {
       return null;
     }
 
-    // Remove frontmatter
-    return skill.content.replace(/^---\n[\s\S]*?\n---\n/, '');
+    // Remove frontmatter block plus the following blank line
+    return skill.content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
   }
 
   /**
@@ -226,7 +226,7 @@ export async function createSkillLoader(skillsDir?: string): Promise<SkillLoader
 }
 
 function parseFrontmatter(content: string): SkillMetadata {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!frontmatterMatch) {
     return { name: 'unknown', description: '' };
   }
@@ -299,5 +299,5 @@ export function parseSkillMetadata(content: string): SkillMetadata {
  * Get skill content without frontmatter
  */
 export function getSkillContentWithoutFrontmatter(content: string): string {
-  return content.replace(/^---\n[\s\S]*?\n---\n/, '');
+  return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
 }

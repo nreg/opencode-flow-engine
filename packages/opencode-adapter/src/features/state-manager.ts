@@ -1,22 +1,11 @@
 import type { FeatureConfig, FeatureResult } from "./types.js";
 import { createWorkflowManager } from "./workflow-manager.js";
-import { fileExists, readJsonFile, writeJsonFile, ensureDir, isContractStale } from "@opencode-sflow/shared";
+import { fileExists, readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, readFile, directoryExists, isContractStale as checkContractStale } from "@opencode-sflow/shared";
 
 const BOULDER_STATE_FILE = ".sflow/boulder-state.json";
 
 type WorkflowManager = ReturnType<typeof createWorkflowManager>;
 
-/**
- * Creates a state manager with boulder-state cross-session persistence.
- *
- * Boulder state stores the workflow context so that when OpenCode restarts,
- * the sFlow workflow can be recovered and continued from where it left off.
- *
- * Inspired by oh-my-openagent's boulder-state pattern:
- * - State is persisted to .sflow/boulder-state.json
- * - On session start, the state is recovered and injected into the workflow
- * - Key lifecycle events are recorded for audit trail
- */
 export function createStateManager(
   config: FeatureConfig = { enabled: true },
   workflowManager?: WorkflowManager,
@@ -26,6 +15,7 @@ export function createStateManager(
   return {
     name: "state_manager",
     config,
+
     getWorkflowManager: () => wf,
 
     async initialize(): Promise<FeatureResult> {
@@ -36,10 +26,6 @@ export function createStateManager(
       return { success: true };
     },
 
-    /**
-     * Restore workflow state from boulder state file.
-     * Called on session_start to recover cross-session workflow context.
-     */
     async restoreState(changeDir: string): Promise<FeatureResult> {
       try {
         const boulderPath = `${changeDir}/${BOULDER_STATE_FILE}`;
@@ -53,7 +39,16 @@ export function createStateManager(
           return { success: true, data: { restored: false, reason: "Empty boulder state" } };
         }
 
-        // Write recovered state to .sflow/state.json
+        const currentState = (boulderState.state as string) || "exploring";
+        const repairedState = await this.detectStateMismatch(changeDir, currentState);
+
+        if (repairedState !== currentState) {
+          console.log(`[SFLOW] Detected state mismatch: state=${currentState} but artifacts indicate ${repairedState}. Auto-repairing.`);
+          boulderState.state = repairedState;
+          boulderState.repairedFrom = currentState;
+          boulderState.repairedAt = new Date().toISOString();
+        }
+
         const statePath = `${changeDir}/.sflow/state.json`;
         await writeJsonFile(statePath, {
           ...boulderState,
@@ -65,7 +60,8 @@ export function createStateManager(
           success: true,
           data: {
             restored: true,
-            state: boulderState.state,
+            state: repairedState,
+            repaired: repairedState !== currentState,
             timestamp: new Date().toISOString(),
           },
         };
@@ -77,10 +73,63 @@ export function createStateManager(
       }
     },
 
-    /**
-     * Persist current workflow state to boulder state file.
-     * Called on session_end to enable cross-session recovery.
-     */
+    async detectStateMismatch(changeDir: string, currentState: string): Promise<string> {
+      const hasProposal = await fileExists(`${changeDir}/proposal.md`);
+      const hasDesign = await fileExists(`${changeDir}/design.md`);
+      const hasTasks = await fileExists(`${changeDir}/tasks.md`);
+      const hasSpecs = await directoryExists(`${changeDir}/specs`);
+      const hasContract = await fileExists(`${changeDir}/execution-contract.md`);
+
+      const proposalContent = hasProposal ? await readFile(`${changeDir}/proposal.md`) : null;
+      const tasksContent = hasTasks ? await readFile(`${changeDir}/tasks.md`) : null;
+
+      const incompleteTasks = tasksContent
+        ? tasksContent.split("\n").filter((line) => line.match(/^-\s*\[\s\]/)).length
+        : 0;
+      const allTasksChecked = tasksContent
+        ? tasksContent.split("\n").filter((line) => line.match(/^-\s*\[.\]\s+/)).length > 0 &&
+          incompleteTasks === 0
+        : false;
+
+      if (currentState === "exploring" && hasProposal && proposalContent && proposalContent.trim().length > 100) {
+        return "specifying";
+      }
+
+      if (currentState === "specifying" && !hasProposal) {
+        return "exploring";
+      }
+      if (currentState === "specifying" && hasDesign && hasTasks && hasSpecs) {
+        return "bridging";
+      }
+
+      if (currentState === "bridging" && (!hasDesign || !hasTasks || !hasSpecs)) {
+        return "specifying";
+      }
+      if (currentState === "bridging" && hasContract) {
+        return "approved-for-build";
+      }
+
+      if (currentState === "approved-for-build" && !hasContract) {
+        return "bridging";
+      }
+      if (currentState === "approved-for-build" && allTasksChecked) {
+        return "closing";
+      }
+
+      if (currentState === "executing" && !hasContract) {
+        return "bridging";
+      }
+      if (currentState === "executing" && allTasksChecked) {
+        return "closing";
+      }
+
+      if (currentState === "debugging" && !hasContract) {
+        return "bridging";
+      }
+
+      return currentState;
+    },
+
     async persistState(changeDir: string): Promise<FeatureResult> {
       try {
         const statePath = `${changeDir}/.sflow/state.json`;
@@ -94,7 +143,6 @@ export function createStateManager(
           return { success: true, data: { persisted: false, reason: "Empty workflow state" } };
         }
 
-        // Write to boulder state file with persistence metadata
         const boulderPath = `${changeDir}/${BOULDER_STATE_FILE}`;
         await writeJsonFile(boulderPath, {
           ...state,
@@ -164,7 +212,6 @@ export function createStateManager(
         const current = await wf.getState(changeDir);
         if (!current.success) return current;
         const result = await wf.transitionState(changeDir, "approved-for-build");
-        // Persist after state change
         if (result.success) {
           await this.persistState(changeDir);
         }
@@ -180,10 +227,43 @@ export function createStateManager(
       }
     },
 
-    /**
-     * Check if the execution contract is stale relative to the proposal.
-     * Delegates to the shared staleness utility.
-     */
+    async upgradeMode(changeDir: string, newMode: string, reason: string): Promise<FeatureResult> {
+      try {
+        const statePath = `${changeDir}/.sflow/state.json`;
+        const state = await readJsonFile<Record<string, unknown>>(statePath);
+        if (!state) {
+          return { success: false, error: "State file not found" };
+        }
+
+        const previousMode = state.mode;
+        state.mode = newMode;
+        state.updatedAt = new Date().toISOString();
+        state.upgradedFrom = previousMode;
+        state.upgradeReason = reason;
+        state.upgradedAt = new Date().toISOString();
+
+        await atomicWriteJsonFile(statePath, state);
+
+        await this.persistState(changeDir);
+
+        return {
+          success: true,
+          data: {
+            upgraded: true,
+            from: previousMode,
+            to: newMode,
+            reason,
+            timestamp: new Date().toISOString(),
+          },
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+
     async isContractStale(changeDir: string): Promise<FeatureResult> {
       try {
         const stateExists = await fileExists(`${changeDir}/.sflow/state.json`);
@@ -194,7 +274,7 @@ export function createStateManager(
           return { success: true, data: { stale: false } };
         }
 
-        const stale = await isContractStale(changeDir);
+        const stale = await checkContractStale(changeDir);
         return { success: true, data: { stale } };
       } catch (error) {
         return {
