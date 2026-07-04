@@ -3,7 +3,7 @@
  */
 
 import type { HookHandler, HookContext, HookResult } from "./types.js";
-import { fileExists, readFile, readJsonFile, isContractStale, getContractStalenessReport } from "@opencode-sflow/shared";
+import { fileExists, readFile, readJsonFile, writeJsonFile, atomicWriteJsonFile, isContractStale, getContractStalenessReport } from "@opencode-sflow/shared";
 import { sharedValidator } from "@opencode-sflow/core";
 
 /**
@@ -156,17 +156,46 @@ async function checkPresetUpgrade(changeDir: string): Promise<HookResult> {
 
   const fileCount = await countChangedFiles(changeDir);
 
+  const hasSchemaChange = taskLines.some((l: string) =>
+    /schema|database|migrat|alter\s+table|ddl|create\s+table/i.test(l)
+  );
+  const hasApiChange = taskLines.some((l: string) =>
+    /\bapi\b|endpoint|route|public\s+(method|function|api)|new\s+module|new\s+interface/i.test(l)
+  );
+  const hasCrossModule = taskLines.some((l: string) =>
+    /cross.?(module|project|service)|multi.?(module|project|service)|coordination|interfaces/i.test(l)
+  );
+
+  const isHotfix = mode === "hotfix";
+  const isTweak = mode === "tweak";
+
   const needsUpgrade =
-    mode === "hotfix" && fileCount >= 3 ||
-    mode === "tweak" && fileCount >= 5 ||
-    mode === "hotfix" && taskCount > 2 ||
-    mode === "tweak" && taskCount > 4;
+    isHotfix && fileCount >= 3 ||
+    isTweak && fileCount >= 5 ||
+    isHotfix && taskCount > 2 ||
+    isTweak && taskCount > 4 ||
+    isHotfix && hasSchemaChange ||
+    isTweak && hasSchemaChange ||
+    isHotfix && hasApiChange ||
+    isTweak && hasApiChange ||
+    isTweak && hasCrossModule;
 
   if (needsUpgrade) {
+    const statePath = `${changeDir}/.sflow/state.json`;
+    const state = await readJsonFile<Record<string, unknown>>(statePath);
+    if (state) {
+      state.mode = "full";
+      state.upgradedFrom = mode;
+      state.upgradeReason = `scope exceeds ${mode} limits (${fileCount} files, ${taskCount} tasks)`;
+      state.upgradedAt = new Date().toISOString();
+      state.updatedAt = new Date().toISOString();
+      await atomicWriteJsonFile(statePath, state);
+    }
+
     return {
       success: false,
       block: true,
-      blockReason: `[SFLOW] Preset upgrade: ${mode} -> full. Reason: scope exceeds preset limits (${mode}: ${fileCount} files, ${taskCount} tasks). Routing as full workflow.`,
+      blockReason: `[SFLOW] Preset upgrade: ${mode} -> full. Reason: scope exceeds preset limits (${mode}: ${fileCount} files, ${taskCount} tasks, schema=${hasSchemaChange}, api=${hasApiChange}, crossModule=${hasCrossModule}). State updated to mode=full. Route back to specifying to complete planning artifacts before resuming execution.`,
     };
   }
 
@@ -225,13 +254,14 @@ async function checkDebuggingState(changeDir: string, action?: string): Promise<
     const isDebugAction =
       action?.includes("bug-investigator") ||
       action?.includes("debugging") ||
-      action?.includes("tool:workflow_router");
+      action?.includes("tool:workflow_router") ||
+      action?.includes("build-executor");
     if (!isDebugAction) {
       return {
         success: false,
         block: true,
         blockReason:
-          "Workflow is in debugging state. Only bug-investigator can operate. Fix the bug and transition back to executing before continuing.",
+          "Workflow is in debugging state. Only bug-investigator and build-executor (for fix verification) can operate. Fix the bug and transition back to executing before continuing.",
       };
     }
   }

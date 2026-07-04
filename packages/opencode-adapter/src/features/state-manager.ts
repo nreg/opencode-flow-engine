@@ -73,7 +73,7 @@ export function createStateManager(
       }
     },
 
-    async detectStateMismatch(changeDir: string, currentState: string): Promise<string> {
+async detectStateMismatch(changeDir: string, currentState: string): Promise<string> {
       const hasProposal = await fileExists(`${changeDir}/proposal.md`);
       const hasDesign = await fileExists(`${changeDir}/design.md`);
       const hasTasks = await fileExists(`${changeDir}/tasks.md`);
@@ -90,6 +90,19 @@ export function createStateManager(
         ? tasksContent.split("\n").filter((line) => line.match(/^-\s*\[.\]\s+/)).length > 0 &&
           incompleteTasks === 0
         : false;
+
+      // Forward mismatch: contract changed after approval → route back to bridging
+      if (hasContract && (currentState === "approved-for-build" || currentState === "executing")) {
+        const stateData = await readJsonFile<Record<string, unknown>>(`${changeDir}/.sflow/state.json`);
+        const storedHash = (stateData?.contract_hash as string) || "";
+        if (storedHash) {
+          const contractContent = await readFile(`${changeDir}/execution-contract.md`);
+          const currentHash = simpleHash(contractContent || "");
+          if (currentHash !== storedHash) {
+            return "bridging";
+          }
+        }
+      }
 
       if (currentState === "exploring" && hasProposal && proposalContent && proposalContent.trim().length > 100) {
         return "specifying";
@@ -264,6 +277,46 @@ export function createStateManager(
       }
     },
 
+    async setBuildPause(changeDir: string, pauseType: string): Promise<FeatureResult> {
+      try {
+        const statePath = `${changeDir}/.sflow/state.json`;
+        const state = await readJsonFile<Record<string, unknown>>(statePath);
+        if (!state) {
+          return { success: false, error: "State file not found" };
+        }
+        state.build_pause = pauseType;
+        state.buildPauseSetAt = new Date().toISOString();
+        state.updatedAt = new Date().toISOString();
+        await atomicWriteJsonFile(statePath, state);
+        return { success: true, data: { build_pause: pauseType, timestamp: new Date().toISOString() } };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+
+    async clearBuildPause(changeDir: string): Promise<FeatureResult> {
+      try {
+        const statePath = `${changeDir}/.sflow/state.json`;
+        const state = await readJsonFile<Record<string, unknown>>(statePath);
+        if (!state) {
+          return { success: false, error: "State file not found" };
+        }
+        state.build_pause = null;
+        state.buildPauseClearedAt = new Date().toISOString();
+        state.updatedAt = new Date().toISOString();
+        await atomicWriteJsonFile(statePath, state);
+        return { success: true, data: { build_pause: null, timestamp: new Date().toISOString() } };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+
     async isContractStale(changeDir: string): Promise<FeatureResult> {
       try {
         const stateExists = await fileExists(`${changeDir}/.sflow/state.json`);
@@ -282,6 +335,16 @@ export function createStateManager(
           error: error instanceof Error ? error.message : String(error),
         };
       }
-    },
+},
   };
+}
+
+function simpleHash(content: string): string {
+  let hash = 0;
+  for (let i = 0; i < content.length; i++) {
+    const char = content.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(16);
 }

@@ -70,11 +70,32 @@ const SFLOW_TOOLS = new Set(['workflow_router', 'contract_validator', 'artifact_
 
 const STATE_FILE_PATH = '.sflow/state.json';
 
-// ─── Helper: read current workflow state ──────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function getCurrentWorkflowState(changeDir: string): Promise<string | null> {
   const state = await readJsonFile<{ state?: string }>(`${changeDir}/${STATE_FILE_PATH}`);
   return state?.state ?? null;
+}
+
+const SOURCE_CODE_PATTERNS = /\.(ts|js|tsx|jsx|mjs|cjs|mts|cts|py|java|kt|rs|go|rb|php|c|cpp|h|hpp|cs|swift|vue|svelte|css|scss|less)$/i;
+const ARTIFACT_NAMES = new Set(['proposal.md', 'design.md', 'tasks.md', 'execution-contract.md']);
+
+function isArtifactPath(filePath: string, changeDir: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/');
+  const changeDirNorm = changeDir.replace(/\\/g, '/');
+
+  if (normalized.includes('.sflow/') || normalized.endsWith('.sflow')) return true;
+  const relative = normalized.startsWith(changeDirNorm)
+    ? normalized.slice(changeDirNorm.length + 1)
+    : normalized;
+  const baseName = relative.split('/').pop() || '';
+  if (ARTIFACT_NAMES.has(baseName)) return true;
+  if (relative.startsWith('specs/') || relative === 'specs') return true;
+  return false;
+}
+
+function isSourceCodePath(filePath: string): boolean {
+  return SOURCE_CODE_PATTERNS.test(filePath);
 }
 
 // ─── Tool definitions using @opencode-ai/plugin ToolDefinition format ──────────
@@ -508,6 +529,61 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
     // ── tool.execute.before hook ──
     "tool.execute.before": async (input, output) => {
       const toolName = input.tool;
+
+      // Phase Guard: Intercept Write/Edit based on workflow state
+      const lowerTool = toolName?.toLowerCase();
+      if (lowerTool === 'write' || lowerTool === 'edit') {
+        const args = (output.args ?? {}) as Record<string, unknown>;
+        const filePath = (args.filePath ?? args.path ?? args.file_path ?? '') as string;
+        const state = await readJsonFile<{ state?: string; mode?: string }>(`${workDir}/${STATE_FILE_PATH}`);
+
+        if (state?.state) {
+          const isArtifact = isArtifactPath(filePath, workDir);
+          const isSourceCode = !isArtifact && isSourceCodePath(filePath);
+
+          // Blocking states: exploring, specifying, bridging — source code not allowed
+          if (
+            (state.state === 'exploring' || state.state === 'specifying' || state.state === 'bridging') &&
+            isSourceCode
+          ) {
+            output.args = {
+              ...(output.args ?? {}),
+              _sflow_guard_blocked: true,
+              _sflow_guard_reason: `[SFLOW] Write blocked: workflow is in "${state.state}" state. Planning phases do not allow source code changes. Complete planning artifacts first.`,
+            };
+            return;
+          }
+
+          // Terminal states: closing, abandoned — block all writes
+          if (state.state === 'closing' || state.state === 'abandoned') {
+            output.args = {
+              ...(output.args ?? {}),
+              _sflow_guard_blocked: true,
+              _sflow_guard_reason: `[SFLOW] Write blocked: workflow is in terminal state "${state.state}". No further changes allowed.`,
+            };
+            return;
+          }
+
+          // Illegal phase jump detection: full mode executing/debugging but missing design.md
+          if (
+            state.mode === 'full' &&
+            (state.state === 'executing' || state.state === 'debugging') &&
+            isSourceCode
+          ) {
+            const designExists = await sflowFileExists(`${workDir}/design.md`);
+            if (!designExists) {
+              output.args = {
+                ...(output.args ?? {}),
+                _sflow_guard_blocked: true,
+                _sflow_guard_reason: `[SFLOW] Write blocked: illegal phase jump detected. Full workflow in "${state.state}" but design.md is missing. Route back to specifying to complete planning artifacts.`,
+              };
+              return;
+            }
+          }
+        }
+      }
+
+      // Original guard for sflow tools
       if (!SFLOW_TOOLS.has(toolName)) return;
 
       const guardHook = hookComposer.getHook('guard');
