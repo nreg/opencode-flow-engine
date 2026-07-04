@@ -2,11 +2,35 @@
  * Guard hook - Guard state transitions and block invalid operations
  * READ-ONLY: This hook NEVER writes state or artifacts. It only detects and reports.
  * State mutations (upgrades, repairs) happen through state-manager or workflow-manager.
+ *
+ * All file-level write guards (C4, C5, terminal state, illegal phase jump)
+ * are consolidated here. Callers (index.ts) pass tool/agent/filePath info
+ * through context.data and check the returned block flag.
  */
 
 import type { HookHandler, HookContext, HookResult } from "./types.js";
 import { fileExists, readFile, readJsonFile, directoryExists, isContractStale, getContractStalenessReport } from "@opencode-sflow/shared";
 import { sharedValidator, HOTFIX_UPGRADE_THRESHOLDS, TWEAK_UPGRADE_THRESHOLDS } from "@opencode-sflow/core";
+
+const SOURCE_CODE_PATTERNS = /\.(ts|js|tsx|jsx|mjs|cjs|mts|cts|py|java|kt|rs|go|rb|php|c|cpp|h|hpp|cs|swift|vue|svelte|css|scss|less)$/i;
+const ARTIFACT_NAMES = new Set(['proposal.md', 'design.md', 'tasks.md', 'execution-contract.md']);
+
+function isArtifactPath(filePath: string, changeDir: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/');
+  const changeDirNorm = changeDir.replace(/\\/g, '/');
+  if (normalized.includes('.sflow/') || normalized.endsWith('.sflow')) return true;
+  const relative = normalized.startsWith(changeDirNorm)
+    ? normalized.slice(changeDirNorm.length + 1)
+    : normalized;
+  const baseName = relative.split('/').pop() || '';
+  if (ARTIFACT_NAMES.has(baseName)) return true;
+  if (relative.startsWith('specs/') || relative === 'specs') return true;
+  return false;
+}
+
+function isSourceCodePath(filePath: string): boolean {
+  return SOURCE_CODE_PATTERNS.test(filePath);
+}
 
 /**
  * Create the guard hook
@@ -16,7 +40,7 @@ export function createGuardHook(): HookHandler {
     name: "guard",
     description: "Guard state transitions and block invalid operations (read-only)",
     execute: async (context) => {
-      const { changeDir } = context;
+      const { changeDir, data } = context;
 
       try {
         const guards = [
@@ -24,7 +48,8 @@ export function createGuardHook(): HookHandler {
           await checkPresetUpgrade(changeDir),
           await checkContractStalenessGuard(changeDir),
           await checkTaskCompletion(changeDir),
-          await checkDebuggingState(changeDir, context.action),
+          await checkDebuggingState(changeDir, context.action, data),
+          await checkFileWriteGuard(changeDir, data),
         ];
 
         const blockingGuards = guards.filter((g) => g.block);
@@ -160,7 +185,7 @@ async function checkPresetUpgrade(changeDir: string): Promise<HookResult> {
     // Match file path patterns: src/..., packages/..., *.ts, etc.
     const matches = line.matchAll(/(?:`([^`]+)`|(\b[\w/.-]+\.\w{1,4}\b))/g);
     for (const m of matches) {
-      const ref = (m[1] || m[2]).trim();
+      const ref = (m[1] ?? m[2] ?? '').trim();
       if (ref && (ref.includes('/') || /\.\w{1,4}$/.test(ref))) {
         fileRefs.add(ref);
       }
@@ -248,24 +273,99 @@ async function checkTaskCompletion(changeDir: string): Promise<HookResult> {
   return { success: true };
 }
 
-async function checkDebuggingState(changeDir: string, action?: string): Promise<HookResult> {
+/**
+ * File-level write guard — consolidated from previously inline logic in index.ts.
+ *
+ * Checks:
+ * - C4: Planning phases (exploring/specifying/bridging) block source code writes
+ * - Terminal states (closing/abandoned) block all writes
+ * - C5: Debugging state only allows bug-investigator and build-executor agents
+ * - Illegal phase jump: full mode executing without design.md
+ */
+async function checkFileWriteGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+  if (!changeDir || !data) return { success: true };
+
+  const toolName = data.toolName as string | undefined;
+  if (toolName !== 'write' && toolName !== 'edit') return { success: true };
+
+  const filePath = (data.filePath as string) || '';
+  const agent = (data.agent as string) || '';
+  if (!filePath) return { success: true };
+
+  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/.sflow/state.json`);
+  if (!stateData?.state) return { success: true };
+
+  const currentState = stateData.state;
+  const isArtifact = isArtifactPath(filePath, changeDir);
+  const isSourceCode = !isArtifact && isSourceCodePath(filePath);
+
+  if (isSourceCode) {
+    // C4: Planning phases block source code writes
+    if (currentState === 'exploring' || currentState === 'specifying' || currentState === 'bridging') {
+      return {
+        success: false, block: true,
+        blockReason: `[SFLOW] Write blocked: workflow is in "${currentState}" state. Planning phases do not allow source code changes. Complete planning artifacts first.`,
+      };
+    }
+
+    // C5: Debugging state — only allow for bug-investigator and build-executor
+    if (currentState === 'debugging') {
+      const allowedAgents = ['bug-investigator', 'build-executor'];
+      const isAllowed = agent && allowedAgents.some(a => agent.toLowerCase().includes(a));
+      if (!isAllowed) {
+        return {
+          success: false, block: true,
+          blockReason: `[SFLOW] Write blocked: workflow is in "debugging" state and current agent (${agent || 'unknown'}) is not a debugging agent. Only bug-investigator and build-executor can modify source code during debugging.`,
+        };
+      }
+    }
+
+    // Illegal phase jump: full mode executing but missing design.md
+    if (stateData.mode === 'full' && currentState === 'executing') {
+      const designExists = await fileExists(`${changeDir}/design.md`);
+      if (!designExists) {
+        return {
+          success: false, block: true,
+          blockReason: `[SFLOW] Write blocked: illegal phase jump detected. Full workflow in "executing" but design.md is missing. Route back to specifying to complete planning artifacts.`,
+        };
+      }
+    }
+  }
+
+  // Terminal states block all writes (including artifacts)
+  if (currentState === 'closing' || currentState === 'abandoned') {
+    return {
+      success: false, block: true,
+      blockReason: `[SFLOW] Write blocked: workflow is in terminal state "${currentState}". No further changes allowed.`,
+    };
+  }
+
+  return { success: true };
+}
+
+/**
+ * Debugging state check — blocks non-debugging operations from non-debugging agents.
+ * Uses both action string (from tool.execute.before) and agent name (from context.data).
+ */
+async function checkDebuggingState(changeDir: string, action?: string, data?: Record<string, unknown>): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
   const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
-  if (stateData?.state === "debugging") {
-    const isDebugAction =
-      action?.includes("bug-investigator") ||
-      action?.includes("debugging") ||
-      action?.includes("tool:workflow_router") ||
-      action?.includes("build-executor");
-    if (!isDebugAction) {
-      return {
-        success: false,
-        block: true,
-        blockReason:
-          "Workflow is in debugging state. Only bug-investigator and build-executor (for fix verification) can operate. Fix the bug and transition back to executing before continuing.",
-      };
-    }
+  if (stateData?.state !== "debugging") return { success: true };
+
+  const agent = (data?.agent as string) || '';
+  const isDebugAction =
+    action?.includes("bug-investigator") ||
+    action?.includes("debugging") ||
+    action?.includes("tool:workflow_router") ||
+    action?.includes("build-executor") ||
+    (agent !== '' && (agent.includes("bug-investigator") || agent.includes("build-executor")));
+
+  if (!isDebugAction) {
+    return {
+      success: false, block: true,
+      blockReason: "Workflow is in debugging state. Only bug-investigator and build-executor (for fix verification) can operate. Fix the bug and transition back to executing before continuing.",
+    };
   }
   return { success: true };
 }

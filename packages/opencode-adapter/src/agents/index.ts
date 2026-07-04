@@ -44,10 +44,6 @@ export type {
 export type {
   AgentMode,
   AgentFactory,
-  AgentCategory,
-  AgentCost,
-  DelegationTrigger,
-  AgentPromptMetadata,
   BuiltinAgentName,
   AgentOverrideConfig,
   AgentOverrides,

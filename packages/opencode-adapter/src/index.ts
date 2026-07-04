@@ -57,7 +57,7 @@ import { readJsonFile } from '@opencode-sflow/shared';
 import type { HookContext } from './hooks/types.js';
 import { sharedValidator } from '@opencode-sflow/core';
 import { fileExists as sflowFileExists, directoryExists, readFile as sflowReadFile } from '@opencode-sflow/shared';
-import { isContractStale } from '@opencode-sflow/shared';
+import { isContractStale, sleep as crossSleep } from '@opencode-sflow/shared';
 import { detectStateMismatch, simpleHash } from './features/state-manager.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
@@ -65,7 +65,7 @@ import { createValidatorTools, createWorkflowTools } from './features/builtin-mc
 export const PLUGIN_ID = 'opencode-sflow';
 export const PLUGIN_VERSION = '0.1.0';
 
-const SFLOW_TOOLS = new Set(['workflow_router', 'contract_validator', 'artifact_inspector', 'validate_spec', 'validate_proposal', 'validate_delta_spec', 'validate_tasks', 'validate_contract', 'validate_design', 'validate_implementation', 'detect_sync_conflicts', 'record_decision_point', 'call_sub_agent', 'background_output', 'background_cancel']);
+const SFLOW_TOOLS = new Set(['workflow_router', 'contract_validator', 'artifact_inspector', 'validate_spec', 'validate_proposal', 'validate_delta_spec', 'validate_tasks', 'validate_contract', 'validate_design', 'validate_implementation', 'detect_sync_conflicts', 'record_decision_point', 'call_flow_agent', 'background_output', 'background_cancel']);
 
 // Lightweight in-memory background task registry
 // Maps taskId → { sessionID, status, result, error }
@@ -96,13 +96,8 @@ async function getCurrentWorkflowState(changeDir: string): Promise<string | null
   return state?.state ?? null;
 }
 
-const SOURCE_CODE_PATTERNS = /\.(ts|js|tsx|jsx|mjs|cjs|mts|cts|py|java|kt|rs|go|rb|php|c|cpp|h|hpp|cs|swift|vue|svelte|css|scss|less)$/i;
-const ARTIFACT_NAMES = new Set(['proposal.md', 'design.md', 'tasks.md', 'execution-contract.md']);
-
-/** Promise-based sleep (cross-runtime compatible, replaces Bun.sleep) */
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+/** Promise-based sleep (cross-runtime compatible) */
+const sleep = crossSleep;
 
 /** Format a tool error response */
 function formatToolOutput(title: string, success: boolean, data: Record<string, unknown>): { title: string; output: string } {
@@ -110,24 +105,6 @@ function formatToolOutput(title: string, success: boolean, data: Record<string, 
 }
 function formatToolError(msg: string): { title: string; output: string } {
   return formatToolOutput('Error', false, { error: msg });
-}
-
-function isArtifactPath(filePath: string, changeDir: string): boolean {
-  const normalized = filePath.replace(/\\/g, '/');
-  const changeDirNorm = changeDir.replace(/\\/g, '/');
-
-  if (normalized.includes('.sflow/') || normalized.endsWith('.sflow')) return true;
-  const relative = normalized.startsWith(changeDirNorm)
-    ? normalized.slice(changeDirNorm.length + 1)
-    : normalized;
-  const baseName = relative.split('/').pop() || '';
-  if (ARTIFACT_NAMES.has(baseName)) return true;
-  if (relative.startsWith('specs/') || relative === 'specs') return true;
-  return false;
-}
-
-function isSourceCodePath(filePath: string): boolean {
-  return SOURCE_CODE_PATTERNS.test(filePath);
 }
 
 // ─── Tool definitions using @opencode-ai/plugin ToolDefinition format ──────────
@@ -174,7 +151,7 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
       },
     },
 
-    call_sub_agent: {
+    call_flow_agent: {
       description: 'Invoke a specialized sFlow subagent. Supports sync (run_in_background=false) and async (run_in_background=true) modes. Async mode returns a task_id; use background_output to retrieve results when complete.',
       args: {
         description: z.string().describe('Short (3-5 words) description of the task'),
@@ -199,13 +176,16 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
             if (run_in_background) {
               return await formatToolError('session_id is not supported in background mode. Use run_in_background=false to continue an existing session.');
             }
-            sessionID = session_id;
+            sessionID = session_id as string;
           } else {
-            const createResult = await client.session.create({
+            const createResult = await (client.session.create as (args: {
+              body: Record<string, unknown>;
+              query?: Record<string, unknown>;
+            }) => Promise<{ data?: { id?: string } }>)({
               body: {
                 parentID: context.sessionID,
                 title: sessionLabel,
-                agent: subagent_type,
+                agent: subagent_type as string,
               },
               query: { directory: changeDir },
             });
@@ -218,11 +198,14 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
           }
 
           // Send the prompt to the subagent
-          await client.session.prompt({
+          await (client.session.prompt as (args: {
+            path: { id: string };
+            body: Record<string, unknown>;
+          }) => Promise<unknown>)({
             path: { id: sessionID },
             body: {
-              agent: subagent_type,
-              parts: [{ type: 'text', text: prompt }],
+              agent: subagent_type as string,
+              parts: [{ type: 'text', text: prompt as string }],
             },
           }).catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
@@ -326,12 +309,23 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
             // messages() might fail; return what we have
           }
 
+          // Register sync result in background registry for background_output retrieval
+          const syncTaskId = generateTaskId();
+          backgroundTaskRegistry.set(syncTaskId, {
+            sessionID,
+            status: 'completed',
+            result: lastOutput,
+            createdAt: startTime,
+            completedAt: Date.now(),
+          });
+
           return {
             title: sessionLabel,
             output: JSON.stringify({
               success: true,
               subagent: subagent_type,
               sessionID,
+              task_id: syncTaskId,
               output: lastOutput,
             }, null, 2),
           };
@@ -351,59 +345,143 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
     background_output: {
       description: 'Retrieve results from a background subagent task. Call this when a <system-reminder> notifies you that a background task completed. Use block=true to wait for completion (timeout: 120s).',
       args: {
-        task_id: z.string().describe('The task ID returned by call_sub_agent (run_in_background=true)'),
+        task_id: z.string().describe('The task ID returned by call_flow_agent (run_in_background=true)'),
         block: z.boolean().optional().describe('Wait for completion (default: false)'),
       },
       execute: async (args: { task_id: string; block?: boolean }, _context) => {
         const { task_id, block } = args;
 
-        const waitForTask = async (): Promise<BackgroundTaskEntry | undefined> => {
+        // Poll the live session to check if the subagent has completed.
+        // This is necessary because async mode tasks are created with status='running'
+        // and there is no automatic callback to update the in-memory registry.
+        // When a session becomes idle, we read its messages and update the registry.
+        const pollAndComplete = async (task: BackgroundTaskEntry): Promise<BackgroundTaskEntry> => {
           const timeout = 120_000;
           const start = Date.now();
+          let lastMsgCount = 0;
+          let stablePolls = 0;
+
           while (Date.now() - start < timeout) {
-            const task = backgroundTaskRegistry.get(task_id);
-            if (!task) return undefined;
-            if (task.status !== 'running') return task;
             await sleep(500);
+
+            // Check session status
+            let isIdle = false;
+            try {
+              const statusResult = await client.session.status();
+              const rawData = statusResult.data;
+              if (Array.isArray(rawData)) {
+                const found = (rawData as Array<{ id: string; type: string }>).find(s => s.id === task.sessionID);
+                if (found) isIdle = found.type === 'idle';
+              } else if (rawData && typeof rawData === 'object') {
+                const obj = rawData as Record<string, { type: string }>;
+                isIdle = obj[task.sessionID]?.type === 'idle';
+              }
+            } catch {
+              // status() may fail; fall through to msg-count check
+            }
+
+            if (isIdle) {
+              // Session idle: read final output
+              try {
+                const messagesResult = await client.session.messages({ path: { id: task.sessionID } });
+                const messages = messagesResult.data as Array<{ parts: Array<{ type: string; text?: string }> }> | undefined;
+                let lastOutput = '(no output)';
+                if (messages) {
+                  for (const msg of messages) {
+                    if (msg.parts) {
+                      for (const part of msg.parts) {
+                        if (part.type === 'text' && part.text) {
+                          lastOutput = part.text;
+                        }
+                      }
+                    }
+                  }
+                }
+                const now = Date.now();
+                const updated: BackgroundTaskEntry = {
+                  ...task,
+                  status: 'completed',
+                  result: lastOutput,
+                  completedAt: now,
+                };
+                backgroundTaskRegistry.set(task_id, updated);
+                return updated;
+              } catch {
+                // messages() failed; mark error
+                const updated: BackgroundTaskEntry = { ...task, status: 'error', error: 'Failed to read session messages' };
+                backgroundTaskRegistry.set(task_id, updated);
+                return updated;
+              }
+            }
+
+            // Fallback: check message count stability
+            try {
+              const messagesResult = await client.session.messages({ path: { id: task.sessionID } });
+              const msgs = messagesResult.data as Array<unknown> | undefined;
+              const currentMsgCount = Array.isArray(msgs) ? msgs.length : 0;
+              if (currentMsgCount > 0 && currentMsgCount === lastMsgCount) {
+                stablePolls++;
+                if (stablePolls >= 3) break;
+              } else {
+                stablePolls = 0;
+                lastMsgCount = currentMsgCount;
+              }
+            } catch { break; }
           }
-          return backgroundTaskRegistry.get(task_id);
+
+          // Final read attempt
+          try {
+            const messagesResult = await client.session.messages({ path: { id: task.sessionID } });
+            const messages = messagesResult.data as Array<{ parts: Array<{ type: string; text?: string }> }> | undefined;
+            let lastOutput = '(no output)';
+            if (messages) {
+              for (const msg of messages) {
+                if (msg.parts) {
+                  for (const part of msg.parts) {
+                    if (part.type === 'text' && part.text) {
+                      lastOutput = part.text;
+                    }
+                  }
+                }
+              }
+            }
+            const now = Date.now();
+            const updated: BackgroundTaskEntry = { ...task, status: 'completed', result: lastOutput, completedAt: now };
+            backgroundTaskRegistry.set(task_id, updated);
+            return updated;
+          } catch {
+            return task;
+          }
         };
 
-        try {
-          if (block) {
-            const task = await waitForTask();
-            if (!task) {
-              return { title: 'Background Output', output: JSON.stringify({ success: false, error: `Task ${task_id} not found` }, null, 2) };
-            }
-            return {
-              title: 'Background Output',
-              output: JSON.stringify({
-                success: task.status !== 'error',
-                task_id,
-                status: task.status,
-                session_id: task.sessionID,
-                result: task.result,
-                error: task.error,
-              }, null, 2),
-            };
-          }
+        const buildResponse = (task: BackgroundTaskEntry) => ({
+          title: 'Background Output',
+          output: JSON.stringify({
+            success: task.status !== 'error',
+            task_id,
+            status: task.status,
+            session_id: task.sessionID,
+            result: task.result,
+            error: task.error,
+          }, null, 2),
+        });
 
-          // Non-blocking: return current status
-          const task = backgroundTaskRegistry.get(task_id);
-          if (!task) {
+        try {
+          const existingTask = backgroundTaskRegistry.get(task_id);
+          if (!existingTask) {
             return { title: 'Background Output', output: JSON.stringify({ success: false, error: `Task ${task_id} not found` }, null, 2) };
           }
-          return {
-            title: 'Background Output',
-            output: JSON.stringify({
-              success: true,
-              task_id,
-              status: task.status,
-              session_id: task.sessionID,
-              result: task.result,
-              error: task.error,
-            }, null, 2),
-          };
+
+          if (!block) {
+            // Non-blocking: return current in-memory status
+            return buildResponse(existingTask);
+          }
+
+          // Blocking: wait for completion, live-polling the session if needed
+          const completed = existingTask.status !== 'running'
+            ? existingTask
+            : await pollAndComplete(existingTask);
+          return buildResponse(completed);
         } catch (error) {
           return {
             title: 'Background Output',
@@ -417,7 +495,7 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
     },
 
     background_cancel: {
-      description: 'Cancel a running background subagent task by task_id. Use this when you no longer need the result of a call_sub_agent call.',
+      description: 'Cancel a running background subagent task by task_id. Use this when you no longer need the result of a call_flow_agent call.',
       args: {
         taskId: z.string().describe('Task ID to cancel (required)'),
       },
@@ -759,74 +837,15 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       const toolName = input.tool;
       const lowerTool = toolName?.toLowerCase();
 
-      // Phase Guard: Intercept Write/Edit based on workflow state
-      if (lowerTool === 'write' || lowerTool === 'edit') {
-        const args = (output.args ?? {}) as Record<string, unknown>;
-        const filePath = (args.filePath ?? args.path ?? args.file_path ?? '') as string;
-        const state = await readJsonFile<{ state?: string; mode?: string }>(`${workDir}/${STATE_FILE_PATH}`);
+      // Gather file path for write/edit tools to pass to guard hook
+      const filePath = (lowerTool === 'write' || lowerTool === 'edit')
+        ? (((output.args ?? {}) as Record<string, unknown>).filePath
+          ?? ((output.args ?? {}) as Record<string, unknown>).path
+          ?? ((output.args ?? {}) as Record<string, unknown>).file_path
+          ?? '') as string
+        : '';
 
-        if (state?.state) {
-          const isArtifact = isArtifactPath(filePath, workDir);
-          const isSourceCode = !isArtifact && isSourceCodePath(filePath);
-
-          // Blocking states: exploring, specifying, bridging — source code not allowed
-          if (
-            (state.state === 'exploring' || state.state === 'specifying' || state.state === 'bridging') &&
-            isSourceCode
-          ) {
-            output.args = {
-              ...(output.args ?? {}),
-              _sflow_guard_blocked: true,
-              _sflow_guard_reason: `[SFLOW] Write blocked: workflow is in "${state.state}" state. Planning phases do not allow source code changes. Complete planning artifacts first.`,
-            };
-            return;
-          }
-
-          // Terminal states: closing, abandoned — block all writes
-          if (state.state === 'closing' || state.state === 'abandoned') {
-            output.args = {
-              ...(output.args ?? {}),
-              _sflow_guard_blocked: true,
-              _sflow_guard_reason: `[SFLOW] Write blocked: workflow is in terminal state "${state.state}". No further changes allowed.`,
-            };
-            return;
-          }
-
-          // C5: Debugging state — only allow Write/Edit for bug-investigator and build-executor
-          if (state.state === 'debugging') {
-            const currentAgent = (input as Record<string, unknown>).agent as string | undefined;
-            const allowedAgents = ['bug-investigator', 'build-executor'];
-            const isAllowed = currentAgent && allowedAgents.some(a => currentAgent.toLowerCase().includes(a));
-            if (!isAllowed && isSourceCode) {
-              output.args = {
-                ...(output.args ?? {}),
-                _sflow_guard_blocked: true,
-                _sflow_guard_reason: `[SFLOW] Write blocked: workflow is in "debugging" state and current agent (${currentAgent || 'unknown'}) is not a debugging agent. Only bug-investigator and build-executor can modify source code during debugging.`,
-              };
-              return;
-            }
-          }
-
-          // Illegal phase jump detection: full mode executing but missing design.md
-          if (
-            state.mode === 'full' &&
-            state.state === 'executing' &&
-            isSourceCode
-          ) {
-            const designExists = await sflowFileExists(`${workDir}/design.md`);
-            if (!designExists) {
-              output.args = {
-                ...(output.args ?? {}),
-                _sflow_guard_blocked: true,
-                _sflow_guard_reason: `[SFLOW] Write blocked: illegal phase jump detected. Full workflow in "executing" but design.md is missing. Route back to specifying to complete planning artifacts.`,
-              };
-              return;
-            }
-          }
-        }
-      }
-
-      // C18: Run guard on ALL direct tool invocations, not just sflow tools
+      // Single guard hook call — all guard logic lives in guard.ts
       const guardHook = hookComposer.getHook('guard');
       if (guardHook) {
         const guardResult = await guardHook.execute({
@@ -834,7 +853,11 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
           stateFile: `${workDir}/${STATE_FILE_PATH}`,
           pluginRoot: '',
           action: `tool:${toolName}`,
-          data: { toolName },
+          data: {
+            toolName: lowerTool,
+            agent: (input as Record<string, unknown>).agent,
+            filePath,
+          },
         });
 
         if (guardResult.block) {
@@ -885,6 +908,33 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
             action: 'state-transition',
             data: { newState },
           });
+        }
+      }
+
+      // Post-process: detect state transitions from agent responses
+      const postProcessHook = hookComposer.getHook('post_process');
+      if (postProcessHook) {
+        const ppResult = await postProcessHook.execute({
+          changeDir: workDir,
+          stateFile: `${workDir}/${STATE_FILE_PATH}`,
+          pluginRoot: '',
+          action: `tool:${toolName}:after`,
+          data: { output: outputStr },
+        });
+        if (ppResult.success) {
+          const ppData = ppResult.data as { stateTransitionSignal?: { from?: string; to: string } } | null;
+          if (ppData?.stateTransitionSignal) {
+            const transitionHook = hookComposer.getHook('state_transition');
+            if (transitionHook) {
+              await transitionHook.execute({
+                changeDir: workDir,
+                stateFile: `${workDir}/${STATE_FILE_PATH}`,
+                pluginRoot: '',
+                action: 'state-transition',
+                data: { newState: ppData.stateTransitionSignal.to },
+              });
+            }
+          }
         }
       }
     },

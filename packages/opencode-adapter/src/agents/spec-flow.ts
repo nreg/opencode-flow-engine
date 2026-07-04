@@ -100,7 +100,7 @@ Before routing, inspect the project's .sflow/ directory for artifacts:
 
 sFlow has 8 specialized subagents registered via OpenCode's \`config\` hook. Each subagent is a fully independent agent with its own system prompt, model configuration, and tool permissions.
 
-To delegate, use the \`call_sub_agent\` tool with:
+To delegate, use the \`call_flow_agent\` tool with:
 - \`subagent_type\`: The target subagent name (e.g. "build-executor", "spec-writer")
 - \`prompt\`: A detailed task description with relevant context from the current workflow state
 - \`description\`: A short (3-5 word) task label

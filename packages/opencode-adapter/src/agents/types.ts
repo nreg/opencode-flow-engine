@@ -18,60 +18,6 @@ export type AgentMode = 'primary' | 'subagent' | 'all';
 export type AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }) => AgentConfig;
 
 /**
- * Agent category for grouping in prompt sections
- */
-export type AgentCategory =
-  | 'exploration'
-  | 'specialist'
-  | 'advisor'
-  | 'utility'
-  | 'workflow';
-
-/**
- * Cost classification for Tool Selection table
- */
-export type AgentCost = 'FREE' | 'CHEAP' | 'EXPENSIVE';
-
-/**
- * Delegation trigger for prompt's Delegation Table
- */
-export interface DelegationTrigger {
-  /** Domain of work (e.g., "Specification Writing") */
-  domain: string;
-  /** When to delegate (e.g., "When creating specs...") */
-  trigger: string;
-}
-
-/**
- * Metadata for generating prompt sections dynamically
- */
-export interface AgentPromptMetadata {
-  /** Category for grouping in prompt sections */
-  category: AgentCategory;
-
-  /** Cost classification for Tool Selection table */
-  cost: AgentCost;
-
-  /** Domain triggers for Delegation Table */
-  triggers: DelegationTrigger[];
-
-  /** When to use this agent (for detailed sections) */
-  useWhen?: string[];
-
-  /** When NOT to use this agent */
-  avoidWhen?: string[];
-
-  /** Optional dedicated prompt section (markdown) */
-  dedicatedSection?: string;
-
-  /** Nickname/alias used in prompt */
-  promptAlias?: string;
-
-  /** Key triggers that should appear in Phase 0 */
-  keyTrigger?: string;
-}
-
-/**
  * Built-in agent names for sFlow
  */
 export type BuiltinAgentName =

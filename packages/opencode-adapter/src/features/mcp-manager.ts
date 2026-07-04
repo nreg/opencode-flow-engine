@@ -5,7 +5,8 @@
 
 import type { McpServer } from './skill-loader.js';
 import { readFile } from 'fs/promises';
-import { join } from 'path';
+import { join, resolve } from 'path';
+import { sleep as crossSleep, spawnProcess, isBun } from '@opencode-sflow/shared';
 
 /**
  * Allowed executable names for MCP server commands.
@@ -118,19 +119,16 @@ export class McpManager {
     }
 
     try {
-      const proc = Bun.spawn([config.command, ...(config.args || [])], {
-        env: { ...process.env, ...config.env },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      const procHandle = await spawnProcess(config.command, config.args || [], config.env);
 
-      instance.pid = proc.pid;
+      instance.pid = procHandle.pid;
 
-      const processHandle = { proc, exited: false };
-      this.processes.set(serverKey, processHandle);
+      const exitedRef = { value: false };
+      this.processes.set(serverKey, { proc: procHandle as unknown as import('bun').Subprocess, exited: false });
 
       // Read initial stdout/stderr to detect startup errors
-      const stdoutReader = proc.stdout.getReader();
-      const stderrReader = proc.stderr.getReader();
+      const stdoutReader = procHandle.stdout;
+      const stderrReader = procHandle.stderr;
       const startupOutput: string[] = [];
       const startupErrors: string[] = [];
 
@@ -139,43 +137,47 @@ export class McpManager {
 
       // Check process health during startup window
       while (Date.now() < deadline) {
-        if (proc.exitCode !== null) {
+        if (exitedRef.value) {
           instance.state = 'error';
-          instance.error = `Process exited immediately with code ${proc.exitCode}`;
+          instance.error = `Process exited immediately during startup`;
           this.processes.delete(serverKey);
           return instance;
         }
 
         // Read available stdout/stderr without blocking
-        const stdoutResult = await Promise.race([
-          stdoutReader.read().catch(() => ({ done: true, value: undefined })),
-          Bun.sleep(50).then(() => ({ done: false, value: undefined })),
-        ]);
-        if (stdoutResult.value) {
-          startupOutput.push(new TextDecoder().decode(stdoutResult.value));
+        if (stdoutReader) {
+          const stdoutResult = await Promise.race([
+            stdoutReader.read().catch(() => ({ done: true, value: undefined })),
+            crossSleep(50).then(() => ({ done: false, value: undefined })),
+          ]);
+          if (stdoutResult.value) {
+            startupOutput.push(new TextDecoder().decode(stdoutResult.value));
+          }
         }
 
-        const stderrResult = await Promise.race([
-          stderrReader.read().catch(() => ({ done: true, value: undefined })),
-          Bun.sleep(50).then(() => ({ done: false, value: undefined })),
-        ]);
-        if (stderrResult.value) {
-          startupErrors.push(new TextDecoder().decode(stderrResult.value));
+        if (stderrReader) {
+          const stderrResult = await Promise.race([
+            stderrReader.read().catch(() => ({ done: true, value: undefined })),
+            crossSleep(50).then(() => ({ done: false, value: undefined })),
+          ]);
+          if (stderrResult.value) {
+            startupErrors.push(new TextDecoder().decode(stderrResult.value));
+          }
         }
 
         // Check if process is still alive
-        if (proc.exitCode === null) {
+        if (!exitedRef.value) {
           break;
         }
       }
 
       // Release readers after startup check
-      stdoutReader.releaseLock();
-      stderrReader.releaseLock();
+      stdoutReader?.releaseLock();
+      stderrReader?.releaseLock();
 
-      if (proc.exitCode !== null) {
+      if (exitedRef.value) {
         instance.state = 'error';
-        instance.error = `Process exited with code ${proc.exitCode}`;
+        instance.error = `Process exited during startup`;
         this.processes.delete(serverKey);
         return instance;
       }
@@ -183,14 +185,14 @@ export class McpManager {
       instance.state = 'running';
 
       // Monitor process for unexpected exit
-      proc.exited.then((exitCode) => {
-        processHandle.exited = true;
+      procHandle.exited.then((exitCode) => {
+        exitedRef.value = true;
         if (instance.state === 'running') {
           instance.state = 'error';
           instance.error = `Process exited unexpectedly with code ${exitCode}`;
         }
       }).catch(() => {
-        processHandle.exited = true;
+        exitedRef.value = true;
       });
     } catch (error) {
       instance.state = 'error';
@@ -235,13 +237,13 @@ export class McpManager {
         const timeout = options?.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT;
         const result = await Promise.race([
           proc.exited,
-          Bun.sleep(timeout).then(() => 'timeout' as const),
+          crossSleep(timeout).then(() => 'timeout' as const),
         ]);
 
         if (result === 'timeout') {
           // Force kill
           proc.kill(9); // SIGKILL on Unix, TerminateProcess on Windows
-          await Bun.sleep(100);
+          await crossSleep(100);
         }
       }
 

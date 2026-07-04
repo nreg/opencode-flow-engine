@@ -2,7 +2,7 @@
  * Centralized agent tool configurations
  * Each agent type defines which tools it has access to
  *
- * call_sub_agent + background_output + background_cancel are sFlow's native
+ * call_flow_agent + background_output + background_cancel are sFlow's native
  * subagent routing tools registered via the Hooks.tool path.
  */
 
@@ -15,13 +15,13 @@ const COMMON_TOOLS = {
 } as const;
 
 export const AGENT_TOOLS: Record<string, AgentTools> = {
-  /** Main orchestrator - uses call_sub_agent + background_output + background_cancel */
+  /** Main orchestrator - uses call_flow_agent + background_output + background_cancel */
   sFlow: {
     ...COMMON_TOOLS,
     write: false,
     edit: false,
     bash: true,
-    call_sub_agent: true,
+    call_flow_agent: true,
     background_output: true,
     background_cancel: true,
     skill: true,
@@ -63,7 +63,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
 
   /**
    * Build executor - full dev tools + subagent dispatch
-   * R4-3: Added call_sub_agent/background_output/background_cancel for SDD mode support.
+   * R4-3: Added call_flow_agent/background_output/background_cancel for SDD mode support.
    * The build-executor agent can now dispatch implementer/reviewer subagents
    * in Subagent-Driven Development mode.
    */
@@ -73,7 +73,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     edit: true,
     bash: true,
     skill: false,
-    call_sub_agent: true,
+    call_flow_agent: true,
     background_output: true,
     background_cancel: true,
     lsp_diagnostics: true,
