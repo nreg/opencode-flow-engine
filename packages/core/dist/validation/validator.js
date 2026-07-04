@@ -21,7 +21,7 @@ function extractSection(content, heading) {
         return undefined;
     let endIdx = lines.length;
     for (let i = idx + 1; i < lines.length; i++) {
-        if (/^##\s+/.test(lines[i])) {
+        if (i < lines.length && /^##\s+/.test(lines[i])) {
             endIdx = i;
             break;
         }
