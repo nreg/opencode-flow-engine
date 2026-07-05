@@ -55,7 +55,7 @@ export function createStateTransitionHook(): HookHandler {
             success: false,
             error: `Preflight gate: missing artifacts for state "${newState}": ${pf.missing.join(', ')}`,
             block: true,
-            blockReason: `[SFLOW] State transition blocked: cannot enter "${newState}". Missing: ${pf.missing.join(', ')}. Route to "${route}" to generate missing artifacts first.`,
+            blockReason: '[SFLOW] Preflight gate: missing ' + pf.missing.join(', ') + '. Route to "' + route + '" first.',
           };
         }
 

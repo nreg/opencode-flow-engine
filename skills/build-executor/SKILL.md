@@ -533,6 +533,54 @@ After a task passes all reviews:
 
 ---
 
+## Task Too Large Early Signal (R1.7)
+
+> Inspired by flow-kit R1.7. When a task triggers context compaction mid-execution, it means the task was not decomposed finely enough.
+
+### Detection Signal
+
+If **any** of these occur during a single task execution:
+- Input tokens > 50k
+- AI repeats content already said (self-hinting symptom)
+- Same error pattern appears ≥ 2 times
+- User says the conversation is "spinning"
+
+### Recovery Procedure
+
+When resuming from context compaction:
+
+1. **Do NOT continue the task as-is**
+2. **Read `.sflow/progress.md`** to understand where you stopped
+3. **Split the current task in `tasks.md`** into ≥ 2 sub-tasks:
+   - Use the original task ID with suffix: `<task-id>-1`, `<task-id>-2`, etc.
+   - Each sub-task must be completable within a single context window
+   - Preserve the original task's `read_files` and `write_files` boundaries
+4. **Update `.sflow/subagent-progress.md`** to reference the new sub-task
+5. **Resume from the first incomplete sub-task**
+
+### Example Split
+
+Original task:
+```
+T03 - Implement authentication flow
+```
+
+After split:
+```
+T03-1 - Create login form component (depends on: T02)
+T03-2 - Add form validation logic (depends on: T03-1)
+T03-3 - Connect to auth API (depends on: T03-2)
+T03-4 - Add error handling and loading states (depends on: T03-3)
+```
+
+### Why This Matters
+
+- Prevents the same task from triggering compaction repeatedly
+- Each sub-task can complete within a single context window
+- Progress is preserved across compactions via PROGRESS.md
+
+---
+
 ## File Boundary Control (read_files / write_files)
 
 > Inspired by flow-kit B3 brownfield safety rail (R7.3 / R6.5). Prevents scope drift by enforcing strict file boundaries per task.

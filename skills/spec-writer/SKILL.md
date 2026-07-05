@@ -54,6 +54,16 @@ For frontend projects, the artifact generation order becomes:
 proposal.md → specs/ → ui-design.md → design.md → tasks.md
 ```
 
+> **⚠️ 设计差异说明（vs flow-kit）**：
+>
+> flow-kit 原始顺序：`REQUIREMENT → DESIGN → UI-DESIGN → TASK`（架构先于视觉）
+>
+> sflow 当前顺序为 `specs → ui-design → design → tasks`（视觉先于架构）。
+>
+> **差异理由**：UI aesthetics 决策（color system, typography, spacing）往往决定了 component tree 的形状和 data flow 的设计。对于设计驱动的项目（landing page、consumer app），视觉调性是北极星，架构服务于视觉。对于工程驱动的项目（admin panel、dashboard），可以考虑跳过 ui-design 阶段或手动调整顺序。
+>
+> **如果需要 flow-kit 原始顺序**：在 `.sflow/config.json` 中设置 `"artifacts.order": ["proposal", "specs", "design", "ui-design", "tasks"]`。
+
 The `ui-design.md` is generated BEFORE `design.md` because UI aesthetics decisions
 (color system, typography, spacing) inform architecture decisions (component tree, data flow).
 

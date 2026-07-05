@@ -47,7 +47,7 @@ export async function checkArtifactPreflight(
     const route = findPreflightState(missing);
     return {
       passed: false, missing, existence, preflightState: route,
-      reason: 'Cannot enter "' + targetState + '". Missing: ' + missing.join(', ') + '. Route to "' + route + '".',
+      reason: '[SFLOW] Preflight gate: missing ' + missing.join(', ') + '. Route to "' + route + '" first.',
     };
   }
   // P4: Extended frontend check — also covers specifying state for frontend projects

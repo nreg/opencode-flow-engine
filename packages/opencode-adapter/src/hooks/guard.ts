@@ -12,7 +12,7 @@ import type { HookHandler, HookContext, HookResult } from "./types.js";
 import { fileExists, readFile, readJsonFile, directoryExists, isContractStale, getContractStalenessReport } from "@opencode-sflow/shared";
 import { sharedValidator, HOTFIX_UPGRADE_THRESHOLDS, TWEAK_UPGRADE_THRESHOLDS } from "@opencode-sflow/core";
 import { checkArtifactPreflight, findPreflightState } from "../features/artifact-preflight.js";
-import { readProgressFile } from "../features/state-manager.js";
+import { readProgressFile, searchLessonsInFile } from "../features/state-manager.js";
 
 const SOURCE_CODE_PATTERNS = /\.(ts|js|tsx|jsx|mjs|cjs|mts|cts|py|java|kt|rs|go|rb|php|c|cpp|h|hpp|cs|swift|vue|svelte|css|scss|less)$/i;
 const ARTIFACT_NAMES = new Set(['proposal.md', 'design.md', 'tasks.md', 'execution-contract.md']);
@@ -57,6 +57,8 @@ export function createGuardHook(): HookHandler {
           await checkReadFilesBoundary(changeDir, data),
           // P20: Git diff boundary verify at commit time (blocking)
           await checkGitCommitBoundary(changeDir, data),
+          // P21: LESSONS.md knowledge base guard (warnings, not blocking)
+          await checkLessonsGuard(changeDir, data),
         ];
 
         const allWarnings: string[] = [];
@@ -109,7 +111,7 @@ async function checkArtifactAndPhaseConsistency(changeDir: string): Promise<Hook
     // Phase 1: Use shared checkArtifactPreflight — returns existence map to avoid redundant I/O
   const pf = await checkArtifactPreflight({ changeDir, targetState: currentState, fileExists, directoryExists, readJson: readJsonFile });
   if (!pf.passed) {
-    return { success: false, block: true, blockReason: 'Missing required artifacts: ' + pf.missing.join(', ') };
+    return { success: false, block: true, blockReason: '[SFLOW] Preflight gate: missing ' + pf.missing.join(', ') + '. Route to "' + findPreflightState(pf.missing) + '" first.' };
   }
 
   // Phase 2: Full mode consistency — reuse pf.existence to avoid redundant stat calls
@@ -698,7 +700,7 @@ async function getActiveTaskId(changeDir: string): Promise<string | null> {
     if (firstUnchecked) {
       // Extract task ID from the line (supports formats like "- [ ] T01 ..." or "- [ ] T01 - ...")
       const idMatch = firstUnchecked[0].match(/(T\d+)/);
-      if (idMatch) return idMatch[1].toUpperCase();
+      if (idMatch && idMatch[1]) return idMatch[1].toUpperCase();
     }
   }
   return null;
@@ -803,6 +805,56 @@ async function checkFileBoundary(changeDir: string, filePath: string): Promise<H
     };
   }
   return null;
+}
+
+/**
+ * P21: LESSONS.md Knowledge Base Guard — warns when starting a task
+ * that matches an active lesson entry.
+ *
+ * Inspired by flow-kit R1.8: "每个 DEV 任务进入实现前必扫 LESSONS.md"
+ * Only warns (does not block) — the AI must declare differences in the execution plan.
+ */
+async function checkLessonsGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+  if (!changeDir || !data) return { success: true };
+
+  // Only check when entering implementing stage
+  const agent = (data.agent as string) || '';
+  if (!agent.includes('build-executor')) return { success: true };
+
+  // Check if subagent-progress.md indicates we're entering implementing stage
+  const sp = await readFile(changeDir + '/.sflow/subagent-progress.md').catch(() => null);
+  if (!sp) return { success: true };
+
+  const stageMatch = sp.match(/\*\*Stage\*\*:\s*(\S+)/i);
+  const stage = stageMatch?.[1];
+
+  // Only warn when entering implementing stage (not during review/fix)
+  if (stage !== 'implementing') return { success: true };
+
+  // Extract task keywords from the plan task
+  const planMatch = sp.match(/\*\*Plan task\*\*:\s*(.+)/i);
+  const planTask = planMatch?.[1] || '';
+  if (!planTask) return { success: true };
+
+  // Extract keywords: file paths + action nouns
+  const fileKeywords = planTask.match(/`([^`]+)`/g)?.map(s => s.replace(/`/g, '')) || [];
+  const actionKeywords = planTask.split(/\s+/).filter((w: string) => w.length >= 4 && !['the', 'and', 'for', 'with', 'this', 'that', 'from'].includes(w.toLowerCase()));
+  const keywords = [...new Set([...fileKeywords, ...actionKeywords])];
+
+  if (keywords.length === 0) return { success: true };
+
+  // Grep LESSONS.md
+  const hits = await searchLessonsInFile(changeDir, keywords);
+
+  if (hits.length > 0) {
+    const hitList = hits.map(h => 'L-' + (h.entry.id || '???') + ': "' + h.entry.title + '" (matched: ' + h.matchedKeywords.join(', ') + ')').join('; ');
+    return {
+      success: true,
+      warnings: ['[SFLOW] LESSONS guard: task matches ' + hits.length + ' active lesson(s): ' + hitList + '. Must declare difference in execution plan before proceeding.'],
+    };
+  }
+
+  return { success: true };
 }
 
 async function checkDebuggingState(changeDir: string, action?: string, data?: Record<string, unknown>): Promise<HookResult> {

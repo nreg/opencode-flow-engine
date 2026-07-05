@@ -354,10 +354,10 @@ export async function readProgressFile(changeDir: string): Promise<ProgressData 
       // Split by | and clean up — handle up to 4 columns
       const cols = trimmed.split('|').map(c => c.trim()).filter(c => c !== '');
       if (cols.length >= 4) {
-        const id = cols[0];
-        const approach = cols[1];
-        const reason = cols[2];
-        const failCount = parseInt(cols[3], 10) || 0;
+        const id = cols[0] || '';
+        const approach = cols[1] || '';
+        const reason = cols[2] || '';
+        const failCount = parseInt(cols[3] || '0', 10) || 0;
         if (id && approach) {
           data.excludedApproaches.push({ id, approach, reason, failCount });
         }
@@ -820,6 +820,66 @@ export function createStateManager(
         return { success: true, data: { written: true, timestamp: new Date().toISOString() } };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+
+    /**
+     * Batch nominate lessons from PROGRESS.md excluded approaches.
+     * Reads PROGRESS.md, creates a LessonEntry for each excluded approach
+     * with failCount >= 1, and appends to LESSONS.md.
+     * Used by release-archivist during closing state.
+     */
+    async addLessonsFromProgress(changeDir: string, taskId?: string): Promise<FeatureResult> {
+      try {
+        const progress = await readProgressFile(changeDir);
+        if (!progress || progress.excludedApproaches.length === 0) {
+          return { success: true, data: { nominated: 0, reason: 'No excluded approaches found in PROGRESS.md' } };
+        }
+
+        // Filter to approaches with actual failures
+        const candidates = progress.excludedApproaches.filter(ex => ex.failCount >= 1);
+        if (candidates.length === 0) {
+          return { success: true, data: { nominated: 0, reason: 'No excluded approaches with failCount >= 1' } };
+        }
+
+        const nominatedIds: string[] = [];
+        for (const ex of candidates) {
+          const lessonEntry: LessonEntry = {
+            title: ex.approach.length > 80 ? ex.approach.slice(0, 80) + '...' : ex.approach,
+            tags: ['proc'],
+            keywords: ex.approach.split(/\s+/).filter(k => k.length >= 3),
+            taskId: taskId || progress.taskId,
+            firstSeen: new Date().toISOString(),
+            lastReviewed: new Date().toISOString(),
+            status: 'active',
+            problem: '任务执行中遇到方案失败',
+            attempted: ex.approach,
+            whyFailed: ex.reason || '未记录具体失败原因',
+            recommendation: '参考 PROGRESS.md 中已排除方案的排除理由，选择其他方案',
+            reevaluateWhen: '条件变化后可重新评估',
+          };
+
+          const result = await this.addLesson(changeDir, lessonEntry);
+          const resultData = result.data as { id?: string } | undefined;
+          if (result.success && resultData?.id) {
+            nominatedIds.push(resultData.id);
+          }
+        }
+
+        return {
+          success: true,
+          data: {
+            nominated: nominatedIds.length,
+            ids: nominatedIds,
+            total: candidates.length,
+            timestamp: new Date().toISOString(),
+          },
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
       }
     },
 

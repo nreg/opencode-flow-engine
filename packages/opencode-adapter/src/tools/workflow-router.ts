@@ -44,6 +44,7 @@ const INTENT_MAP: Array<{
   { pattern: /执行\s*T\d+|跑\s*T\d+|do\s*T\d+|执行任务/i, agent: 'build-executor', action: 'execute', description: 'Task execution (specific)', tokens: ['执行t', '跑t', 'dot', '执行任务'] },
   { pattern: /执行|实现|implement|build|编码|开始/i, agent: 'build-executor', action: 'execute', description: 'Task execution', tokens: ['执行', '实现', 'implement', 'build', '编码'] },
   { pattern: /设计UI|界面ui|ux|视觉|theme|design\s+system|design\s+tokens/i, agent: 'spec-writer', action: 'design-ui', description: 'UI/UX design', tokens: ['设计ui', '界面', '视觉', 'theme', 'design system'] },
+  { pattern: /选技术|选栈|选框架|tech\s*stack|用什么开发|迁移评估|技术选型|栈选型/i, agent: 'spec-writer', action: 'tech-stack', description: 'Technology stack selection', tokens: ['选技术', '选栈', '选框架', 'tech stack', '技术选型', '栈选型', '迁移评估'] },
   { pattern: /设计|design/i, agent: 'spec-writer', action: 'design', description: 'Specification design', tokens: ['设计', 'design'] },
   { pattern: /合同|合约|contract|执行合同|execution/i, agent: 'contract-builder', action: 'build', description: 'Contract building', tokens: ['contract', '合约', '执行合同'] },
   { pattern: /需求|探索|explore|分析|调研/i, agent: 'need-explorer', action: 'explore', description: 'Requirements exploration', tokens: ['需求', '探索', 'explore', '分析', '调研'] },
