@@ -53,7 +53,18 @@ export function createGuardHook(): HookHandler {
           await checkDebuggingState(changeDir, context.action, data),
           await checkProgressAntiRepeatGuard(changeDir, data),
           await checkFileWriteGuard(changeDir, data),
+          // P19: Read files boundary check (warnings, not blocking)
+          await checkReadFilesBoundary(changeDir, data),
+          // P20: Git diff boundary verify at commit time (blocking)
+          await checkGitCommitBoundary(changeDir, data),
         ];
+
+        const allWarnings: string[] = [];
+        for (const g of guards) {
+          if (g.warnings && g.warnings.length > 0) {
+            allWarnings.push(...g.warnings);
+          }
+        }
 
         const blockingGuards = guards.filter((g) => g.block);
         if (blockingGuards.length > 0) {
@@ -62,10 +73,14 @@ export function createGuardHook(): HookHandler {
             error: "Guard conditions not met",
             block: true,
             blockReason: blockingGuards.map((g) => g.blockReason).join("; "),
+            warnings: allWarnings.length > 0 ? allWarnings : undefined,
           };
         }
 
-        return { success: true };
+        return {
+          success: true,
+          warnings: allWarnings.length > 0 ? allWarnings : undefined,
+        };
       } catch (error) {
         return {
           success: false,
@@ -369,6 +384,137 @@ async function checkFileWriteGuard(changeDir: string, data?: Record<string, unkn
 }
 
 /**
+ * P19: Read files boundary check — warns when agent reads files
+ * outside the declared read_files in execution-contract.md.
+ */
+async function checkReadFilesBoundary(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+  if (!changeDir || !data) return { success: true };
+
+  const toolName = data.toolName as string | undefined;
+  if (toolName !== 'read') return { success: true };
+
+  const filePath = (data.filePath as string) || '';
+  if (!filePath) return { success: true };
+
+  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
+  if (!stateData?.state) return { success: true };
+
+  const currentState = stateData.state;
+  // Only apply in executing/debugging states where active task tracking exists
+  if (currentState !== 'executing' && currentState !== 'debugging') return { success: true };
+
+  // Don't warn about reading artifacts or .sflow files
+  if (isArtifactPath(filePath, changeDir) || filePath.includes('.sflow/')) return { success: true };
+
+  // Parse read_files from execution-contract.md
+  const activeTaskId = await getActiveTaskId(changeDir);
+  const patterns = await getActiveTaskReadFiles(changeDir, activeTaskId);
+  if (!patterns || patterns.length === 0) return { success: true };
+
+  if (!matchesBoundary(filePath, patterns)) {
+    return {
+      success: true,
+      warnings: [`[SFLOW] Read outside declared read_files: ${filePath}. Allowed: ${patterns.join(', ')}`],
+    };
+  }
+
+  return { success: true };
+}
+
+/**
+ * P20: Git diff boundary verify at commit time — blocks git commit when
+ * staged files include paths outside the active task's write_files.
+ */
+async function checkGitCommitBoundary(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+  if (!changeDir || !data) return { success: true };
+
+  const toolName = data.toolName as string | undefined;
+  if (toolName !== 'bash') return { success: true };
+
+  const command = (data.command as string) || '';
+  if (!command) return { success: true };
+
+  // Detect git commit commands (with -m flag, or commit with -c/--amend)
+  if (!/\bgit\s+commit\s+/.test(command)) return { success: true };
+
+  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
+  if (!stateData?.state) return { success: true };
+
+  const currentState = stateData.state;
+  if (currentState !== 'executing' && currentState !== 'debugging') return { success: true };
+
+  // Get staged files using git status
+  try {
+    const { execSync } = await import('child_process');
+    const stagedOutput = execSync('git diff --cached --name-only', { cwd: changeDir, encoding: 'utf8' }).trim();
+    if (!stagedOutput) return { success: true };
+
+    const stagedFiles = stagedOutput.split('\n').filter((l: string) => l.trim());
+
+    // Parse write_files from execution-contract.md
+    const activeTaskId = await getActiveTaskId(changeDir);
+    const allowedPatterns = await getActiveTaskWriteFiles(changeDir, activeTaskId);
+    if (!allowedPatterns || allowedPatterns.length === 0) return { success: true };
+
+    // Use global patterns if no task-level patterns found
+    const globalPatterns = await getGlobalWriteFiles(changeDir);
+    const allPatterns = [...allowedPatterns, ...globalPatterns];
+    if (allPatterns.length === 0) return { success: true };
+
+    const violated = stagedFiles.filter((f: string) => !matchesBoundary(f, allPatterns));
+    if (violated.length > 0) {
+      return {
+        success: false,
+        block: true,
+        blockReason: `[SFLOW] Git commit blocked: staged files outside write_files boundary: ${violated.join(', ')}. Allowed: ${allPatterns.join(', ')}. Move these files out of staging or update execution-contract.md first.`,
+      };
+    }
+  } catch {
+    // git command failed (not a git repo, etc.) — skip silently
+  }
+
+  return { success: true };
+}
+
+/**
+ * Get read_files patterns for the active task from execution-contract.md.
+ */
+async function getActiveTaskReadFiles(changeDir: string, taskId: string | null): Promise<string[] | null> {
+  const cc = await readFile(changeDir + '/execution-contract.md');
+  if (!cc) return null;
+  const parsed = parseFileBoundaryPatterns(cc);
+
+  if (taskId && parsed.taskBoundaries.has(taskId + ':read')) {
+    return parsed.taskBoundaries.get(taskId + ':read')!;
+  }
+  return null;
+}
+
+/**
+ * Get write_files patterns for the active task from execution-contract.md.
+ */
+async function getActiveTaskWriteFiles(changeDir: string, taskId: string | null): Promise<string[] | null> {
+  const cc = await readFile(changeDir + '/execution-contract.md');
+  if (!cc) return null;
+  const parsed = parseFileBoundaryPatterns(cc);
+
+  if (taskId && parsed.taskBoundaries.has(taskId)) {
+    return parsed.taskBoundaries.get(taskId)!;
+  }
+  return null;
+}
+
+/**
+ * Get global write_files patterns from execution-contract.md.
+ */
+async function getGlobalWriteFiles(changeDir: string): Promise<string[]> {
+  const cc = await readFile(changeDir + '/execution-contract.md');
+  if (!cc) return [];
+  const parsed = parseFileBoundaryPatterns(cc);
+  return parsed.globalPatterns;
+}
+
+/**
  * Debugging state check — blocks non-debugging operations from non-debugging agents.
  * Uses both action string (from tool.execute.before) and agent name (from context.data).
  */
@@ -485,25 +631,30 @@ function parseFileBoundaryPatterns(contractContent: string): {
   }
 
   // === Format 5: Task table ===
-  // Detect if this is a table with column headers to find write_files column index.
-  // Heuristic: match the header row first.
   const headerRow = contractContent.match(/^\|?\s*Task\s*\|[^|]*\|[^|]*\|[^|]*\|?\s*$/im);
-  const writeFilesColIndex = 3; // Default: 4th column (0-indexed: 3)
+  const writeFilesColIndex = 3; // 4th column (0-indexed: 3)
+  const readFilesColIndex = 2;  // 3rd column (0-indexed: 2)
 
-  // Match all table data rows: | T01 | ... | ... | ... |
   for (const m of contractContent.matchAll(/^\|\s*(T\d+)\s*\|[^|]*\|[^|]*\|[^|]*\|/gm)) {
     const taskId = m[1];
     if (!taskId) continue;
     const cellContent = m[0] || '';
-    // Extract the write_files column (split by | and take the appropriate column)
     const cols = cellContent.split('|').map(c => c.trim());
-    // cols[0] is empty (before first |), cols[1]=T01, cols[2]=description, cols[3]=read_files, cols[4]=write_files
+    // cols[0]=empty, cols[1]=T01, cols[2]=description, cols[3]=read_files, cols[4]=write_files
     if (cols.length >= 5) {
-      const writeCol = cols[writeFilesColIndex + 1]; // +1 because cols[0] is empty
+      const writeCol = cols[writeFilesColIndex + 1];
       if (writeCol) {
         const pats = parseCell(writeCol);
         if (pats.length > 0) {
           taskBoundaries.set(taskId, pats);
+        }
+      }
+      // P19: Also track read_files patterns
+      const readCol = cols[readFilesColIndex + 1];
+      if (readCol) {
+        const readPats = parseCell(readCol);
+        if (readPats.length > 0) {
+          taskBoundaries.set(taskId + ':read', readPats);
         }
       }
     }
@@ -531,12 +682,26 @@ function parseFileBoundaryPatterns(contractContent: string): {
 
 /**
  * Get the active task ID from subagent-progress.md (if it exists).
+ * P22 fix: When subagent-progress.md doesn't exist, fall back to inferring
+ * from tasks.md (first unchecked task) instead of returning null immediately.
  */
 async function getActiveTaskId(changeDir: string): Promise<string | null> {
   const sp = await readFile(changeDir + '/.sflow/subagent-progress.md').catch(() => null);
-  if (!sp) return null;
-  const planMatch = sp.match(/\*\*Plan task\*\*:\s*(T\d+)/i);
-  return planMatch?.[1] ? planMatch[1].toUpperCase() : null;
+  if (sp) {
+    const planMatch = sp.match(/\*\*Plan task\*\*:\s*(T\d+)/i);
+    if (planMatch?.[1]) return planMatch[1].toUpperCase();
+  }
+  // P22 fix: Fallback to first unchecked task in tasks.md
+  const tasksContent = await readFile(changeDir + '/tasks.md').catch(() => null);
+  if (tasksContent) {
+    const firstUnchecked = tasksContent.match(/^-\s*\[\s*\]\s*(?:T\d+\s*[—-]?\s*)?(.+)/m);
+    if (firstUnchecked) {
+      // Extract task ID from the line (supports formats like "- [ ] T01 ..." or "- [ ] T01 - ...")
+      const idMatch = firstUnchecked[0].match(/(T\d+)/);
+      if (idMatch) return idMatch[1].toUpperCase();
+    }
+  }
+  return null;
 }
 
 /**

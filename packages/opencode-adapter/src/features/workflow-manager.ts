@@ -12,16 +12,42 @@ const STATE_FILE = `${SFLOW_DIR}/state.json`;
 const ARCHIVE_DIR = `${SFLOW_DIR}/archive`;
 
 /**
+ * Strong frontend signals — one match is sufficient to classify as frontend.
+ * These are frameworks/libraries that are exclusively or primarily used in frontend projects.
+ */
+const STRONG_FRONTEND_PATTERN = /react|vue|next|nuxt|svelte|angular|solid-js|remix|gatsby|astro|qwik/i;
+
+/**
+ * Weak frontend signals — need at least 2 matches to classify as frontend.
+ * These are libraries that can appear in both frontend and backend projects.
+ */
+const WEAK_FRONTEND_PATTERN = /tailwindcss|postcss|styled-components|emotion|antd|element-ui|daisyui|bootstrap|shadcn|chakra-ui|mui\/material|@ngrx|react-router|vue-router|pinia|zustand|jotai|redux|sass|less|@vitejs/i;
+
+/**
  * Detect if the project at changeDir is a frontend project.
  * Checks: package.json dependencies, directory structure, config files.
+ *
+ * Uses a two-tier signal system to reduce false positives:
+ * - Strong signals (React, Vue, Next.js, etc.): 1 match = frontend
+ * - Weak signals (Redux, PostCSS, etc.): need 2+ matches = frontend
  */
 export async function detectFrontend(changeDir: string): Promise<boolean> {
-  // 1. Check package.json for frontend frameworks (RegExp-based, O(n) vs original O(nm))
+  // 1. Check package.json for frontend frameworks
   const pkgJson = await readJsonFile<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(changeDir + '/package.json').catch(() => null);
   if (pkgJson) {
     const allDeps = Object.keys({ ...pkgJson.dependencies, ...pkgJson.devDependencies });
-    const frontendPattern = /react|vue|next|nuxt|svelte|angular|solid-js|sass|less|tailwindcss|postcss|styled-components|emotion|antd|element-ui|vite|@vitejs|daisyui|bootstrap|remix|gatsby|astro|qwik|shadcn|chakra-ui|mui\/material|@ngrx|react-router|vue-router|pinia|zustand|jotai|redux/i;
-    if (allDeps.some(dep => frontendPattern.test(dep))) return true;
+
+    // Check strong signals first — one match is enough
+    if (allDeps.some(dep => STRONG_FRONTEND_PATTERN.test(dep))) return true;
+
+    // Count weak signals — need at least 2
+    let weakSignalCount = 0;
+    for (const dep of allDeps) {
+      if (WEAK_FRONTEND_PATTERN.test(dep)) {
+        weakSignalCount++;
+        if (weakSignalCount >= 2) return true;
+      }
+    }
   }
 
   // 2. Check for frontend directory structure
@@ -161,7 +187,7 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       const hasProposal = await fileExists(changeDir + '/proposal.md');
       const hasContract = await fileExists(changeDir + '/execution-contract.md');
       const tasksContent = await readFile(changeDir + '/tasks.md').catch(() => null);
-      const taskLines = tasksContent ? tasksContent.split('\\n').filter((line: string) => line.match(/^-\\s*\\[.\\]\\s+/)) : [];
+        const taskLines = tasksContent ? tasksContent.split('\n').filter((line: string) => line.match(/^-\s*\[.\]\s+/)) : [];
       const changedFileCount = await countChangedFiles(changeDir);
       const mode = inferModeFromArtifacts(hasProposal, hasContract, changedFileCount, taskLines.length);
 
@@ -171,12 +197,13 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       return { state, mode };
     },
 
-    /** Get auto-detected frontend status */
+    /**
+     * Get frontend status — always uses real-time detection.
+     * P27: State.json cached value is informational only; actual decisions
+     * must use real-time detectFrontend() to avoid stale cache issues.
+     */
     async isFrontend(changeDir: string): Promise<boolean> {
-      const state = await readJsonFile<{ isFrontend?: boolean }>(changeDir + '/' + STATE_FILE).catch(() => null);
-      if (state?.isFrontend !== undefined) return state.isFrontend;
-      const detected = await detectFrontend(changeDir);
-      return detected;
+      return detectFrontend(changeDir);
     },
   };
 }

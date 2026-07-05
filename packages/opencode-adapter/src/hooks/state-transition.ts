@@ -1,10 +1,7 @@
-/**
- * State Transition hook - Manage workflow state transitions
- */
-
 import type { HookHandler, HookContext, HookResult } from './types.js';
 import { isValidTransition, getValidTransitions } from '@opencode-sflow/core';
-import { ensureDir, readJsonFile, writeJsonFile, stateFileMutex } from '@opencode-sflow/shared';
+import { ensureDir, fileExists, directoryExists, readJsonFile, writeJsonFile, stateFileMutex } from '@opencode-sflow/shared';
+import { checkArtifactPreflight, findPreflightState } from '../features/artifact-preflight.js';
 
 const STATE_FILE_PATH = '.sflow/state.json';
 
@@ -41,6 +38,24 @@ export function createStateTransitionHook(): HookHandler {
             error: `Invalid transition from ${currentState} to ${newState}`,
             block: true,
             blockReason: `Cannot transition from ${currentState} to ${newState}. Valid transitions: ${valid.join(', ')}`,
+          };
+        }
+
+        // P1 fix: Preflight gate — check target state's required artifacts BEFORE transitioning
+        const pf = await checkArtifactPreflight({
+          changeDir,
+          targetState: newState,
+          fileExists,
+          directoryExists,
+          readJson: readJsonFile,
+        });
+        if (!pf.passed) {
+          const route = findPreflightState(pf.missing);
+          return {
+            success: false,
+            error: `Preflight gate: missing artifacts for state "${newState}": ${pf.missing.join(', ')}`,
+            block: true,
+            blockReason: `[SFLOW] State transition blocked: cannot enter "${newState}". Missing: ${pf.missing.join(', ')}. Route to "${route}" to generate missing artifacts first.`,
           };
         }
 

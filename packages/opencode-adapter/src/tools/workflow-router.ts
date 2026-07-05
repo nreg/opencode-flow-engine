@@ -26,16 +26,43 @@ const STATE_ALLOWED_AGENTS: Record<string, string[]> = {
  * Intent-to-agent mapping table.
  * Maps natural language keywords to the appropriate sFlow agent.
  * Inspired by flow-kit GO.md's intent auto-routing.
+ *
+ * P5 fix: Each entry includes explicit token lists for scoring,
+ * avoiding fragile regex-to-token extraction.
+ *
+ * P7 fix: Expanded to cover all flow-kit GO.md routing patterns.
  */
-const INTENT_MAP: Array<{ pattern: RegExp; agent: string; action: string; description: string }> = [
-  { pattern: /审查|review|check\s+code|code\s+review|质量/i, agent: 'code-reviewer', action: 'review', description: 'Code review' },
-  { pattern: /调试|debug|bug|错误|error|fix|trace|排查/i, agent: 'bug-investigator', action: 'investigate', description: 'Bug investigation' },
-  { pattern: /执行|实现|implement|build|编码|开始/i, agent: 'build-executor', action: 'execute', description: 'Task execution' },
-  { pattern: /设计|设计UI|界面|ui|ux|页面/i, agent: 'spec-writer', action: 'design', description: 'UI/UX design' },
-  { pattern: /合同|合约|contract|执行合同|execution/i, agent: 'contract-builder', action: 'build', description: 'Contract building' },
-  { pattern: /需求|探索|explore|分析|调研/i, agent: 'need-explorer', action: 'explore', description: 'Requirements exploration' },
-  { pattern: /归档|archive|发布|release|完成/i, agent: 'release-archivist', action: 'archive', description: 'Release archiving' },
-  { pattern: /合并|merge|合并spec|spec.merge/i, agent: 'spec-merger', action: 'merge', description: 'Spec merging' },
+const INTENT_MAP: Array<{
+  pattern: RegExp;
+  agent: string;
+  action: string;
+  description: string;
+  tokens: string[];
+}> = [
+  { pattern: /审查|review|check\s+code|code\s+review|质量/i, agent: 'code-reviewer', action: 'review', description: 'Code review', tokens: ['审查', 'review', 'code review', '质量'] },
+  { pattern: /调试|debug|bug|错误|error|fix|trace|排查/i, agent: 'bug-investigator', action: 'investigate', description: 'Bug investigation', tokens: ['调试', 'debug', 'bug', '错误', 'error', 'trace', '排查'] },
+  { pattern: /执行\s*T\d+|跑\s*T\d+|do\s*T\d+|执行任务/i, agent: 'build-executor', action: 'execute', description: 'Task execution (specific)', tokens: ['执行t', '跑t', 'dot', '执行任务'] },
+  { pattern: /执行|实现|implement|build|编码|开始/i, agent: 'build-executor', action: 'execute', description: 'Task execution', tokens: ['执行', '实现', 'implement', 'build', '编码'] },
+  { pattern: /设计UI|界面ui|ux|视觉|theme|design\s+system|design\s+tokens/i, agent: 'spec-writer', action: 'design-ui', description: 'UI/UX design', tokens: ['设计ui', '界面', '视觉', 'theme', 'design system'] },
+  { pattern: /设计|design/i, agent: 'spec-writer', action: 'design', description: 'Specification design', tokens: ['设计', 'design'] },
+  { pattern: /合同|合约|contract|执行合同|execution/i, agent: 'contract-builder', action: 'build', description: 'Contract building', tokens: ['contract', '合约', '执行合同'] },
+  { pattern: /需求|探索|explore|分析|调研/i, agent: 'need-explorer', action: 'explore', description: 'Requirements exploration', tokens: ['需求', '探索', 'explore', '分析', '调研'] },
+  { pattern: /归档|archive|发布|release|完成|ship|集成|验收/i, agent: 'release-archivist', action: 'archive', description: 'Release archiving', tokens: ['归档', 'archive', '发布', 'release', 'ship', '验收'] },
+  { pattern: /拆任务|plan\s*tasks|分解|拆/i, agent: 'spec-writer', action: 'task-split', description: 'Task breakdown', tokens: ['拆任务', 'plan tasks', '分解'] },
+  { pattern: /测试|写测试|UAT|test/i, agent: 'build-executor', action: 'test', description: 'Testing', tokens: ['测试', '写测试', 'uat', 'test'] },
+  { pattern: /继续|接着上次|恢复|resume/i, agent: 'build-executor', action: 'resume', description: 'Resume interrupted work', tokens: ['继续', '接着上次', '恢复', 'resume'] },
+  { pattern: /合并|merge|合并spec|spec.merge/i, agent: 'spec-merger', action: 'merge', description: 'Spec merging', tokens: ['合并', 'merge', '合并spec'] },
+  { pattern: /健康检查|health|体检|巡检|技术债/i, agent: 'release-archivist', action: 'health-check', description: 'Health inspection', tokens: ['健康检查', 'health', '体检', '巡检'] },
+];
+
+/**
+ * P6 fix: "New thing description" regex patterns.
+ * When no active change exists and user describes a new feature/thing,
+ * route to need-explorer (equivalent to flow-kit's 0-change).
+ */
+const NEW_THING_PATTERNS = [
+  /^(做|想|加|实现|设计|开发|创建|新增|添加)\s+/i,
+  /^(want|make|add|implement|design|create|build)\s+/i,
 ];
 
 /**
@@ -55,35 +82,36 @@ function extractTaskId(input: string): string | null {
  *
  * Returns null if no clear intent match is found (fall back to artifact-based routing).
  */
+/**
+ * P6 fix: Check if the input is a "new thing description".
+ * Flow-kit GO.md rule: If no active change exists and user describes a new feature,
+ * route to need-explorer (equivalent to 0-change) even if the input contains
+ * words like "design" or "UI".
+ */
+function isNewThingDescription(input: string, hasActiveChange: boolean): boolean {
+  if (hasActiveChange) return false;
+  return NEW_THING_PATTERNS.some(p => p.test(input));
+}
+
+/**
+ * P5 fix: Match user intent using explicit token lists scoring.
+ * Each entry provides explicit tokens directly (no fragile regex-to-token extraction).
+ */
 function matchIntent(input: string): { agent: string; action: string; description: string; score: number } | null {
   const lowerInput = input.toLowerCase();
   const candidates: Array<{ agent: string; action: string; description: string; score: number }> = [];
 
   for (const entry of INTENT_MAP) {
-    // Extract meaningful keywords from the pattern (strip regex operators)
-    const patternSource = entry.pattern.source.toLowerCase();
-    // Split by regex alternation and word-boundary operators to enumerate tokens.
-    // patternSource is the raw regex string (e.g. "审查|review|check\\s+code|...")
-    // Use \b (word boundary) to strip, not \\b (literal backslash-b)
-    const tokens = [...new Set(
-      patternSource
-        .replace(/\^|\b|\(\?:|\)|\\s\*|\$\||\[/g, ' ')
-        .split(/[|\\()?*+^$.\]]+/)
-        .map(t => t.trim().replace(/\\/g, ''))
-        .filter(t => t.length >= 2 && !/^\d+$/.test(t))
-    )];
+    const lowerTokens = entry.tokens.map(t => t.toLowerCase());
 
-    // Count what fraction of tokens match the input
     let matchedTokens = 0;
-    for (const token of tokens) {
+    for (const token of lowerTokens) {
       if (lowerInput.includes(token)) matchedTokens++;
     }
 
-    // Also count direct pattern match (bonus for exact regex matches)
     const exactMatch = entry.pattern.test(input);
 
-    // Score = matched token ratio + exact match bonus
-    const tokenRatio = tokens.length > 0 ? matchedTokens / tokens.length : 0;
+    const tokenRatio = lowerTokens.length > 0 ? matchedTokens / lowerTokens.length : 0;
     const score = (exactMatch ? 0.5 : 0) + tokenRatio * 0.5;
 
     if (score > 0 || exactMatch) {
@@ -93,15 +121,13 @@ function matchIntent(input: string): { agent: string; action: string; descriptio
 
   if (candidates.length === 0) return null;
 
-  // Sort by score descending; ties broken by longest description (most specific)
   candidates.sort((a, b) => {
     const diff = b.score - a.score;
     if (Math.abs(diff) > 0.01) return diff > 0 ? 1 : -1;
     return b.description.length - a.description.length;
   });
 
-  const best = candidates[0] as { agent: string; action: string; description: string; score: number } | undefined;
-  return best ?? null;
+  return candidates[0] ?? null;
 }
 
 /**
@@ -171,9 +197,38 @@ export function createWorkflowRouterTool(): ToolDefinition {
 
       // Phase 1: Intent-based routing (if user gave a clear intent)
       if (userIntent) {
+        // P6 fix: Check "new thing description" priority first
+        const wfStateForNewThing = await readWorkflowState(changeDir);
+        const hasActiveChange = !!(wfStateForNewThing?.state);
+
+        if (isNewThingDescription(userIntent, hasActiveChange)) {
+          return {
+            title: "Workflow Router",
+            output: JSON.stringify({
+              success: true,
+              data: {
+                source: 'new-thing',
+                state: 'exploring',
+                skill: 'need-explorer',
+                action: 'explore',
+                description: 'New feature description detected',
+                reasons: [
+                  `New thing: "${userIntent}"`,
+                  'Flow-kit rule: new descriptions route to need-explorer even if containing design/UI keywords',
+                ],
+                // P8: Routing declaration
+                routingDeclaration: {
+                  loaded: [],
+                  notLoaded: ['specs/', 'design.md', 'tasks.md', 'execution-contract.md'],
+                  nextAction: 'Explore requirements with need-explorer',
+                },
+              },
+            }),
+          };
+        }
+
         const matched = matchIntent(userIntent);
         if (matched) {
-          // State guard: check if matched agent is allowed in current state
           const wfState = await readWorkflowState(changeDir);
           const currentState = wfState?.state || 'exploring';
           const allowedAgents = STATE_ALLOWED_AGENTS[currentState] || [];
@@ -191,7 +246,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
                   action: matched.action,
                   description: matched.description,
                   reasons: [
-                    `Intented routed via: ${userIntent}`,
+                    `Intended routed via: ${userIntent}`,
                     `But ${matched.agent} is not allowed in state "${currentState}". Allowed agents: ${allowedAgents.join(', ')}`,
                   ],
                   stateGuardBlocked: true,
@@ -211,7 +266,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
                 skill: matched.agent,
                 action: matched.action,
                 description: matched.description,
-                reasons: ['Intented routed via: ' + userIntent],
+                reasons: ['Intended routed via: ' + userIntent],
                 stateGuardBlocked: false,
                 taskId,
               },
@@ -220,51 +275,65 @@ export function createWorkflowRouterTool(): ToolDefinition {
         }
       }
 
+      // P9 fix: Check specs content, not just directory existence
+      const { listFiles } = await import('@opencode-sflow/shared');
+
       // Phase 2: Artifact-based state detection (fallback)
       try {
+        const specsDirExists = await directoryExists(`${changeDir}/specs`);
+        const specsFileCount = specsDirExists ? (await listFiles(`${changeDir}/specs`, '.md')).length : 0;
         const artifacts = {
           proposal: await fileExists(`${changeDir}/proposal.md`),
-          specs: await directoryExists(`${changeDir}/specs`),
+          specs: specsDirExists && specsFileCount > 0,
+          specsFileCount,
           design: await fileExists(`${changeDir}/design.md`),
           tasks: await fileExists(`${changeDir}/tasks.md`),
           contract: await fileExists(`${changeDir}/execution-contract.md`),
           uiDesign: await fileExists(`${changeDir}/ui-design.md`),
         };
 
-        // Use real-time detectFrontend() instead of stale state.json
         const isFrontend = await detectFrontend(changeDir);
 
-        // Determine workflow state
         let state: string;
         let skill: string;
         let reasons: string[] = [];
+        const routingDeclaration = { loaded: [] as string[], notLoaded: [] as string[], nextAction: '' };
 
         if (!artifacts.proposal && !artifacts.specs) {
           state = "exploring";
           skill = "need-explorer";
           reasons.push("No planning artifacts found");
+          routingDeclaration.nextAction = "Begin requirements exploration";
         } else if (!artifacts.contract) {
-          // Check if frontend project needs ui-design phase
           if (isFrontend && !artifacts.uiDesign && artifacts.design && artifacts.tasks) {
             state = "ui-design";
             skill = "spec-writer";
             reasons.push("Frontend project needs ui-design.md before bridging");
+            routingDeclaration.loaded.push('proposal.md', 'specs/', 'design.md', 'tasks.md');
+            routingDeclaration.notLoaded.push('ui-design.md');
+            routingDeclaration.nextAction = "Generate ui-design.md";
           } else {
             state = "specifying";
             skill = "spec-writer";
-            reasons.push("Planning artifacts exist but contract is missing");
+            reasons.push(specsFileCount > 0 ? "Specs exist but contract incomplete" : "Planning artifacts exist but contract is missing");
+            if (specsFileCount > 0) routingDeclaration.loaded.push(`specs/ (${specsFileCount} files)`);
+            routingDeclaration.notLoaded.push('execution-contract.md');
+            routingDeclaration.nextAction = "Complete planning artifacts";
           }
         } else if (!(await isContractApproved(changeDir))) {
           state = "bridging";
           skill = "contract-builder";
           reasons.push("Contract exists but not approved");
+          routingDeclaration.loaded.push('proposal.md', 'specs/', 'design.md', 'tasks.md', 'execution-contract.md');
+          routingDeclaration.nextAction = "Approve execution contract";
         } else {
           state = "executing";
           skill = "build-executor";
           reasons.push("Contract approved, ready for implementation");
+          routingDeclaration.loaded.push('proposal.md', 'execution-contract.md');
+          routingDeclaration.nextAction = "Begin task execution";
         }
 
-        // Check for stale contract using unified staleness check
         if (artifacts.contract) {
           const stale = await isContractStale(changeDir);
           if (stale) {
@@ -285,6 +354,8 @@ export function createWorkflowRouterTool(): ToolDefinition {
               reasons,
               artifacts,
               isFrontend,
+              // P8: Routing declaration for transparency
+              routingDeclaration,
             },
           }),
         };

@@ -47,12 +47,22 @@ If you catch yourself thinking:
 
 1. Read execution-contract.md
 2. Select next task from task batches
-3. Write failing test (RED)
-4. Write minimal implementation (GREEN)
-5. Refactor if needed (REFACTOR)
-6. Update tasks.md
-7. Update .sflow/subagent-progress.md checkpoint
-8. Repeat until batch complete
+3. **Pre-implementation: Scan LESSONS.md** (R1.8 equivalent)
+   - Read .sflow/lessons.md (if it exists) and project-level lessons
+   - Keywords = current task's write_files + action description
+   - For each hit, note "差异是 X" or "确认仍适用" in execution plan
+   - If planned approach matches an active lesson entry, STOP and explain difference
+4. Write failing test (RED)
+5. Write minimal implementation (GREEN)
+6. Refactor if needed (REFACTOR)
+7. **Pre-commit: Git diff boundary verify** (R6.5 equivalent)
+   - Run git diff --name-only to list changed files
+   - Compare against current task write_files from execution-contract.md
+   - If files outside write_files are staged, STOP and resolve before committing
+   - Document verify result in SUMMARY
+8. Update tasks.md
+9. Update .sflow/subagent-progress.md checkpoint
+10. Repeat until batch complete
 
 ## Dispatch Enforcement
 
@@ -115,10 +125,20 @@ If upgrade is needed:
 - Do NOT mark verification as passed while dirty diff remains unexplained
 - Do not advance state based solely on dirty worktree; attribution must happen first
 
+## Post-Implementation: LESSONS.md Nomination
+
+After completing a task, evaluate whether any failure/ debugging experience should be nominated:
+- Debugging took > 30 minutes AND root cause is not task-specific
+- Another task could hit the same issue within 6 months
+- The fix is not already documented in design.md
+
+If nomination criteria are met, append a new L-NNN entry to .sflow/lessons.md.
+
 ## Tool Usage
 
 You have access to:
 - \`read\` - Read contract and code
+- \`grep\` - Search LESSONS.md for relevant failures (use before implementing)
 - \`write\` - Write code and tests
 - \`edit\` - Edit code
 - \`bash\` - Run tests and commands

@@ -80,9 +80,10 @@ describe('Workflow State Machine — Pure Transition Logic', () => {
     expect(TRANSITION_TABLE.abandoned).toEqual([]);
   });
 
-  it('should have exactly 21 valid transitions total (2+4+2+3+4+3+2+1)', () => {
+  // P28 fix: Added ui-design → specifying transition, total is now 22
+  it('should have exactly 22 valid transitions total (2+4+3+3+4+3+2+1)', () => {
     const total = Object.values(TRANSITION_TABLE).reduce((sum, t) => sum + t.length, 0);
-    expect(total).toBe(21);
+    expect(total).toBe(22);
   });
 
   it('should allow self-loop only as a reversion (not a stay)', () => {
@@ -341,7 +342,9 @@ describe('Workflow State Machine — Hook Integration', () => {
     await cleanupDir(dir).catch(() => {});
   });
 
-  it('should transition from exploring to specifying via hook', async () => {
+  // P1 fix: Preflight gate requires proposal.md before entering specifying
+  it('should transition from exploring to specifying via hook (with proposal.md)', async () => {
+    await Bun.write(dir + '/proposal.md', '# Proposal\n\n## Why\nThis is a test proposal.\n\n## What Changes\nTest changes.');
     const hook = createStateTransitionHook();
     const result = await hook.execute({
       changeDir: dir,

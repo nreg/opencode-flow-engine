@@ -68,6 +68,16 @@ export interface ProgressData {
 
 // ─── LESSONS.md Operations ──────────────────────────────────────────────────
 
+/**
+ * P17 fix: More flexible section boundary patterns.
+ * Accepts both full Chinese labels and shorter variants with optional whitespace.
+ */
+function extractSection(block: string, labelPattern: string): string | null {
+  const regex = new RegExp(labelPattern + '\\n([\\s\\S]*?)(?=\\n\\*\\*|\\n### |$)', 'i');
+  const match = block.match(regex);
+  return match ? (match[1] || '').trim() : null;
+}
+
 export function parseLessonsMd(content: string): LessonEntry[] {
   const entries: LessonEntry[] = [];
   const blocks = content.split(/\n### /);
@@ -79,16 +89,28 @@ export function parseLessonsMd(content: string): LessonEntry[] {
     if (!primaryMatch && !looseMatch) continue;
     const tags = primaryMatch ? (primaryMatch[1] || '').split(',').map((t: string) => t.trim()) : [];
     const title = primaryMatch ? (primaryMatch[2] || '').trim() : ((looseMatch ? looseMatch[1] : '') || '').trim();
-    const keywordsMatch = block.match(/\*\*关键词\*\*:\s*(.+)/);
-    const problemMatch = block.match(/\*\*问题场景\*\*\n([\s\S]*?)(?=\*\*当时尝试)/);
-    const attemptedMatch = block.match(/\*\*当时尝试的方案\*\*\n([\s\S]*?)(?=\*\*为什么不行)/);
-    const whyFailedMatch = block.match(/\*\*为什么不行\*\*\n([\s\S]*?)(?=\*\*当前推荐)/);
-    const recMatch = block.match(/\*\*当前推荐做法\*\*\n([\s\S]*?)(?=\*\*何时可重新)/);
-    const reevalMatch = block.match(/\*\*何时可重新评估\*\*\n([\s\S]*?)$/);
-    const statusMatch = block.match(/\*\*状态\*\*:\s*(.+)/);
-    const stackMatch = block.match(/\*\*适用栈\*\*:\s*(.+)/);
-    const firstSeenMatch = block.match(/\*\*首发\*\*:\s*(.+)/);
-    const keywords = keywordsMatch ? (keywordsMatch[1] || '').split(/\s+/).filter(Boolean) : [];
+
+    // P17 fix: Use flexible section extraction with multiple label variants
+    const problem = extractSection(block, '\\*\\*问题场景\\*\\*')
+      || extractSection(block, '\\*\\*场景\\*\\*')
+      || extractSection(block, '\\*\\*问题\\*\\*') || '';
+    const attempted = extractSection(block, '\\*\\*当时尝试的方案\\*\\*')
+      || extractSection(block, '\\*\\*尝试方案\\*\\*')
+      || extractSection(block, '\\*\\*尝试\\*\\*') || '';
+    const whyFailed = extractSection(block, '\\*\\*为什么不行\\*\\*')
+      || extractSection(block, '\\*\\*失败原因\\*\\*')
+      || extractSection(block, '\\*\\*原因\\*\\*') || '';
+    const recommendation = extractSection(block, '\\*\\*当前推荐做法\\*\\*')
+      || extractSection(block, '\\*\\*推荐做法\\*\\*')
+      || extractSection(block, '\\*\\*推荐\\*\\*') || '';
+    const reevaluateWhen = extractSection(block, '\\*\\*何时可重新评估\\*\\*')
+      || extractSection(block, '\\*\\*何时评估\\*\\*') || '';
+
+    const keywordsMatch = block.match(/\*\*关键词\*\*:\s*(.+)/) || block.match(/\*\*关键词\*\*[:：]\s*(.+)/);
+    const statusMatch = block.match(/\*\*状态\*\*:\s*(.+)/) || block.match(/\*\*状态\*\*[:：]\s*(.+)/);
+    const stackMatch = block.match(/\*\*适用栈\*\*:\s*(.+)/) || block.match(/\*\*适用栈\*\*[:：]\s*(.+)/);
+    const firstSeenMatch = block.match(/\*\*首发\*\*:\s*(.+)/) || block.match(/\*\*首发\*\*[:：]\s*(.+)/);
+    const keywords = keywordsMatch ? (keywordsMatch[1] || '').split(/[\s,]+/).filter(Boolean) : [];
     const id = 'L-' + (idMatch ? (idMatch[1] || String(entries.length + 1)) : String(entries.length + 1));
     entries.push({
       id,
@@ -99,11 +121,11 @@ export function parseLessonsMd(content: string): LessonEntry[] {
       stack: stackMatch ? (stackMatch[1] || '').trim() : undefined,
       firstSeen: firstSeenMatch ? (firstSeenMatch[1] || '').trim() : new Date().toISOString(),
       lastReviewed: new Date().toISOString(),
-      problem: problemMatch ? (problemMatch[1] || '').trim() : '',
-      attempted: attemptedMatch ? (attemptedMatch[1] || '').trim() : '',
-      whyFailed: whyFailedMatch ? (whyFailedMatch[1] || '').trim() : '',
-      recommendation: recMatch ? (recMatch[1] || '').trim() : '',
-      reevaluateWhen: reevalMatch ? (reevalMatch[1] || '').trim() : '',
+      problem,
+      attempted,
+      whyFailed,
+      recommendation,
+      reevaluateWhen: reevaluateWhen || '无需重新评估',
     });
   }
   return entries;
@@ -180,14 +202,36 @@ async function searchLessonsInSingleFile(lessonsPath: string, keywords: string[]
   const hits: LessonHit[] = [];
   if (keywords.length === 0) return [];
   const lowerKeywords = keywords.map(k => k.toLowerCase());
+  // P14 fix: Stop words for English keyword filtering (Chinese has no stop word list here)
+  const lessonStopWords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
+    'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'using',
+    'this', 'that', 'it', 'its', 'we', 'they', 'use', 'used', 'do', 'does', 'did',
+    'not', 'no', 'but', 'or', 'and', 'if', 'then', 'else', 'so', 'of', '方案', '做法',
+    '尝试', '问题', '解决', '使用', '通过', '可以', '需要', '进行']);
+
   for (const entry of entries) {
     if (entry.status !== 'active') continue;
-    const matched = lowerKeywords.filter(kw =>
-      entry.keywords.some(ek => ek.toLowerCase().includes(kw) || kw.includes(ek.toLowerCase())) ||
+    const matched = lowerKeywords.filter(kw => {
+      // P14 fix: Skip short tokens (< 2 chars) to reduce substring false positives
+      if (kw.length < 2) return false;
+      // P14 fix: Skip common stop words
+      if (lessonStopWords.has(kw)) return false;
+      // P14 fix: Use word-length-prefix matching instead of pure substring
+      // For English: require the keyword to start with the search term (or vice versa)
+      // For Chinese: require exact match (Chinese chars don't have whitespace boundaries)
+      return entry.keywords.some(ek => {
+        const ekLower = ek.toLowerCase();
+        if (ekLower === kw) return true;
+        // For multi-char keywords, require prefix match (reduces "auth" matching "authentication")
+        if (kw.length >= 3 && ekLower.startsWith(kw)) return true;
+        if (kw.length >= 3 && kw.startsWith(ekLower)) return true;
+        // Chinese: exact character n-gram match
+        if (/[\u4e00-\u9fff]/.test(kw) && ekLower.includes(kw)) return true;
+        return false;
+      }) ||
       entry.title.toLowerCase().includes(kw) ||
-      entry.tags.some(t => t.toLowerCase().includes(kw)),
-    );
-    // Apply min match ratio to reduce false positives
+      entry.tags.some(t => t.toLowerCase().includes(kw));
+    });
     const matchRatio = matched.length / lowerKeywords.length;
     if (matched.length > 0 && matchRatio >= LESSONS_MIN_MATCH_RATIO) {
       hits.push({ entry, matchedKeywords: matched });
@@ -293,19 +337,30 @@ export async function readProgressFile(changeDir: string): Promise<ProgressData 
   if (pauseMatch) data.pausedAt = pauseMatch[1] || '';
   const triggerMatch = content.match(/\*\*触发清窗的信号\*\*:\s*(.+)/);
   if (triggerMatch) data.trigger = triggerMatch[1] || '';
-  const stateMatch = content.match(/## 当前正在做[^]*?\n([^#]+)/);
+  // P11 fix: More robust "current state" parsing — stop at next ## or --- section
+  const stateMatch = content.match(/## 当前正在做[\s\S]*?\n([\s\S]*?)(?=\n##|\n---|\n$)/);
   if (stateMatch) data.currentState = (stateMatch[1] || '').trim();
   const nextMatch = content.match(/\*\*下一步\*\*:\s*(.+)/);
   if (nextMatch) data.nextStep = (nextMatch[1] || '').trim();
   const blockedMatch = content.match(/\*\*阻塞\*\*:\s*(.+)/);
   if (blockedMatch) data.blockedBy = (blockedMatch[1] || '').trim();
-  // Parse excluded approaches table — use [^|] to prevent | from breaking column alignment
-  const tableMatch = content.match(/\| (\S+) \| ([^|]+?) \| ([^|]+?) \| (\d+) \|/g);
-  if (tableMatch) {
-    for (const row of tableMatch) {
-      const parts = row.match(/\| (\S+) \| (.+?) \| (.+?) \| (\d+) \|/);
-      if (parts) {
-        data.excludedApproaches.push({ id: parts[1] || '', approach: parts[2] || '', reason: parts[3] || '', failCount: parseInt(parts[4] || '0', 10) });
+  // P11 fix: More robust table parsing — skip header row, handle multi-line cells
+  const tableSection = content.match(/## 已排除的方案[\s\S]*?\|[-\s|]+\|\n((?:\|.*\|\n?)*)/);
+  if (tableSection && tableSection[1]) {
+    const rows = tableSection[1].trim().split('\n');
+    for (const row of rows) {
+      const trimmed = row.trim();
+      if (!trimmed.startsWith('|') || /^\|[-\s|]+\|$/.test(trimmed)) continue;
+      // Split by | and clean up — handle up to 4 columns
+      const cols = trimmed.split('|').map(c => c.trim()).filter(c => c !== '');
+      if (cols.length >= 4) {
+        const id = cols[0];
+        const approach = cols[1];
+        const reason = cols[2];
+        const failCount = parseInt(cols[3], 10) || 0;
+        if (id && approach) {
+          data.excludedApproaches.push({ id, approach, reason, failCount });
+        }
       }
     }
   }
@@ -323,16 +378,47 @@ export async function readProgressFile(changeDir: string): Promise<ProgressData 
 }
 
 /**
- * Extract meaningful keywords from an approach string for comparison.
- * Removes stop words and short tokens, returns a set of significant terms.
+ * P13 fix: Minimum keyword overlap ratio for anti-repeat blocking.
+ * Extracted as a named constant for configurability.
+ */
+export const PROGRESS_ANTI_REPEAT_THRESHOLD = 0.5;
+
+/**
+ * P10 fix: Extract meaningful keywords from text for comparison.
+ * Supports both English (whitespace tokenization) and Chinese (character n-grams).
  */
 function extractKeywords(text: string): Set<string> {
+  const lower = text.toLowerCase();
+  const keywords = new Set<string>();
+
+  // English: split on whitespace, filter stop words and short tokens
   const stopWords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
     'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'using',
     'this', 'that', 'it', 'its', 'we', 'they', 'use', 'used', 'do', 'does', 'did',
     'not', 'no', 'but', 'or', 'and', 'if', 'then', 'else', 'so']);
-  const words = text.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length >= 3 && !stopWords.has(w));
-  return new Set(words);
+  const englishTokens = lower.replace(/[^\w\s]/g, ' ').split(/\s+/);
+  for (const t of englishTokens) {
+    if (t.length >= 3 && !stopWords.has(t)) keywords.add(t);
+  }
+
+  // Chinese: extract character n-grams (2-4 chars) for matching
+  const chineseChars = lower.match(/[\u4e00-\u9fff]+/g);
+  if (chineseChars) {
+    for (const segment of chineseChars) {
+      // Generate n-grams of length 2-4
+      for (let n = 2; n <= 4; n++) {
+        for (let i = 0; i <= segment.length - n; i++) {
+          keywords.add(segment.slice(i, i + n));
+        }
+      }
+      // Also add the full segment if reasonably short
+      if (segment.length <= 8) {
+        keywords.add(segment);
+      }
+    }
+  }
+
+  return keywords;
 }
 
 export async function detectProgressAntiRepeat(changeDir: string, plannedApproach: string): Promise<{ blocked: boolean; matched: ExcludedApproach | null; reason?: string }> {
@@ -347,13 +433,12 @@ export async function detectProgressAntiRepeat(changeDir: string, plannedApproac
   for (const ex of progress.excludedApproaches) {
     const excludedKeywords = extractKeywords(ex.approach);
     if (excludedKeywords.size === 0) continue;
-    // Compute Jaccard-like intersection ratio
     let intersectionCount = 0;
     for (const kw of plannedKeywords) {
       if (excludedKeywords.has(kw)) intersectionCount++;
     }
     const overlapRatio = intersectionCount / Math.min(plannedKeywords.size, excludedKeywords.size);
-    if (overlapRatio >= 0.5) {
+    if (overlapRatio >= PROGRESS_ANTI_REPEAT_THRESHOLD) {
       return {
         blocked: true,
         matched: ex,
@@ -390,15 +475,17 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
     }
   }
   if (currentState === 'exploring' && hp && pc && pc.trim().length > 100) return 'specifying';
+  // P28: ui-design requires proposal.md + specs/ + design.md + tasks.md as preconditions
   if (currentState === 'specifying' && hd && ht && hsp) {
-    // Use real-time detectFrontend() instead of cached state.json isFrontend
-    // Dynamic import to avoid circular dependency across package boundaries
     const { detectFrontend } = await import('./workflow-manager.js');
     const isFrontend = await detectFrontend(changeDir);
     if (isFrontend && !hui) return 'ui-design';
     return 'bridging';
   }
+  // ui-design → bridging: only if ui-design.md already exists
   if (currentState === 'ui-design' && hui) return 'bridging';
+  // ui-design → specifying: if prerequisites are missing, fall back
+  if (currentState === 'ui-design' && (!hd || !ht || !hsp)) return 'specifying';
   if (currentState === 'bridging' && hc) return 'approved-for-build';
   if ((currentState === 'approved-for-build' || currentState === 'executing') && allDone) return 'closing';
   if (currentState === 'specifying' && !hp) return 'exploring';

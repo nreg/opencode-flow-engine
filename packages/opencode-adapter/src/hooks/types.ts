@@ -44,4 +44,6 @@ export interface HookResult {
   error?: string;
   block?: boolean;
   blockReason?: string;
+  /** P19: Non-blocking warnings for agent awareness */
+  warnings?: string[];
 }
