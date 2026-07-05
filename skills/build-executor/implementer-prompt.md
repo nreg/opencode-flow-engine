@@ -21,6 +21,17 @@ Subagent:
 
     ## Before You Begin
 
+    ### Step 0: Check LESSONS Knowledge Base
+
+    Before writing any code, check `.sflow/lessons.md` for relevant lessons:
+
+    1. Grep the file with keywords from the task (file paths, libraries, technologies)
+    2. For each active entry that matches your planned approach:
+       - Write in your execution plan: "已查阅 L-NNN，本次方案与之的差异是 X"
+       - If your approach is IDENTICAL to a failed approach → **STOP**
+       - Report back as BLOCKED with: "L-NNN conflict: approach already failed, cannot retry without explaining difference"
+    3. Deduplicate: read the "已排除的方案" in `.sflow/progress.md` if it exists
+
     If you have questions about:
     - The requirements or acceptance criteria
     - The approach or implementation strategy

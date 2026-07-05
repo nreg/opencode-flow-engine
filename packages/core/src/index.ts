@@ -21,4 +21,4 @@ export type { RequirementBlock, RequirementsSectionParts, DeltaPlan, ParsedDelta
 export { REQUIREMENT_HEADER_REGEX, normalizeRequirementName, extractRequirementsSection, parseDeltaSpec, parseChangeMarkdown } from './parsing/requirement-blocks.js';
 
 // Workflow constants
-export { VALID_TRANSITIONS, ALL_STATES, isValidTransition, getValidTransitions, HOTFIX_UPGRADE_THRESHOLDS, TWEAK_UPGRADE_THRESHOLDS } from './constants.js';
+export { VALID_TRANSITIONS, ALL_STATES, isValidTransition, getValidTransitions, HOTFIX_UPGRADE_THRESHOLDS, TWEAK_UPGRADE_THRESHOLDS, ARTIFACT_PREFLIGHT, PREFLIGHT_ARTIFACT_TABLE, isDirectoryArtifact } from './constants.js';

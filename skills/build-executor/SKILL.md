@@ -458,3 +458,146 @@ Do not report completion until:
 - review blockers are resolved
 - all batches have been reviewed (per-task reviews + broad final review)
 - the workflow is ready for `release-archivist`
+
+## LESSONS Knowledge Base Check (Cross-Task Failure Prevention)
+
+> Inspired by flow-kit LESSONS.md (R1.8). Every task must check `.sflow/lessons.md` before starting implementation.
+
+### Before Each Task
+
+Before dispatching or starting any task implementation:
+
+1. **Check if `.sflow/lessons.md` exists**. If not, create an empty skeleton.
+2. **Extract keywords** from the task:
+   - File paths mentioned in `write_files` / `read_files`
+   - Key nouns from `action` description
+   - Programming languages / libraries involved
+3. **Grep `.sflow/lessons.md`** with these keywords
+4. **For each hit entry (L-NNN)**:
+   - If the entry is `status: active` and matches your planned approach → **STOP**
+   - Write to task plan: `"已查阅 L-NNN，本次方案与之的差异是 X"` or `"已查阅 L-NNN，本次确认仍适用，因此不重试该方案"`
+   - If your approach is identical to a failed approach → trigger anti-repeat protocol below
+
+### On Debug Exit
+
+After bug-investigator completes diagnosis and before transitioning back to executing:
+
+1. If the root cause is non-trivial (>30 min debug time, or likely to recur)
+2. Use `.sflow-templates/LESSONS.md` as template
+3. Call the `addLesson` method on state-manager to append to `.sflow/lessons.md`
+4. Include: tags, title, problem scenario, what was attempted, why it failed, recommended approach, keywords for future grep
+
+---
+
+## Anti-Repeat Protocol (PROGRESS.md)
+
+> Inspired by flow-kit R1.5/R1.6. Prevents repeated failed approaches across context resets.
+
+### When to Write PROGRESS.md
+
+Write a PROGRESS.md snapshot when ANY of these signals trigger:
+
+- Input tokens > 50k
+- AI repeats content already said (self-hinting symptom)
+- Same error pattern appears ≥ 2 times
+- User says the conversation is "spinning"
+- Context needs compaction
+
+### What to Include
+
+Write to `.sflow/progress.md` using the template at `.sflow-templates/PROGRESS.md`:
+
+1. **Completed sub-steps**: what's already done
+2. **Current state**: exactly what's being worked on
+3. **Excluded approaches (已排除的方案)**: ALL approaches tried and failed, with reasons
+4. **Pending assumptions**: things that need confirmation
+5. **Clues**: file locations, line numbers, discoveries
+
+### On Context Resume (Recovery)
+
+When resuming from a context break:
+
+1. **Read `.sflow/progress.md`** — do NOT trust conversation history
+2. **Read the EXCLUDED APPROACHES section** — this is the anti-repeat key
+3. **Check your planned next step** against the excluded list:
+   - If your step matches an excluded approach → **STOP**
+   - You MUST write: "本次与第 N 次失败的差异是 X" — if you cannot, pause and ask the user
+4. **If the task is too large** (was interrupted mid-task) → split it into ≥2 sub-tasks in TASK.md
+5. If clean, resume from the "current state" description
+
+### On Task Completion
+
+After a task passes all reviews:
+1. Delete `.sflow/progress.md`
+2. Move task summary to `SUMMARY.md`
+
+---
+
+## File Boundary Control (read_files / write_files)
+
+> Inspired by flow-kit B3 brownfield safety rail (R7.3 / R6.5). Prevents scope drift by enforcing strict file boundaries per task.
+
+### Task Boundary Fields
+
+Each task in the execution contract MUST include two boundary fields:
+
+- **read_files**: Files/directories the implementer is ALLOWED to read for context
+- **write_files**: Files the implementer is ALLOWED to create or modify
+
+### Implementation Rules
+
+1. **Task brief must include** the read_files and write_files from the execution contract
+2. **Before writing any code**, verify the target file is in the task's write_files list
+3. **If a needed file is NOT in write_files**:
+   - Do NOT modify it — this is scope drift
+   - Stop and report: "File X is not in task write_files. Need to either update the task boundary or create a new task."
+4. **Before commit**, run boundary verification:
+   ```bash
+   git diff --name-only
+   ```
+   Compare against the task's write_files list
+
+### Commit Boundary Enforcement
+
+Before any commit in the progress ledger:
+
+1. Run: `git diff --name-only` (or similar command)
+2. Compare against current task's `write_files` list
+3. **If boundary violated** (files outside write_files were modified):
+   - Report all out-of-bound files
+   - Do NOT commit — either:
+     a. Roll back the unintended changes
+     b. OR escalate to user for scope expansion
+4. **Report clean or violated** in the progress checkpoint:
+   - `✅ Boundary check: 0 files out of bounds` or
+   - `❌ Boundary violation: <files> are not in write_files`
+
+### Example Task Boundary
+
+```
+Task: T03 - Add ThemeContext provider
+read_files:
+  src/theme/*
+  src/lib/api-client.ts
+  src/utils/storage.ts
+write_files:
+  src/theme/ThemeContext.tsx
+  src/theme/__tests__/ThemeContext.test.tsx
+  
+Boundary check: Only modify files under src/theme/ and src/theme/__tests__/
+```
+
+### Scope Drift Response
+
+If scope drift is detected during execution:
+
+1. **Stop immediately** — do not continue
+2. Report which files were changed outside the boundary
+3. Offer options:
+   - "Update the task boundary to include these files"
+   - "Roll back the unintended changes"
+   - "Split this into a new task for the out-of-bound files"
+4. Do NOT proceed until the user or contract-builder resolves the boundary
+
+
+

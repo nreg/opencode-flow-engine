@@ -39,8 +39,8 @@ async function ensureDir(dir: string): Promise<void> {
 // =============================================================================
 describe('Workflow State Machine — Pure Transition Logic', () => {
 
-  it('should have exactly 8 states', () => {
-    expect(ALL_STATES).toHaveLength(8);
+  it('should have exactly 9 states', () => {
+    expect(ALL_STATES).toHaveLength(9);
     expect(ALL_STATES.sort()).toEqual([
       'abandoned',
       'approved-for-build',
@@ -50,6 +50,7 @@ describe('Workflow State Machine — Pure Transition Logic', () => {
       'executing',
       'exploring',
       'specifying',
+      'ui-design',
     ]);
   });
 
@@ -79,9 +80,9 @@ describe('Workflow State Machine — Pure Transition Logic', () => {
     expect(TRANSITION_TABLE.abandoned).toEqual([]);
   });
 
-  it('should have exactly 17 valid transitions total', () => {
+  it('should have exactly 21 valid transitions total (2+4+2+3+4+3+2+1)', () => {
     const total = Object.values(TRANSITION_TABLE).reduce((sum, t) => sum + t.length, 0);
-    expect(total).toBe(18);
+    expect(total).toBe(21);
   });
 
   it('should allow self-loop only as a reversion (not a stay)', () => {
@@ -118,7 +119,8 @@ describe('Workflow State Machine — Happy Path', () => {
   });
 
   it('should follow the happy path: exploring→specifying→bridging→approved-for-build→executing→closing', async () => {
-    for (const nextState of ['specifying', 'bridging', 'approved-for-build', 'executing', 'closing'] as const) {
+    for (const nextState of ['specifying',
+      'ui-design', 'bridging', 'approved-for-build', 'executing', 'closing'] as const) {
       const result = await wf.transitionState(dir, nextState);
       expect(result.success).toBe(true);
       expect((result.data as Record<string, unknown>).to).toBe(nextState);
@@ -205,7 +207,7 @@ describe('Workflow State Machine — State Reversion', () => {
     await writeStateFile(dir, { state: 'exploring', mode: 'full' });
     wf = createWorkflowManager({ enabled: true });
     await wf.initialize();
-    for (const state of ['specifying', 'bridging', 'approved-for-build']) {
+    for (const state of ['specifying', 'ui-design', 'bridging', 'approved-for-build']) {
       const result = await wf.transitionState(dir, state);
       if (!result.success) break;
     }
@@ -233,7 +235,8 @@ describe('Workflow State Machine — Abandonment', () => {
   const dir = tempDir('abandon');
   let wf: ReturnType<typeof createWorkflowManager>;
 
-  const abandonableStates = ['exploring', 'specifying', 'bridging', 'approved-for-build', 'executing', 'debugging', 'closing'];
+  const abandonableStates = ['exploring', 'specifying',
+      'ui-design', 'bridging', 'approved-for-build', 'executing', 'debugging', 'closing'];
 
   beforeEach(async () => {
     await cleanupDir(dir).catch(() => {});
@@ -453,7 +456,8 @@ describe('Workflow State Machine — Complete Lifecycle', () => {
   });
 
   it('should be able to abandon at any point in the lifecycle', async () => {
-    const states = ['exploring', 'specifying', 'bridging', 'approved-for-build', 'executing', 'debugging', 'closing'];
+    const states = ['exploring', 'specifying',
+      'ui-design', 'bridging', 'approved-for-build', 'executing', 'debugging', 'closing'];
     for (const s of states) {
       await writeStateFile(dir, { state: s, mode: 'full' });
       const result = await wf.transitionState(dir, 'abandoned');
@@ -481,3 +485,7 @@ describe('Workflow State Machine — Complete Lifecycle', () => {
     expect((state2.data as Record<string, unknown>).state).toBe('specifying');
   });
 });
+
+
+
+

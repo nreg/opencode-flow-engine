@@ -1,6 +1,6 @@
 ---
 name: spec-writer
-description: Create or refine sflow planning artifacts. Invoke when the change is understood well enough to write proposal.md, specs/, design.md, and tasks.md.
+description: Create or refine sflow planning artifacts. Invoke when the change is understood well enough to write proposal.md, specs/, design.md, and tasks.md. For frontend projects, also generates ui-design.md.
 ---
 
 # Spec Writer
@@ -16,35 +16,68 @@ Invoke this skill when the user says things like:
 - "create the design doc"
 - "break the work into tasks"
 - "formalize the plan"
+- "设计UI" or "UI design" (for frontend projects — generates ui-design.md)
 
 ## Required Inputs
 
 Before generating or revising artifacts, read:
 
-- `.sflow/state.json` — especially `dp_0_decisions` and `dp_0_confirmed`
+- `.sflow/state.json` — especially `dp_0_decisions`, `dp_0_confirmed`, and `isFrontend`
 - Any existing planning artifacts in the change folder
 
 If `dp_0_confirmed` is not `true` for a new/incomplete change, stop and route back to `workflow-start` to complete DP-0.
+
+## Frontend Project Detection (Enhanced)
+
+Before generating artifacts, detect if this change involves frontend/UI work:
+
+### Step 0: Check Frontend Flag
+
+Read `isFrontend` from `.sflow/state.json`. If `true`, this change will require:
+1. All standard artifacts (proposal, specs, design, tasks)
+2. **Plus**: `ui-design.md` — UI aesthetics direction + design tokens
+
+### Step 0.1: Detection Methods (if isFrontend not set)
+
+If `isFrontend` is not yet set in state.json, detect from:
+
+1. **Description keywords**: website, web, 网页, page, app, UI, 界面, dashboard, component, react, vue, etc.
+2. **Package.json**: Check for frontend dependencies (react, vue, angular, svelte, next, nuxt)
+3. **Directory structure**: Check for `src/components/`, `src/pages/`, `.css` files
+
+If detected as frontend, update `.sflow/state.json` to set `isFrontend: true`.
+
+### Step 0.2: Frontend-Specific Workflow Path
+
+For frontend projects, the artifact generation order becomes:
+```
+proposal.md → specs/ → ui-design.md → design.md → tasks.md
+```
+
+The `ui-design.md` is generated BEFORE `design.md` because UI aesthetics decisions
+(color system, typography, spacing) inform architecture decisions (component tree, data flow).
 
 ## Required Artifacts
 
 Create or refine:
 
-- `proposal.md`
-- `specs/`
-- `design.md`
-- `tasks.md`
+- `proposal.md` — Always
+- `specs/` — Always
+- `ui-design.md` — Only for frontend projects (between specs and design)
+- `design.md` — Always
+- `tasks.md` — Always
 
 ### Config Check
 
 Before generating artifacts, check the project configuration in `.sflow/config.json` (if it exists):
-- Generate artifacts in the configured order (default: proposal → specs → design → tasks)
+- Generate artifacts in the configured order (default: proposal → specs → [ui-design] → design → tasks)
 - Skip any artifacts listed in the `artifacts.skip` configuration
 
 Use OpenSpec-style artifact roles:
 
 - `proposal.md` defines why and scope
 - `specs/` define required behavior
+- `ui-design.md` defines UI aesthetics direction, design tokens, and anti-pattern checklist
 - `design.md` defines how and why at the architecture level
 - `tasks.md` defines dependency-aware implementation steps
 
@@ -65,6 +98,7 @@ Must clearly state:
 - what changes
 - capabilities affected
 - impact areas
+- **must declare if this is a frontend project** (for routing to ui-design phase)
 
 ### `specs/`
 
@@ -72,9 +106,56 @@ Must be testable.
 
 Every requirement should be written so that a later test can prove it.
 
+### `ui-design.md` (Frontend Projects Only)
+
+Generated between `specs/` and `design.md`. Must include:
+
+```markdown
+# UI Design — <change-title>
+
+## Visual Direction
+- **Style**: <e.g., minimal / glassmorphism / brutalist / clean professional>
+- **Reference products**: <1-3 real products for inspiration>
+- **Key emotion**: <what users should feel>
+
+## Design Tokens
+### Color System (OKLCH format preferred)
+- Primary: <value>
+- Secondary: <value>
+- Background: <value>
+- Text: <value>
+- Accent/Success/Error/Warning: <values>
+
+### Typography
+- Headings: <font-family, weights>
+- Body: <font-family, weights>
+- Scale: <clamp() or step values>
+
+### Spacing
+- Base unit: <e.g., 4px / 8px>
+- Scale: <values>
+
+### Border Radius / Shadows
+- Values for different component levels
+
+## Component Architecture (UI Tree)
+- List key visual components and their hierarchy
+- Reference existing design system components to reuse
+
+## Anti-AI-Slop Checklist
+- [ ] No hardcoded colors — all from CSS variables
+- [ ] No hardcoded font sizes — all from type scale tokens
+- [ ] Border-left decorations are NOT used
+- [ ] Hash tags (#) are NOT used for labels/tags
+- [ ] Loading states don't flash empty elements
+- [ ] All interactive states defined (hover, focus, active, disabled, loading)
+```
+
 ### `design.md`
 
 Must explain architectural decisions and trade-offs, not line-by-line implementation.
+
+For frontend projects, design.md must reference `ui-design.md` tokens and component decisions.
 
 ### `tasks.md`
 
@@ -120,6 +201,7 @@ The artifact set must be internally aligned:
 
 - `proposal.md` sets scope
 - `specs/` define observable behavior
+- `ui-design.md` (frontend) defines visual decisions and tokens
 - `design.md` explains the chosen technical shape
 - `tasks.md` converts that shape into execution order
 
@@ -137,6 +219,7 @@ After creating or modifying any artifact, run these validation checks. Do not ha
 - [ ] Has `## Impact` section listing affected code areas, APIs, and dependencies
 - [ ] Has `## Capabilities` section (New Capabilities and Modified Capabilities)
 - [ ] No TBD/TODO/placeholder language in any section
+- [ ] **Frontend**: declares frontend scope in capabilities
 
 ### `specs/` Validation
 
@@ -146,6 +229,15 @@ After creating or modifying any artifact, run these validation checks. Do not ha
 - [ ] Each scenario is independently testable
 - [ ] No requirement contradicts another requirement
 
+### `ui-design.md` Validation (Frontend Only)
+
+- [ ] Color system defined (primary, background, text minimum)
+- [ ] Typography defined (headings + body minimum)
+- [ ] Spacing scale defined
+- [ ] Anti-AI-slop checklist completed
+- [ ] No hardcoded color/typography values in planned components
+- [ ] Design tokens referenceable by CSS variables
+
 ### `design.md` Validation
 
 - [ ] Has `## Context` section describing current state, constraints, stakeholders
@@ -153,6 +245,7 @@ After creating or modifying any artifact, run these validation checks. Do not ha
 - [ ] Has `## Decisions` section with at least one decision (Choice + Rationale + Alternatives)
 - [ ] Has `## Risks And Trade-Offs` section
 - [ ] Architectural decisions are justified with trade-off analysis
+- [ ] **Frontend**: references ui-design.md tokens and component architecture
 
 ### `tasks.md` Validation
 
@@ -186,7 +279,7 @@ Before handing off:
 - [ ] Verify File Structure — every file referenced in any task appears in the File Structure section
 - [ ] Verify Interfaces — every cross-batch dependency is declared in the Interfaces section
 - [ ] Verify zero placeholders — grep for TBD, TODO, "implement later", "figure out", "add appropriate"
-- [ ] Verify task granularity — each step is 2-5 min, atomic, concretely actionable
+- [ ] **Frontend**: Verify ui-design.md exists and is referenced by design.md
 
 ## DP-2: Artifact Review Gate
 
@@ -195,6 +288,7 @@ Before handing off to `contract-builder`, present a summary of all artifacts to 
 1. **Summarize each artifact** in 2-3 sentences:
    - `proposal.md`: what problem, what changes, scope boundaries
    - `specs/`: key requirements and scenarios
+   - `ui-design.md` (frontend): visual direction, design tokens
    - `design.md`: architecture decisions and trade-offs
    - `tasks.md`: batch breakdown and dependency chain
 
@@ -217,10 +311,13 @@ Do not start implementation after writing planning artifacts.
 
 Once the artifacts are stable, validated, and DP-2 is recorded, hand off to `contract-builder`.
 
+**For frontend projects**: After ui-design.md is approved, set `.sflow/state.json` state to `ui-design` if specs are done but design/tasks are not yet started. This will cause the Artifact Preflight Gate to route through the ui-design state properly.
+
 ## Output Standard
 
 When handing off, report:
 
 1. which artifacts were created or modified
 2. validation results (pass/fail for each artifact)
-3. a one-sentence summary of what the change does
+3. whether this is a frontend project (ui-design.md generated)
+4. a one-sentence summary of what the change does

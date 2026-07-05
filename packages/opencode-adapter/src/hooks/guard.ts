@@ -11,6 +11,7 @@
 import type { HookHandler, HookContext, HookResult } from "./types.js";
 import { fileExists, readFile, readJsonFile, directoryExists, isContractStale, getContractStalenessReport } from "@opencode-sflow/shared";
 import { sharedValidator, HOTFIX_UPGRADE_THRESHOLDS, TWEAK_UPGRADE_THRESHOLDS } from "@opencode-sflow/core";
+import { checkArtifactPreflight, findPreflightState } from "../features/artifact-preflight.js";
 
 const SOURCE_CODE_PATTERNS = /\.(ts|js|tsx|jsx|mjs|cjs|mts|cts|py|java|kt|rs|go|rb|php|c|cpp|h|hpp|cs|swift|vue|svelte|css|scss|less)$/i;
 const ARTIFACT_NAMES = new Set(['proposal.md', 'design.md', 'tasks.md', 'execution-contract.md']);
@@ -88,34 +89,10 @@ async function checkArtifactAndPhaseConsistency(changeDir: string): Promise<Hook
   const currentState = stateData?.state || "exploring";
   const mode = stateData?.mode;
 
-  // Phase 1: Basic artifact existence by state
-  const missingArtifacts: string[] = [];
-
-  if (currentState !== "exploring" && currentState !== "abandoned") {
-    const proposalExists = await fileExists(`${changeDir}/proposal.md`);
-    if (!proposalExists) {
-      missingArtifacts.push("proposal.md");
-    }
-  }
-  if (currentState === "bridging" || currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") {
-    const designExists = await fileExists(`${changeDir}/design.md`);
-    if (!designExists) missingArtifacts.push("design.md");
-    const tasksExists = await fileExists(`${changeDir}/tasks.md`);
-    if (!tasksExists) missingArtifacts.push("tasks.md");
-    const specsExists = await directoryExists(`${changeDir}/specs`);
-    if (!specsExists) missingArtifacts.push("specs/");
-  }
-  if (currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") {
-    const contractExists = await fileExists(`${changeDir}/execution-contract.md`);
-    if (!contractExists) missingArtifacts.push("execution-contract.md");
-  }
-
-  if (missingArtifacts.length > 0) {
-    return {
-      success: false,
-      block: true,
-      blockReason: `Missing required artifacts for state "${currentState}": ${missingArtifacts.join(", ")}`,
-    };
+    // Phase 1: Use shared checkArtifactPreflight
+  const pf = await checkArtifactPreflight({ changeDir, targetState: currentState, fileExists, directoryExists, readJson: readJsonFile });
+  if (!pf.passed) {
+    return { success: false, block: true, blockReason: 'Missing required artifacts: ' + pf.missing.join(', ') };
   }
 
   // Phase 2: Full mode consistency (reverse check — are artifacts missing that state implies?)
@@ -330,7 +307,14 @@ async function checkFileWriteGuard(changeDir: string, data?: Record<string, unkn
         };
       }
     }
+
+    // File Boundary Control — applies during executing AND debugging
+    if (currentState === 'executing' || currentState === 'debugging') {
+      const br = await checkFileBoundary(changeDir, filePath);
+      if (br) return br;
+    }
   }
+
 
   // Terminal states block all writes (including artifacts)
   if (currentState === 'closing' || currentState === 'abandoned') {
@@ -347,6 +331,98 @@ async function checkFileWriteGuard(changeDir: string, data?: Record<string, unkn
  * Debugging state check — blocks non-debugging operations from non-debugging agents.
  * Uses both action string (from tool.execute.before) and agent name (from context.data).
  */
+
+
+/**
+ * Parse file boundary patterns from execution-contract.md.
+ * Supports both XML-style (<write_files>...</write_files>) and
+ * YAML-style (write_files:\n  - path/to/file) formats.
+ */
+function parseFileBoundaryPatterns(contractContent: string): string[] {
+  const pats: string[] = [];
+
+  // XML-style: <write_files>...</write_files>
+  for (const m of contractContent.matchAll(/<write_files>([\s\S]*?)<\/write_files>/g)) {
+    for (const l of (m[1] || '').split('\n')) {
+      const t = l.trim();
+      if (t && !t.startsWith('<')) pats.push(t);
+    }
+  }
+
+  // YAML-style: write_files:\n  - path/to/file
+  const yamlMatch = contractContent.match(/write_files:\s*\n([\s\S]*?)(?=\n\S|\n*$)/);
+  if (yamlMatch && yamlMatch[1]) {
+    for (const l of yamlMatch[1].split('\n')) {
+      const t = l.replace(/^[-\s]*/, '').trim();
+      if (t && !t.startsWith('#') && !t.startsWith('write_files')) pats.push(t);
+    }
+  }
+
+  // Inline list: write_files: [path1, path2]
+  const inlineMatch = contractContent.match(/write_files:\s*\[([^\]]+)\]/);
+  if (inlineMatch && inlineMatch[1]) {
+    for (const p of inlineMatch[1].split(',')) {
+      const t = p.trim().replace(/['"]/g, '');
+      if (t) pats.push(t);
+    }
+  }
+
+  // Legacy format: "write_files:" line followed by "- path" lines with no YAML structure
+  // (fallback for edge cases the above patterns miss)
+  if (pats.length === 0) {
+    const ms = contractContent.match(/write_files:[\s\S]*?(?=\n\w|$)/);
+    if (ms) {
+      for (const l of ms[0].split('\n')) {
+        const t = l.replace(/^- /, '').trim();
+        if (t && !t.startsWith('write_files')) pats.push(t);
+      }
+    }
+  }
+
+  return pats;
+}
+
+/**
+ * Check if a file path matches any allowed boundary pattern.
+ */
+function matchesBoundary(filePath: string, patterns: string[]): boolean {
+  const rel = filePath.replace(/\\/g, '/').toLowerCase();
+  return patterns.some(p => {
+    const np = p.replace(/\\/g, '/').toLowerCase();
+    if (rel === np || rel.endsWith('/' + np)) return true;
+    if (np.endsWith('/*') && rel.startsWith(np.slice(0, -1))) return true;
+    if (np.endsWith('/') && rel.startsWith(np)) return true;
+    // Glob: src/**/*.ts
+    if (np.includes('*')) {
+      const escaped = np.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*');
+      try {
+        if (new RegExp('^' + escaped + '$').test(rel)) return true;
+      } catch { /* skip invalid regex */ }
+    }
+    return false;
+  });
+}
+
+/**
+ * File Boundary Control - validates source file writes against task write_files.
+ * Runs in executing AND debugging states.
+ */
+async function checkFileBoundary(changeDir: string, filePath: string): Promise<HookResult | null> {
+  const cc = await readFile(changeDir + '/execution-contract.md');
+  if (!cc) return null;
+
+  const pats = parseFileBoundaryPatterns(cc);
+  if (pats.length === 0) return null;
+
+  if (!matchesBoundary(filePath, pats)) {
+    return {
+      success: false, block: true,
+      blockReason: '[SFLOW] File Boundary: ' + filePath + ' not in write_files. Allowed boundaries: ' + pats.join(', '),
+    };
+  }
+  return null;
+}
+
 async function checkDebuggingState(changeDir: string, action?: string, data?: Record<string, unknown>): Promise<HookResult> {
   if (!changeDir) return { success: true };
 

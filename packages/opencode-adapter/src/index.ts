@@ -33,6 +33,8 @@ export type {
   ModelProvenance, ModelResolutionResult,
 } from './agents/index.js';
 
+import { createWorkflowRouterTool } from './tools/index.js';
+
 export {
   createWorkflowRouterTool, createContractValidatorTool, createArtifactInspectorTool,
 } from './tools/index.js';
@@ -109,17 +111,18 @@ function formatToolError(msg: string): { title: string; output: string } {
 
 // ─── Tool definitions using @opencode-ai/plugin ToolDefinition format ──────────
 
+
+
 function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
   return {
     workflow_router: {
-      description: 'Detect current workflow state and route to the appropriate agent',
+      description: 'Detect current workflow state and route to the appropriate agent. Supports GO.md-style intent matching.',
       args: {
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
       execute: async (args, context) => {
-        const resolvedDir = context.directory || '';
-        const result = await executeWorkflowRouter(resolvedDir);
-        return { title: 'Workflow Router', output: JSON.stringify(result, null, 2) };
+        
+        return createWorkflowRouterTool().execute({ ...args, changeDir: context.directory || '' }, context);
       },
     },
 
@@ -535,6 +538,7 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
 
 // ─── Tool execution logic ─────────────────────────────────────────────────────
 
+// NOTE: Full implementation in tools/workflow-router.ts
 async function executeWorkflowRouter(changeDir: string) {
   const artifacts = {
     proposal: await sflowFileExists(`${changeDir}/proposal.md`),

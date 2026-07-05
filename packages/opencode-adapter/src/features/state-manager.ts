@@ -1,6 +1,6 @@
 import type { FeatureConfig, FeatureResult } from "./types.js";
 import { createWorkflowManager } from "./workflow-manager.js";
-import { fileExists, readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, readFile, directoryExists, isContractStale as checkContractStale } from "@opencode-sflow/shared";
+import { fileExists, readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, readFile, directoryExists, isContractStale as checkContractStale, writeFile } from "@opencode-sflow/shared";
 
 const BOULDER_STATE_FILE = ".sflow/boulder-state.json";
 
@@ -17,6 +17,258 @@ export async function simpleHash(content: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
 }
 
+// ─── LESSONS.md Types ──────────────────────────────────────────────────────
+
+export interface LessonEntry {
+  id?: string;
+  title: string;
+  tags: string[];
+  changeId?: string;
+  taskId?: string;
+  firstSeen: string;
+  lastReviewed: string;
+  stack?: string;
+  status: 'active' | 'superseded' | 'deprecated';
+  supersededBy?: string;
+  keywords: string[];
+  problem: string;
+  attempted: string;
+  whyFailed: string;
+  recommendation: string;
+  reevaluateWhen?: string;
+}
+
+export interface LessonHit {
+  entry: LessonEntry;
+  matchedKeywords: string[];
+}
+
+// ─── PROGRESS.md Types ─────────────────────────────────────────────────────
+
+export interface ExcludedApproach {
+  id: string;
+  approach: string;
+  reason: string;
+  failCount: number;
+}
+
+export interface ProgressData {
+  changeId?: string;
+  taskId?: string;
+  pausedAt: string;
+  trigger: string;
+  completedSteps: string[];
+  currentState: string;
+  nextStep?: string;
+  blockedBy?: string;
+  excludedApproaches: ExcludedApproach[];
+  pendingAssumptions: string[];
+  clues: string[];
+}
+
+// ─── LESSONS.md Operations ──────────────────────────────────────────────────
+
+export function parseLessonsMd(content: string): LessonEntry[] {
+  const entries: LessonEntry[] = [];
+  const blocks = content.split(/\n### /);
+  for (const block of blocks) {
+    if (!block.trim()) continue;
+    const idMatch = block.match(/^L-(\d+)/);
+    const titleMatch = block.match(/^L-\d+\s*·\s*\[([^\]]*)\]\s*(.+)/);
+    if (!titleMatch) continue;
+    const tags = (titleMatch[1] || '').split(',').map(t => t.trim());
+    const title = (titleMatch[2] || '').trim();
+    const keywordsMatch = block.match(/\*\*关键词\*\*:\s*(.+)/);
+    const problemMatch = block.match(/\*\*问题场景\*\*\n([\s\S]*?)(?=\*\*当时尝试)/);
+    const attemptedMatch = block.match(/\*\*当时尝试的方案\*\*\n([\s\S]*?)(?=\*\*为什么不行)/);
+    const whyFailedMatch = block.match(/\*\*为什么不行\*\*\n([\s\S]*?)(?=\*\*当前推荐)/);
+    const recMatch = block.match(/\*\*当前推荐做法\*\*\n([\s\S]*?)(?=\*\*何时可重新)/);
+    const reevalMatch = block.match(/\*\*何时可重新评估\*\*\n([\s\S]*?)$/);
+    const statusMatch = block.match(/\*\*状态\*\*:\s*(.+)/);
+    const stackMatch = block.match(/\*\*适用栈\*\*:\s*(.+)/);
+    const firstSeenMatch = block.match(/\*\*首发\*\*:\s*(.+)/);
+    const keywords = keywordsMatch ? (keywordsMatch[1] || '').split(/\s+/).filter(Boolean) : [];
+    const id = 'L-' + (idMatch ? (idMatch[1] || String(entries.length + 1)) : String(entries.length + 1));
+    entries.push({
+      id,
+      title,
+      tags,
+      keywords,
+      status: (statusMatch ? (statusMatch[1] || '').trim() as LessonEntry['status'] : undefined) || 'active',
+      stack: stackMatch ? (stackMatch[1] || '').trim() : undefined,
+      firstSeen: firstSeenMatch ? (firstSeenMatch[1] || '').trim() : new Date().toISOString(),
+      lastReviewed: new Date().toISOString(),
+      problem: problemMatch ? (problemMatch[1] || '').trim() : '',
+      attempted: attemptedMatch ? (attemptedMatch[1] || '').trim() : '',
+      whyFailed: whyFailedMatch ? (whyFailedMatch[1] || '').trim() : '',
+      recommendation: recMatch ? (recMatch[1] || '').trim() : '',
+      reevaluateWhen: reevalMatch ? (reevalMatch[1] || '').trim() : '',
+    });
+  }
+  return entries;
+}
+
+export function formatLessonEntry(index: number, entry: LessonEntry): string {
+  const lines = [
+    '### L-' + String(index).padStart(3, '0') + ' · [' + entry.tags.join(', ') + '] ' + entry.title,
+    '',
+    '- **首发**: ' + (entry.changeId || '') + ' · ' + (entry.taskId || '') + ' · ' + entry.firstSeen,
+    '- **上次复核**: ' + entry.lastReviewed,
+    '- **适用栈**: ' + (entry.stack || ''),
+    '- **状态**: ' + entry.status + (entry.supersededBy ? ' superseded-by:' + entry.supersededBy : ''),
+    '- **关键词**: ' + entry.keywords.join(' '),
+    '',
+    '**问题场景**',
+    entry.problem,
+    '',
+    '**当时尝试的方案**',
+    entry.attempted,
+    '',
+    '**为什么不行**',
+    entry.whyFailed,
+    '',
+    '**当前推荐做法**',
+    entry.recommendation,
+    '',
+    '**何时可重新评估**',
+    entry.reevaluateWhen || '无需重新评估',
+  ];
+  return lines.join('\n');
+}
+
+export async function searchLessonsInFile(changeDir: string, keywords: string[]): Promise<LessonHit[]> {
+  const lessonsPath = changeDir + '/.sflow/lessons.md';
+  const content = await readFile(lessonsPath);
+  if (!content) return [];
+  const entries = parseLessonsMd(content);
+  const hits: LessonHit[] = [];
+  const lowerKeywords = keywords.map(k => k.toLowerCase());
+  for (const entry of entries) {
+    if (entry.status !== 'active') continue;
+    const matched = lowerKeywords.filter(kw =>
+      entry.keywords.some(ek => ek.toLowerCase().includes(kw) || kw.includes(ek.toLowerCase())) ||
+      entry.title.toLowerCase().includes(kw) ||
+      entry.tags.some(t => t.toLowerCase().includes(kw)),
+    );
+    if (matched.length > 0) {
+      hits.push({ entry, matchedKeywords: matched });
+    }
+  }
+  return hits;
+}
+
+export async function writeProgressFile(changeDir: string, data: ProgressData): Promise<void> {
+  const path = changeDir + '/.sflow/progress.md';
+  const lines: string[] = [];
+  lines.push('# PROGRESS: ' + (data.taskId || 'Unknown'), '');
+  if (data.changeId) lines.push('- **Change ID**: ' + data.changeId);
+  if (data.taskId) lines.push('- **Task ID**: ' + data.taskId);
+  lines.push('- **暂停时间**: ' + data.pausedAt);
+  lines.push('- **触发清窗的信号**: ' + data.trigger);
+  lines.push('', '---', '', '## 已完成的子步骤', '');
+  for (const step of data.completedSteps) {
+    lines.push('- [x] ' + step);
+  }
+  lines.push('', '## 当前正在做（清窗那一刻的状态）', '');
+  lines.push(data.currentState);
+  if (data.nextStep) lines.push('', '**下一步**: ' + data.nextStep);
+  if (data.blockedBy) lines.push('', '**阻塞**: ' + data.blockedBy);
+  lines.push('', '## 已排除的方案（反重复关键）', '');
+  lines.push('> 接手的 AI 必须读这一段。任何想再尝试这些方案的，必须先解释"本次与上次的差异"。', '');
+  lines.push('', '| # | 方案 | 排除理由 | 失败次数 |');
+  lines.push('|---|------|----------|----------|');
+  for (const ex of data.excludedApproaches) {
+    lines.push('| ' + ex.id + ' | ' + ex.approach + ' | ' + ex.reason + ' | ' + ex.failCount + ' |');
+  }
+  lines.push('', '## 待确认的假设', '');
+  for (const a of data.pendingAssumptions) {
+    lines.push('- ' + a);
+  }
+  lines.push('', '## 临时记下的线索 / 文件位置', '');
+  for (const c of data.clues) {
+    lines.push('- ' + c);
+  }
+  lines.push('', '---', '', '## 恢复指引（给下一会话的 AI）', '');
+  lines.push('下一会话开始时，**第一步**：', '');
+  lines.push('1. 读完本文件「已排除的方案」');
+  lines.push('2. 检查接下来计划的方案是否撞车');
+  lines.push('3. 如果不撞车，从「当前正在做」的下一步起步');
+  lines.push('4. 完成本任务后，删除本 PROGRESS.md（产出迁移到 SUMMARY.md）');
+  lines.push('', '> PROGRESS.md 是**临时**文件，任务完成后必须清理。');
+  await ensureDir(changeDir + '/.sflow');
+  const { writeFile: fsWrite } = await import('fs/promises');
+  await fsWrite(path, lines.join('\n'), 'utf-8');
+}
+
+export async function readProgressFile(changeDir: string): Promise<ProgressData | null> {
+  const path = changeDir + '/.sflow/progress.md';
+  const content = await readFile(path);
+  if (!content) return null;
+  const data: ProgressData = {
+    pausedAt: '',
+    trigger: '',
+    completedSteps: [],
+    currentState: '',
+    excludedApproaches: [],
+    pendingAssumptions: [],
+    clues: [],
+  };
+  const taskIdMatch = content.match(/PROGRESS:\s*(\S+)/);
+  if (taskIdMatch) data.taskId = taskIdMatch[1] || '';
+  const changeIdMatch = content.match(/\*\*Change ID\*\*:\s*(\S+)/);
+  if (changeIdMatch) data.changeId = changeIdMatch[1] || '';
+  const pauseMatch = content.match(/\*\*暂停时间\*\*:\s*(.+)/);
+  if (pauseMatch) data.pausedAt = pauseMatch[1] || '';
+  const triggerMatch = content.match(/\*\*触发清窗的信号\*\*:\s*(.+)/);
+  if (triggerMatch) data.trigger = triggerMatch[1] || '';
+  const stateMatch = content.match(/## 当前正在做[^]*?\n([^#]+)/);
+  if (stateMatch) data.currentState = (stateMatch[1] || '').trim();
+  const nextMatch = content.match(/\*\*下一步\*\*:\s*(.+)/);
+  if (nextMatch) data.nextStep = (nextMatch[1] || '').trim();
+  const blockedMatch = content.match(/\*\*阻塞\*\*:\s*(.+)/);
+  if (blockedMatch) data.blockedBy = (blockedMatch[1] || '').trim();
+  // Parse excluded approaches table
+  const tableMatch = content.match(/\| (\S+) \| (.+?) \| (.+?) \| (\d+) \|/g);
+  if (tableMatch) {
+    for (const row of tableMatch) {
+      const parts = row.match(/\| (\S+) \| (.+?) \| (.+?) \| (\d+) \|/);
+      if (parts) {
+        data.excludedApproaches.push({ id: parts[1] || '', approach: parts[2] || '', reason: parts[3] || '', failCount: parseInt(parts[4] || '0', 10) });
+      }
+    }
+  }
+  // Parse assumptions
+  const assumptionsSection = content.match(/## 待确认的假设[^]*?\n((?:- .+\n?)*)/);
+  if (assumptionsSection && assumptionsSection[1]) {
+    data.pendingAssumptions = assumptionsSection[1].split('\n').filter(l => l.startsWith('- ')).map(l => l.slice(2));
+  }
+  // Parse clues
+  const cluesSection = content.match(/## 临时记下的线索[^]*?\n((?:- .+\n?)*)/);
+  if (cluesSection && cluesSection[1]) {
+    data.clues = cluesSection[1].split('\n').filter(l => l.startsWith('- ')).map(l => l.slice(2));
+  }
+  return data;
+}
+
+export async function detectProgressAntiRepeat(changeDir: string, plannedApproach: string): Promise<{ blocked: boolean; matched: ExcludedApproach | null; reason?: string }> {
+  const progress = await readProgressFile(changeDir);
+  if (!progress || progress.excludedApproaches.length === 0) {
+    return { blocked: false, matched: null };
+  }
+  const lowerPlanned = plannedApproach.toLowerCase();
+  for (const ex of progress.excludedApproaches) {
+    if (lowerPlanned.includes(ex.approach.toLowerCase()) || ex.approach.toLowerCase().includes(lowerPlanned)) {
+      return {
+        blocked: true,
+        matched: ex,
+        reason: 'Approach matches excluded approach ' + ex.id + ' ("' + ex.approach + '"). Previous failure reason: ' + ex.reason + '. Must explain difference from previous attempt before retrying.',
+      };
+    }
+  }
+  return { blocked: false, matched: null };
+}
+
+
 /**
  * Canonical detectStateMismatch - single source of truth for state/artifact consistency.
  * Used by session.ts and state-manager.restoreState.
@@ -27,6 +279,7 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
   const ht = await fileExists(changeDir + '/tasks.md');
   const hsp = await directoryExists(changeDir + '/specs');
   const hc = await fileExists(changeDir + '/execution-contract.md');
+  const hui = await fileExists(changeDir + '/ui-design.md');
   const pc = hp ? await readFile(changeDir + '/proposal.md') : null;
   const tc = ht ? await readFile(changeDir + '/tasks.md') : null;
   const inc = tc ? tc.split('\n').filter((l: string) => l.match(/^-\s*\[\s\]/)).length : 0;
@@ -41,11 +294,18 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
     }
   }
   if (currentState === 'exploring' && hp && pc && pc.trim().length > 100) return 'specifying';
-  if (currentState === 'specifying' && hd && ht && hsp) return 'bridging';
+  if (currentState === 'specifying' && hd && ht && hsp) {
+    // If frontend project and ui-design.md is expected but missing → go to ui-design
+    const sd = await readJsonFile<Record<string, unknown>>(changeDir + '/.sflow/state.json').catch(() => null);
+    if (sd?.isFrontend && !hui) return 'ui-design';
+    return 'bridging';
+  }
+  if (currentState === 'ui-design' && hui) return 'bridging';
   if (currentState === 'bridging' && hc) return 'approved-for-build';
   if ((currentState === 'approved-for-build' || currentState === 'executing') && allDone) return 'closing';
   if (currentState === 'specifying' && !hp) return 'exploring';
   if (currentState === 'bridging' && (!hd || !ht || !hsp)) return 'specifying';
+  if (currentState === 'ui-design' && (!hd || !ht || !hsp)) return 'specifying';
   if (currentState === 'approved-for-build' && !hc) return 'bridging';
   if (currentState === 'executing' && !hc) return 'bridging';
   if (currentState === 'debugging' && !hc) return 'bridging';
@@ -294,6 +554,102 @@ export function createStateManager(
           success: false,
           error: error instanceof Error ? error.message : String(error),
         };
+      }
+    },
+
+    // ─── LESSONS.md Methods ────────────────────────────────────────────────
+
+    async grepLessons(changeDir: string, keywords: string[]): Promise<FeatureResult> {
+      try {
+        const hits = await searchLessonsInFile(changeDir, keywords);
+        return { success: true, data: { hits } };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+
+    async addLesson(changeDir: string, entry: LessonEntry): Promise<FeatureResult> {
+      try {
+        const lessonsPath = changeDir + '/.sflow/lessons.md';
+        const existing = await readFile(lessonsPath);
+        const entries = existing ? parseLessonsMd(existing) : [];
+        const nextIndex = entries.length + 1;
+        const formatted = '\n\n' + formatLessonEntry(nextIndex, { ...entry, firstSeen: entry.firstSeen || new Date().toISOString(), lastReviewed: new Date().toISOString() });
+        // If file doesn't exist yet, write with header
+        if (!existing) {
+          const header = '# LESSONS — 跨任务失败知识库\n\n';
+          await ensureDir(changeDir + '/.sflow');
+          const { writeFile: fsWrite } = await import('fs/promises');
+          await fsWrite(lessonsPath, header + formatted.trim(), 'utf-8');
+        } else {
+          const { writeFile: fsWrite } = await import('fs/promises');
+          await fsWrite(lessonsPath, existing.replace(/\n*$/, '') + formatted, 'utf-8');
+        }
+        return { success: true, data: { added: true, id: 'L-' + String(nextIndex).padStart(3, '0'), timestamp: new Date().toISOString() } };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+
+    // ─── PROGRESS.md Methods ───────────────────────────────────────────────
+
+    async writeProgress(changeDir: string, data: ProgressData): Promise<FeatureResult> {
+      try {
+        await writeProgressFile(changeDir, data);
+        return { success: true, data: { written: true, taskId: data.taskId, timestamp: new Date().toISOString() } };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+
+    async readProgress(changeDir: string): Promise<FeatureResult> {
+      try {
+        const data = await readProgressFile(changeDir);
+        return { success: true, data: data || null };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+
+    async checkProgressAntiRepeat(changeDir: string, plannedApproach: string): Promise<FeatureResult> {
+      try {
+        const result = await detectProgressAntiRepeat(changeDir, plannedApproach);
+        return { success: true, data: result };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+
+    async writeProgressSnapshot(changeDir: string, data: { taskId?: string; currentState: string; nextStep?: string; excludedApproaches: ExcludedApproach[] }): Promise<FeatureResult> {
+      try {
+        const progressData: ProgressData = {
+          taskId: data.taskId,
+          pausedAt: new Date().toISOString(),
+          trigger: 'Manual snapshot',
+          completedSteps: [],
+          currentState: data.currentState,
+          nextStep: data.nextStep,
+          excludedApproaches: data.excludedApproaches,
+          pendingAssumptions: [],
+          clues: [],
+        };
+        await writeProgressFile(changeDir, progressData);
+        return { success: true, data: { written: true, timestamp: new Date().toISOString() } };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+
+    async clearProgressSnapshot(changeDir: string): Promise<FeatureResult> {
+      try {
+        const { unlink } = await import('fs/promises');
+        await unlink(changeDir + '/.sflow/progress.md');
+        return { success: true, data: { cleared: true, timestamp: new Date().toISOString() } };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        // File not found is not an error
+        if (msg.includes('ENOENT')) return { success: true, data: { cleared: true } };
+        return { success: false, error: msg };
       }
     },
 

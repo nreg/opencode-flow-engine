@@ -4,11 +4,61 @@
 
 import type { FeatureConfig, FeatureResult } from './types.js';
 import { isValidTransition } from '@opencode-sflow/core';
-import { readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, stateFileMutex, fileExists, directoryExists, readFile } from '@opencode-sflow/shared';
+import { readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, stateFileMutex, fileExists, directoryExists, readFile, listFiles } from '@opencode-sflow/shared';
+import { detectStateMismatch } from './state-manager.js';
 
 const SFLOW_DIR = '.sflow';
 const STATE_FILE = `${SFLOW_DIR}/state.json`;
 const ARCHIVE_DIR = `${SFLOW_DIR}/archive`;
+
+/**
+ * Detect if the project at changeDir is a frontend project.
+ * Checks: package.json dependencies, directory structure, config files.
+ */
+export async function detectFrontend(changeDir: string): Promise<boolean> {
+  // 1. Check package.json for frontend frameworks
+  const pkgJson = await readJsonFile<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(changeDir + '/package.json').catch(() => null);
+  if (pkgJson) {
+    const allDeps = { ...pkgJson.dependencies, ...pkgJson.devDependencies };
+    const frontendIndicators = [
+      'react', 'vue', 'next', 'nuxt', 'svelte', 'angular', 'solid-js',
+      'sass', 'less', 'tailwindcss', 'postcss', 'styled-components',
+      'emotion', 'antd', 'element-ui', 'vite', '@vitejs',
+    ];
+    for (const dep of Object.keys(allDeps)) {
+      for (const indicator of frontendIndicators) {
+        if (dep.includes(indicator) || indicator.includes(dep)) return true;
+      }
+    }
+  }
+
+  // 2. Check for frontend directory structure
+  const frontendDirs = ['src/pages', 'src/components', 'src/views', 'src/router', 'pages', 'components', 'views'];
+  for (const dir of frontendDirs) {
+    if (await directoryExists(changeDir + '/' + dir)) return true;
+  }
+
+  // 3. Check for frontend config files
+  const configFiles = ['vite.config.ts', 'vite.config.js', 'next.config.js', 'next.config.ts', 'nuxt.config.ts', 'vue.config.js', 'angular.json', 'svelte.config.js', 'tailwind.config.js', 'tailwind.config.ts'];
+  for (const cfg of configFiles) {
+    if (await fileExists(changeDir + '/' + cfg)) return true;
+  }
+
+  return false;
+}
+
+/** Automatically detect frontend and update state.json if needed */
+export async function autoDetectFrontendAndUpdateState(changeDir: string): Promise<void> {
+  const statePath = changeDir + '/' + STATE_FILE;
+  const existing = await readJsonFile<Record<string, unknown>>(statePath);
+  if (!existing) return;
+  const isFrontend = await detectFrontend(changeDir);
+  if (existing.isFrontend !== isFrontend) {
+    existing.isFrontend = isFrontend;
+    existing.frontendDetectedAt = new Date().toISOString();
+    await writeJsonFile(statePath, existing);
+  }
+}
 
 export function createWorkflowManager(config: FeatureConfig = { enabled: true }) {
   return {
@@ -115,7 +165,6 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
     },
 
         async inferStateFromArtifacts(changeDir: string): Promise<{ state: string; mode: string }> {
-      const { detectStateMismatch } = await import('./state-manager.js');
       const state = await detectStateMismatch(changeDir, 'exploring');
       const hasProposal = await fileExists(changeDir + '/proposal.md');
       const hasContract = await fileExists(changeDir + '/execution-contract.md');
@@ -123,7 +172,19 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       const taskLines = tasksContent ? tasksContent.split('\\n').filter((line: string) => line.match(/^-\\s*\\[.\\]\\s+/)) : [];
       const changedFileCount = await countChangedFiles(changeDir);
       const mode = inferModeFromArtifacts(hasProposal, hasContract, changedFileCount, taskLines.length);
+
+      // Auto-detect frontend and update state if applicable
+      await autoDetectFrontendAndUpdateState(changeDir).catch(() => {});
+
       return { state, mode };
+    },
+
+    /** Get auto-detected frontend status */
+    async isFrontend(changeDir: string): Promise<boolean> {
+      const state = await readJsonFile<{ isFrontend?: boolean }>(changeDir + '/' + STATE_FILE).catch(() => null);
+      if (state?.isFrontend !== undefined) return state.isFrontend;
+      const detected = await detectFrontend(changeDir);
+      return detected;
     },
   };
 }
@@ -160,10 +221,12 @@ async function initializeState(changeDir: string): Promise<void> {
   }
 
   const inferred = await createWorkflowManager().inferStateFromArtifacts(changeDir);
+  const isFrontend = await detectFrontend(changeDir);
   await ensureDir(`${changeDir}/${SFLOW_DIR}`);
   await writeJsonFile(stateFile, {
     state: inferred.state,
     mode: inferred.mode,
+    isFrontend,
     artifacts_hash: '',
     contract_hash: '',
     batches_completed: 0,
@@ -185,6 +248,7 @@ async function readStateFile(changeDir: string): Promise<{
   dp_0_confirmed: boolean;
   contractApproved: boolean;
   verificationStatus: string;
+  isFrontend?: boolean;
   [key: string]: unknown;
 }> {
   const state = await readJsonFile<{
@@ -197,6 +261,7 @@ async function readStateFile(changeDir: string): Promise<{
     dp_0_confirmed: boolean;
     contractApproved: boolean;
     verificationStatus: string;
+    isFrontend?: boolean;
     [key: string]: unknown;
   }>(
     `${changeDir}/${STATE_FILE}`,
@@ -211,6 +276,7 @@ async function readStateFile(changeDir: string): Promise<{
     dp_0_confirmed: false,
     contractApproved: false,
     verificationStatus: 'pending',
+    isFrontend: false,
   };
 }
 
