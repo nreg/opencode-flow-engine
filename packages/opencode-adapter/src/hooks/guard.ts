@@ -89,33 +89,32 @@ async function checkArtifactAndPhaseConsistency(changeDir: string): Promise<Hook
   const currentState = stateData?.state || "exploring";
   const mode = stateData?.mode;
 
-    // Phase 1: Use shared checkArtifactPreflight
+    // Phase 1: Use shared checkArtifactPreflight — returns existence map to avoid redundant I/O
   const pf = await checkArtifactPreflight({ changeDir, targetState: currentState, fileExists, directoryExists, readJson: readJsonFile });
   if (!pf.passed) {
     return { success: false, block: true, blockReason: 'Missing required artifacts: ' + pf.missing.join(', ') };
   }
 
-  // Phase 2: Full mode consistency (reverse check — are artifacts missing that state implies?)
+  // Phase 2: Full mode consistency — reuse pf.existence to avoid redundant stat calls
   if (mode === "full" && currentState && currentState !== "exploring" && currentState !== "abandoned") {
+    const ex = pf.existence || {};
     const inconsistencies: string[] = [];
 
-    const proposalExists = await fileExists(`${changeDir}/proposal.md`);
-    const designExists = await fileExists(`${changeDir}/design.md`);
-    const tasksExists = await fileExists(`${changeDir}/tasks.md`);
-    const specsExists = await directoryExists(`${changeDir}/specs`);
-    const contractExists = await fileExists(`${changeDir}/execution-contract.md`);
+    // probe artifact only if not already in existence map (safety fallback)
+    const probeFile = async (name: string) => name in ex ? ex[name] : await fileExists(`${changeDir}/${name}`);
+    const probeDir = async (name: string) => name in ex ? ex[name] : await directoryExists(`${changeDir}/${name}`);
 
-    if (!proposalExists) inconsistencies.push("full workflow but proposal.md missing");
-    if ((currentState === "bridging" || currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") && !designExists) {
+    if (!await probeFile('proposal.md')) inconsistencies.push("full workflow but proposal.md missing");
+    if ((currentState === "bridging" || currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") && !await probeFile('design.md')) {
       inconsistencies.push("full workflow but design.md missing");
     }
-    if ((currentState === "bridging" || currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") && !tasksExists) {
+    if ((currentState === "bridging" || currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") && !await probeFile('tasks.md')) {
       inconsistencies.push("full workflow but tasks.md missing");
     }
-    if ((currentState === "bridging" || currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") && !specsExists) {
+    if ((currentState === "bridging" || currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") && !await probeDir('specs')) {
       inconsistencies.push("full workflow but specs/ missing");
     }
-    if ((currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") && !contractExists) {
+    if ((currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") && !await probeFile('execution-contract.md')) {
       inconsistencies.push("execution state but execution-contract.md missing");
     }
 
@@ -263,7 +262,9 @@ async function checkFileWriteGuard(changeDir: string, data?: Record<string, unkn
   if (!changeDir || !data) return { success: true };
 
   const toolName = data.toolName as string | undefined;
-  if (toolName !== 'write' && toolName !== 'edit') return { success: true };
+  // File boundary and state guard apply to write/edit/rename/delete
+  const modifyingTools = ['write', 'edit', 'rename', 'delete'];
+  if (!toolName || !modifyingTools.includes(toolName)) return { success: true };
 
   const filePath = (data.filePath as string) || '';
   const agent = (data.agent as string) || '';
@@ -367,6 +368,25 @@ function parseFileBoundaryPatterns(contractContent: string): string[] {
     }
   }
 
+  // Task table format: | T01 | desc | read_files | write_files |
+  // The write_files column (col 4) contains space-separated backtick paths or plain paths.
+  for (const m of contractContent.matchAll(/^\|\s*(T\d+)\s*\|[^|]*\|[^|]*\|\s*([^|]+)\s*\|/gm)) {
+    const cell = (m[2] || '').trim();
+    // Extract backtick-wrapped paths: `path/to/file`
+    const backtickPaths = cell.match(/`([^`]+)`/g);
+    if (backtickPaths) {
+      for (const bp of backtickPaths) pats.push(bp.replace(/`/g, ''));
+    }
+    // Also extract bare paths separated by whitespace (no backticks)
+    const bareParts = cell.replace(/`[^`]+`/g, '').trim();
+    if (bareParts) {
+      for (const part of bareParts.split(/\s+/)) {
+        const t = part.trim();
+        if (t && (t.includes('/') || t.includes('\\') || /\.\w{1,4}$/.test(t))) pats.push(t);
+      }
+    }
+  }
+
   // Legacy format: "write_files:" line followed by "- path" lines with no YAML structure
   // (fallback for edge cases the above patterns miss)
   if (pats.length === 0) {
@@ -393,10 +413,15 @@ function matchesBoundary(filePath: string, patterns: string[]): boolean {
     if (np.endsWith('/*') && rel.startsWith(np.slice(0, -1))) return true;
     if (np.endsWith('/') && rel.startsWith(np)) return true;
     // Glob: src/**/*.ts
+    // ** matches across directory boundaries; single * matches within one dir level
     if (np.includes('*')) {
-      const escaped = np.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*');
+      const escaped = np
+        .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*\*/g, '<<<DOUBLESTAR>>>')
+        .replace(/\*/g, '[^/]*')
+        .replace(/<<<DOUBLESTAR>>>/g, '.*');
       try {
-        if (new RegExp('^' + escaped + '$').test(rel)) return true;
+        if (new RegExp('^' + escaped + '$', 's').test(rel)) return true;
       } catch { /* skip invalid regex */ }
     }
     return false;

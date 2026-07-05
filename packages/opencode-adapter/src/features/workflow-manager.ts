@@ -24,22 +24,25 @@ export async function detectFrontend(changeDir: string): Promise<boolean> {
       'react', 'vue', 'next', 'nuxt', 'svelte', 'angular', 'solid-js',
       'sass', 'less', 'tailwindcss', 'postcss', 'styled-components',
       'emotion', 'antd', 'element-ui', 'vite', '@vitejs',
+      'daisyui', 'bootstrap', 'remix', 'gatsby', 'astro', 'qwik',
+      'shadcn', 'chakra-ui', 'mui/material', '@ngrx', 'react-router',
+      'vue-router', 'pinia', 'zustand', 'jotai', 'redux',
     ];
     for (const dep of Object.keys(allDeps)) {
       for (const indicator of frontendIndicators) {
-        if (dep.includes(indicator) || indicator.includes(dep)) return true;
+        if (dep.includes(indicator)) return true;
       }
     }
   }
 
   // 2. Check for frontend directory structure
-  const frontendDirs = ['src/pages', 'src/components', 'src/views', 'src/router', 'pages', 'components', 'views'];
+  const frontendDirs = ['src/pages', 'src/components', 'src/views', 'src/router', 'pages', 'components', 'views', 'app', 'src/app'];
   for (const dir of frontendDirs) {
     if (await directoryExists(changeDir + '/' + dir)) return true;
   }
 
   // 3. Check for frontend config files
-  const configFiles = ['vite.config.ts', 'vite.config.js', 'next.config.js', 'next.config.ts', 'nuxt.config.ts', 'vue.config.js', 'angular.json', 'svelte.config.js', 'tailwind.config.js', 'tailwind.config.ts'];
+  const configFiles = ['vite.config.ts', 'vite.config.js', 'next.config.js', 'next.config.ts', 'nuxt.config.ts', 'vue.config.js', 'angular.json', 'svelte.config.js', 'tailwind.config.js', 'tailwind.config.ts', 'astro.config.mjs', 'astro.config.ts', 'remix.config.js', 'gatsby-config.js', 'gatsby-config.ts', 'qwik.config.ts'];
   for (const cfg of configFiles) {
     if (await fileExists(changeDir + '/' + cfg)) return true;
   }

@@ -21,7 +21,7 @@ export function createArtifactInspectorTool(): ToolDefinition {
       },
       artifactType: {
         type: 'string',
-        description: 'Type of artifact to inspect (proposal, specs, design, tasks)',
+        description: 'Type of artifact to inspect (proposal, specs, design, tasks, ui-design)',
         required: false,
       },
     },
@@ -82,6 +82,16 @@ export function createArtifactInspectorTool(): ToolDefinition {
           }
         }
 
+        // Inspect ui-design (frontend projects only)
+        if (!artifactType || artifactType === 'ui-design') {
+          const uiDesignContent = await readFile(`${resolvedDir}/ui-design.md`);
+          if (uiDesignContent) {
+            results['ui-design'] = validateUiDesign(uiDesignContent);
+          } else {
+            results['ui-design'] = { valid: false, error: 'File not found (frontend projects only)', issues: [], summary: { errors: 1, warnings: 0, info: 0 } };
+          }
+        }
+
         const summary = generateInspectionSummary(results);
         const recommendations = generateInspectionRecommendations(results);
 
@@ -122,6 +132,11 @@ function generateInspectionSummary(results: Record<string, unknown>): string {
     }
   }
 
+  const uiDesign = results['ui-design'] as { valid: boolean; error?: string; summary?: { errors: number } } | undefined;
+  if (uiDesign && !uiDesign.valid && !uiDesign.error?.includes('not found')) {
+    issues.push(`UI-Design: ${uiDesign.summary?.errors || 0} error(s)`);
+  }
+
   const tasks = results.tasks as { valid: boolean; summary?: { errors: number } } | undefined;
   if (tasks && !tasks.valid) {
     issues.push(`Tasks: ${tasks.summary?.errors || 0} error(s)`);
@@ -150,10 +165,45 @@ function generateInspectionRecommendations(results: Record<string, unknown>): st
     }
   }
 
+  const uiDesign = results['ui-design'] as { valid: boolean; error?: string } | undefined;
+  if (uiDesign && !uiDesign.valid && !uiDesign.error?.includes('not found')) {
+    recommendations.push('Fix ui-design.md issues before proceeding');
+  }
+
   const tasks = results.tasks as { valid: boolean } | undefined;
   if (tasks && !tasks.valid) {
     recommendations.push('Fix task issues before proceeding');
   }
 
   return recommendations;
+}
+
+/**
+ * Validate ui-design.md content.
+ * Checks for required sections: color system, typography, spacing, anti-AI-slop checklist.
+ */
+function validateUiDesign(content: string): { valid: boolean; issues: Array<{ level: string; message: string }>; summary: { errors: number; warnings: number; info: number } } {
+  const issues: Array<{ level: string; message: string }> = [];
+  const lower = content.toLowerCase();
+
+  if (!lower.includes('color') || !/(?:primary|color system|色)/.test(lower)) {
+    issues.push({ level: 'ERROR', message: 'Missing color system definition (primary, background, text minimum)' });
+  }
+  if (!lower.includes('typography') && !lower.includes('font')) {
+    issues.push({ level: 'ERROR', message: 'Missing typography definition (headings + body minimum)' });
+  }
+  if (!lower.includes('spacing') && !lower.includes('base unit')) {
+    issues.push({ level: 'WARNING', message: 'Missing spacing scale definition' });
+  }
+  if (!content.includes('- [ ]') && !content.includes('- [x]')) {
+    issues.push({ level: 'WARNING', message: 'Missing anti-AI-slop checklist' });
+  }
+
+  const errors = issues.filter(i => i.level === 'ERROR').length;
+  const warnings = issues.filter(i => i.level === 'WARNING').length;
+  return {
+    valid: errors === 0,
+    issues,
+    summary: { errors, warnings, info: 0 },
+  };
 }

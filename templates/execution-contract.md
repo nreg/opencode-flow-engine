@@ -14,7 +14,15 @@
 
 ## Task Batches
 
-[Extracted from tasks.md. Execution order and dependencies.]
+Each task MUST declare its file boundaries to prevent scope drift.
+
+| Task ID | Description | read_files | write_files |
+|---------|-------------|------------|-------------|
+| T01 | [Task description] | `src/moduleA/*` `src/lib/utils.ts` | `src/moduleA/feature.ts` `src/moduleA/__tests__/feature.test.ts` |
+| T02 | [Task description] | `src/moduleB/*` | `src/moduleB/handler.ts` `src/moduleB/__tests__/handler.test.ts` |
+
+**read_files**: Files/directories the implementer is ALLOWED to read for context.
+**write_files**: Files the implementer is ALLOWED to create or modify — any change outside these paths is scope drift and MUST be blocked.
 
 ## Test Obligations
 

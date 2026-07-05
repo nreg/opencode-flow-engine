@@ -74,10 +74,11 @@ export function parseLessonsMd(content: string): LessonEntry[] {
   for (const block of blocks) {
     if (!block.trim()) continue;
     const idMatch = block.match(/^L-(\d+)/);
-    const titleMatch = block.match(/^L-\d+\s*·\s*\[([^\]]*)\]\s*(.+)/);
-    if (!titleMatch) continue;
-    const tags = (titleMatch[1] || '').split(',').map(t => t.trim());
-    const title = (titleMatch[2] || '').trim();
+    const primaryMatch = block.match(/^L-\d+\s*(?:·|-|\s*)\s*\[([^\]]*)\]\s*(.+)/);
+    const looseMatch = !primaryMatch ? block.match(/^L-\d+\s+(.+?)(?:\n|$)/) : null;
+    if (!primaryMatch && !looseMatch) continue;
+    const tags = primaryMatch ? (primaryMatch[1] || '').split(',').map((t: string) => t.trim()) : [];
+    const title = primaryMatch ? (primaryMatch[2] || '').trim() : ((looseMatch ? looseMatch[1] : '') || '').trim();
     const keywordsMatch = block.match(/\*\*关键词\*\*:\s*(.+)/);
     const problemMatch = block.match(/\*\*问题场景\*\*\n([\s\S]*?)(?=\*\*当时尝试)/);
     const attemptedMatch = block.match(/\*\*当时尝试的方案\*\*\n([\s\S]*?)(?=\*\*为什么不行)/);
@@ -136,12 +137,20 @@ export function formatLessonEntry(index: number, entry: LessonEntry): string {
   return lines.join('\n');
 }
 
+/**
+ * Minimum match ratio for lesson keyword search.
+ * At least MIN_MATCH_RATIO of the input keywords must match
+ * before an entry is considered a hit, to reduce false positives.
+ */
+const LESSONS_MIN_MATCH_RATIO = 0.4;
+
 export async function searchLessonsInFile(changeDir: string, keywords: string[]): Promise<LessonHit[]> {
   const lessonsPath = changeDir + '/.sflow/lessons.md';
   const content = await readFile(lessonsPath);
   if (!content) return [];
   const entries = parseLessonsMd(content);
   const hits: LessonHit[] = [];
+  if (keywords.length === 0) return [];
   const lowerKeywords = keywords.map(k => k.toLowerCase());
   for (const entry of entries) {
     if (entry.status !== 'active') continue;
@@ -150,7 +159,9 @@ export async function searchLessonsInFile(changeDir: string, keywords: string[])
       entry.title.toLowerCase().includes(kw) ||
       entry.tags.some(t => t.toLowerCase().includes(kw)),
     );
-    if (matched.length > 0) {
+    // Apply min match ratio to reduce false positives
+    const matchRatio = matched.length / lowerKeywords.length;
+    if (matched.length > 0 && matchRatio >= LESSONS_MIN_MATCH_RATIO) {
       hits.push({ entry, matchedKeywords: matched });
     }
   }
@@ -196,8 +207,7 @@ export async function writeProgressFile(changeDir: string, data: ProgressData): 
   lines.push('4. 完成本任务后，删除本 PROGRESS.md（产出迁移到 SUMMARY.md）');
   lines.push('', '> PROGRESS.md 是**临时**文件，任务完成后必须清理。');
   await ensureDir(changeDir + '/.sflow');
-  const { writeFile: fsWrite } = await import('fs/promises');
-  await fsWrite(path, lines.join('\n'), 'utf-8');
+  await writeFile(path, lines.join('\n'));
 }
 
 export async function readProgressFile(changeDir: string): Promise<ProgressData | null> {
@@ -227,8 +237,8 @@ export async function readProgressFile(changeDir: string): Promise<ProgressData 
   if (nextMatch) data.nextStep = (nextMatch[1] || '').trim();
   const blockedMatch = content.match(/\*\*阻塞\*\*:\s*(.+)/);
   if (blockedMatch) data.blockedBy = (blockedMatch[1] || '').trim();
-  // Parse excluded approaches table
-  const tableMatch = content.match(/\| (\S+) \| (.+?) \| (.+?) \| (\d+) \|/g);
+  // Parse excluded approaches table — use [^|] to prevent | from breaking column alignment
+  const tableMatch = content.match(/\| (\S+) \| ([^|]+?) \| ([^|]+?) \| (\d+) \|/g);
   if (tableMatch) {
     for (const row of tableMatch) {
       const parts = row.match(/\| (\S+) \| (.+?) \| (.+?) \| (\d+) \|/);
@@ -250,18 +260,42 @@ export async function readProgressFile(changeDir: string): Promise<ProgressData 
   return data;
 }
 
+/**
+ * Extract meaningful keywords from an approach string for comparison.
+ * Removes stop words and short tokens, returns a set of significant terms.
+ */
+function extractKeywords(text: string): Set<string> {
+  const stopWords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
+    'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'using',
+    'this', 'that', 'it', 'its', 'we', 'they', 'use', 'used', 'do', 'does', 'did',
+    'not', 'no', 'but', 'or', 'and', 'if', 'then', 'else', 'so']);
+  const words = text.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length >= 3 && !stopWords.has(w));
+  return new Set(words);
+}
+
 export async function detectProgressAntiRepeat(changeDir: string, plannedApproach: string): Promise<{ blocked: boolean; matched: ExcludedApproach | null; reason?: string }> {
   const progress = await readProgressFile(changeDir);
   if (!progress || progress.excludedApproaches.length === 0) {
     return { blocked: false, matched: null };
   }
-  const lowerPlanned = plannedApproach.toLowerCase();
+  const plannedKeywords = extractKeywords(plannedApproach);
+  if (plannedKeywords.size === 0) {
+    return { blocked: false, matched: null };
+  }
   for (const ex of progress.excludedApproaches) {
-    if (lowerPlanned.includes(ex.approach.toLowerCase()) || ex.approach.toLowerCase().includes(lowerPlanned)) {
+    const excludedKeywords = extractKeywords(ex.approach);
+    if (excludedKeywords.size === 0) continue;
+    // Compute Jaccard-like intersection ratio
+    let intersectionCount = 0;
+    for (const kw of plannedKeywords) {
+      if (excludedKeywords.has(kw)) intersectionCount++;
+    }
+    const overlapRatio = intersectionCount / Math.min(plannedKeywords.size, excludedKeywords.size);
+    if (overlapRatio >= 0.5) {
       return {
         blocked: true,
         matched: ex,
-        reason: 'Approach matches excluded approach ' + ex.id + ' ("' + ex.approach + '"). Previous failure reason: ' + ex.reason + '. Must explain difference from previous attempt before retrying.',
+        reason: 'Approach has ' + Math.round(overlapRatio * 100) + '% keyword overlap with excluded approach ' + ex.id + ' ("' + ex.approach + '"). Previous failure reason: ' + ex.reason + '. Must explain difference from previous attempt before retrying.',
       };
     }
   }
@@ -295,9 +329,11 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
   }
   if (currentState === 'exploring' && hp && pc && pc.trim().length > 100) return 'specifying';
   if (currentState === 'specifying' && hd && ht && hsp) {
-    // If frontend project and ui-design.md is expected but missing → go to ui-design
-    const sd = await readJsonFile<Record<string, unknown>>(changeDir + '/.sflow/state.json').catch(() => null);
-    if (sd?.isFrontend && !hui) return 'ui-design';
+    // Use real-time detectFrontend() instead of cached state.json isFrontend
+    // Dynamic import to avoid circular dependency across package boundaries
+    const { detectFrontend } = await import('./workflow-manager.js');
+    const isFrontend = await detectFrontend(changeDir);
+    if (isFrontend && !hui) return 'ui-design';
     return 'bridging';
   }
   if (currentState === 'ui-design' && hui) return 'bridging';
@@ -579,11 +615,9 @@ export function createStateManager(
         if (!existing) {
           const header = '# LESSONS — 跨任务失败知识库\n\n';
           await ensureDir(changeDir + '/.sflow');
-          const { writeFile: fsWrite } = await import('fs/promises');
-          await fsWrite(lessonsPath, header + formatted.trim(), 'utf-8');
+          await writeFile(lessonsPath, header + formatted.trim());
         } else {
-          const { writeFile: fsWrite } = await import('fs/promises');
-          await fsWrite(lessonsPath, existing.replace(/\n*$/, '') + formatted, 'utf-8');
+          await writeFile(lessonsPath, existing.replace(/\n*$/, '') + formatted);
         }
         return { success: true, data: { added: true, id: 'L-' + String(nextIndex).padStart(3, '0'), timestamp: new Date().toISOString() } };
       } catch (error) {
@@ -642,7 +676,7 @@ export function createStateManager(
 
     async clearProgressSnapshot(changeDir: string): Promise<FeatureResult> {
       try {
-        const { unlink } = await import('fs/promises');
+        const { unlink } = await import('node:fs/promises');
         await unlink(changeDir + '/.sflow/progress.md');
         return { success: true, data: { cleared: true, timestamp: new Date().toISOString() } };
       } catch (error) {
@@ -693,8 +727,7 @@ export function createStateManager(
         }
         lines.push('', '_Updated: ' + now + '_');
         await ensureDir(changeDir + '/.sflow');
-        const { writeFile } = await import('fs/promises');
-        await writeFile(progressPath, lines.join('\n'), 'utf-8');
+        await writeFile(progressPath, lines.join('\n'));
         return { success: true, data: { written: true, stage: checkpoint.stage, timestamp: now } };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) };

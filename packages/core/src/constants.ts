@@ -6,7 +6,7 @@
 export const VALID_TRANSITIONS: Record<string, string[]> = {
   exploring: ['specifying', 'abandoned'],
   specifying: ['ui-design', 'bridging', 'exploring', 'abandoned'],
-  'ui-design': ['bridging', 'abandoned'],
+  'ui-design': ['bridging', 'specifying', 'abandoned'],
   bridging: ['approved-for-build', 'specifying', 'abandoned'],
   'approved-for-build': ['executing', 'bridging', 'closing', 'abandoned'],
   executing: ['debugging', 'closing', 'abandoned'],

@@ -2,6 +2,7 @@
  * Artifact Preflight - Shared check function for artifact-first discipline.
  */
 import { ARTIFACT_PREFLIGHT, isDirectoryArtifact } from '@opencode-sflow/core';
+import { detectFrontend } from './workflow-manager.js';
 
 export interface PreflightCheckParams {
   changeDir: string;
@@ -16,6 +17,8 @@ export interface PreflightCheckResult {
   missing: string[];
   preflightState?: string;
   reason?: string;
+  /** Existence map for all checked artifacts — reused by guard Phase 2 to avoid redundant stat calls */
+  existence?: Record<string, boolean>;
 }
 
 export async function checkArtifactPreflight(
@@ -27,35 +30,48 @@ export async function checkArtifactPreflight(
     return { passed: true, missing: [] };
   }
   const missing: string[] = [];
+  const existence: Record<string, boolean> = {};
   for (const artifact of gate.required) {
     const p = changeDir + '/' + artifact;
-    const exists = isDirectoryArtifact(artifact)
-      ? await directoryExists(p) : await fileExists(p);
+    let exists: boolean;
+    if (isDirectoryArtifact(artifact)) {
+      exists = await directoryExists(p);
+      // For the specs/ directory, also verify it contains at least one .md file
+      if (exists && (artifact === 'specs/' || artifact.endsWith('/'))) {
+        const { listFiles } = await import('@opencode-sflow/shared');
+        const specFiles = await listFiles(p, '.md');
+        exists = specFiles.length > 0;
+      }
+    } else {
+      exists = await fileExists(p);
+    }
+    existence[artifact] = exists;
     if (!exists) missing.push(artifact);
   }
   if (missing.length > 0) {
     const route = findPreflightState(missing);
     return {
-      passed: false, missing, preflightState: route,
+      passed: false, missing, existence, preflightState: route,
       reason: 'Cannot enter "' + targetState + '". Missing: ' + missing.join(', ') + '. Route to "' + route + '".',
     };
   }
-  // Frontend check
-  if (['bridging', 'approved-for-build', 'executing'].includes(targetState) && readJson) {
+  // Frontend check — use detectFrontend() for real-time detection instead of stale state.json
+  if (['bridging', 'approved-for-build', 'executing'].includes(targetState)) {
     try {
-      const sd = await readJson<{ isFrontend?: boolean }>(changeDir + '/.sflow/state.json');
-      if (sd?.isFrontend) {
+      const isFrontend = await detectFrontend(changeDir);
+      if (isFrontend) {
         const uiOk = await fileExists(changeDir + '/ui-design.md');
+        existence['ui-design.md'] = uiOk;
         if (!uiOk) {
           return {
-            passed: false, missing: ['ui-design.md'], preflightState: 'ui-design',
+            passed: false, missing: ['ui-design.md'], existence, preflightState: 'ui-design',
             reason: 'Frontend project needs ui-design.md before "' + targetState + '".',
           };
         }
       }
     } catch { /* skip */ }
   }
-  return { passed: true, missing: [] };
+  return { passed: true, missing: [], existence };
 }
 
 /**
