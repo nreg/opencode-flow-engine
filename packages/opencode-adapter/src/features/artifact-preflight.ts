@@ -2,6 +2,7 @@
  * Artifact Preflight - Shared check function for artifact-first discipline.
  */
 import { ARTIFACT_PREFLIGHT, isDirectoryArtifact } from '@opencode-sflow/core';
+import { listFiles } from '@opencode-sflow/shared';
 import { detectFrontend } from './workflow-manager.js';
 
 export interface PreflightCheckParams {
@@ -36,9 +37,8 @@ export async function checkArtifactPreflight(
     let exists: boolean;
     if (isDirectoryArtifact(artifact)) {
       exists = await directoryExists(p);
-      // For the specs/ directory, also verify it contains at least one .md file
-      if (exists && (artifact === 'specs/' || artifact.endsWith('/'))) {
-        const { listFiles } = await import('@opencode-sflow/shared');
+      // For directory artifacts, also verify they contain at least one .md file
+      if (exists && artifact.endsWith('/')) {
         const specFiles = await listFiles(p, '.md');
         exists = specFiles.length > 0;
       }

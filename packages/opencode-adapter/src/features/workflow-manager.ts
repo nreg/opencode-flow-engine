@@ -16,23 +16,12 @@ const ARCHIVE_DIR = `${SFLOW_DIR}/archive`;
  * Checks: package.json dependencies, directory structure, config files.
  */
 export async function detectFrontend(changeDir: string): Promise<boolean> {
-  // 1. Check package.json for frontend frameworks
+  // 1. Check package.json for frontend frameworks (RegExp-based, O(n) vs original O(nm))
   const pkgJson = await readJsonFile<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(changeDir + '/package.json').catch(() => null);
   if (pkgJson) {
-    const allDeps = { ...pkgJson.dependencies, ...pkgJson.devDependencies };
-    const frontendIndicators = [
-      'react', 'vue', 'next', 'nuxt', 'svelte', 'angular', 'solid-js',
-      'sass', 'less', 'tailwindcss', 'postcss', 'styled-components',
-      'emotion', 'antd', 'element-ui', 'vite', '@vitejs',
-      'daisyui', 'bootstrap', 'remix', 'gatsby', 'astro', 'qwik',
-      'shadcn', 'chakra-ui', 'mui/material', '@ngrx', 'react-router',
-      'vue-router', 'pinia', 'zustand', 'jotai', 'redux',
-    ];
-    for (const dep of Object.keys(allDeps)) {
-      for (const indicator of frontendIndicators) {
-        if (dep.includes(indicator)) return true;
-      }
-    }
+    const allDeps = Object.keys({ ...pkgJson.dependencies, ...pkgJson.devDependencies });
+    const frontendPattern = /react|vue|next|nuxt|svelte|angular|solid-js|sass|less|tailwindcss|postcss|styled-components|emotion|antd|element-ui|vite|@vitejs|daisyui|bootstrap|remix|gatsby|astro|qwik|shadcn|chakra-ui|mui\/material|@ngrx|react-router|vue-router|pinia|zustand|jotai|redux/i;
+    if (allDeps.some(dep => frontendPattern.test(dep))) return true;
   }
 
   // 2. Check for frontend directory structure

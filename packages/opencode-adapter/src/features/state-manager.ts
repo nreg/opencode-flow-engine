@@ -144,8 +144,36 @@ export function formatLessonEntry(index: number, entry: LessonEntry): string {
  */
 const LESSONS_MIN_MATCH_RATIO = 0.4;
 
-export async function searchLessonsInFile(changeDir: string, keywords: string[]): Promise<LessonHit[]> {
-  const lessonsPath = changeDir + '/.sflow/lessons.md';
+/**
+ * Derive the project root directory from a change directory path.
+ * A change dir is typically under .sflow/changes/<change-id>.
+ * The project root is the first ancestor that does NOT end with a change-like path.
+ */
+export function findProjectRoot(changeDir: string): string {
+  const normalized = changeDir.replace(/\\/g, '/');
+  // If under .sflow/changes/, the project root is 3 levels up from the change
+  const changesMarker = '/.sflow/changes/';
+  const idx = normalized.lastIndexOf(changesMarker);
+  if (idx !== -1) {
+    return normalized.slice(0, idx);
+  }
+  // If changeDir itself contains .sflow/, it might be a project root
+  if (normalized.includes('/.sflow/')) {
+    // Walk up until we find the directory that contains .sflow
+    const parts = normalized.split('/');
+    for (let i = parts.length; i > 0; i--) {
+      const candidate = parts.slice(0, i).join('/');
+      if (candidate.endsWith('/.sflow')) return parts.slice(0, i - 1).join('/');
+    }
+  }
+  return changeDir;
+}
+
+/**
+ * Search lessons in a specific file path.
+ * Internal helper — does NOT do project-level fallback.
+ */
+async function searchLessonsInSingleFile(lessonsPath: string, keywords: string[]): Promise<LessonHit[]> {
   const content = await readFile(lessonsPath);
   if (!content) return [];
   const entries = parseLessonsMd(content);
@@ -165,6 +193,40 @@ export async function searchLessonsInFile(changeDir: string, keywords: string[])
       hits.push({ entry, matchedKeywords: matched });
     }
   }
+  return hits;
+}
+
+/**
+ * Search lessons with project-level fallback.
+ * 1. Searches change-level .sflow/lessons.md first
+ * 2. Also searches project-level .sflow/lessons.md (for cross-change shared knowledge)
+ * Results from both levels are merged, deduplicated by entry ID.
+ */
+export async function searchLessonsInFile(changeDir: string, keywords: string[]): Promise<LessonHit[]> {
+  const hits: LessonHit[] = [];
+  const seenIds = new Set<string>();
+
+  // Level 1: change-level lessons
+  const changeHits = await searchLessonsInSingleFile(changeDir + '/.sflow/lessons.md', keywords);
+  for (const hit of changeHits) {
+    if (hit.entry.id && !seenIds.has(hit.entry.id)) {
+      seenIds.add(hit.entry.id);
+      hits.push(hit);
+    }
+  }
+
+  // Level 2: project-level lessons (cross-change shared)
+  const projectRoot = findProjectRoot(changeDir);
+  if (projectRoot !== changeDir) {
+    const projectHits = await searchLessonsInSingleFile(projectRoot + '/.sflow/lessons.md', keywords);
+    for (const hit of projectHits) {
+      if (hit.entry.id && !seenIds.has(hit.entry.id)) {
+        seenIds.add(hit.entry.id);
+        hits.push(hit);
+      }
+    }
+  }
+
   return hits;
 }
 

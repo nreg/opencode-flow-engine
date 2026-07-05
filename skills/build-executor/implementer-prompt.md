@@ -113,6 +113,13 @@ Subagent:
     - Are tests comprehensive?
     - Is the test output pristine (no stray warnings or noise)?
 
+    **Boundary (File Boundary Control):**
+    - Run `git diff --name-only` (or equivalent) to list ALL changed files
+    - Compare against your task's `write_files` list
+    - If any changed file is NOT in `write_files` → DO NOT COMMIT
+    - Options: roll back out-of-bound changes, OR escalate with "file X not in write_files"
+    - Record the boundary check result: `✅ Boundary check: 0 files out of bounds` or `❌ Boundary violation: <files>`
+
     If you find issues during self-review, fix them now before reporting.
 
     ## After Review Findings

@@ -62,12 +62,16 @@ function matchIntent(input: string): { agent: string; action: string; descriptio
   for (const entry of INTENT_MAP) {
     // Extract meaningful keywords from the pattern (strip regex operators)
     const patternSource = entry.pattern.source.toLowerCase();
-    // Split by regex alternation and word-boundary operators to enumerate tokens
-    const tokens = patternSource
-      .replace(/\\b|\\b|\(\?:|\)|\^|\\s\*|\$\|\\s\*/g, ' ')
-      .split(/[|\\()?*+^$.\][]+/)
-      .map(t => t.trim().replace(/\\/g, ''))
-      .filter(t => t.length >= 2 && !/^\d+$/.test(t));
+    // Split by regex alternation and word-boundary operators to enumerate tokens.
+    // patternSource is the raw regex string (e.g. "审查|review|check\\s+code|...")
+    // Use \b (word boundary) to strip, not \\b (literal backslash-b)
+    const tokens = [...new Set(
+      patternSource
+        .replace(/\^|\b|\(\?:|\)|\\s\*|\$\||\[/g, ' ')
+        .split(/[|\\()?*+^$.\]]+/)
+        .map(t => t.trim().replace(/\\/g, ''))
+        .filter(t => t.length >= 2 && !/^\d+$/.test(t))
+    )];
 
     // Count what fraction of tokens match the input
     let matchedTokens = 0;
@@ -110,6 +114,38 @@ async function readWorkflowState(changeDir: string): Promise<{ state: string; mo
 }
 
 /**
+ * Auto-discover the active change directory by scanning .sflow/changes/.
+ * Returns the first change directory found, or the given directory if nothing found.
+ */
+async function findActiveChangeDir(changeDir: string, fsDirectory: string): Promise<string> {
+  // If an explicit changeDir was provided, use it directly
+  if (changeDir) return changeDir;
+
+  // Scan .sflow/changes/ for active change directories
+  const changesRoot = fsDirectory + '/.sflow/changes';
+  const changesDir = await directoryExists(changesRoot).catch(() => false);
+  if (changesDir) {
+    const { readdir } = await import('node:fs/promises');
+    const entries = await readdir(changesRoot).catch(() => [] as string[]);
+    // Filter to directories that contain a state.json or proposal.md
+    for (const entry of entries) {
+      const candidate = changesRoot + '/' + entry;
+      const hasState = await fileExists(candidate + '/.sflow/state.json').catch(() => false);
+      const hasProposal = await fileExists(candidate + '/proposal.md').catch(() => false);
+      if (hasState || hasProposal) {
+        return candidate;
+      }
+    }
+  }
+
+  // Fallback: check if fsDirectory itself is a change dir
+  const selfHasState = await fileExists(fsDirectory + '/.sflow/state.json').catch(() => false);
+  if (selfHasState) return fsDirectory;
+
+  return changeDir || fsDirectory;
+}
+
+/**
  * Create the workflow router tool
  */
 export function createWorkflowRouterTool(): ToolDefinition {
@@ -130,7 +166,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
     },
     execute: async (params, context) => {
       const p = params as { changeDir?: string; intent?: string };
-      const changeDir = p.changeDir || context.directory;
+      const changeDir = await findActiveChangeDir(p.changeDir || '', context.directory || '');
       const userIntent = p.intent || '';
 
       // Phase 1: Intent-based routing (if user gave a clear intent)
