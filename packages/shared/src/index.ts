@@ -13,3 +13,7 @@ export { fileExists, readFile, writeFile, atomicWriteFile, listFiles, directoryE
 export { isContractStale, getContractStalenessReport } from './contract-staleness.js';
 export type { StalenessReport } from './contract-staleness.js';
 export { isBun, sleep, readTextFile, checkFileExists, writeTextFile, spawnProcess } from './runtime.js';
+
+export { CacheManager, caches, startCacheCleanup, stopCacheCleanup } from './cache.js';
+
+export { segmentChinese, extractKeywords, calculateOverlapRatio, calculateDynamicThreshold } from './chinese-segmenter.js';

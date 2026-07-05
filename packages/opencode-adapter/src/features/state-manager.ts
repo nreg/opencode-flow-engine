@@ -1,6 +1,6 @@
 import type { FeatureConfig, FeatureResult } from "./types.js";
 import { createWorkflowManager } from "./workflow-manager.js";
-import { fileExists, readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, readFile, directoryExists, isContractStale as checkContractStale, writeFile } from "@opencode-sflow/shared";
+import { fileExists, readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, readFile, directoryExists, isContractStale as checkContractStale, writeFile, extractKeywords as jiebaExtractKeywords, calculateDynamicThreshold, calculateOverlapRatio } from "@opencode-sflow/shared";
 
 const BOULDER_STATE_FILE = ".sflow/boulder-state.json";
 
@@ -112,6 +112,11 @@ export function parseLessonsMd(content: string): LessonEntry[] {
     const firstSeenMatch = block.match(/\*\*首发\*\*:\s*(.+)/) || block.match(/\*\*首发\*\*[:：]\s*(.+)/);
     const keywords = keywordsMatch ? (keywordsMatch[1] || '').split(/[\s,]+/).filter(Boolean) : [];
     const id = 'L-' + (idMatch ? (idMatch[1] || String(entries.length + 1)) : String(entries.length + 1));
+
+    // P36: Check if reevaluateWhen condition is met
+    // This is stored in the entry and checked at search time to warn about stale lessons
+    const reevaluateWhenParsed = reevaluateWhen || '无需重新评估';
+
     entries.push({
       id,
       title,
@@ -232,8 +237,11 @@ async function searchLessonsInSingleFile(lessonsPath: string, keywords: string[]
       entry.title.toLowerCase().includes(kw) ||
       entry.tags.some(t => t.toLowerCase().includes(kw));
     });
+    // P37: Dynamic threshold based on total keyword count
+    const totalKeywords = lowerKeywords.length + entry.keywords.length;
+    const lessonsThreshold = calculateDynamicThreshold(totalKeywords, LESSONS_MIN_MATCH_RATIO);
     const matchRatio = matched.length / lowerKeywords.length;
-    if (matched.length > 0 && matchRatio >= LESSONS_MIN_MATCH_RATIO) {
+    if (matched.length > 0 && matchRatio >= lessonsThreshold) {
       hits.push({ entry, matchedKeywords: matched });
     }
   }
@@ -388,37 +396,38 @@ export const PROGRESS_ANTI_REPEAT_THRESHOLD = 0.5;
  * Supports both English (whitespace tokenization) and Chinese (character n-grams).
  */
 function extractKeywords(text: string): Set<string> {
-  const lower = text.toLowerCase();
-  const keywords = new Set<string>();
-
-  // English: split on whitespace, filter stop words and short tokens
-  const stopWords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
-    'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'using',
-    'this', 'that', 'it', 'its', 'we', 'they', 'use', 'used', 'do', 'does', 'did',
-    'not', 'no', 'but', 'or', 'and', 'if', 'then', 'else', 'so']);
-  const englishTokens = lower.replace(/[^\w\s]/g, ' ').split(/\s+/);
-  for (const t of englishTokens) {
-    if (t.length >= 3 && !stopWords.has(t)) keywords.add(t);
-  }
-
-  // Chinese: extract character n-grams (2-4 chars) for matching
-  const chineseChars = lower.match(/[\u4e00-\u9fff]+/g);
-  if (chineseChars) {
-    for (const segment of chineseChars) {
-      // Generate n-grams of length 2-4
-      for (let n = 2; n <= 4; n++) {
-        for (let i = 0; i <= segment.length - n; i++) {
-          keywords.add(segment.slice(i, i + n));
+  // P31: Use jieba-based keyword extraction for better accuracy
+  // Falls back to the original n-gram approach if jieba fails
+  try {
+    const keywords = jiebaExtractKeywords(text);
+    return new Set(keywords);
+  } catch {
+    // Fallback to original n-gram approach
+    const lower = text.toLowerCase();
+    const keywords = new Set<string>();
+    const stopWords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
+      'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'using',
+      'this', 'that', 'it', 'its', 'we', 'they', 'use', 'used', 'do', 'does', 'did',
+      'not', 'no', 'but', 'or', 'and', 'if', 'then', 'else', 'so']);
+    const englishTokens = lower.replace(/[^\w\s]/g, ' ').split(/\s+/);
+    for (const t of englishTokens) {
+      if (t.length >= 3 && !stopWords.has(t)) keywords.add(t);
+    }
+    const chineseChars = lower.match(/[\u4e00-\u9fff]+/g);
+    if (chineseChars) {
+      for (const segment of chineseChars) {
+        for (let n = 2; n <= 4; n++) {
+          for (let i = 0; i <= segment.length - n; i++) {
+            keywords.add(segment.slice(i, i + n));
+          }
+        }
+        if (segment.length <= 8) {
+          keywords.add(segment);
         }
       }
-      // Also add the full segment if reasonably short
-      if (segment.length <= 8) {
-        keywords.add(segment);
-      }
     }
+    return keywords;
   }
-
-  return keywords;
 }
 
 export async function detectProgressAntiRepeat(changeDir: string, plannedApproach: string): Promise<{ blocked: boolean; matched: ExcludedApproach | null; reason?: string }> {
@@ -433,16 +442,16 @@ export async function detectProgressAntiRepeat(changeDir: string, plannedApproac
   for (const ex of progress.excludedApproaches) {
     const excludedKeywords = extractKeywords(ex.approach);
     if (excludedKeywords.size === 0) continue;
-    let intersectionCount = 0;
-    for (const kw of plannedKeywords) {
-      if (excludedKeywords.has(kw)) intersectionCount++;
-    }
-    const overlapRatio = intersectionCount / Math.min(plannedKeywords.size, excludedKeywords.size);
-    if (overlapRatio >= PROGRESS_ANTI_REPEAT_THRESHOLD) {
+    // P32: Use dynamic threshold based on keyword count
+    const totalKeywords = plannedKeywords.size + excludedKeywords.size;
+    const threshold = calculateDynamicThreshold(totalKeywords, PROGRESS_ANTI_REPEAT_THRESHOLD);
+    // P32: Use calculateOverlapRatio for more accurate overlap detection
+    const overlapRatio = calculateOverlapRatio(Array.from(plannedKeywords), Array.from(excludedKeywords));
+    if (overlapRatio >= threshold) {
       return {
         blocked: true,
         matched: ex,
-        reason: 'Approach has ' + Math.round(overlapRatio * 100) + '% keyword overlap with excluded approach ' + ex.id + ' ("' + ex.approach + '"). Previous failure reason: ' + ex.reason + '. Must explain difference from previous attempt before retrying.',
+        reason: 'Approach has ' + Math.round(overlapRatio * 100) + '% keyword overlap with excluded approach ' + ex.id + ' ("' + ex.approach + '"). Previous failure reason: ' + ex.reason + '. Dynamic threshold: ' + threshold.toFixed(2) + '. Must explain difference from previous attempt before retrying.',
       };
     }
   }
@@ -485,16 +494,48 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
   // ui-design → bridging: only if ui-design.md already exists
   if (currentState === 'ui-design' && hui) return 'bridging';
   // ui-design → specifying: if prerequisites are missing, fall back
-  if (currentState === 'ui-design' && (!hd || !ht || !hsp)) return 'specifying';
+  if (currentState === 'ui-design' && (!hd || !ht || !hsp)) {
+    // P41: Clean up orphaned ui-design.md when its prerequisites are missing
+    if (hui) {
+      try {
+        const { unlink } = await import('node:fs/promises');
+        await unlink(changeDir + '/ui-design.md');
+      } catch {
+        // File may not exist or permission error — ignore
+      }
+    }
+    return 'specifying';
+  }
   if (currentState === 'bridging' && hc) return 'approved-for-build';
   if ((currentState === 'approved-for-build' || currentState === 'executing') && allDone) return 'closing';
   if (currentState === 'specifying' && !hp) return 'exploring';
   if (currentState === 'bridging' && (!hd || !ht || !hsp)) return 'specifying';
-  if (currentState === 'ui-design' && (!hd || !ht || !hsp)) return 'specifying';
+  // P41: Duplicate check removed — handled in ui-design → specifying above
   if (currentState === 'approved-for-build' && !hc) return 'bridging';
   if (currentState === 'executing' && !hc) return 'bridging';
   if (currentState === 'debugging' && !hc) return 'bridging';
   return currentState;
+}
+/**
+ * P33: Clear PROGRESS.md after task completion.
+ * Deletes the progress file and optionally moves task summary to SUMMARY.md.
+ */
+export async function clearProgressFile(changeDir: string): Promise<void> {
+  const progressPath = changeDir + '/.sflow/progress.md';
+  try {
+    const { unlink } = await import('node:fs/promises');
+    await unlink(progressPath);
+  } catch {
+    // File doesn't exist, ignore
+  }
+  // Also clear subagent-progress.md to avoid stale state
+  const subagentProgressPath = changeDir + '/.sflow/subagent-progress.md';
+  try {
+    const { unlink } = await import('node:fs/promises');
+    await unlink(subagentProgressPath);
+  } catch {
+    // File doesn't exist, ignore
+  }
 }
 export function createStateManager(
   config: FeatureConfig = { enabled: true },
@@ -759,8 +800,31 @@ export function createStateManager(
         const existing = await readFile(lessonsPath);
         const entries = existing ? parseLessonsMd(existing) : [];
         const nextIndex = entries.length + 1;
+
+        // P35: Validate keywords — warn if too few or auto-generated
+        if (entry.keywords.length < 3) {
+          console.warn('[SFLOW] Lesson has fewer than 3 keywords. Consider adding more specific keywords for better searchability.');
+        }
+        const looksAutoGenerated = entry.keywords.length > 0 && entry.keywords.every(k =>
+          k === k.toLowerCase() && /^[a-z\u4e00-\u9fff]+$/.test(k)
+        );
+        if (looksAutoGenerated) {
+          console.warn('[SFLOW] Lesson keywords appear auto-generated. Consider manually specifying more descriptive keywords (e.g., technology names, error codes, file paths).');
+        }
+
+        // P35: Check for duplicate entries (same problem + approach)
+        const isDuplicate = entries.some(existingEntry =>
+          existingEntry.problem === entry.problem &&
+          existingEntry.attempted === entry.attempted
+        );
+        if (isDuplicate) {
+          return {
+            success: true,
+            data: { added: false, reason: 'Duplicate lesson: same problem and approach already exists', id: null },
+          };
+        }
+
         const formatted = '\n\n' + formatLessonEntry(nextIndex, { ...entry, firstSeen: entry.firstSeen || new Date().toISOString(), lastReviewed: new Date().toISOString() });
-        // If file doesn't exist yet, write with header
         if (!existing) {
           const header = '# LESSONS — 跨任务失败知识库\n\n';
           await ensureDir(changeDir + '/.sflow');
@@ -963,3 +1027,6 @@ async isContractStale(changeDir: string): Promise<FeatureResult> {
 },
   };
 }
+
+
+

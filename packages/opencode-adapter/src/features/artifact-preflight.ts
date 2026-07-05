@@ -1,5 +1,15 @@
+﻿/**
+ * Artifact Preflight Gate - Check required artifacts before state transitions.
+ *
+ * Inspired by flow-kit's Artifact Preflight Gate (GO.md § 第二步前).
+ *
+ * P29: Caching. Uses unified CacheManager with 5s TTL to avoid redundant
+ * filesystem operations during frequent state transitions.
+ * P4: Extended frontend check — also covers specifying state for frontend projects.
+ */
+
 import { ARTIFACT_PREFLIGHT, isDirectoryArtifact } from '@opencode-sflow/core';
-import { listFiles } from '@opencode-sflow/shared';
+import { listFiles, caches } from '@opencode-sflow/shared';
 import { detectFrontend } from './workflow-manager.js';
 
 export interface PreflightCheckParams {
@@ -22,6 +32,14 @@ export async function checkArtifactPreflight(
   params: PreflightCheckParams,
 ): Promise<PreflightCheckResult> {
   const { changeDir, targetState, fileExists, directoryExists, readJson } = params;
+
+  // P29: Check cache first — avoids redundant filesystem operations
+  const cacheKey = changeDir + ':' + targetState;
+  const cached = caches.artifactPreflight.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const gate = ARTIFACT_PREFLIGHT[targetState];
   if (!gate || gate.required.length === 0) {
     return { passed: true, missing: [] };
@@ -45,10 +63,13 @@ export async function checkArtifactPreflight(
   }
   if (missing.length > 0) {
     const route = findPreflightState(missing);
-    return {
+    const result: PreflightCheckResult = {
       passed: false, missing, existence, preflightState: route,
       reason: '[SFLOW] Preflight gate: missing ' + missing.join(', ') + '. Route to "' + route + '" first.',
     };
+    // P29: Cache negative result briefly (shorter TTL for failures)
+    caches.artifactPreflight.set(cacheKey, { passed: result.passed, missing: result.missing, existence: result.existence || {} }, 2000);
+    return result;
   }
   // P4: Extended frontend check — also covers specifying state for frontend projects
   const frontendCheckStates = ['specifying', 'ui-design', 'bridging', 'approved-for-build', 'executing', 'debugging'];
@@ -58,28 +79,31 @@ export async function checkArtifactPreflight(
       if (isFrontend) {
         const uiOk = await fileExists(changeDir + '/ui-design.md');
         existence['ui-design.md'] = uiOk;
-        // P2: Check already passed required artifacts; ui-design.md is optional for bridging+ in ARTIFACT_PREFLIGHT
-        // but required for frontend projects via this separate check
         if (!uiOk && targetState !== 'specifying') {
-          // For specifying state: ui-design.md doesn't need to exist yet (it's generated during specifying→ui-design transition)
-          return {
+          const result: PreflightCheckResult = {
             passed: false, missing: ['ui-design.md'], existence, preflightState: 'ui-design',
             reason: 'Frontend project needs ui-design.md before "' + targetState + '".',
           };
+          caches.artifactPreflight.set(cacheKey, { passed: result.passed, missing: result.missing, existence: result.existence || {} }, 2000);
+          return result;
         }
       }
     } catch (err) {
-      // P2 fix: Log warning instead of silently swallowing errors
-      // A filesystem error in detectFrontend should not silently pass the gate
       console.warn('[SFLOW] detectFrontend() failed during preflight gate:', err instanceof Error ? err.message : String(err));
-      return {
+      const result: PreflightCheckResult = {
         passed: false, missing: [], existence,
         preflightState: targetState,
         reason: 'Frontend detection failed: ' + (err instanceof Error ? err.message : String(err)) + '. Cannot verify ui-design.md requirement.',
       };
+      caches.artifactPreflight.set(cacheKey, { passed: result.passed, missing: result.missing, existence: result.existence || {} }, 2000);
+      return result;
     }
   }
-  return { passed: true, missing: [], existence };
+
+  const result: PreflightCheckResult = { passed: true, missing: [], existence };
+  // P29: Cache positive result with full TTL
+  caches.artifactPreflight.set(cacheKey, { passed: result.passed, missing: result.missing, existence: result.existence || {} });
+  return result;
 }
 
 /**
@@ -91,8 +115,6 @@ export async function checkArtifactPreflight(
  */
 export function findPreflightState(missing: string[]): string {
   if (missing.includes('proposal.md')) return 'exploring';
-  // P3 fix: When core artifacts AND ui-design.md are both missing,
-  // route to specifying first (core specs are prerequisite)
   if (missing.includes('specs/') || missing.includes('design.md') || missing.includes('tasks.md')) {
     return 'specifying';
   }

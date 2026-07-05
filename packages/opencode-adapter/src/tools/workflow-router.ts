@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Workflow Router tool - State detection and routing
  */
 
@@ -57,6 +57,104 @@ const INTENT_MAP: Array<{
 ];
 
 /**
+ * P30: NLU enhancement — synonym mapping for better intent recognition.
+ * Maps colloquial expressions to canonical intent tokens used by INTENT_MAP.
+ * This bridges the gap between how users naturally describe tasks and
+ * the formal token lists in INTENT_MAP entries.
+ */
+const SYNONYM_MAP: Record<string, string> = {
+  // --- Code Review synonyms ---
+  '看看': 'review',
+  '检查': 'review',
+  '审核': 'review',
+  '过一遍': 'review',
+  '审视': 'review',
+  'inspect': 'review',
+  'examine': 'review',
+  'verify': 'review',
+  'audit': 'review',
+  '检视': 'review',
+  '扫一遍': 'review',
+
+  // --- Debug/Fix synonyms ---
+  '修复': 'fix',
+  '改正': 'fix',
+  '修好': 'fix',
+  '纠正': 'fix',
+  '解决': 'fix',
+  '处理': 'fix',
+  '排查': 'debug',
+  '追踪': 'trace',
+  '跟踪': 'trace',
+  '定位': 'trace',
+  'rectify': 'fix',
+  'correct': 'fix',
+  'resolve': 'fix',
+
+  // --- Implement/Build synonyms ---
+  '写代码': 'implement',
+  '撸代码': 'implement',
+  '搭建': 'build',
+  '动手': 'start',
+  '开工': 'start',
+  '开干': 'start',
+  'build': 'implement',
+  'code': 'implement',
+
+  // --- Continue/Resume synonyms ---
+  '接着': 'continue',
+  '继续搞': 'continue',
+  '接着搞': 'continue',
+  '继续做': 'continue',
+  'proceed': 'continue',
+  'resume': 'continue',
+
+  // --- Explore/Requirements synonyms ---
+  '调研': 'explore',
+  '了解一下': 'explore',
+  '分析': 'explore',
+  '规划': 'explore',
+  'study': 'explore',
+  'research': 'explore',
+
+  // --- Test synonyms ---
+  '验证': 'test',
+  '测一下': 'test',
+  '跑一下': 'test',
+  '试试': 'test',
+
+  // --- Design synonyms ---
+  '画图': 'design',
+  '原型': 'design',
+  'prototype': 'design',
+
+  // --- Release/Archive synonyms ---
+  '上线': 'release',
+  '部署': 'release',
+  '打包': 'release',
+  '交付': 'ship',
+  'deploy': 'release',
+  'publish': 'release',
+};
+function expandSynonyms(input: string): string {
+  let expanded = input;
+  // Sort by length descending to match longer phrases first (e.g. "继续搞" before "继续")
+  const entries = Object.entries(SYNONYM_MAP).sort((a, b) => b[0].length - a[0].length);
+  for (const [synonym, canonical] of entries) {
+    // Use word-boundary matching for English, simple replace for Chinese
+    if (/^[a-zA-Z]/.test(synonym)) {
+      const regex = new RegExp('\\b' + synonym + '\\b', 'gi');
+      expanded = expanded.replace(regex, canonical);
+    } else {
+      // Chinese: replace all occurrences (Chinese text has no word boundaries)
+      const regex = new RegExp(synonym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+      expanded = expanded.replace(regex, canonical);
+    }
+  }
+  return expanded;
+}
+
+/**
  * P6 fix: "New thing description" regex patterns.
  * When no active change exists and user describes a new feature/thing,
  * route to need-explorer (equivalent to flow-kit's 0-change).
@@ -76,14 +174,6 @@ function extractTaskId(input: string): string | null {
 }
 
 /**
- * Match user intent to an agent using scoring instead of first-match.
- * Each INTENT_MAP pattern is decomposed into tokens; the entry with the highest
- * token overlap score wins. This prevents order-dependent routing (e.g. "check build"
- * scoring higher for build-executor than code-reviewer).
- *
- * Returns null if no clear intent match is found (fall back to artifact-based routing).
- */
-/**
  * P6 fix: Check if the input is a "new thing description".
  * Flow-kit GO.md rule: If no active change exists and user describes a new feature,
  * route to need-explorer (equivalent to 0-change) even if the input contains
@@ -97,9 +187,14 @@ function isNewThingDescription(input: string, hasActiveChange: boolean): boolean
 /**
  * P5 fix: Match user intent using explicit token lists scoring.
  * Each entry provides explicit tokens directly (no fragile regex-to-token extraction).
+ *
+ * P30: Uses expandSynonyms() to normalize colloquial input before matching,
+ * enabling natural language understanding for phrases like "帮我看看代码质量".
  */
 function matchIntent(input: string): { agent: string; action: string; description: string; score: number } | null {
-  const lowerInput = input.toLowerCase();
+  // P30: Expand synonyms before matching
+  const expandedInput = expandSynonyms(input);
+  const lowerInput = expandedInput.toLowerCase();
   const candidates: Array<{ agent: string; action: string; description: string; score: number }> = [];
 
   for (const entry of INTENT_MAP) {
@@ -110,7 +205,8 @@ function matchIntent(input: string): { agent: string; action: string; descriptio
       if (lowerInput.includes(token)) matchedTokens++;
     }
 
-    const exactMatch = entry.pattern.test(input);
+    // Also test regex pattern against expanded input
+    const exactMatch = entry.pattern.test(expandedInput);
 
     const tokenRatio = lowerTokens.length > 0 ? matchedTokens / lowerTokens.length : 0;
     const score = (exactMatch ? 0.5 : 0) + tokenRatio * 0.5;
@@ -217,7 +313,6 @@ export function createWorkflowRouterTool(): ToolDefinition {
                   `New thing: "${userIntent}"`,
                   'Flow-kit rule: new descriptions route to need-explorer even if containing design/UI keywords',
                 ],
-                // P8: Routing declaration
                 routingDeclaration: {
                   loaded: [],
                   notLoaded: ['specs/', 'design.md', 'tasks.md', 'execution-contract.md'],
@@ -355,7 +450,6 @@ export function createWorkflowRouterTool(): ToolDefinition {
               reasons,
               artifacts,
               isFrontend,
-              // P8: Routing declaration for transparency
               routingDeclaration,
             },
           }),

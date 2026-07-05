@@ -24,6 +24,12 @@ const STRONG_FRONTEND_PATTERN = /react|vue|next|nuxt|svelte|angular|solid-js|rem
 const WEAK_FRONTEND_PATTERN = /tailwindcss|postcss|styled-components|emotion|antd|element-ui|daisyui|bootstrap|shadcn|chakra-ui|mui\/material|@ngrx|react-router|vue-router|pinia|zustand|jotai|redux|sass|less|@vitejs/i;
 
 /**
+ * P40: Negative signals — backend frameworks that indicate this is NOT a frontend project.
+ * Only checked when no strong frontend signals are also present (e.g., Next.js + Express is still frontend).
+ */
+const BACKEND_FRAMEWORK_PATTERN = /express|fastify|koa|hapi|nestjs|django|flask|fastapi|spring-boot|springframework|spring|gin|echo|fiber|actix|rocket|aspnet|laravel|symfony|rails|phoenix|sinatra|vertx|micronaut|quarkus|helidon|jooby/i;
+
+/**
  * Detect if the project at changeDir is a frontend project.
  * Checks: package.json dependencies, directory structure, config files.
  *
@@ -32,13 +38,33 @@ const WEAK_FRONTEND_PATTERN = /tailwindcss|postcss|styled-components|emotion|ant
  * - Weak signals (Redux, PostCSS, etc.): need 2+ matches = frontend
  */
 export async function detectFrontend(changeDir: string): Promise<boolean> {
-  // 1. Check package.json for frontend frameworks
+  // 1. Check package.json for framework signals
   const pkgJson = await readJsonFile<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(changeDir + '/package.json').catch(() => null);
   if (pkgJson) {
     const allDeps = Object.keys({ ...pkgJson.dependencies, ...pkgJson.devDependencies });
 
-    // Check strong signals first — one match is enough
-    if (allDeps.some(dep => STRONG_FRONTEND_PATTERN.test(dep))) return true;
+    // P40: Check for backend frameworks first (negative signal)
+    const hasBackendFramework = allDeps.some(dep => BACKEND_FRAMEWORK_PATTERN.test(dep));
+    const hasStrongFrontend = allDeps.some(dep => STRONG_FRONTEND_PATTERN.test(dep));
+
+    // If backend framework present AND no strong frontend framework → likely backend project
+    if (hasBackendFramework && !hasStrongFrontend) {
+      // But still check weak frontend signals — need 3+ to override backend signal
+      let weakSignalCount = 0;
+      for (const dep of allDeps) {
+        if (WEAK_FRONTEND_PATTERN.test(dep)) {
+          weakSignalCount++;
+          if (weakSignalCount >= 3) {
+            // Override: 3+ weak frontend signals in a backend project is suspicious
+            return true;
+          }
+        }
+      }
+      return false; // Backend framework without strong frontend → not frontend
+    }
+
+    // Check strong signals — one match is enough (even with backend, e.g. Next.js + Express)
+    if (hasStrongFrontend) return true;
 
     // Count weak signals — need at least 2
     let weakSignalCount = 0;
@@ -315,3 +341,4 @@ async function archiveWorkflow(changeDir: string): Promise<void> {
   };
   await writeJsonFile(`${changeDir}/${ARCHIVE_DIR}/archive.json`, archiveData);
 }
+

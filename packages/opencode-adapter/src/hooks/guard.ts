@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Guard hook - Guard state transitions and block invalid operations
  * READ-ONLY: This hook NEVER writes state or artifacts. It only detects and reports.
  * State mutations (upgrades, repairs) happen through state-manager or workflow-manager.
@@ -289,7 +289,25 @@ async function checkProgressAntiRepeatGuard(changeDir: string, data?: Record<str
 
   const fileKeywords = filePath.replace(/\\/g, '/').split(/[/.]/).filter(k => k.length >= 3 && !['src', 'test', 'spec', 'index'].includes(k));
   const agentKeywords = agent ? agent.split(/[-_\s]+/).filter(k => k.length >= 3) : [];
-  const combinedKeywords = [...new Set([...fileKeywords, ...agentKeywords])];
+
+  // P34: Also read current task description from subagent-progress.md for better keyword inference
+  let taskKeywords: string[] = [];
+  const sp = await readFile(changeDir + '/.sflow/subagent-progress.md').catch(() => null);
+  if (sp) {
+    const planMatch = sp.match(/\*\*Plan task\*\*:\s*(.+)/i);
+    if (planMatch?.[1]) {
+      const taskDesc = planMatch[1];
+      // Extract file paths (backtick-wrapped) from task description
+      const fileRefs = (taskDesc.match(/\x60([^\x60]+)\x60/g) || []).map(function(s) { return s.replace(/\x60/g, ''); });
+      // Extract action words (4+ chars, non-stop words)
+      const actionWords = taskDesc.split(/\s+/).filter((w: string) =>
+        w.length >= 4 && !['the', 'and', 'for', 'with', 'this', 'that', 'from', '需要', '一个', '进行', '使用'].includes(w.toLowerCase())
+      );
+      taskKeywords = [...new Set([...fileRefs, ...actionWords])];
+    }
+  }
+
+  const combinedKeywords = [...new Set([...fileKeywords, ...agentKeywords, ...taskKeywords])];
 
   if (combinedKeywords.length === 0) return { success: true };
 
@@ -389,6 +407,34 @@ async function checkFileWriteGuard(changeDir: string, data?: Record<string, unkn
  * P19: Read files boundary check — warns when agent reads files
  * outside the declared read_files in execution-contract.md.
  */
+/**
+ * P39: Whitelist for read_files — common config files and directories
+ * that should always be readable without triggering boundary warnings.
+ * These are infrastructure/config files, not source code.
+ */
+const READ_FILES_WHITELIST = [
+  // Config files
+  'tsconfig.json', 'tsconfig.build.json', 'tsconfig.node.json', 'jsconfig.json',
+  'package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock',
+  '.npmrc', '.yarnrc', '.pnpmfile.cjs',
+  'babel.config.js', 'babel.config.json', '.babelrc', '.babelrc.json',
+  'eslint.config.js', '.eslintrc', '.eslintrc.json', '.eslintrc.js',
+  'prettier.config.js', '.prettierrc', '.prettierrc.json',
+  '.editorconfig', '.gitignore', '.gitattributes', '.gitmodules',
+  'README.md', 'CHANGELOG.md', 'LICENSE', 'CONTRIBUTING.md',
+  // Build configs
+  'vite.config.ts', 'vite.config.js', 'vite.config.mjs',
+  'webpack.config.js', 'rollup.config.js', 'rollup.config.mjs',
+  'jest.config.js', 'jest.config.ts', 'vitest.config.ts', 'vitest.config.js',
+  'mocha.opts', '.mocharc.js', '.mocharc.json',
+  // Environment
+  '.env', '.env.local', '.env.development', '.env.production', '.env.test',
+  '.env.example',
+  // Project metadata
+  'opencode.json', '.opencode.json', '.vscode/',
+  // Directories always accessible
+  'node_modules/', '.git/',
+];
 async function checkReadFilesBoundary(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
 
@@ -407,6 +453,20 @@ async function checkReadFilesBoundary(changeDir: string, data?: Record<string, u
 
   // Don't warn about reading artifacts or .sflow files
   if (isArtifactPath(filePath, changeDir) || filePath.includes('.sflow/')) return { success: true };
+
+  // P39: Check whitelist first — config/infra files are always readable
+  const relPathForWhitelist = filePath.replace(changeDir.replace(/\\/g, '/'), '').replace(/^[\/\\]/, '');
+  const normalizedFilePath = relPathForWhitelist || filePath.replace(/\\/g, '/').split('/').pop() || '';
+  const isInWhitelist = READ_FILES_WHITELIST.some(wl => {
+    if (wl.endsWith('/')) {
+      // Directory prefix match
+      return normalizedFilePath.startsWith(wl) || normalizedFilePath.includes('/' + wl.substring(0, wl.length - 1));
+    }
+    return normalizedFilePath === wl || normalizedFilePath.endsWith('/' + wl);
+  });
+  if (isInWhitelist) {
+    return { success: true }; // Whitelisted, skip warning
+  }
 
   // Parse read_files from execution-contract.md
   const activeTaskId = await getActiveTaskId(changeDir);
@@ -632,31 +692,55 @@ function parseFileBoundaryPatterns(contractContent: string): {
     }
   }
 
-  // === Format 5: Task table ===
-  const headerRow = contractContent.match(/^\|?\s*Task\s*\|[^|]*\|[^|]*\|[^|]*\|?\s*$/im);
-  const writeFilesColIndex = 3; // 4th column (0-indexed: 3)
-  const readFilesColIndex = 2;  // 3rd column (0-indexed: 2)
+  // === Format 5: Task table with dynamic header parsing ===
+  // P38: Dynamically determine column indices from header row instead of hardcoding.
+  // This makes the parser resilient to column reordering.
+  const tableMatch = contractContent.match(/^\|?\s*Task\s*\|[\s\S]*?(?=\n\n|\n#|\n##|$)/m);
+  if (tableMatch) {
+    const tableContent = tableMatch[0];
+    const lines = tableContent.split('\n').filter(l => l.trim().startsWith('|'));
 
-  for (const m of contractContent.matchAll(/^\|\s*(T\d+)\s*\|[^|]*\|[^|]*\|[^|]*\|/gm)) {
-    const taskId = m[1];
-    if (!taskId) continue;
-    const cellContent = m[0] || '';
-    const cols = cellContent.split('|').map(c => c.trim());
-    // cols[0]=empty, cols[1]=T01, cols[2]=description, cols[3]=read_files, cols[4]=write_files
-    if (cols.length >= 5) {
-      const writeCol = cols[writeFilesColIndex + 1];
-      if (writeCol) {
-        const pats = parseCell(writeCol);
-        if (pats.length > 0) {
-          taskBoundaries.set(taskId, pats);
-        }
-      }
-      // P19: Also track read_files patterns
-      const readCol = cols[readFilesColIndex + 1];
-      if (readCol) {
-        const readPats = parseCell(readCol);
-        if (readPats.length > 0) {
-          taskBoundaries.set(taskId + ':read', readPats);
+    if (lines.length >= 2) {
+      // Parse header row to determine column indices dynamically
+      const headerLine = lines[0] || '';
+      const headers = (headerLine || '').split('|').map(h => h.trim().toLowerCase());
+
+      let writeFilesColIndex = headers.findIndex(h => h.includes('write') || h.includes('写') || h.includes('修改'));
+      let readFilesColIndex = headers.findIndex(h => h.includes('read') || h.includes('读') || h.includes('参考'));
+      let taskColIndex = headers.findIndex(h => h.includes('task') || h.includes('任务') || h.includes('id'));
+
+      // Fallback to default positions if headers not found
+      if (writeFilesColIndex === -1) writeFilesColIndex = 4;
+      if (readFilesColIndex === -1) readFilesColIndex = 3;
+      if (taskColIndex === -1) taskColIndex = 1;
+
+      // Parse data rows (skip header at index 0 and separator at index 1)
+      for (let i = 2; i < lines.length; i++) {
+        const row = lines[i];
+        const cols = (row || '').split('|').map(c => c.trim());
+
+        if (cols.length > Math.max(writeFilesColIndex, readFilesColIndex, taskColIndex)) {
+          const taskIdMatch = cols[taskColIndex]?.match(/(T\d+)/);
+          const taskId = taskIdMatch?.[1];
+          if (!taskId) continue;
+
+          // Parse write_files
+          const writeCol = cols[writeFilesColIndex];
+          if (writeCol) {
+            const pats = parseCell(writeCol);
+            if (pats.length > 0) {
+              taskBoundaries.set(taskId, pats);
+            }
+          }
+
+          // Parse read_files
+          const readCol = cols[readFilesColIndex];
+          if (readCol) {
+            const readPats = parseCell(readCol);
+            if (readPats.length > 0) {
+              taskBoundaries.set(taskId + ':read', readPats);
+            }
+          }
         }
       }
     }
@@ -879,5 +963,7 @@ async function checkDebuggingState(changeDir: string, action?: string, data?: Re
   }
   return { success: true };
 }
+
+
 
 

@@ -27,6 +27,7 @@
     "@opencode-ai/plugin": "latest",
     "@opencode-ai/sdk": "latest",
     "js-yaml": "^4.1.0",
+    "nodejieba": "^3.5.8",
     "zod": "^3.23.0"
   },
   "devDependencies": {
