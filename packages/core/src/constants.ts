@@ -1,5 +1,7 @@
 /**
  * Shared workflow constants
+ *
+ * Note: WorkflowState type is defined in schema/base.ts to avoid circular dependencies.
  */
 
 /** Valid state transitions */
@@ -17,18 +19,6 @@ export const VALID_TRANSITIONS: Record<string, string[]> = {
 
 /** All workflow states */
 export const ALL_STATES = Object.keys(VALID_TRANSITIONS);
-
-/** Workflow states */
-export type WorkflowState =
-  | 'exploring'
-  | 'specifying'
-  | 'ui-design'
-  | 'bridging'
-  | 'approved-for-build'
-  | 'executing'
-  | 'debugging'
-  | 'closing'
-  | 'abandoned';
 
 /** Check if a state transition is valid */
 export function isValidTransition(from: string, to: string): boolean {
@@ -93,11 +83,6 @@ const ARTIFACT_PREFLIGHT_BASE: Record<string, { required: string[]; optional?: s
  * Artifact Preflight Gate table.
  * Maps workflow state to the artifacts that MUST exist before entering that state.
  * Used by guard.ts to enforce artifact-first discipline.
- *
- * P2: executing/debugging/closing use expandFrom to inherit from approved-for-build,
- * so adding a new required artifact to approved-for-build automatically propagates.
- *
- * Inspired by flow-kit's Artifact Preflight Gate (GO.md § 第二步前).
  */
 export const ARTIFACT_PREFLIGHT: Record<string, { required: string[]; optional?: string[] }> = {
   ...ARTIFACT_PREFLIGHT_BASE,

@@ -4,6 +4,24 @@
  */
 
 /**
+ * Workflow states
+ * Defined here (not in constants.ts) to avoid circular dependencies:
+ * - schema/base.ts uses WorkflowState (defined here)
+ * - constants.ts imports WorkflowState from here (no circular dependency)
+ * - validator.ts imports from constants.ts and parsing (no circular dependency)
+ */
+export type WorkflowState =
+  | 'exploring'
+  | 'specifying'
+  | 'ui-design'
+  | 'bridging'
+  | 'approved-for-build'
+  | 'executing'
+  | 'debugging'
+  | 'closing'
+  | 'abandoned';
+
+/**
  * Represents a scenario in a requirement.
  * Uses rawText to preserve original content for downstream analysis.
  */
@@ -80,8 +98,6 @@ export interface Change {
  * Workflow modes
  */
 export type WorkflowMode = 'full' | 'hotfix' | 'tweak';
-
-import type { WorkflowState } from '../constants.js';
 
 /**
  * A decision point record — captures a confirmed transition gate in the workflow.

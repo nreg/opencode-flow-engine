@@ -4,12 +4,11 @@
  */
 
 // Schema types
-export type { Scenario, Requirement, Spec, DeltaOperationType, Rename, Delta, Change, WorkflowMode, WorkflowStateFile, WorkflowStateRecord } from './schema/base.js';
+export type { Scenario, Requirement, Spec, DeltaOperationType, Rename, Delta, Change, WorkflowMode, WorkflowState, WorkflowStateFile, WorkflowStateRecord } from './schema/base.js';
 export { isValidStateRecord } from './schema/base.js';
-export type { WorkflowState } from './constants.js';
 
 // Validation
-export type { ValidationLevel, ValidationIssue, ValidationReport, VerificationDimension, VerificationStatus, VerificationFinding, VerificationReport, ConflictReport, SyncConflict } from './validation/types.js';
+export type { ValidationLevel, ValidationIssue, ValidationReport, VerificationDimension, VerificationStatus, VerificationFinding, ConflictReport, SyncConflict } from './validation/types.js';
 export { VALIDATION_MESSAGES, MIN_WHY_SECTION_LENGTH, MIN_PURPOSE_LENGTH, MAX_WHY_SECTION_LENGTH, MAX_REQUIREMENT_TEXT_LENGTH, MAX_DELTAS_PER_CHANGE, VERIFICATION_DIMENSIONS, VERIFICATION_MESSAGES, MIN_ABANDONMENT_REASON_LENGTH } from './validation/constants.js';
 export { Validator, sharedValidator } from './validation/validator.js';
 
