@@ -235,90 +235,19 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
               }, null, 2),
             };
           }
+          // Sync mode: poll for completion using shared pollSessionCompletion
+          const lastOutput = await pollSessionCompletion(
+            client as unknown as { session: import("./helpers/polling.js").SFlowClientSession },
+            sessionID,
+            { isNew },
+          ) || '(no output)';
 
-          // Sync mode: poll for completion
-          const startTime = Date.now();
-          let lastMsgCount = 0;
-          let stablePolls = 0;
-          const STABLE_REQUIRED = 3;
-          let sawActiveStatus = false;
-
-          while (Date.now() - startTime < MAX_WAIT_MS) {
-            await sleep(POLL_INTERVAL_MS);
-
-            let sessionStatus: { type: string } | undefined;
-            try {
-              const statusResult = await client.session.status();
-              const rawData = statusResult.data;
-              // Normalize: handle both array and object formats
-              if (Array.isArray(rawData)) {
-                const found = (rawData as Array<{ id: string; type: string }>).find(s => s.id === sessionID);
-                if (found) sessionStatus = { type: found.type };
-              } else if (rawData && typeof rawData === 'object') {
-                const obj = rawData as Record<string, { type: string }>;
-                sessionStatus = obj[sessionID];
-              }
-            } catch {
-              // status() might throw if session is not found; treat as idle
-              break;
-            }
-
-            if (sessionStatus && sessionStatus.type !== 'idle') {
-              sawActiveStatus = true;
-              stablePolls = 0;
-              lastMsgCount = 0;
-              continue;
-            }
-
-            let currentMsgCount = 0;
-            try {
-              const messagesResult = await client.session.messages({ path: { id: sessionID } });
-              const msgs = messagesResult.data as Array<unknown> | undefined;
-              currentMsgCount = Array.isArray(msgs) ? msgs.length : 0;
-            } catch {
-              break;
-            }
-
-            if (isNew && !sawActiveStatus && currentMsgCount === 0) {
-              continue;
-            }
-
-            if (currentMsgCount > 0 && currentMsgCount === lastMsgCount) {
-              stablePolls++;
-              if (stablePolls >= STABLE_REQUIRED) break;
-            } else {
-              stablePolls = 0;
-              lastMsgCount = currentMsgCount;
-            }
-          }
-
-          // Retrieve messages
-          let lastOutput = '(no output)';
-          try {
-            const messagesResult = await client.session.messages({ path: { id: sessionID } });
-            const messages = messagesResult.data as Array<{ parts: Array<{ type: string; text?: string }> }> | undefined;
-            if (messages) {
-              for (const msg of messages) {
-                if (msg.parts) {
-                  for (const part of msg.parts) {
-                    if (part.type === 'text' && part.text) {
-                      lastOutput = part.text;
-                    }
-                  }
-                }
-              }
-            }
-          } catch {
-            // messages() might fail; return what we have
-          }
-
-          // Register sync result in background registry for background_output retrieval
           const syncTaskId = generateTaskId();
           backgroundTaskRegistry.set(syncTaskId, {
             sessionID,
             status: 'completed',
             result: lastOutput,
-            createdAt: startTime,
+            createdAt: Date.now(),
             completedAt: Date.now(),
           });
 
@@ -359,102 +288,20 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
         // and there is no automatic callback to update the in-memory registry.
         // When a session becomes idle, we read its messages and update the registry.
         const pollAndComplete = async (task: BackgroundTaskEntry): Promise<BackgroundTaskEntry> => {
-          const timeout = 120_000;
-          const start = Date.now();
-          let lastMsgCount = 0;
-          let stablePolls = 0;
-
-          while (Date.now() - start < timeout) {
-            await sleep(500);
-
-            // Check session status
-            let isIdle = false;
-            try {
-              const statusResult = await client.session.status();
-              const rawData = statusResult.data;
-              if (Array.isArray(rawData)) {
-                const found = (rawData as Array<{ id: string; type: string }>).find(s => s.id === task.sessionID);
-                if (found) isIdle = found.type === 'idle';
-              } else if (rawData && typeof rawData === 'object') {
-                const obj = rawData as Record<string, { type: string }>;
-                isIdle = obj[task.sessionID]?.type === 'idle';
-              }
-            } catch {
-              // status() may fail; fall through to msg-count check
-            }
-
-            if (isIdle) {
-              // Session idle: read final output
-              try {
-                const messagesResult = await client.session.messages({ path: { id: task.sessionID } });
-                const messages = messagesResult.data as Array<{ parts: Array<{ type: string; text?: string }> }> | undefined;
-                let lastOutput = '(no output)';
-                if (messages) {
-                  for (const msg of messages) {
-                    if (msg.parts) {
-                      for (const part of msg.parts) {
-                        if (part.type === 'text' && part.text) {
-                          lastOutput = part.text;
-                        }
-                      }
-                    }
-                  }
-                }
-                const now = Date.now();
-                const updated: BackgroundTaskEntry = {
-                  ...task,
-                  status: 'completed',
-                  result: lastOutput,
-                  completedAt: now,
-                };
-                backgroundTaskRegistry.set(task_id, updated);
-                return updated;
-              } catch {
-                // messages() failed; mark error
-                const updated: BackgroundTaskEntry = { ...task, status: 'error', error: 'Failed to read session messages' };
-                backgroundTaskRegistry.set(task_id, updated);
-                return updated;
-              }
-            }
-
-            // Fallback: check message count stability
-            try {
-              const messagesResult = await client.session.messages({ path: { id: task.sessionID } });
-              const msgs = messagesResult.data as Array<unknown> | undefined;
-              const currentMsgCount = Array.isArray(msgs) ? msgs.length : 0;
-              if (currentMsgCount > 0 && currentMsgCount === lastMsgCount) {
-                stablePolls++;
-                if (stablePolls >= 3) break;
-              } else {
-                stablePolls = 0;
-                lastMsgCount = currentMsgCount;
-              }
-            } catch { break; }
-          }
-
-          // Final read attempt
-          try {
-            const messagesResult = await client.session.messages({ path: { id: task.sessionID } });
-            const messages = messagesResult.data as Array<{ parts: Array<{ type: string; text?: string }> }> | undefined;
-            let lastOutput = '(no output)';
-            if (messages) {
-              for (const msg of messages) {
-                if (msg.parts) {
-                  for (const part of msg.parts) {
-                    if (part.type === 'text' && part.text) {
-                      lastOutput = part.text;
-                    }
-                  }
-                }
-              }
-            }
-            const now = Date.now();
-            const updated: BackgroundTaskEntry = { ...task, status: 'completed', result: lastOutput, completedAt: now };
-            backgroundTaskRegistry.set(task_id, updated);
-            return updated;
-          } catch {
-            return task;
-          }
+          const output = await pollSessionCompletion(
+            client as unknown as { session: import('./helpers/polling.js').SFlowClientSession },
+            task.sessionID,
+            { maxWaitMs: 120000 },
+          );
+          const now = Date.now();
+          const updated: BackgroundTaskEntry = {
+            ...task,
+            status: 'completed',
+            result: output || '(no output)',
+            completedAt: now,
+          };
+          backgroundTaskRegistry.set(task_id, updated);
+          return updated;
         };
 
         const buildResponse = (task: BackgroundTaskEntry) => ({
@@ -538,56 +385,16 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
 
 // ─── Tool execution logic ─────────────────────────────────────────────────────
 
-// NOTE: Full implementation in tools/workflow-router.ts
+// Delegates to canonical detectWorkflowState() — single source of truth.
+// Replaces the earlier inline implementation that was missing ui-design/frontend support.
 async function executeWorkflowRouter(changeDir: string) {
-  const artifacts = {
-    proposal: await sflowFileExists(`${changeDir}/proposal.md`),
-    specs: await directoryExists(`${changeDir}/specs`),
-    design: await sflowFileExists(`${changeDir}/design.md`),
-    tasks: await sflowFileExists(`${changeDir}/tasks.md`),
-    contract: await sflowFileExists(`${changeDir}/execution-contract.md`),
-    state: await sflowFileExists(`${changeDir}/${STATE_FILE_PATH}`),
+  const detection = await detectWorkflowState(changeDir);
+  return {
+    state: detection.state,
+    skill: detection.skill,
+    reasons: detection.reasons,
+    artifacts: detection.artifacts,
   };
-
-  let state: string;
-  let skill: string;
-  const reasons: string[] = [];
-
-  if (!artifacts.proposal && !artifacts.specs) {
-    state = 'exploring';
-    skill = 'need-explorer';
-    reasons.push('No planning artifacts found');
-  } else if (!artifacts.contract) {
-    state = 'specifying';
-    skill = 'spec-writer';
-    reasons.push('Planning artifacts exist but contract is missing');
-  } else {
-    const stateData = await readJsonFile<{ state?: string; contractApproved?: boolean }>(`${changeDir}/${STATE_FILE_PATH}`);
-    const isApproved = stateData?.contractApproved === true
-      || stateData?.state === 'approved-for-build'
-      || stateData?.state === 'executing'
-      || stateData?.state === 'closing';
-    if (!isApproved) {
-      state = 'bridging';
-      skill = 'contract-builder';
-      reasons.push('Contract exists but not approved');
-    } else {
-      state = 'executing';
-      skill = 'build-executor';
-      reasons.push('Contract approved, ready for implementation');
-    }
-  }
-
-  if (artifacts.contract) {
-    const isStale = await isContractStale(changeDir);
-    if (isStale) {
-      state = 'bridging';
-      skill = 'contract-builder';
-      reasons.push('Contract is stale, needs regeneration');
-    }
-  }
-
-  return { state, skill, reasons, artifacts };
 }
 
 async function executeContractValidator(changeDir: string) {
@@ -787,8 +594,8 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       }
 
       // --- Register project-level MCPs (Tier 2) (S15 fix) ---
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const projectMcpConfig = (await loadProjectMcpConfig()) as any;
+      
+      const projectMcpConfig = (await loadProjectMcpConfig()) as Record<string, { command: string | string[]; environment?: Record<string, string> }>;
       for (const [name, server] of Object.entries(projectMcpConfig)) {
         const srv = server as { command: string | string[]; environment?: Record<string, string> };
         if (srv && srv.command) {
@@ -1025,6 +832,7 @@ const sflowPluginModule: PluginModule = {
 };
 
 export default sflowPluginModule;
+
 
 
 

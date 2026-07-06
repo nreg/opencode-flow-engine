@@ -84,13 +84,14 @@ export async function spawnProcess(
   command: string,
   args: string[],
   env?: Record<string, string | undefined>,
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 ): Promise<{
   pid: number | undefined;
   exited: Promise<number | null>;
   kill: (signal?: number) => void;
-  stdout: any;
-  stderr: any;
+  // Cross-runtime: Bun's ReadableStreamBYOBReader != Node's ReadableStreamDefaultReader
+  stdout: unknown;
+  stderr: unknown;
 }> {
   if (isBun) {
     const proc = Bun.spawn([command, ...args], {
@@ -118,13 +119,13 @@ export async function spawnProcess(
   child.on('exit', (code) => exitedResolve(code));
   child.on('error', () => exitedResolve(null));
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const stdoutReader: any = child.stdout
+  
+  const stdoutReader = child.stdout
     ? new ReadableStream({ start(controller) { child.stdout!.on('data', (chunk: Buffer) => controller.enqueue(chunk)); child.stdout!.on('end', () => controller.close()); } }).getReader()
     : null;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const stderrReader: any = child.stderr
+  
+  const stderrReader = child.stderr
     ? new ReadableStream({ start(controller) { child.stderr!.on('data', (chunk: Buffer) => controller.enqueue(chunk)); child.stderr!.on('end', () => controller.close()); } }).getReader()
     : null;
 
@@ -142,3 +143,5 @@ export async function spawnProcess(
     stderr: stderrReader,
   };
 }
+
+

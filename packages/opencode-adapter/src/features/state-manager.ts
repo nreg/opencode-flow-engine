@@ -173,7 +173,7 @@ export function formatLessonEntry(index: number, entry: LessonEntry): string {
  * At least MIN_MATCH_RATIO of the input keywords must match
  * before an entry is considered a hit, to reduce false positives.
  */
-const LESSONS_MIN_MATCH_RATIO = 0.4;
+const LESSONS_MIN_MATCH_RATIO = 0.55; // P3: Increased from 0.4 to reduce false positives
 
 /**
  * Derive the project root directory from a change directory path.
@@ -492,18 +492,157 @@ export async function detectProgressAntiRepeat(changeDir: string, plannedApproac
   return { blocked: false, matched: null };
 }
 
+/**
+ * Canonical detectWorkflowState — unified state detection result.
+ * Replaces the three duplicate implementations in:
+ *   - index.ts (executeWorkflowRouter)
+ *   - tools/workflow-router.ts (artifact-based detection)
+ *   - features/state-manager.ts (detectStateMismatch)
+ *
+ * Returns the detected state, recommended subagent, and routing info.
+ * All three callers SHOULD delegate to this function.
+ */
+export interface WorkflowStateDetection {
+  state: string;
+  skill: string;
+  mode: string;
+  reasons: string[];
+  artifacts: {
+    proposal: boolean;
+    specs: boolean;
+    specsFileCount: number;
+    design: boolean;
+    tasks: boolean;
+    contract: boolean;
+    uiDesign: boolean;
+  };
+  isFrontend: boolean;
+  isApproved: boolean;
+}
 
 /**
- * Canonical detectStateMismatch - single source of truth for state/artifact consistency.
- * Used by session.ts and state-manager.restoreState.
+ * Read artifacts once and return a reusable map (avoids redundant I/O).
  */
+export async function detectArtifactExistence(changeDir: string): Promise<{
+  proposal: boolean; design: boolean; tasks: boolean; specs: boolean;
+  specsFileCount: number; contract: boolean; uiDesign: boolean;
+}> {
+  const [hp, hd, ht, hc, hui] = await Promise.all([
+    fileExists(changeDir + '/proposal.md'),
+    fileExists(changeDir + '/design.md'),
+    fileExists(changeDir + '/tasks.md'),
+    fileExists(changeDir + '/execution-contract.md'),
+    fileExists(changeDir + '/ui-design.md'),
+  ]);
+  const specsDirExists = await directoryExists(changeDir + '/specs');
+  const specsFileCount = specsDirExists
+    ? (await (await import('node:fs/promises')).readdir(changeDir + '/specs')).filter(n => n.endsWith('.md')).length
+    : 0;
+  return {
+    proposal: hp, design: hd, tasks: ht,
+    specs: specsDirExists && specsFileCount > 0,
+    specsFileCount, contract: hc, uiDesign: hui,
+  };
+}
+
+/**
+ * Canonical workflow state detection — single source of truth.
+ *
+ * Artifact-first approach: inspects filesystem, then reads state.json for approval status.
+ * Supports all 9 states including ui-design for frontend projects.
+ *
+ * @param changeDir - The project/change directory
+ * @param artifactsOpt - Optional pre-fetched artifact existence map (avoids redundant I/O)
+ */
+export async function detectWorkflowState(
+  changeDir: string,
+  artifactsOpt?: WorkflowStateDetection['artifacts'],
+): Promise<WorkflowStateDetection> {
+  const artifacts = artifactsOpt ?? await detectArtifactExistence(changeDir);
+  const stateData = await readJsonFile<{ state?: string; mode?: string; contractApproved?: boolean }>(
+    changeDir + '/.sflow/state.json',
+  ).catch(() => null);
+
+  const isApproved = (
+    stateData?.contractApproved === true
+    || stateData?.state === 'approved-for-build'
+    || stateData?.state === 'executing'
+    || stateData?.state === 'closing'
+  );
+  const mode = stateData?.mode || 'full';
+
+  // Detect frontend — only for states that need ui-design check
+  let isFrontend = false;
+  const statesNeedingFrontend = ['specifying', 'ui-design', 'bridging', 'approved-for-build', 'executing', 'debugging'];
+
+  // Check state.json cached flag first; fall back to heuristics only if absent
+  if (stateData?.isFrontend === true || stateData?.isFrontend === false) {
+    isFrontend = stateData.isFrontend === true;
+  } else {
+    const { detectFrontend } = await import('./workflow-manager.js');
+    isFrontend = await detectFrontend(changeDir);
+  }
+
+  let state: string;
+  let skill: string;
+  const reasons: string[] = [];
+
+  if (!artifacts.proposal && !artifacts.specs) {
+    state = 'exploring';
+    skill = 'need-explorer';
+    reasons.push('No planning artifacts found');
+  } else if (!artifacts.contract) {
+    // Contract missing — check if we need ui-design or just need more planning
+    if (isFrontend && !artifacts.uiDesign && artifacts.design && artifacts.tasks) {
+      state = 'ui-design';
+      skill = 'spec-writer';
+      reasons.push('Frontend project needs ui-design.md before bridging');
+    } else {
+      state = 'specifying';
+      skill = 'spec-writer';
+      reasons.push(artifacts.specsFileCount > 0
+        ? 'Specs exist but contract incomplete'
+        : 'Planning artifacts exist but contract is missing');
+    }
+  } else if (!isApproved) {
+    state = 'bridging';
+    skill = 'contract-builder';
+    reasons.push('Contract exists but not approved');
+  } else {
+    state = 'executing';
+    skill = 'build-executor';
+    reasons.push('Contract approved, ready for implementation');
+  }
+
+  // Contract staleness override
+  if (artifacts.contract) {
+    try {
+      const { isContractStale: checkStale } = await import('@opencode-sflow/shared');
+      const stale = await checkStale(changeDir);
+      if (stale) {
+        state = 'bridging';
+        skill = 'contract-builder';
+        reasons.push('Contract is stale, needs regeneration');
+      }
+    } catch { /* ignore staleness check failures */ }
+  }
+
+  return {
+    state, skill, mode, reasons,
+    artifacts,
+    isFrontend, isApproved,
+  };
+}
 export async function detectStateMismatch(changeDir: string, currentState: string): Promise<string> {
-  const hp = await fileExists(changeDir + '/proposal.md');
-  const hd = await fileExists(changeDir + '/design.md');
-  const ht = await fileExists(changeDir + '/tasks.md');
-  const hsp = await directoryExists(changeDir + '/specs');
-  const hc = await fileExists(changeDir + '/execution-contract.md');
-  const hui = await fileExists(changeDir + '/ui-design.md');
+  // Delegates to canonical detectWorkflowState for artifact detection,
+  // but keeps existing self-healing logic for state vs artifact consistency.
+  const artifacts = await detectArtifactExistence(changeDir);
+  const hp = artifacts.proposal;
+  const hd = artifacts.design;
+  const ht = artifacts.tasks;
+  const hsp = artifacts.specs;
+  const hc = artifacts.contract;
+  const hui = artifacts.uiDesign;
   const pc = hp ? await readFile(changeDir + '/proposal.md') : null;
   const tc = ht ? await readFile(changeDir + '/tasks.md') : null;
   const inc = tc ? tc.split('\n').filter((l: string) => l.match(/^-\s*\[\s\]/)).length : 0;
@@ -518,25 +657,19 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
     }
   }
   if (currentState === 'exploring' && hp && pc && pc.trim().length > 100) return 'specifying';
-  // P28: ui-design requires proposal.md + specs/ + design.md + tasks.md as preconditions
   if (currentState === 'specifying' && hd && ht && hsp) {
     const { detectFrontend } = await import('./workflow-manager.js');
     const isFrontend = await detectFrontend(changeDir);
     if (isFrontend && !hui) return 'ui-design';
     return 'bridging';
   }
-  // ui-design → bridging: only if ui-design.md already exists
   if (currentState === 'ui-design' && hui) return 'bridging';
-  // ui-design → specifying: if prerequisites are missing, fall back
   if (currentState === 'ui-design' && (!hd || !ht || !hsp)) {
-    // P41: Clean up orphaned ui-design.md when its prerequisites are missing
     if (hui) {
       try {
         const { unlink } = await import('node:fs/promises');
         await unlink(changeDir + '/ui-design.md');
-      } catch {
-        // File may not exist or permission error — ignore
-      }
+      } catch { /* ignore */ }
     }
     return 'specifying';
   }
@@ -544,12 +677,41 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
   if ((currentState === 'approved-for-build' || currentState === 'executing') && allDone) return 'closing';
   if (currentState === 'specifying' && !hp) return 'exploring';
   if (currentState === 'bridging' && (!hd || !ht || !hsp)) return 'specifying';
-  // P41: Duplicate check removed — handled in ui-design → specifying above
   if (currentState === 'approved-for-build' && !hc) return 'bridging';
   if (currentState === 'executing' && !hc) return 'bridging';
   if (currentState === 'debugging' && !hc) return 'bridging';
   return currentState;
 }
+/**
+ * Shared writeStateFile — unified state.json writer.
+ * Used by both state-transition hook and workflow-manager.
+ * Replaces duplicate inline implementations.
+ */
+export async function writeStateFile(changeDir: string, newState: string, extra?: Record<string, unknown>): Promise<void> {
+  const { ensureDir, readJsonFile, writeJsonFile, stateFileMutex } = await import('@opencode-sflow/shared');
+  const now = new Date().toISOString();
+  const statePath = changeDir + '/.sflow/state.json';
+  await ensureDir(changeDir + '/.sflow');
+  await stateFileMutex.runExclusive(async () => {
+    const existing = await readJsonFile<Record<string, unknown>>(statePath);
+    const state: Record<string, unknown> = existing ?? {
+      state: 'exploring',
+      mode: 'full',
+      artifacts_hash: '',
+      contract_hash: '',
+      batches_completed: 0,
+      dp_0_confirmed: false,
+      contractApproved: false,
+      verificationStatus: 'pending',
+      createdAt: now,
+    };
+    state.state = newState;
+    state.updatedAt = now;
+    if (extra) Object.assign(state, extra);
+    await writeJsonFile(statePath, state);
+  });
+}
+
 /**
  * P33: Clear PROGRESS.md after task completion.
  * Deletes the progress file and optionally moves task summary to SUMMARY.md.
@@ -1072,6 +1234,8 @@ async isContractStale(changeDir: string): Promise<FeatureResult> {
 },
   };
 }
+
+
 
 
 

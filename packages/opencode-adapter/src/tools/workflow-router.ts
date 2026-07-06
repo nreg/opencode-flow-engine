@@ -1,11 +1,11 @@
-﻿/**
+/**
  * Workflow Router tool - State detection and routing
  */
 
 import type { ToolDefinition, ToolContext, ToolResult } from "./types.js";
 import { fileExists, directoryExists, readJsonFile, isContractStale } from "@opencode-sflow/shared";
 import { detectFrontend } from "../features/workflow-manager.js";
-
+import { detectWorkflowState } from "../features/state-manager.js";
 /**
  * Map from workflow state to allowed agents.
  * Intent routing must respect this — routing to an agent not allowed in current state
@@ -378,118 +378,53 @@ export function createWorkflowRouterTool(): ToolDefinition {
         }
       }
 
-      // P9 fix: Check specs content, not just directory existence
-      const { listFiles } = await import('@opencode-sflow/shared');
-
-      // Phase 2: Artifact-based state detection (fallback)
+      // Phase 2: Artifact-based state detection (fallback) — delegates to canonical detectWorkflowState()
       try {
-        const specsDirExists = await directoryExists(`${changeDir}/specs`);
-        const specsFileCount = specsDirExists ? (await listFiles(`${changeDir}/specs`, '.md')).length : 0;
-        const artifacts = {
-          proposal: await fileExists(`${changeDir}/proposal.md`),
-          specs: specsDirExists && specsFileCount > 0,
-          specsFileCount,
-          design: await fileExists(`${changeDir}/design.md`),
-          tasks: await fileExists(`${changeDir}/tasks.md`),
-          contract: await fileExists(`${changeDir}/execution-contract.md`),
-          uiDesign: await fileExists(`${changeDir}/ui-design.md`),
+        const detection = await detectWorkflowState(changeDir);
+        const routingDeclaration = {
+          loaded: [] as string[],
+          notLoaded: [] as string[],
+          nextAction: '',
         };
-
-        const isFrontend = await detectFrontend(changeDir);
-
-        let state: string;
-        let skill: string;
-        let reasons: string[] = [];
-        const routingDeclaration = { loaded: [] as string[], notLoaded: [] as string[], nextAction: '' };
-
-        if (!artifacts.proposal && !artifacts.specs) {
-          state = "exploring";
-          skill = "need-explorer";
-          reasons.push("No planning artifacts found");
-          routingDeclaration.nextAction = "Begin requirements exploration";
-        } else if (!artifacts.contract) {
-          if (isFrontend && !artifacts.uiDesign && artifacts.design && artifacts.tasks) {
-            state = "ui-design";
-            skill = "spec-writer";
-            reasons.push("Frontend project needs ui-design.md before bridging");
-            routingDeclaration.loaded.push('proposal.md', 'specs/', 'design.md', 'tasks.md');
-            routingDeclaration.notLoaded.push('ui-design.md');
-            routingDeclaration.nextAction = "Generate ui-design.md";
-          } else {
-            state = "specifying";
-            skill = "spec-writer";
-            reasons.push(specsFileCount > 0 ? "Specs exist but contract incomplete" : "Planning artifacts exist but contract is missing");
-            if (specsFileCount > 0) routingDeclaration.loaded.push(`specs/ (${specsFileCount} files)`);
-            routingDeclaration.notLoaded.push('execution-contract.md');
-            routingDeclaration.nextAction = "Complete planning artifacts";
-          }
-        } else if (!(await isContractApproved(changeDir))) {
-          state = "bridging";
-          skill = "contract-builder";
-          reasons.push("Contract exists but not approved");
+        if (detection.state === 'exploring') {
+          routingDeclaration.nextAction = 'Begin requirements exploration';
+        } else if (detection.state === 'specifying' || detection.state === 'ui-design') {
+          if (detection.artifacts.specsFileCount > 0) routingDeclaration.loaded.push('specs/ (' + detection.artifacts.specsFileCount + ' files)');
+          routingDeclaration.notLoaded.push('execution-contract.md');
+          routingDeclaration.nextAction = detection.state === 'ui-design' ? 'Generate ui-design.md' : 'Complete planning artifacts';
+        } else if (detection.state === 'bridging') {
           routingDeclaration.loaded.push('proposal.md', 'specs/', 'design.md', 'tasks.md', 'execution-contract.md');
-          routingDeclaration.nextAction = "Approve execution contract";
+          routingDeclaration.nextAction = 'Approve execution contract';
         } else {
-          state = "executing";
-          skill = "build-executor";
-          reasons.push("Contract approved, ready for implementation");
           routingDeclaration.loaded.push('proposal.md', 'execution-contract.md');
-          routingDeclaration.nextAction = "Begin task execution";
-        }
-
-        if (artifacts.contract) {
-          const stale = await isContractStale(changeDir);
-          if (stale) {
-            state = "bridging";
-            skill = "contract-builder";
-            reasons.push("Contract is stale, needs regeneration");
-          }
+          routingDeclaration.nextAction = 'Begin task execution';
         }
 
         return {
-          title: "Workflow Router",
+          title: 'Workflow Router',
           output: JSON.stringify({
             success: true,
             data: {
               source: 'artifacts',
-              state,
-              skill,
-              reasons,
-              artifacts,
-              isFrontend,
+              state: detection.state,
+              skill: detection.skill,
+              reasons: detection.reasons,
+              artifacts: detection.artifacts,
+              isFrontend: detection.isFrontend,
               routingDeclaration,
             },
           }),
         };
       } catch (error) {
         return {
-          title: "Workflow Router",
+          title: 'Workflow Router',
           output: JSON.stringify({
             success: false,
             error: error instanceof Error ? error.message : String(error),
-            suggestions: ["Check if the change directory exists", "Verify file permissions"],
+            suggestions: ['Check if the change directory exists', 'Verify file permissions'],
           }),
         };
       }
     },
   };
-}
-
-async function isContractApproved(changeDir: string): Promise<boolean> {
-  const state = await readJsonFile<{ state?: string; contractApproved?: boolean }>(
-    `${changeDir}/.sflow/state.json`,
-  );
-  // P5: Use explicit contractApproved field first.
-  // If it's explicitly set (true or false), honor it without state inference.
-  // If it's undefined, fall back to state-based inference.
-  if (state?.contractApproved !== undefined) {
-    return state.contractApproved === true;
-  }
-  if (
-    state?.state === "approved-for-build" ||
-    state?.state === "executing" ||
-    state?.state === "closing"
-  )
-    return true;
-  return false;
 }

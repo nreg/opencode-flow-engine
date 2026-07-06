@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Guard hook - Guard state transitions and block invalid operations
  * READ-ONLY: This hook NEVER writes state or artifacts. It only detects and reports.
  * State mutations (upgrades, repairs) happen through state-manager or workflow-manager.
@@ -9,6 +9,8 @@
  */
 
 import type { HookHandler, HookContext, HookResult } from "./types.js";
+import { isArtifactPath, isSourceCodePath, simpleContractHash } from "./guard/helpers.js";
+import { parseFileBoundaryPatterns, matchesBoundary, getActiveTaskId, boundaryCache, getBoundaryCacheKey, READ_FILES_WHITELIST } from "./guard/boundary.js";
 import { fileExists, readFile, readJsonFile, directoryExists, isContractStale, getContractStalenessReport } from "@opencode-sflow/shared";
 import { sharedValidator, HOTFIX_UPGRADE_THRESHOLDS, TWEAK_UPGRADE_THRESHOLDS } from "@opencode-sflow/core";
 import { checkArtifactPreflight, findPreflightState } from "../features/artifact-preflight.js";
@@ -426,29 +428,7 @@ async function checkFileWriteGuard(changeDir: string, data?: Record<string, unkn
  * that should always be readable without triggering boundary warnings.
  * These are infrastructure/config files, not source code.
  */
-const READ_FILES_WHITELIST = [
-  // Config files
-  'tsconfig.json', 'tsconfig.build.json', 'tsconfig.node.json', 'jsconfig.json',
-  'package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock',
-  '.npmrc', '.yarnrc', '.pnpmfile.cjs',
-  'babel.config.js', 'babel.config.json', '.babelrc', '.babelrc.json',
-  'eslint.config.js', '.eslintrc', '.eslintrc.json', '.eslintrc.js',
-  'prettier.config.js', '.prettierrc', '.prettierrc.json',
-  '.editorconfig', '.gitignore', '.gitattributes', '.gitmodules',
-  'README.md', 'CHANGELOG.md', 'LICENSE', 'CONTRIBUTING.md',
-  // Build configs
-  'vite.config.ts', 'vite.config.js', 'vite.config.mjs',
-  'webpack.config.js', 'rollup.config.js', 'rollup.config.mjs',
-  'jest.config.js', 'jest.config.ts', 'vitest.config.ts', 'vitest.config.js',
-  'mocha.opts', '.mocharc.js', '.mocharc.json',
-  // Environment
-  '.env', '.env.local', '.env.development', '.env.production', '.env.test',
-  '.env.example',
-  // Project metadata
-  'opencode.json', '.opencode.json', '.vscode/',
-  // Directories always accessible
-  'node_modules/', '.git/',
-];
+
 async function checkReadFilesBoundary(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
 
@@ -603,279 +583,6 @@ async function getGlobalWriteFiles(changeDir: string): Promise<string[]> {
  */
 
 
-// ─── File Boundary Control — Cache ──────────────────────────────────────
-
-/**
- * In-memory cache for parsed file boundary patterns.
- * Key: changeDir + ':' + contractHash (detect staleness)
- * Value: { patterns: string[], taskBoundaries: Map<string, string[]> }
- *
- * This avoids re-reading and re-parsing the contract on every write operation.
- * The cache is invalidated when the contract file changes (detected by hash).
- */
-const boundaryCache = new Map<string, { contractHash: string; taskBoundaries: Map<string, string[]>; globalPatterns: string[] }>();
-
-function getBoundaryCacheKey(changeDir: string, contractHash: string): string {
-  return changeDir + ':' + contractHash;
-}
-
-/**
- * Parse task-level and global file boundary patterns from execution-contract.md.
- *
- * Supports 5 formats:
- * 1. XML-style: <write_files>...</write_files> (global)
- * 2. YAML-style: write_files:\n  - path (global)
- * 3. Inline list: write_files: [path1, path2] (global)
- * 4. Task table: | T01 | desc | read_files | write_files | (per-task)
- * 5. Legacy fallback: write_files: line + "- path" lines
- *
- * Returns both global patterns and per-task boundary maps.
- */
-function parseFileBoundaryPatterns(contractContent: string): {
-  taskBoundaries: Map<string, string[]>;
-  globalPatterns: string[];
-} {
-  const globalPatterns: string[] = [];
-  const taskBoundaries = new Map<string, string[]>();
-
-  // Helper: parse a write_files cell value into a list of patterns
-  const parseCell = (cell: string): string[] => {
-    const pats: string[] = [];
-    // Extract backtick-wrapped paths: `path/to/file`
-    const backtickPaths = cell.match(/`([^`]+)`/g);
-    if (backtickPaths) {
-      for (const bp of backtickPaths) pats.push(bp.replace(/`/g, ''));
-    }
-    // Also extract bare paths separated by whitespace (no backticks)
-    const bareParts = cell.replace(/`[^`]+`/g, '').trim();
-    if (bareParts) {
-      for (const part of bareParts.split(/\s+/)) {
-        const t = part.trim();
-        if (t && (t.includes('/') || t.includes('\\') || /\.\w{1,4}$/.test(t))) pats.push(t);
-      }
-    }
-    return pats;
-  };
-
-  // === Format 1: XML-style <write_files>...</write_files> (task-scoped if inside a task block) ===
-  // Task blocks: <!-- Task T01 --> ... <!-- /Task T01 -->
-  const taskBlockRegex = /<!--\s*Task\s+(T\d+)\s*-->([\s\S]*?)<!--\s*\/Task\s+\1\s*-->/g;
-  let taskBlockMatch: RegExpExecArray | null;
-  while ((taskBlockMatch = taskBlockRegex.exec(contractContent)) !== null) {
-    const taskId = taskBlockMatch[1];
-    const blockContent = taskBlockMatch[2] || '';
-    const taskPats: string[] = [];
-
-    // XML-style within task block
-    for (const m of blockContent.matchAll(/<write_files>([\s\S]*?)<\/write_files>/g)) {
-      for (const l of (m[1] || '').split('\n')) {
-        const t = l.trim();
-        if (t && !t.startsWith('<')) taskPats.push(t);
-      }
-    }
-
-    // YAML-style within task block
-    const yamlMatch = blockContent.match(/write_files:\s*\n([\s\S]*?)(?=\n\S|\n*$)/);
-    if (yamlMatch && yamlMatch[1]) {
-      for (const l of yamlMatch[1].split('\n')) {
-        const t = l.replace(/^[-\s]*/, '').trim();
-        if (t && !t.startsWith('#') && !t.startsWith('write_files')) taskPats.push(t);
-      }
-    }
-
-    if (taskPats.length > 0 && taskId) taskBoundaries.set(taskId, taskPats);
-  }
-
-  // === Format 2: XML-style <write_files>...</write_files> (global, outside task blocks) ===
-  // First strip task-block content so we don't double-count
-  const strippedContent = contractContent.replace(/<!--\s*Task\s+T\d+\s*-->[\s\S]*?<!--\s*\/Task\s+T\d+\s*-->/g, '');
-  for (const m of strippedContent.matchAll(/<write_files>([\s\S]*?)<\/write_files>/g)) {
-    for (const l of (m[1] || '').split('\n')) {
-      const t = l.trim();
-      if (t && !t.startsWith('<')) globalPatterns.push(t);
-    }
-  }
-
-  // === Format 3: YAML-style write_files: list (global) ===
-  for (const m of strippedContent.matchAll(/^write_files:\s*\n([\s\S]*?)(?=\n\S|\n*$)/gm)) {
-    for (const l of (m[1] || '').split('\n')) {
-      const t = l.replace(/^[-\s]*/, '').trim();
-      if (t && !t.startsWith('#') && !t.startsWith('write_files') && !t.startsWith('<')) globalPatterns.push(t);
-    }
-  }
-
-  // === Format 4: Inline list: write_files: [path1, path2] ===
-  const inlineMatch = strippedContent.match(/write_files:\s*\[([^\]]+)\]/);
-  if (inlineMatch && inlineMatch[1]) {
-    for (const p of inlineMatch[1].split(',')) {
-      const t = p.trim().replace(/['"]/g, '');
-      if (t) globalPatterns.push(t);
-    }
-  }
-
-  // === Format 5: Task table with dynamic header parsing ===
-  // P38: Dynamically determine column indices from header row instead of hardcoding.
-  // This makes the parser resilient to column reordering.
-  const tableMatch = contractContent.match(/^\|?\s*Task\s*\|[\s\S]*?(?=\n\n|\n#|\n##|$)/m);
-  if (tableMatch) {
-    const tableContent = tableMatch[0];
-    const lines = tableContent.split('\n').filter(l => l.trim().startsWith('|'));
-
-    if (lines.length >= 2) {
-      // Parse header row to determine column indices dynamically
-      const headerLine = lines[0] || '';
-      const headers = (headerLine || '').split('|').map(h => h.trim().toLowerCase());
-
-      let writeFilesColIndex = headers.findIndex(h => h.includes('write') || h.includes('写') || h.includes('修改'));
-      let readFilesColIndex = headers.findIndex(h => h.includes('read') || h.includes('读') || h.includes('参考'));
-      let taskColIndex = headers.findIndex(h => h.includes('task') || h.includes('任务') || h.includes('id'));
-
-      // Fallback to default positions if headers not found
-      if (writeFilesColIndex === -1) writeFilesColIndex = 4;
-      if (readFilesColIndex === -1) readFilesColIndex = 3;
-      if (taskColIndex === -1) taskColIndex = 1;
-
-      // Parse data rows (skip header at index 0 and separator at index 1)
-      for (let i = 2; i < lines.length; i++) {
-        const row = lines[i];
-        const cols = (row || '').split('|').map(c => c.trim());
-
-        if (cols.length > Math.max(writeFilesColIndex, readFilesColIndex, taskColIndex)) {
-          const taskIdMatch = cols[taskColIndex]?.match(/(T\d+)/);
-          const taskId = taskIdMatch?.[1];
-          if (!taskId) continue;
-
-          // Parse write_files
-          const writeCol = cols[writeFilesColIndex];
-          if (writeCol) {
-            const pats = parseCell(writeCol);
-            if (pats.length > 0) {
-              taskBoundaries.set(taskId, pats);
-            }
-          }
-
-          // Parse read_files
-          const readCol = cols[readFilesColIndex];
-          if (readCol) {
-            const readPats = parseCell(readCol);
-            if (readPats.length > 0) {
-              taskBoundaries.set(taskId + ':read', readPats);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // === Format 6: Legacy fallback (no task isolation) ===
-  if (globalPatterns.length === 0 && taskBoundaries.size === 0) {
-    const ms = strippedContent.match(/write_files:[\s\S]*?(?=\n\w|$)/);
-    if (ms) {
-      for (const l of ms[0].split('\n')) {
-        const t = l.replace(/^- /, '').trim();
-        if (t && !t.startsWith('write_files')) globalPatterns.push(t);
-      }
-    }
-  }
-
-  // Deduplicate patterns
-  const dedupedGlobals = [...new Set(globalPatterns)];
-  for (const [tid, pats] of taskBoundaries) {
-    taskBoundaries.set(tid, [...new Set(pats)]);
-  }
-
-  return { taskBoundaries, globalPatterns: dedupedGlobals };
-}
-
-/**
- * Get the active task ID from subagent-progress.md (if it exists).
- * P22 fix: When subagent-progress.md doesn't exist, fall back to inferring
- * from tasks.md (first unchecked task) instead of returning null immediately.
- */
-async function getActiveTaskId(changeDir: string): Promise<string | null> {
-  const sp = await readFile(changeDir + '/.sflow/subagent-progress.md').catch(() => null);
-  if (sp) {
-    const planMatch = sp.match(/\*\*Plan task\*\*:\s*(T\d+)/i);
-    if (planMatch?.[1]) return planMatch[1].toUpperCase();
-  }
-  // P22 fix: Fallback to first unchecked task in tasks.md
-  const tasksContent = await readFile(changeDir + '/tasks.md').catch(() => null);
-  if (tasksContent) {
-    const firstUnchecked = tasksContent.match(/^-\s*\[\s*\]\s*(?:T\d+\s*[—-]?\s*)?(.+)/m);
-    if (firstUnchecked) {
-      // Extract task ID from the line (supports formats like "- [ ] T01 ..." or "- [ ] T01 - ...")
-      const idMatch = firstUnchecked[0].match(/(T\d+)/);
-      if (idMatch && idMatch[1]) return idMatch[1].toUpperCase();
-    }
-  }
-  return null;
-}
-
-/**
- * Check if a file path matches any allowed boundary pattern.
- *
- * P18: Normalizes absolute paths to relative before comparison.
- * Strips common drive-letter prefixes (Windows) and known repo-root segments.
- */
-function matchesBoundary(filePath: string, patterns: string[]): boolean {
-  let rel = filePath.replace(/\\/g, '/').toLowerCase();
-  // Strip Windows drive-letter prefix: /^[a-z]:\// → //
-  rel = rel.replace(/^[a-z]:\//, '/');
-  // If the path is still absolute (starts with /), try to make it project-relative
-  // by stripping common prefix segments up to the first known source directory
-  const knownSourcePrefixes = ['/src/', '/packages/', '/lib/', '/app/', '/components/', '/test/', '/tests/', '__tests__/'];
-  if (rel.startsWith('/')) {
-    const parts = rel.split('/');
-    const srcIdx = parts.findIndex(p => knownSourcePrefixes.some(pre => p.startsWith(pre) || p === pre.replace(/[\/]/g, '')));
-    if (srcIdx > 0 && srcIdx < parts.length - 1) {
-      rel = parts.slice(srcIdx).join('/');
-    }
-  }
-  // Strip leading ./
-  rel = rel.replace(/^\.\//, '');
-
-  return patterns.some(p => {
-    const np = p.replace(/\\/g, '/').toLowerCase().replace(/^\.\//, '');
-    if (rel === np || rel.endsWith('/' + np)) return true;
-    if (np.endsWith('/*') && rel.startsWith(np.slice(0, -1))) return true;
-    if (np.endsWith('/') && rel.startsWith(np)) return true;
-    // Glob: src/**/*.ts
-    // ** matches across directory boundaries; single * matches within one dir level
-    if (np.includes('*')) {
-      const escaped = np
-        .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-        .replace(/\*\*/g, '<<<DOUBLESTAR>>>')
-        .replace(/\*/g, '[^/]*')
-        .replace(/<<<DOUBLESTAR>>>/g, '.*');
-      try {
-        if (new RegExp('^' + escaped + '$', 's').test(rel)) return true;
-      } catch { /* skip invalid regex */ }
-    }
-    return false;
-  });
-}
-
-/**
- * Compute a simple hash of contract content for cache invalidation.
- */
-function simpleContractHash(content: string): string {
-  let hash = 0;
-  for (let i = 0; i < content.length; i++) {
-    const chr = content.charCodeAt(i);
-    hash = ((hash << 5) - hash) + chr;
-    hash |= 0; // Convert to 32bit integer
-  }
-  return hash.toString(36);
-}
-
-/**
- * File Boundary Control - validates source file writes against task write_files.
- * Runs in executing AND debugging states.
- *
- * Uses an in-memory cache to avoid re-reading the contract on every write.
- * Task-level isolation: only the active task's write_files are checked.
- * If no active task is found, falls back to global patterns.
- */
 async function checkFileBoundary(changeDir: string, filePath: string): Promise<HookResult | null> {
   const cc = await readFile(changeDir + '/execution-contract.md');
   if (!cc) return null;
@@ -1018,6 +725,7 @@ async function checkDebuggingState(changeDir: string, action?: string, data?: Re
   }
   return { success: true };
 }
+
 
 
 

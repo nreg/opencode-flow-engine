@@ -1,7 +1,8 @@
 import type { HookHandler, HookContext, HookResult } from './types.js';
 import { isValidTransition, getValidTransitions } from '@opencode-sflow/core';
-import { ensureDir, fileExists, directoryExists, readJsonFile, writeJsonFile, stateFileMutex } from '@opencode-sflow/shared';
+import { fileExists, directoryExists, readJsonFile } from '@opencode-sflow/shared';
 import { checkArtifactPreflight, findPreflightState } from '../features/artifact-preflight.js';
+import { writeStateFile } from '../features/state-manager.js';
 
 const STATE_FILE_PATH = '.sflow/state.json';
 
@@ -93,24 +94,7 @@ async function readStateFile(changeDir: string): Promise<Record<string, unknown>
 }
 
 async function updateState(changeDir: string, newState: string): Promise<void> {
-  const now = new Date().toISOString();
-  await ensureDir(`${changeDir}/.sflow`);
-
-  await stateFileMutex.runExclusive(async () => {
-    const existing = await readStateFile(changeDir);
-    const state: Record<string, unknown> = existing ?? {
-      state: 'exploring',
-      mode: 'full',
-      artifacts_hash: '',
-      contract_hash: '',
-      batches_completed: 0,
-      dp_0_confirmed: false,
-      contractApproved: false,
-      verificationStatus: 'pending',
-      createdAt: now,
-    };
-    state.state = newState;
-    state.updatedAt = now;
-    await writeJsonFile(`${changeDir}/${STATE_FILE_PATH}`, state);
-  });
+  // Delegates to shared writeStateFile — same function used by workflow-manager
+  await writeStateFile(changeDir, newState);
 }
+

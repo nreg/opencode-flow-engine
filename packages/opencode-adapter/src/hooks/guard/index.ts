@@ -1,0 +1,10 @@
+/**
+ * Guard hook — combined entry point.
+ * Delegates to sub-modules for specific guard checks.
+ */
+export { createGuardHook } from '../guard.js';
+export { isArtifactPath, isSourceCodePath, simpleContractHash } from './helpers.js';
+export {
+  parseFileBoundaryPatterns, matchesBoundary, getActiveTaskId,
+  boundaryCache, getBoundaryCacheKey, READ_FILES_WHITELIST,
+} from './boundary.js';
