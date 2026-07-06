@@ -83,33 +83,35 @@ export function parseLessonsMd(content: string): LessonEntry[] {
   const blocks = content.split(/\n### /);
   for (const block of blocks) {
     if (!block.trim()) continue;
-    const idMatch = block.match(/^L-(\d+)/);
-    const primaryMatch = block.match(/^L-\d+\s*(?:·|-|\s*)\s*\[([^\]]*)\]\s*(.+)/);
-    const looseMatch = !primaryMatch ? block.match(/^L-\d+\s+(.+?)(?:\n|$)/) : null;
+    // P15: Trim start of block so regex anchors work when block has leading whitespace
+    const trimmedBlock = block.replace(/^\s+/, '');
+    const idMatch = trimmedBlock.match(/^L-(\d+)/);
+    const primaryMatch = trimmedBlock.match(/^L-\d+\s*(?:·|-|\s*)\s*\[([^\]]*)\]\s*(.+)/);
+    const looseMatch = !primaryMatch ? trimmedBlock.match(/^L-\d+\s+(.+?)(?:\n|$)/) : null;
     if (!primaryMatch && !looseMatch) continue;
     const tags = primaryMatch ? (primaryMatch[1] || '').split(',').map((t: string) => t.trim()) : [];
     const title = primaryMatch ? (primaryMatch[2] || '').trim() : ((looseMatch ? looseMatch[1] : '') || '').trim();
 
     // P17 fix: Use flexible section extraction with multiple label variants
-    const problem = extractSection(block, '\\*\\*问题场景\\*\\*')
-      || extractSection(block, '\\*\\*场景\\*\\*')
-      || extractSection(block, '\\*\\*问题\\*\\*') || '';
-    const attempted = extractSection(block, '\\*\\*当时尝试的方案\\*\\*')
-      || extractSection(block, '\\*\\*尝试方案\\*\\*')
-      || extractSection(block, '\\*\\*尝试\\*\\*') || '';
-    const whyFailed = extractSection(block, '\\*\\*为什么不行\\*\\*')
-      || extractSection(block, '\\*\\*失败原因\\*\\*')
-      || extractSection(block, '\\*\\*原因\\*\\*') || '';
-    const recommendation = extractSection(block, '\\*\\*当前推荐做法\\*\\*')
-      || extractSection(block, '\\*\\*推荐做法\\*\\*')
-      || extractSection(block, '\\*\\*推荐\\*\\*') || '';
-    const reevaluateWhen = extractSection(block, '\\*\\*何时可重新评估\\*\\*')
-      || extractSection(block, '\\*\\*何时评估\\*\\*') || '';
+    const problem = extractSection(trimmedBlock, '\\*\\*问题场景\\*\\*')
+      || extractSection(trimmedBlock, '\\*\\*场景\\*\\*')
+      || extractSection(trimmedBlock, '\\*\\*问题\\*\\*') || '';
+    const attempted = extractSection(trimmedBlock, '\\*\\*当时尝试的方案\\*\\*')
+      || extractSection(trimmedBlock, '\\*\\*尝试方案\\*\\*')
+      || extractSection(trimmedBlock, '\\*\\*尝试\\*\\*') || '';
+    const whyFailed = extractSection(trimmedBlock, '\\*\\*为什么不行\\*\\*')
+      || extractSection(trimmedBlock, '\\*\\*失败原因\\*\\*')
+      || extractSection(trimmedBlock, '\\*\\*原因\\*\\*') || '';
+    const recommendation = extractSection(trimmedBlock, '\\*\\*当前推荐做法\\*\\*')
+      || extractSection(trimmedBlock, '\\*\\*推荐做法\\*\\*')
+      || extractSection(trimmedBlock, '\\*\\*推荐\\*\\*') || '';
+    const reevaluateWhen = extractSection(trimmedBlock, '\\*\\*何时可重新评估\\*\\*')
+      || extractSection(trimmedBlock, '\\*\\*何时评估\\*\\*') || '';
 
-    const keywordsMatch = block.match(/\*\*关键词\*\*:\s*(.+)/) || block.match(/\*\*关键词\*\*[:：]\s*(.+)/);
-    const statusMatch = block.match(/\*\*状态\*\*:\s*(.+)/) || block.match(/\*\*状态\*\*[:：]\s*(.+)/);
-    const stackMatch = block.match(/\*\*适用栈\*\*:\s*(.+)/) || block.match(/\*\*适用栈\*\*[:：]\s*(.+)/);
-    const firstSeenMatch = block.match(/\*\*首发\*\*:\s*(.+)/) || block.match(/\*\*首发\*\*[:：]\s*(.+)/);
+    const keywordsMatch = trimmedBlock.match(/\*\*关键词\*\*:\s*(.+)/) || trimmedBlock.match(/\*\*关键词\*\*[:：]\s*(.+)/);
+    const statusMatch = trimmedBlock.match(/\*\*状态\*\*:\s*(.+)/) || trimmedBlock.match(/\*\*状态\*\*[:：]\s*(.+)/);
+    const stackMatch = trimmedBlock.match(/\*\*适用栈\*\*:\s*(.+)/) || trimmedBlock.match(/\*\*适用栈\*\*[:：]\s*(.+)/);
+    const firstSeenMatch = trimmedBlock.match(/\*\*首发\*\*:\s*(.+)/) || trimmedBlock.match(/\*\*首发\*\*[:：]\s*(.+)/);
     const keywords = keywordsMatch ? (keywordsMatch[1] || '').split(/[\s,]+/).filter(Boolean) : [];
     const id = 'L-' + (idMatch ? (idMatch[1] || String(entries.length + 1)) : String(entries.length + 1));
 
@@ -137,8 +139,10 @@ export function parseLessonsMd(content: string): LessonEntry[] {
 }
 
 export function formatLessonEntry(index: number, entry: LessonEntry): string {
+  // P12: Escape special MD chars in tags to prevent markup breakage
+  const safeTags = entry.tags.map(t => t.replace(/[\[\]\(\)]/g, ''));
   const lines = [
-    '### L-' + String(index).padStart(3, '0') + ' · [' + entry.tags.join(', ') + '] ' + entry.title,
+    '### L-' + String(index).padStart(3, '0') + ' · [' + safeTags.join(', ') + '] ' + entry.title,
     '',
     '- **首发**: ' + (entry.changeId || '') + ' · ' + (entry.taskId || '') + ' · ' + entry.firstSeen,
     '- **上次复核**: ' + entry.lastReviewed,
@@ -234,8 +238,18 @@ async function searchLessonsInSingleFile(lessonsPath: string, keywords: string[]
         if (/[\u4e00-\u9fff]/.test(kw) && ekLower.includes(kw)) return true;
         return false;
       }) ||
-      entry.title.toLowerCase().includes(kw) ||
-      entry.tags.some(t => t.toLowerCase().includes(kw));
+      // P11: Use word-boundary matching on title, not substring — prevents "form" matching "transformer"
+      (() => {
+        const titleLower = entry.title.toLowerCase();
+        if (titleLower === kw) return true;
+        const escKw = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        try { return new RegExp('\\b' + escKw + '\\b', 'i').test(entry.title); }
+        catch { return titleLower.includes(kw) && kw.length >= 4; }
+      })() ||
+      entry.tags.some(t => {
+        const tLower = t.toLowerCase();
+        return tLower === kw || tLower.startsWith(kw + ' ') || tLower.endsWith(' ' + kw);
+      });
     });
     // P37: Dynamic threshold based on total keyword count
     const totalKeywords = lowerKeywords.length + entry.keywords.length;
@@ -352,30 +366,39 @@ export async function readProgressFile(changeDir: string): Promise<ProgressData 
   if (nextMatch) data.nextStep = (nextMatch[1] || '').trim();
   const blockedMatch = content.match(/\*\*阻塞\*\*:\s*(.+)/);
   if (blockedMatch) data.blockedBy = (blockedMatch[1] || '').trim();
-  // P11 fix: More robust table parsing — skip header row, handle multi-line cells
-  const tableSection = content.match(/## 已排除的方案[\s\S]*?\|[-\s|]+\|\n((?:\|.*\|\n?)*)/);
+  // P7: Robust table parsing — handles blockquote between header and table,
+  // rows without leading `|`, and returns empty result with warning if no rows found
+  const tableSection = content.match(/## 已排除的方案[\s\S]*?((?:\|.*\|\n?)+)/);
   if (tableSection && tableSection[1]) {
+    // Deduplicate rows: collect unique (id, approach, reason) combinations
+    const seenRows = new Set<string>();
     const rows = tableSection[1].trim().split('\n');
     for (const row of rows) {
       const trimmed = row.trim();
+      // Skip non-table lines, separator rows, and rows without content
       if (!trimmed.startsWith('|') || /^\|[-\s|]+\|$/.test(trimmed)) continue;
-      // Split by | and clean up — handle up to 4 columns
-      const cols = trimmed.split('|').map(c => c.trim()).filter(c => c !== '');
+      // Normalize: strip leading/trailing `|` before splitting
+      const normalized = trimmed.replace(/^\|+/, '').replace(/\|+$/, '');
+      const cols = normalized.split('|').map(c => c.trim()).filter(c => c !== '');
       if (cols.length >= 4) {
         const id = cols[0] || '';
         const approach = cols[1] || '';
         const reason = cols[2] || '';
         const failCount = parseInt(cols[3] || '0', 10) || 0;
-        if (id && approach) {
+        if (id && approach && !seenRows.has(id + ':' + approach)) {
+          seenRows.add(id + ':' + approach);
           data.excludedApproaches.push({ id, approach, reason, failCount });
         }
       }
     }
   }
-  // Parse assumptions
-  const assumptionsSection = content.match(/## 待确认的假设[^]*?\n((?:- .+\n?)*)/);
+  // P10: Parse "待确认的假设" — use lookahead for next ## section boundary to
+  // prevent matching `- ` lines from previous sections (e.g., the table block)
+  const assumptionsSection = content.match(/## 待确认的假设\n([\s\S]*?)(?=\n## |\n---|\n$)/);
   if (assumptionsSection && assumptionsSection[1]) {
-    data.pendingAssumptions = assumptionsSection[1].split('\n').filter(l => l.startsWith('- ')).map(l => l.slice(2));
+    data.pendingAssumptions = assumptionsSection[1].split('\n')
+      .filter(l => l.trimStart().startsWith('- '))
+      .map(l => l.trimStart().replace(/^- /, ''));
   }
   // Parse clues
   const cluesSection = content.match(/## 临时记下的线索[^]*?\n((?:- .+\n?)*)/);
@@ -413,17 +436,28 @@ function extractKeywords(text: string): Set<string> {
     for (const t of englishTokens) {
       if (t.length >= 3 && !stopWords.has(t)) keywords.add(t);
     }
+    // P8: Reduce Chinese n-gram false positives — only 2-char bigrams for long segments,
+    // full segment for short segments, and deduplicate via frequency map
     const chineseChars = lower.match(/[\u4e00-\u9fff]+/g);
     if (chineseChars) {
+      const ngramFreq = new Map<string, number>();
       for (const segment of chineseChars) {
-        for (let n = 2; n <= 4; n++) {
-          for (let i = 0; i <= segment.length - n; i++) {
-            keywords.add(segment.slice(i, i + n));
+        // Short segment (≤4 chars): use the whole segment
+        if (segment.length <= 4) {
+          keywords.add(segment);
+        } else {
+          // Long segment: only 2-char overlapping bigrams, count frequency
+          for (let i = 0; i <= segment.length - 2; i++) {
+            const bigram = segment.slice(i, i + 2);
+            ngramFreq.set(bigram, (ngramFreq.get(bigram) || 0) + 1);
           }
-        }
-        if (segment.length <= 8) {
+          // Also add the full segment if it's a meaningful phrase
           keywords.add(segment);
         }
+      }
+      // Only include bigrams that appear ≥ 2 times across all segments
+      for (const [bigram, freq] of ngramFreq) {
+        if (freq >= 2) keywords.add(bigram);
       }
     }
     return keywords;
@@ -812,15 +846,26 @@ export function createStateManager(
           console.warn('[SFLOW] Lesson keywords appear auto-generated. Consider manually specifying more descriptive keywords (e.g., technology names, error codes, file paths).');
         }
 
-        // P35: Check for duplicate entries (same problem + approach)
-        const isDuplicate = entries.some(existingEntry =>
-          existingEntry.problem === entry.problem &&
-          existingEntry.attempted === entry.attempted
-        );
+        // P13: Expand duplicate detection — also checks title + keyword overlap for partial matches
+        const isDuplicate = entries.some(existingEntry => {
+          // Exact match: same problem and attempted approach
+          if (existingEntry.problem === entry.problem && existingEntry.attempted === entry.attempted) return true;
+          // Fuzzy match: same problem AND significant keyword overlap (70%+)
+          if (existingEntry.problem === entry.problem) {
+            const existingKeywords = new Set(existingEntry.keywords.map(k => k.toLowerCase()));
+            const newKeywords = entry.keywords.map(k => k.toLowerCase());
+            const overlap = newKeywords.filter(k => existingKeywords.has(k)).length;
+            const ratio = newKeywords.length > 0 ? overlap / newKeywords.length : 0;
+            if (ratio >= 0.7) return true;
+          }
+          // Title match: same or highly similar title
+          if (existingEntry.title.toLowerCase() === entry.title.toLowerCase()) return true;
+          return false;
+        });
         if (isDuplicate) {
           return {
             success: true,
-            data: { added: false, reason: 'Duplicate lesson: same problem and approach already exists', id: null },
+            data: { added: false, reason: 'Duplicate lesson: same or highly similar entry already exists', id: null },
           };
         }
 

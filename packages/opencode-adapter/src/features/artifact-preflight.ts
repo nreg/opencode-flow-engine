@@ -62,10 +62,10 @@ export async function checkArtifactPreflight(
     if (!exists) missing.push(artifact);
   }
   if (missing.length > 0) {
-    const route = findPreflightState(missing);
+    const route = findPreflightState(missing, true);
     const result: PreflightCheckResult = {
-      passed: false, missing, existence, preflightState: route,
-      reason: '[SFLOW] Preflight gate: missing ' + missing.join(', ') + '. Route to "' + route + '" first.',
+      passed: false, missing, existence, preflightState: route.state,
+      reason: `[SFLOW] Preflight gate: missing ${missing.join(', ')}. Route to "${route.state}" first (${route.actionHint}).`,
     };
     // P29: Cache negative result briefly (shorter TTL for failures)
     caches.artifactPreflight.set(cacheKey, { passed: result.passed, missing: result.missing, existence: result.existence || {} }, 2000);
@@ -107,18 +107,39 @@ export async function checkArtifactPreflight(
 }
 
 /**
+ * Preflight route with human-readable action hint.
+ * P3: Extends the state with an `actionHint` describing what to do next.
+ */
+export interface PreflightRoute {
+  state: string;
+  actionHint: string;
+}
+
+const PREFLIGHT_ROUTES: Record<string, PreflightRoute> = {
+  exploring:  { state: 'exploring',  actionHint: '创建 proposal.md 明确需求和范围' },
+  specifying: { state: 'specifying', actionHint: '补齐 specs/, design.md, tasks.md 规划工件' },
+  'ui-design':{ state: 'ui-design', actionHint: '生成 ui-design.md 定义 UI 设计 token 和组件结构' },
+  bridging:   { state: 'bridging',   actionHint: '生成 execution-contract.md 执行合同' },
+};
+
+/**
  * Find the deepest state to fall back to based on missing artifacts.
- * Returns the EARLIEST state that still needs work.
+ * Returns the EARLIEST state that still needs work, with a human-readable action hint.
  *
  * P3 fix: When both core specs and ui-design.md are missing,
- * return a more specific route message.
+ * return a more specific route message with action guidance.
  */
-export function findPreflightState(missing: string[]): string {
-  if (missing.includes('proposal.md')) return 'exploring';
-  if (missing.includes('specs/') || missing.includes('design.md') || missing.includes('tasks.md')) {
-    return 'specifying';
-  }
-  if (missing.includes('ui-design.md')) return 'ui-design';
-  if (missing.includes('execution-contract.md')) return 'bridging';
-  return 'exploring';
+export function findPreflightState(missing: string[], returnRoute?: true): PreflightRoute;
+export function findPreflightState(missing: string[], returnRoute?: false): string;
+export function findPreflightState(missing: string[], returnRoute = false): string | PreflightRoute {
+  const stateName = (() => {
+    if (missing.includes('proposal.md')) return 'exploring';
+    if (missing.includes('specs/') || missing.includes('design.md') || missing.includes('tasks.md')) return 'specifying';
+    if (missing.includes('ui-design.md')) return 'ui-design';
+    if (missing.includes('execution-contract.md')) return 'bridging';
+    return 'exploring';
+  })();
+
+  if (returnRoute) return (PREFLIGHT_ROUTES[stateName] as PreflightRoute) || PREFLIGHT_ROUTES.exploring;
+  return stateName;
 }

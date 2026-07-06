@@ -66,22 +66,44 @@ export const TWEAK_UPGRADE_THRESHOLDS = {
 // ─── Artifact Preflight Gate: State → Required Artifacts ───────────────────
 
 /**
+ * P2: Helper to extend a base state's required artifact list.
+ * Reduces duplication when multiple states share the same base requirements.
+ */
+function expandFrom(base: string, extra: string[], extraOptional?: string[]): { required: string[]; optional?: string[] } {
+  const baseEntry = ARTIFACT_PREFLIGHT_BASE[base];
+  if (!baseEntry) return { required: [...extra], optional: extraOptional };
+  const mergedOptional = [...(baseEntry.optional || []), ...(extraOptional || [])];
+  return { required: [...baseEntry.required, ...extra], optional: mergedOptional.length > 0 ? mergedOptional : undefined };
+}
+
+/**
+ * Base artifact preflight entries — defined separately so expandFrom can reference them.
+ * P2: executing/debugging/closing inherit from approved-for-build via expandFrom.
+ */
+const ARTIFACT_PREFLIGHT_BASE: Record<string, { required: string[]; optional?: string[] }> = {
+  exploring:            { required: [] },
+  specifying:           { required: ['proposal.md'] },
+  'ui-design':          { required: ['proposal.md', 'specs/'] },
+  bridging:             { required: ['proposal.md', 'specs/', 'design.md', 'tasks.md'], optional: ['ui-design.md'] },
+  'approved-for-build': { required: ['proposal.md', 'specs/', 'design.md', 'tasks.md', 'execution-contract.md'], optional: ['ui-design.md'] },
+  abandoned:            { required: [] },
+};
+
+/**
  * Artifact Preflight Gate table.
  * Maps workflow state to the artifacts that MUST exist before entering that state.
  * Used by guard.ts to enforce artifact-first discipline.
  *
+ * P2: executing/debugging/closing use expandFrom to inherit from approved-for-build,
+ * so adding a new required artifact to approved-for-build automatically propagates.
+ *
  * Inspired by flow-kit's Artifact Preflight Gate (GO.md § 第二步前).
  */
 export const ARTIFACT_PREFLIGHT: Record<string, { required: string[]; optional?: string[] }> = {
-  exploring:          { required: [] },
-  specifying:         { required: ['proposal.md'] },
-  'ui-design':        { required: ['proposal.md', 'specs/'] },
-  bridging:           { required: ['proposal.md', 'specs/', 'design.md', 'tasks.md'], optional: ['ui-design.md'] },
-  'approved-for-build': { required: ['proposal.md', 'specs/', 'design.md', 'tasks.md', 'execution-contract.md'], optional: ['ui-design.md'] },
-  executing:          { required: ['proposal.md', 'specs/', 'design.md', 'tasks.md', 'execution-contract.md'], optional: ['ui-design.md'] },
-  debugging:          { required: ['proposal.md', 'specs/', 'design.md', 'tasks.md', 'execution-contract.md'], optional: ['ui-design.md'] },
-  closing:            { required: ['proposal.md', 'specs/', 'design.md', 'tasks.md', 'execution-contract.md'], optional: ['ui-design.md'] },
-  abandoned:          { required: [] },
+  ...ARTIFACT_PREFLIGHT_BASE,
+  executing:  expandFrom('approved-for-build', []),
+  debugging:  expandFrom('approved-for-build', []),
+  closing:    expandFrom('approved-for-build', []),
 };
 
 /** Save as named constant for reuse */

@@ -12,86 +12,20 @@ const STATE_FILE = `${SFLOW_DIR}/state.json`;
 const ARCHIVE_DIR = `${SFLOW_DIR}/archive`;
 
 /**
- * Strong frontend signals — one match is sufficient to classify as frontend.
- * These are frameworks/libraries that are exclusively or primarily used in frontend projects.
- */
-const STRONG_FRONTEND_PATTERN = /react|vue|next|nuxt|svelte|angular|solid-js|remix|gatsby|astro|qwik/i;
-
-/**
- * Weak frontend signals — need at least 2 matches to classify as frontend.
- * These are libraries that can appear in both frontend and backend projects.
- */
-const WEAK_FRONTEND_PATTERN = /tailwindcss|postcss|styled-components|emotion|antd|element-ui|daisyui|bootstrap|shadcn|chakra-ui|mui\/material|@ngrx|react-router|vue-router|pinia|zustand|jotai|redux|sass|less|@vitejs/i;
-
-/**
- * P40: Negative signals — backend frameworks that indicate this is NOT a frontend project.
- * Only checked when no strong frontend signals are also present (e.g., Next.js + Express is still frontend).
- */
-const BACKEND_FRAMEWORK_PATTERN = /express|fastify|koa|hapi|nestjs|django|flask|fastapi|spring-boot|springframework|spring|gin|echo|fiber|actix|rocket|aspnet|laravel|symfony|rails|phoenix|sinatra|vertx|micronaut|quarkus|helidon|jooby/i;
-
-/**
- * Detect if the project at changeDir is a frontend project.
- * Checks: package.json dependencies, directory structure, config files.
- *
- * Uses a two-tier signal system to reduce false positives:
- * - Strong signals (React, Vue, Next.js, etc.): 1 match = frontend
- * - Weak signals (Redux, PostCSS, etc.): need 2+ matches = frontend
+ * P21: detectFrontend 只读 state.json，不自己猜。
+ * AI 在 workflow 初始化时已读完项目上下文，直接设 isFrontend 即可。
+ * 前后端混放的项目，AI 根据本次 CHANGE 范围判断，不需要全局启发式检测。
  */
 export async function detectFrontend(changeDir: string): Promise<boolean> {
-  // 1. Check package.json for framework signals
-  const pkgJson = await readJsonFile<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(changeDir + '/package.json').catch(() => null);
-  if (pkgJson) {
-    const allDeps = Object.keys({ ...pkgJson.dependencies, ...pkgJson.devDependencies });
-
-    // P40: Check for backend frameworks first (negative signal)
-    const hasBackendFramework = allDeps.some(dep => BACKEND_FRAMEWORK_PATTERN.test(dep));
-    const hasStrongFrontend = allDeps.some(dep => STRONG_FRONTEND_PATTERN.test(dep));
-
-    // If backend framework present AND no strong frontend framework → likely backend project
-    if (hasBackendFramework && !hasStrongFrontend) {
-      // But still check weak frontend signals — need 3+ to override backend signal
-      let weakSignalCount = 0;
-      for (const dep of allDeps) {
-        if (WEAK_FRONTEND_PATTERN.test(dep)) {
-          weakSignalCount++;
-          if (weakSignalCount >= 3) {
-            // Override: 3+ weak frontend signals in a backend project is suspicious
-            return true;
-          }
-        }
-      }
-      return false; // Backend framework without strong frontend → not frontend
-    }
-
-    // Check strong signals — one match is enough (even with backend, e.g. Next.js + Express)
-    if (hasStrongFrontend) return true;
-
-    // Count weak signals — need at least 2
-    let weakSignalCount = 0;
-    for (const dep of allDeps) {
-      if (WEAK_FRONTEND_PATTERN.test(dep)) {
-        weakSignalCount++;
-        if (weakSignalCount >= 2) return true;
-      }
-    }
-  }
-
-  // 2. Check for frontend directory structure
-  const frontendDirs = ['src/pages', 'src/components', 'src/views', 'src/router', 'pages', 'components', 'views', 'app', 'src/app'];
-  for (const dir of frontendDirs) {
-    if (await directoryExists(changeDir + '/' + dir)) return true;
-  }
-
-  // 3. Check for frontend config files
-  const configFiles = ['vite.config.ts', 'vite.config.js', 'next.config.js', 'next.config.ts', 'nuxt.config.ts', 'vue.config.js', 'angular.json', 'svelte.config.js', 'tailwind.config.js', 'tailwind.config.ts', 'astro.config.mjs', 'astro.config.ts', 'remix.config.js', 'gatsby-config.js', 'gatsby-config.ts', 'qwik.config.ts'];
-  for (const cfg of configFiles) {
-    if (await fileExists(changeDir + '/' + cfg)) return true;
-  }
-
-  return false;
+  const state = await readJsonFile<{ isFrontend?: boolean }>(`${changeDir}/.sflow/state.json`).catch(() => null);
+  return state?.isFrontend === true;
 }
 
-/** Automatically detect frontend and update state.json if needed */
+/**
+ * Update state.json isFrontend cache for informational use.
+ * @deprecated P24: isFrontend cached value is informational only;
+ * actual decisions must use real-time detectFrontend() to avoid stale cache.
+ */
 export async function autoDetectFrontendAndUpdateState(changeDir: string): Promise<void> {
   const statePath = changeDir + '/' + STATE_FILE;
   const existing = await readJsonFile<Record<string, unknown>>(statePath);
@@ -100,6 +34,7 @@ export async function autoDetectFrontendAndUpdateState(changeDir: string): Promi
   if (existing.isFrontend !== isFrontend) {
     existing.isFrontend = isFrontend;
     existing.frontendDetectedAt = new Date().toISOString();
+    existing._deprecated_isFrontendCache = true; // P24: flag for future removal
     await writeJsonFile(statePath, existing);
   }
 }
@@ -165,6 +100,21 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
             } as FeatureResult;
           }
 
+          // P22: Block transition to closing when tasks are still incomplete
+          if (newState === 'closing' || newState === 'abandoned') {
+            const tasksContent = await readFile(changeDir + '/tasks.md').catch(() => null);
+            if (tasksContent) {
+              const taskLines = tasksContent.split('\n').filter((line: string) => line.match(/^-\s*\[.\]\s+/));
+              const incompleteTasks = taskLines.filter((line: string) => line.match(/^-\s*\[\s\]/));
+              if (incompleteTasks.length > 0) {
+                return {
+                  success: false,
+                  error: `P22: Cannot transition to "${newState}": ${incompleteTasks.length} task(s) are still incomplete. Complete all tasks before closing.`,
+                } as FeatureResult;
+              }
+            }
+          }
+
           const now = new Date().toISOString();
           await writeJsonFile(`${changeDir}/${STATE_FILE}`, {
             ...currentState,
@@ -217,7 +167,8 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       const changedFileCount = await countChangedFiles(changeDir);
       const mode = inferModeFromArtifacts(hasProposal, hasContract, changedFileCount, taskLines.length);
 
-      // Auto-detect frontend and update state if applicable
+      // P25: Always run frontend pre-detection even in exploring state,
+      // so downstream artifact-preflight can check ui-design.md requirements early.
       await autoDetectFrontendAndUpdateState(changeDir).catch(() => {});
 
       return { state, mode };

@@ -54,6 +54,9 @@ const INTENT_MAP: Array<{
   { pattern: /继续|接着上次|恢复|resume/i, agent: 'build-executor', action: 'resume', description: 'Resume interrupted work', tokens: ['继续', '接着上次', '恢复', 'resume'] },
   { pattern: /合并|merge|合并spec|spec.merge/i, agent: 'spec-merger', action: 'merge', description: 'Spec merging', tokens: ['合并', 'merge', '合并spec'] },
   { pattern: /健康检查|health|体检|巡检|技术债/i, agent: 'release-archivist', action: 'health-check', description: 'Health inspection', tokens: ['健康检查', 'health', '体检', '巡检'] },
+  // P6: Horizontal commands — intel-scan (project onboarding) and architect (architecture review)
+  { pattern: /入场扫描|扫描代码|intel.scan|老项目首次|项目情报|brownfield/i, agent: 'need-explorer', action: 'intel-scan', description: 'Project onboarding scan', tokens: ['入场扫描', 'intel scan', '项目情报', 'brownfield'] },
+  { pattern: /架构梳理|架构审查|architect|architecture.review|建架构|画架构图|重审adr/i, agent: 'spec-writer', action: 'architect', description: 'Architecture review', tokens: ['架构梳理', '架构审查', 'architect', 'architecture review', '重审adr'] },
 ];
 
 /**
@@ -294,11 +297,15 @@ export function createWorkflowRouterTool(): ToolDefinition {
 
       // Phase 1: Intent-based routing (if user gave a clear intent)
       if (userIntent) {
-        // P6 fix: Check "new thing description" priority first
+        // P4: Try intent matching FIRST. Only fall back to "new thing detection"
+        // when no intent matches (to avoid "做代码审查" being treated as new thing).
+        const matched = matchIntent(userIntent);
         const wfStateForNewThing = await readWorkflowState(changeDir);
         const hasActiveChange = !!(wfStateForNewThing?.state);
+        const isNewThing = isNewThingDescription(userIntent, hasActiveChange);
 
-        if (isNewThingDescription(userIntent, hasActiveChange)) {
+        // Only check new-thing when: no intent match AND user seems to describe something new
+        if (!matched && isNewThing) {
           return {
             title: "Workflow Router",
             output: JSON.stringify({
@@ -311,7 +318,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
                 description: 'New feature description detected',
                 reasons: [
                   `New thing: "${userIntent}"`,
-                  'Flow-kit rule: new descriptions route to need-explorer even if containing design/UI keywords',
+                  'Flow-kit rule: new descriptions without intent match route to need-explorer',
                 ],
                 routingDeclaration: {
                   loaded: [],
@@ -323,7 +330,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
           };
         }
 
-        const matched = matchIntent(userIntent);
+        // If matched or both, proceed to matched intent routing
         if (matched) {
           const wfState = await readWorkflowState(changeDir);
           const currentState = wfState?.state || 'exploring';
@@ -472,7 +479,12 @@ async function isContractApproved(changeDir: string): Promise<boolean> {
   const state = await readJsonFile<{ state?: string; contractApproved?: boolean }>(
     `${changeDir}/.sflow/state.json`,
   );
-  if (state?.contractApproved === true) return true;
+  // P5: Use explicit contractApproved field first.
+  // If it's explicitly set (true or false), honor it without state inference.
+  // If it's undefined, fall back to state-based inference.
+  if (state?.contractApproved !== undefined) {
+    return state.contractApproved === true;
+  }
   if (
     state?.state === "approved-for-build" ||
     state?.state === "executing" ||

@@ -111,29 +111,35 @@ async function checkArtifactAndPhaseConsistency(changeDir: string): Promise<Hook
     // Phase 1: Use shared checkArtifactPreflight — returns existence map to avoid redundant I/O
   const pf = await checkArtifactPreflight({ changeDir, targetState: currentState, fileExists, directoryExists, readJson: readJsonFile });
   if (!pf.passed) {
-    return { success: false, block: true, blockReason: '[SFLOW] Preflight gate: missing ' + pf.missing.join(', ') + '. Route to "' + findPreflightState(pf.missing) + '" first.' };
+    // P3: pf.reason already includes the enhanced action hint from artifact-preflight.ts
+    return { success: false, block: true, blockReason: pf.reason || '[SFLOW] Preflight gate: missing ' + pf.missing.join(', ') + '. Route to "' + findPreflightState(pf.missing) + '" first.' };
   }
 
-  // Phase 2: Full mode consistency — reuse pf.existence to avoid redundant stat calls
+  // Phase 2: Full mode consistency — use pf.existence directly, avoid redundant file I/O (P1)
   if (mode === "full" && currentState && currentState !== "exploring" && currentState !== "abandoned") {
     const ex = pf.existence || {};
     const inconsistencies: string[] = [];
 
-    // probe artifact only if not already in existence map (safety fallback)
-    const probeFile = async (name: string) => name in ex ? ex[name] : await fileExists(`${changeDir}/${name}`);
-    const probeDir = async (name: string) => name in ex ? ex[name] : await directoryExists(`${changeDir}/${name}`);
+    // Reuse existence map from Phase 1; only probe artifacts not in the map
+    const checkFile = async (name: string): Promise<boolean> =>
+      name in ex ? (ex[name] as boolean) : await fileExists(`${changeDir}/${name}`);
+    const checkDir = async (name: string): Promise<boolean> =>
+      name in ex ? (ex[name] as boolean) : await directoryExists(`${changeDir}/${name}`);
 
-    if (!await probeFile('proposal.md')) inconsistencies.push("full workflow but proposal.md missing");
-    if ((currentState === "bridging" || currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") && !await probeFile('design.md')) {
+    const statesAfterSpec = ["bridging", "approved-for-build", "executing", "debugging", "closing"];
+    const statesAfterExec = ["approved-for-build", "executing", "debugging", "closing"];
+
+    if (!await checkFile('proposal.md')) inconsistencies.push("full workflow but proposal.md missing");
+    if (statesAfterSpec.includes(currentState) && !await checkFile('design.md')) {
       inconsistencies.push("full workflow but design.md missing");
     }
-    if ((currentState === "bridging" || currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") && !await probeFile('tasks.md')) {
+    if (statesAfterSpec.includes(currentState) && !await checkFile('tasks.md')) {
       inconsistencies.push("full workflow but tasks.md missing");
     }
-    if ((currentState === "bridging" || currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") && !await probeDir('specs')) {
+    if (statesAfterSpec.includes(currentState) && !await checkDir('specs')) {
       inconsistencies.push("full workflow but specs/ missing");
     }
-    if ((currentState === "approved-for-build" || currentState === "executing" || currentState === "debugging" || currentState === "closing") && !await probeFile('execution-contract.md')) {
+    if (statesAfterExec.includes(currentState) && !await checkFile('execution-contract.md')) {
       inconsistencies.push("execution state but execution-contract.md missing");
     }
 
@@ -386,6 +392,14 @@ async function checkFileWriteGuard(changeDir: string, data?: Record<string, unkn
 
     // File Boundary Control — applies during executing AND debugging
     if (currentState === 'executing' || currentState === 'debugging') {
+      // P16: If no execution-contract.md found, block writes and require regeneration
+      const contractExists = await fileExists(`${changeDir}/execution-contract.md`).catch(() => false);
+      if (!contractExists) {
+        return {
+          success: false, block: true,
+          blockReason: `[SFLOW] Write blocked: workflow is in "${currentState}" state but execution-contract.md is missing. Route back to bridging to regenerate the contract.`,
+        };
+      }
       const br = await checkFileBoundary(changeDir, filePath);
       if (br) return br;
     }
@@ -506,9 +520,16 @@ async function checkGitCommitBoundary(changeDir: string, data?: Record<string, u
   if (currentState !== 'executing' && currentState !== 'debugging') return { success: true };
 
   // Get staged files using git status
+  //
+  // P17: changeDir may be under .sflow/changes/<id> (not the git root).
+  // Use `git rev-parse --show-toplevel` to find the real repo root,
+  // then run `git diff --cached` from there.
   try {
     const { execSync } = await import('child_process');
-    const stagedOutput = execSync('git diff --cached --name-only', { cwd: changeDir, encoding: 'utf8' }).trim();
+    const gitRoot = execSync('git rev-parse --show-toplevel', { cwd: changeDir, encoding: 'utf8' }).trim();
+    if (!gitRoot) return { success: true };
+
+    const stagedOutput = execSync('git diff --cached --name-only', { cwd: gitRoot, encoding: 'utf8' }).trim();
     if (!stagedOutput) return { success: true };
 
     const stagedFiles = stagedOutput.split('\n').filter((l: string) => l.trim());
@@ -531,8 +552,8 @@ async function checkGitCommitBoundary(changeDir: string, data?: Record<string, u
         blockReason: `[SFLOW] Git commit blocked: staged files outside write_files boundary: ${violated.join(', ')}. Allowed: ${allPatterns.join(', ')}. Move these files out of staging or update execution-contract.md first.`,
       };
     }
-  } catch {
-    // git command failed (not a git repo, etc.) — skip silently
+  } catch (err) {
+    console.warn('[SFLOW] P19: git boundary check skipped — ' + (err instanceof Error ? err.message : String(err)));
   }
 
   return { success: true };
@@ -792,11 +813,29 @@ async function getActiveTaskId(changeDir: string): Promise<string | null> {
 
 /**
  * Check if a file path matches any allowed boundary pattern.
+ *
+ * P18: Normalizes absolute paths to relative before comparison.
+ * Strips common drive-letter prefixes (Windows) and known repo-root segments.
  */
 function matchesBoundary(filePath: string, patterns: string[]): boolean {
-  const rel = filePath.replace(/\\/g, '/').toLowerCase();
+  let rel = filePath.replace(/\\/g, '/').toLowerCase();
+  // Strip Windows drive-letter prefix: /^[a-z]:\// → //
+  rel = rel.replace(/^[a-z]:\//, '/');
+  // If the path is still absolute (starts with /), try to make it project-relative
+  // by stripping common prefix segments up to the first known source directory
+  const knownSourcePrefixes = ['/src/', '/packages/', '/lib/', '/app/', '/components/', '/test/', '/tests/', '__tests__/'];
+  if (rel.startsWith('/')) {
+    const parts = rel.split('/');
+    const srcIdx = parts.findIndex(p => knownSourcePrefixes.some(pre => p.startsWith(pre) || p === pre.replace(/[\/]/g, '')));
+    if (srcIdx > 0 && srcIdx < parts.length - 1) {
+      rel = parts.slice(srcIdx).join('/');
+    }
+  }
+  // Strip leading ./
+  rel = rel.replace(/^\.\//, '');
+
   return patterns.some(p => {
-    const np = p.replace(/\\/g, '/').toLowerCase();
+    const np = p.replace(/\\/g, '/').toLowerCase().replace(/^\.\//, '');
     if (rel === np || rel.endsWith('/' + np)) return true;
     if (np.endsWith('/*') && rel.startsWith(np.slice(0, -1))) return true;
     if (np.endsWith('/') && rel.startsWith(np)) return true;
@@ -901,21 +940,37 @@ async function checkFileBoundary(changeDir: string, filePath: string): Promise<H
 async function checkLessonsGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
 
-  // Only check when entering implementing stage
   const agent = (data.agent as string) || '';
-  if (!agent.includes('build-executor')) return { success: true };
+  // P14: Extend to bug-investigator in debugging state
+  const isDebuggingAgent = agent.includes('bug-investigator');
+  const isBuildExecutor = agent.includes('build-executor');
+  if (!isBuildExecutor && !isDebuggingAgent) return { success: true };
 
-  // Check if subagent-progress.md indicates we're entering implementing stage
+  // Read state to determine if we're in debugging
+  let currentState = '';
+  try {
+    const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
+    currentState = stateData?.state || '';
+  } catch { /* ignore */ }
+  const isDebuggingState = currentState === 'debugging';
+
+  // Read subagent-progress.md once for keyword extraction
   const sp = await readFile(changeDir + '/.sflow/subagent-progress.md').catch(() => null);
-  if (!sp) return { success: true };
 
-  const stageMatch = sp.match(/\*\*Stage\*\*:\s*(\S+)/i);
-  const stage = stageMatch?.[1];
+  // For build-executor: check stage in subagent-progress.md
+  // For bug-investigator in debugging: skip stage check, just extract keywords
+  if (isBuildExecutor && !isDebuggingState) {
+    if (!sp) return { success: true };
 
-  // Only warn when entering implementing stage (not during review/fix)
-  if (stage !== 'implementing') return { success: true };
+    const stageMatch = sp.match(/\*\*Stage\*\*:\s*(\S+)/i);
+    const stage = stageMatch?.[1];
+
+    // Only warn when entering implementing stage (not during review/fix)
+    if (stage !== 'implementing') return { success: true };
+  }
 
   // Extract task keywords from the plan task
+  if (!sp) return { success: true };
   const planMatch = sp.match(/\*\*Plan task\*\*:\s*(.+)/i);
   const planTask = planMatch?.[1] || '';
   if (!planTask) return { success: true };
