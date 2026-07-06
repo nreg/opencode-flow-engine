@@ -572,13 +572,20 @@ export class Validator {
                 });
             }
         });
-        if (!content.includes('Test Obligations') && !content.includes('TDD')) {
-            issues.push({
-                level: 'WARNING',
-                path: 'execution-contract.md',
-                message: 'No test obligations defined',
-                suggestion: 'Add test obligations to ensure quality implementation',
-            });
+        // Check for Test Obligations section header (exact section match, not just keyword presence)
+        const hasTestObligationsSection = /^##\s+Test\s+Obligations\s*$/m.test(content);
+        if (!hasTestObligationsSection) {
+            // Fallback: check for TDD keyword within a dedicated test section
+            const hasTddSection = /^##\s+(Testing|Test\s+Plan|Test\s+Strategy)\s*$/im.test(content);
+            const hasTddContent = /\bTDD\b/i.test(content);
+            if (!hasTddContent || !(content.includes('Test Obligations') || content.includes('Test Plan') || hasTddSection)) {
+                issues.push({
+                    level: 'WARNING',
+                    path: 'execution-contract.md',
+                    message: 'No test obligations defined',
+                    suggestion: 'Add a ## Test Obligations section to the execution contract',
+                });
+            }
         }
         return createReport(issues, this.strictMode);
     }
