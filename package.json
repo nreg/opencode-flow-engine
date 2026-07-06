@@ -9,7 +9,8 @@
     "sflow": "./bin/sflow.js"
   },
   "scripts": {
-    "build": "bun run build:core && bun run build:adapter && bun run build:shared",
+    "build": "bun run clean && bun run build:core && bun run build:shared && bun run build:adapter",
+    "clean": "rm -rf packages/core/dist packages/core/tsconfig.tsbuildinfo packages/shared/dist packages/shared/tsconfig.tsbuildinfo packages/opencode-adapter/dist",
     "build:core": "cd packages/core && bun run build",
     "build:adapter": "cd packages/opencode-adapter && bun run build",
     "build:shared": "cd packages/shared && bun run build",
