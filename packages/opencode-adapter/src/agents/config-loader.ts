@@ -107,8 +107,17 @@ const BUILTIN_AGENTS: BuiltinAgentName[] = [
 export function agentOverridesFromConfig(config: SFlowConfig): AgentOverrides {
   const overrides: AgentOverrides = {};
 
+  // Build case-insensitive lookup: user config may use 'sflow' vs code's 'sFlow'
+  const agentsCI = new Map<string, AgentConfigEntry>();
+  if (config.agents) {
+    for (const [key, val] of Object.entries(config.agents)) {
+      agentsCI.set(key.toLowerCase(), val);
+    }
+  }
+
   for (const name of BUILTIN_AGENTS) {
-    const entry = config.agents?.[name];
+    // Try exact match first, then case-insensitive fallback
+    const entry = config.agents?.[name] ?? agentsCI.get(name.toLowerCase());
     if (!entry) continue;
 
     const override: Partial<AgentOverrideConfig> = {};
@@ -154,7 +163,7 @@ export function generateConfigTemplate(): SFlowConfig {
     version: '0.1.0',
     mode: 'full',
     agents: {
-      sflow: {
+      sFlow: {
         model: 'deepseek-v4-flash',
         temperature: 0.6,
         fallback_models: ['glm-5.1', 'kimi-k2.6'],
