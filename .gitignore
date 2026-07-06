@@ -20,3 +20,4 @@ bin-release/
 /packages/core/dist/
 /packages/opencode-adapter/dist/
 /packages/shared/dist/
+*.tsbuildinfo
