@@ -522,7 +522,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
 
   const workDir = input.directory;
   const sflowClient = input.client;
-  console.log(`[sFlow] Initializing in ${workDir}`);
+
 
   const hookComposer = createHookComposer();
   const skillLoader = await createSkillLoader();
@@ -536,7 +536,6 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
 
   return {
     dispose: async () => {
-      console.log('[sFlow] Plugin disposed');
       for (const server of mcpManager.getRunningServers()) {
         try {
           await mcpManager.stopServer(server.name);
@@ -577,9 +576,6 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       // Detect oh-my-openagent from cfg.plugin list
       const hasOmo = detectOmoPlugin(cfg.plugin);
       setHasOmoPlugin(hasOmo);
-      if (hasOmo) {
-        console.log('[sFlow] oh-my-openagent detected — enabling call_omo_agent and task tools');
-      }
 
       if (!cfg.agent) cfg.agent = {};
 
