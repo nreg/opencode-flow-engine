@@ -63,11 +63,13 @@ import { isContractStale, sleep as crossSleep } from '@opencode-sflow/shared';
 import { detectStateMismatch, simpleHash } from './features/state-manager.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
+import { setHasOmoPlugin } from './agents/agent-tools.js';
 
 export const PLUGIN_ID = 'opencode-sflow';
 export const PLUGIN_VERSION = '0.1.0';
 
-const SFLOW_TOOLS = new Set(['workflow_router', 'contract_validator', 'artifact_inspector', 'validate_spec', 'validate_proposal', 'validate_delta_spec', 'validate_tasks', 'validate_contract', 'validate_design', 'validate_implementation', 'detect_sync_conflicts', 'record_decision_point', 'call_flow_agent', 'background_output', 'background_cancel']);
+/** sFlow native tool names (used in tool.execute.after for post-processing) */
+const SFLOW_TOOLS = new Set(['workflow_router', 'contract_validator', 'artifact_inspector', 'validate_spec', 'validate_proposal', 'validate_delta_spec', 'validate_tasks', 'validate_contract', 'validate_design', 'validate_implementation', 'detect_sync_conflicts', 'record_decision_point', 'call_flow_agent', 'flowagent_output', 'flowagent_cancel']);
 
 // Lightweight in-memory background task registry
 // Maps taskId → { sessionID, status, result, error }
@@ -84,7 +86,7 @@ let backgroundTaskCounter = 0;
 
 function generateTaskId(): string {
   backgroundTaskCounter++;
-  return `bg_${Date.now()}_${backgroundTaskCounter}`;
+  return `sf_${Date.now()}_${backgroundTaskCounter}`;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -112,6 +114,23 @@ function formatToolError(msg: string): { title: string; output: string } {
 // ─── Tool definitions using @opencode-ai/plugin ToolDefinition format ──────────
 
 
+
+
+/**
+ * Detect oh-my-openagent from cfg.plugin list.
+ * Called during config hook to set the hasOmoPlugin flag for agent-tools.
+ */
+function detectOmoPlugin(pluginConfig: (string | [string, Record<string, unknown>])[] | undefined): boolean {
+  if (!pluginConfig) return false;
+  return pluginConfig.some(p => {
+    const name = Array.isArray(p) ? p[0] : p;
+    return name === 'oh-my-openagent'
+      || name === 'oh-my-opencode'
+      || name.startsWith('oh-my-openagent')
+      || name.startsWith('oh-my-opencode')
+      || name === 'omo';
+  });
+}
 
 function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
   return {
@@ -155,12 +174,12 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
     },
 
     call_flow_agent: {
-      description: 'Invoke a specialized sFlow subagent. Supports sync (run_in_background=false) and async (run_in_background=true) modes. Async mode returns a task_id; use background_output to retrieve results when complete.',
+      description: 'Invoke a specialized sFlow subagent. Supports sync (run_in_background=false) and async (run_in_background=true) modes. Async mode returns a task_id; use flowagent_output to retrieve results when complete.',
       args: {
         description: z.string().describe('Short (3-5 words) description of the task'),
         prompt: z.string().describe('The task for the subagent to perform'),
         subagent_type: z.string().describe('The subagent to invoke (e.g. build-executor, spec-writer)'),
-        run_in_background: z.boolean().describe('true=async (returns task_id for background_output), false=sync (waits for completion)'),
+        run_in_background: z.boolean().describe('true=async (returns task_id for flowagent_output), false=sync (waits for completion)'),
         session_id: z.string().optional().describe('Existing session to continue (sync mode only)'),
       },
       execute: async (args, context) => {
@@ -274,10 +293,14 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
       },
     },
 
-    background_output: {
-      description: 'Retrieve results from a background subagent task. Call this when a <system-reminder> notifies you that a background task completed. Use block=true to wait for completion (timeout: 120s).',
+    /**
+     * sFlow native background output retrieval.
+     * Named flowagent_output to avoid collision with oh-my-openagent's background_output.
+     */
+    flowagent_output: {
+      description: 'Retrieve results from a background sFlow subagent task (call_flow_agent async mode). Call this when a <system-reminder> notifies you that a background task completed. Use block=true to wait for completion (timeout: 120s).',
       args: {
-        task_id: z.string().describe('The task ID returned by call_flow_agent (run_in_background=true)'),
+        task_id: z.string().describe('The task ID returned by call_flow_agent (run_in_background=true, prefix: sf_)'),
         block: z.boolean().optional().describe('Wait for completion (default: false)'),
       },
       execute: async (args: { task_id: string; block?: boolean }, _context) => {
@@ -305,7 +328,7 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
         };
 
         const buildResponse = (task: BackgroundTaskEntry) => ({
-          title: 'Background Output',
+          title: 'FlowAgent Output',
           output: JSON.stringify({
             success: task.status !== 'error',
             task_id,
@@ -319,7 +342,7 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
         try {
           const existingTask = backgroundTaskRegistry.get(task_id);
           if (!existingTask) {
-            return { title: 'Background Output', output: JSON.stringify({ success: false, error: `Task ${task_id} not found` }, null, 2) };
+            return { title: 'FlowAgent Output', output: JSON.stringify({ success: false, error: `Task ${task_id} not found` }, null, 2) };
           }
 
           if (!block) {
@@ -334,7 +357,7 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
           return buildResponse(completed);
         } catch (error) {
           return {
-            title: 'Background Output',
+            title: 'FlowAgent Output',
             output: JSON.stringify({
               success: false,
               error: error instanceof Error ? error.message : String(error),
@@ -344,20 +367,24 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
       },
     },
 
-    background_cancel: {
-      description: 'Cancel a running background subagent task by task_id. Use this when you no longer need the result of a call_flow_agent call.',
+    /**
+     * sFlow native background task cancellation.
+     * Named flowagent_cancel to avoid collision with oh-my-openagent's background_cancel.
+     */
+    flowagent_cancel: {
+      description: 'Cancel a running sFlow subagent task by task_id (call_flow_agent async mode). Use this when you no longer need the result.',
       args: {
-        taskId: z.string().describe('Task ID to cancel (required)'),
+        taskId: z.string().describe('Task ID to cancel (required, prefix: sf_)'),
       },
       execute: async (args: { taskId: string }, _context) => {
         const { taskId } = args;
         try {
           const task = backgroundTaskRegistry.get(taskId);
           if (!task) {
-            return { title: 'Background Cancel', output: JSON.stringify({ success: false, error: `Task ${taskId} not found` }, null, 2) };
+            return { title: 'FlowAgent Cancel', output: JSON.stringify({ success: false, error: `Task ${taskId} not found` }, null, 2) };
           }
           if (task.status !== 'running') {
-            return { title: 'Background Cancel', output: JSON.stringify({ success: true, message: `Task ${taskId} already in status: ${task.status}` }, null, 2) };
+            return { title: 'FlowAgent Cancel', output: JSON.stringify({ success: true, message: `Task ${taskId} already in status: ${task.status}` }, null, 2) };
           }
 
           // Abort the session if possible
@@ -368,10 +395,10 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
           }
 
           backgroundTaskRegistry.delete(taskId);
-          return { title: 'Background Cancel', output: JSON.stringify({ success: true, message: `Task ${taskId} cancelled and removed` }, null, 2) };
+          return { title: 'FlowAgent Cancel', output: JSON.stringify({ success: true, message: `Task ${taskId} cancelled and removed` }, null, 2) };
         } catch (error) {
           return {
-            title: 'Background Cancel',
+            title: 'FlowAgent Cancel',
             output: JSON.stringify({
               success: false,
               error: error instanceof Error ? error.message : String(error),
@@ -545,8 +572,15 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       }
     },
 
-    // ── config hook: register agents and MCP servers ──
+    // ── config hook: register agents, MCP servers, detect oh-my-openagent ──
     config: async (cfg) => {
+      // Detect oh-my-openagent from cfg.plugin list
+      const hasOmo = detectOmoPlugin(cfg.plugin);
+      setHasOmoPlugin(hasOmo);
+      if (hasOmo) {
+        console.log('[sFlow] oh-my-openagent detected — enabling call_omo_agent and task tools');
+      }
+
       if (!cfg.agent) cfg.agent = {};
 
       for (const name of getAgentNames()) {
@@ -832,6 +866,7 @@ const sflowPluginModule: PluginModule = {
 };
 
 export default sflowPluginModule;
+
 
 
 

@@ -419,3 +419,4 @@ When routing to a skill that has an associated decision point, include the decis
 - Keep the user on one visible workflow.
 - Avoid making them choose between upstream mental models.
 - Treat OpenSpec ideas as planning inputs and Superpowers ideas as execution discipline, but keep `sflow` as the only workflow owner.
+

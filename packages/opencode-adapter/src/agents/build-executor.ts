@@ -5,7 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory } from './types.js';
-import { getAgentTools } from './agent-tools.js';
+import { getAgentTools, getHasOmoPlugin } from './agent-tools.js';
 
 export const createBuildExecutorAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'build-executor',
@@ -142,10 +142,49 @@ You have access to:
 - \`write\` - Write code and tests
 - \`edit\` - Edit code
 - \`bash\` - Run tests and commands
+- \`call_flow_agent\` - Dispatch implementer/reviewer subagents
+- \`flowagent_output\` - Retrieve async subagent results
+- \`flowagent_cancel\` - Cancel running subagent tasks
 - \`lsp_diagnostics\` - Check for errors
-- \`lsp_goto_definition\` - Navigate code`,
+- \`lsp_goto_definition\` - Navigate code
+
+### oh-my-openagent Enhanced Tools (When Available)
+
+If oh-my-openagent is installed, you also have:
+- \`call_omo_agent\` - Quick explore/librarian tasks (codebase exploration, doc research)
+- \`task\` - Full delegation with category-based model selection and skill loading
+
+### SDD Task Delegation Strategy
+
+When operating in SDD (Subagent-Driven Development) mode with oh-my-openagent available,
+dispatch sub-tasks using \`task\` instead of \`call_flow_agent\` to leverage category-based
+model selection and skill injection:
+
+| Task Type | Recommended Category | Skills | Use Case |
+|-----------|--------------------|--------|----------|
+| Frontend UI | \`visualEngineering\` | ["shadcn-ui", "frontend-design"] | Pages, components, styling |
+| Backend Logic | \`deep\` | ["programming"] | APIs, services, data processing |
+| Simple Fix | \`quick\` | --- | Single-file changes, minor fixes |
+| Documentation | \`writing\` | --- | README, comments, docs |
+| Architecture | \`ultrabrain\` | --- | Complex design decisions |
+
+Example --- parallel dispatch of frontend + backend tasks:
+
+\`\`\`
+// Frontend task with skill loading
+task(category="visualEngineering", load_skills=["shadcn-ui"],
+  run_in_background=true, prompt="Implement the user profile page...")
+
+// Backend task with deep reasoning
+task(category="deep", load_skills=["programming"],
+  run_in_background=true, prompt="Create the user API endpoints...")
+\`\`\`
+
+> **Note**: The \`task\` tool is only available when oh-my-openagent is installed.
+> If not available, fall back to \`call_flow_agent\` with \`subagent_type="build-executor"\`
+> for all sub-tasks. Both approaches work correctly without oh-my-openagent.`,
   temperature: options?.temperature ?? 0.7,
-  tools: getAgentTools('build-executor'),
+  tools: getAgentTools('build-executor', getHasOmoPlugin()),
 });
 
 // Mode is managed by AGENT_MODES registry in agent-builder.ts
