@@ -83,7 +83,8 @@ describe('Continuation Hook — Build Pause 3-State', () => {
     const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
-    expect(data?.shouldContinue).toBe(true);
+    // executing requires user consent before dispatching build-executor
+    expect(data?.shouldContinue).toBe(false);
     expect(data?.pause_state).toBeUndefined();
   });
 });
@@ -133,22 +134,39 @@ describe('Continuation Hook — Auto-Transition Config', () => {
     await cleanupDir(dir);
   });
 
-  it('should auto-transition by default', async () => {
-    await writeState(dir, { state: 'executing', mode: 'full' });
+  it('should auto-transition by default for non-manual states', async () => {
+    await writeState(dir, { state: 'specifying', mode: 'full' });
     const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     const data = result.data as Record<string, unknown>;
     expect(data?.shouldContinue).toBe(true);
     expect(data?.next).toBe('auto');
+    expect(data?.skill).toBe('spec-writer');
+  });
+
+  it('should not auto-transition for executing state', async () => {
+    await writeState(dir, { state: 'executing', mode: 'full' });
+    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+    const data = result.data as Record<string, unknown>;
+    expect(data?.shouldContinue).toBe(false);
+    expect(data?.next).toBe('manual');
+  });
+
+  it('should not auto-transition for approved-for-build state', async () => {
+    await writeState(dir, { state: 'approved-for-build', mode: 'full' });
+    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+    const data = result.data as Record<string, unknown>;
+    expect(data?.shouldContinue).toBe(false);
+    expect(data?.next).toBe('manual');
   });
 
   it('should respect auto_transition: false in config', async () => {
-    await writeState(dir, { state: 'executing', mode: 'full' });
+    await writeState(dir, { state: 'specifying', mode: 'full' });
     await writeConfig(dir, { auto_transition: false });
     const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     const data = result.data as Record<string, unknown>;
     expect(data?.shouldContinue).toBe(false);
     expect(data?.next).toBe('manual');
-    expect(data?.skill).toBe('build-executor');
+    expect(data?.skill).toBe('spec-writer');
   });
 
   it('should return correct skill for each state', async () => {

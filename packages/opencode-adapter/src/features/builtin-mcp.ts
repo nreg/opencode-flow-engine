@@ -29,7 +29,7 @@ async function readFileContent(filePath: string): Promise<string | null> {
 
 function resolvePath(context: ToolContext, filePath?: string, defaultRelative?: string): string {
   if (filePath) return filePath;
-  const dir = context.directory || '';
+  const dir = (context && context.directory) || '';
   return defaultRelative ? `${dir}/${defaultRelative}` : dir;
 }
 

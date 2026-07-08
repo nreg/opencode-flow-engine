@@ -115,6 +115,26 @@ export function createContinuationHook(): HookHandler {
         };
       }
 
+      // States that require user approval or explicit delegation — never auto-continue.
+      // The orchestrator must stop and wait for the user to say "go" before dispatching.
+      const MANUAL_STATES = new Set(['approved-for-build', 'executing']);
+      if (MANUAL_STATES.has(currentState)) {
+        return {
+          success: true,
+          data: {
+            shouldContinue: false,
+            reason: `Workflow is at ${currentState} — waiting for user action`,
+            phase_advanced: false,
+            auto_invoke: false,
+            next: 'manual',
+            skill,
+            hint: currentState === 'approved-for-build'
+              ? `Contract ready for review. Ask the user to approve before proceeding.`
+              : `State is ${currentState}. Ask the user whether to dispatch build-executor for implementation.`,
+          },
+        };
+      }
+
       // Read auto_transition config from .sflow/config.json (change-level) or default to true
       let autoTransition = true;
       const configPath = `${changeDir}/.sflow/config.json`;
