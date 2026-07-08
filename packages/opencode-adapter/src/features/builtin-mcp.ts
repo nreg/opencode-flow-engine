@@ -8,144 +8,179 @@
  *
  * This follows oh-my-openagent's principle: if a capability fits naturally as
  * a tool, serve it as a tool — not as an MCP server.
+ *
+ * All file-based tools accept file paths instead of content to avoid
+ * wasting tokens on inline content. Tools read files from disk using
+ * context.directory to resolve paths.
  */
 
-import type { ToolDefinition } from '@opencode-ai/plugin';
+import type { ToolDefinition, ToolContext } from '@opencode-ai/plugin';
 import { z } from 'zod';
 import { sharedValidator } from '@opencode-sflow/core';
 
+async function readFileContent(filePath: string): Promise<string | null> {
+  try {
+    const { readFile } = await import('node:fs/promises');
+    return await readFile(filePath, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+function resolvePath(context: ToolContext, filePath?: string, defaultRelative?: string): string {
+  if (filePath) return filePath;
+  const dir = context.directory || '';
+  return defaultRelative ? `${dir}/${defaultRelative}` : dir;
+}
+
 /**
  * Create all built-in validation tool definitions.
- * These mirror the methods that were previously behind a custom MCP server.
+ * All accept file paths (not content) to minimize token usage.
  */
 export function createValidatorTools(): Record<string, ToolDefinition> {
   return {
     validate_spec: {
-      description: 'Validate a spec file content (Purpose section, requirements with SHALL/MUST, scenarios)',
+      description: 'Validate a spec file. Reads from <dir>/.sflow/specs/<name>.md by default. Pass spec_path to use a different location.',
       args: {
         name: z.string().describe('Spec name (e.g. "auth-service")'),
-        content: z.string().describe('Full spec markdown content'),
+        spec_path: z.string().optional().describe('Path to the spec markdown file. Defaults to <changeDir>/.sflow/specs/<name>.md'),
       },
-      execute: async (args: { name: string; content: string }) => {
-        const report = sharedValidator.validateSpecContent(args.name, args.content);
-        return {
-          title: 'Spec Validation',
-          output: JSON.stringify(report, null, 2),
-        };
+      execute: async (args: { name: string; spec_path?: string }, context: ToolContext) => {
+        const filePath = resolvePath(context, args.spec_path, `.sflow/specs/${args.name}.md`);
+        const content = await readFileContent(filePath);
+        if (content === null) {
+          return { title: 'Spec Validation', output: JSON.stringify({ valid: false, issues: [{ level: 'ERROR', path: 'file', message: `Spec file not found: ${filePath}` }], summary: { errors: 1, warnings: 0, info: 0 } }, null, 2) };
+        }
+        const report = sharedValidator.validateSpecContent(args.name, content);
+        return { title: 'Spec Validation', output: JSON.stringify(report, null, 2) };
       },
     },
 
     validate_proposal: {
-      description: 'Validate a proposal markdown content (Why section and What Changes section)',
+      description: 'Validate a proposal file (Why section and What Changes section). Reads from <dir>/.sflow/proposal.md by default.',
       args: {
-        content: z.string().describe('Full proposal markdown content'),
+        proposal_path: z.string().optional().describe('Path to the proposal markdown file. Defaults to <changeDir>/.sflow/proposal.md'),
       },
-      execute: async (args: { content: string }) => {
-        const report = sharedValidator.validateChangeContent('proposal', args.content);
-        return {
-          title: 'Proposal Validation',
-          output: JSON.stringify(report, null, 2),
-        };
+      execute: async (args: { proposal_path?: string }, context: ToolContext) => {
+        const filePath = resolvePath(context, args.proposal_path, '.sflow/proposal.md');
+        const content = await readFileContent(filePath);
+        if (content === null) {
+          return { title: 'Proposal Validation', output: JSON.stringify({ valid: false, issues: [{ level: 'ERROR', path: 'file', message: `Proposal file not found: ${filePath}` }], summary: { errors: 1, warnings: 0, info: 0 } }, null, 2) };
+        }
+        const report = sharedValidator.validateChangeContent('proposal', content);
+        return { title: 'Proposal Validation', output: JSON.stringify(report, null, 2) };
       },
     },
 
     validate_delta_spec: {
-      description: 'Validate a delta spec (ADDED/MODIFIED/REMOVED/RENAMED operations with cross-section conflict detection)',
+      description: 'Validate a delta spec file (ADDED/MODIFIED/REMOVED/RENAMED operations with cross-section conflict detection). Pass delta_spec_path or changeName (reads from <dir>/.sflow/delta-specs/<changeName>.md).',
       args: {
-        content: z.string().describe('Delta spec markdown content'),
-        changeName: z.string().optional().describe('Change name for context'),
+        delta_spec_path: z.string().optional().describe('Path to the delta spec markdown file. Defaults to <changeDir>/.sflow/delta-specs/<changeName>.md'),
+        changeName: z.string().optional().describe('Change name (used to resolve default path). Required if delta_spec_path not provided.'),
       },
-      execute: async (args: { content: string; changeName?: string }) => {
-        const report = sharedValidator.validateDeltaSpec(args.content, args.changeName || 'unnamed');
-        return {
-          title: 'Delta Spec Validation',
-          output: JSON.stringify(report, null, 2),
-        };
+      execute: async (args: { delta_spec_path?: string; changeName?: string }, context: ToolContext) => {
+        const defaultRelative = args.changeName ? `.sflow/delta-specs/${args.changeName}.md` : undefined;
+        const filePath = resolvePath(context, args.delta_spec_path, defaultRelative);
+        const content = await readFileContent(filePath);
+        if (content === null) {
+          return { title: 'Delta Spec Validation', output: JSON.stringify({ valid: false, issues: [{ level: 'ERROR', path: 'file', message: `Delta spec file not found: ${filePath}` }], summary: { errors: 1, warnings: 0, info: 0 } }, null, 2) };
+        }
+        const report = sharedValidator.validateDeltaSpec(content, args.changeName || 'unnamed');
+        return { title: 'Delta Spec Validation', output: JSON.stringify(report, null, 2) };
       },
     },
 
     validate_tasks: {
-      description: 'Validate a tasks.md file for completeness and task definitions',
+      description: 'Validate a tasks.md file for completeness and task definitions. Reads from <dir>/.sflow/tasks.md by default.',
       args: {
-        content: z.string().describe('Tasks markdown content'),
+        tasks_path: z.string().optional().describe('Path to the tasks markdown file. Defaults to <changeDir>/.sflow/tasks.md'),
       },
-      execute: async (args: { content: string }) => {
-        const report = sharedValidator.validateTasks(args.content);
-        return {
-          title: 'Tasks Validation',
-          output: JSON.stringify(report, null, 2),
-        };
+      execute: async (args: { tasks_path?: string }, context: ToolContext) => {
+        const filePath = resolvePath(context, args.tasks_path, '.sflow/tasks.md');
+        const content = await readFileContent(filePath);
+        if (content === null) {
+          return { title: 'Tasks Validation', output: JSON.stringify({ valid: false, issues: [{ level: 'ERROR', path: 'file', message: `Tasks file not found: ${filePath}` }], summary: { errors: 1, warnings: 0, info: 0 } }, null, 2) };
+        }
+        const report = sharedValidator.validateTasks(content);
+        return { title: 'Tasks Validation', output: JSON.stringify(report, null, 2) };
       },
     },
 
     validate_contract: {
-      description: 'Validate an execution contract for required sections (Intent Lock, Approved Behavior, Design Constraints, Task Batches, Test Obligations)',
+      description: 'Validate an execution contract file. Reads from <dir>/.sflow/execution-contract.md by default.',
       args: {
-        content: z.string().describe('Execution contract markdown content'),
+        contract_path: z.string().optional().describe('Path to the execution contract file. Defaults to <changeDir>/.sflow/execution-contract.md'),
       },
-      execute: async (args: { content: string }) => {
-        const report = sharedValidator.validateExecutionContract(args.content);
-        return {
-          title: 'Contract Validation',
-          output: JSON.stringify(report, null, 2),
-        };
+      execute: async (args: { contract_path?: string }, context: ToolContext) => {
+        const filePath = resolvePath(context, args.contract_path, '.sflow/execution-contract.md');
+        const content = await readFileContent(filePath);
+        if (content === null) {
+          return { title: 'Contract Validation', output: JSON.stringify({ valid: false, issues: [{ level: 'ERROR', path: 'file', message: `Contract file not found: ${filePath}` }], summary: { errors: 1, warnings: 0, info: 0 } }, null, 2) };
+        }
+        const report = sharedValidator.validateExecutionContract(content);
+        return { title: 'Contract Validation', output: JSON.stringify(report, null, 2) };
       },
     },
 
     validate_design: {
-      description: 'Validate a design.md file for required sections (Architecture Decision, Design Constraints, Implementation Approach)',
+      description: 'Validate a design.md file for required sections (Architecture Decision, Design Constraints, Implementation Approach). Reads from <dir>/.sflow/design.md by default.',
       args: {
-        content: z.string().describe('Design markdown content'),
+        design_path: z.string().optional().describe('Path to the design markdown file. Defaults to <changeDir>/.sflow/design.md'),
       },
-      execute: async (args: { content: string }) => {
-        const report = sharedValidator.validateDesign(args.content);
-        return {
-          title: 'Design Validation',
-          output: JSON.stringify(report, null, 2),
-        };
+      execute: async (args: { design_path?: string }, context: ToolContext) => {
+        const filePath = resolvePath(context, args.design_path, '.sflow/design.md');
+        const content = await readFileContent(filePath);
+        if (content === null) {
+          return { title: 'Design Validation', output: JSON.stringify({ valid: false, issues: [{ level: 'ERROR', path: 'file', message: `Design file not found: ${filePath}` }], summary: { errors: 1, warnings: 0, info: 0 } }, null, 2) };
+        }
+        const report = sharedValidator.validateDesign(content);
+        return { title: 'Design Validation', output: JSON.stringify(report, null, 2) };
       },
     },
 
     validate_implementation: {
-      description: 'Validate implementation against spec and design (Completeness, Correctness, Coherence dimensions)',
+      description: 'Validate implementation against spec and design (Completeness, Correctness, Coherence dimensions). Reads spec and design from file paths.',
       args: {
         diffSummary: z.string().describe('Git diff or change summary of the implementation'),
-        specContent: z.string().describe('Full spec content to validate against'),
-        designContent: z.string().optional().describe('Design content for coherence check'),
+        spec_path: z.string().optional().describe('Path to the spec file. Defaults to <changeDir>/.sflow/specs/<spec_name>.md.'),
+        spec_name: z.string().optional().describe('Spec name used to resolve default spec path. Required if spec_path not provided.'),
+        design_path: z.string().optional().describe('Path to the design file. Defaults to <changeDir>/.sflow/design.md'),
       },
-      execute: async (args: { diffSummary: string; specContent: string; designContent?: string }) => {
-        const report = sharedValidator.validateImplementation(
-          args.diffSummary,
-          args.specContent,
-          args.designContent || '',
-        );
-        return {
-          title: 'Implementation Validation',
-          output: JSON.stringify(report, null, 2),
-        };
+      execute: async (args: { diffSummary: string; spec_path?: string; spec_name?: string; design_path?: string }, context: ToolContext) => {
+        const specDefault = args.spec_name ? `.sflow/specs/${args.spec_name}.md` : undefined;
+        const specFilePath = resolvePath(context, args.spec_path, specDefault);
+        const specContent = await readFileContent(specFilePath) || '';
+
+        const designFilePath = resolvePath(context, args.design_path, '.sflow/design.md');
+        const designContent = await readFileContent(designFilePath) || '';
+
+        const report = sharedValidator.validateImplementation(args.diffSummary, specContent, designContent);
+        return { title: 'Implementation Validation', output: JSON.stringify(report, null, 2) };
       },
     },
 
     detect_sync_conflicts: {
-      description: 'Detect sync conflicts across multiple delta specs (requirements modified by multiple changes)',
+      description: 'Detect sync conflicts across multiple delta specs (requirements modified by multiple changes). Pass delta spec paths as JSON array.',
       args: {
-        deltaSpecs: z.string().describe('JSON array of { changeName: string, content: string } objects'),
+        delta_specs_json: z.string().describe('JSON array of { changeName: string, deltaSpecPath: string } objects'),
       },
-      execute: async (args: { deltaSpecs: string }) => {
-        let deltaSpecs: Array<{ changeName: string; content: string }>;
+      execute: async (args: { delta_specs_json: string }, context: ToolContext) => {
+        let entries: Array<{ changeName: string; deltaSpecPath: string }>;
         try {
-          deltaSpecs = JSON.parse(args.deltaSpecs);
+          entries = JSON.parse(args.delta_specs_json);
         } catch {
-          return {
-            title: 'Sync Conflict Detection',
-            output: JSON.stringify({ hasConflicts: false, conflicts: [], error: 'Invalid JSON in deltaSpecs' }, null, 2),
-          };
+          return { title: 'Sync Conflict Detection', output: JSON.stringify({ hasConflicts: false, conflicts: [], error: 'Invalid JSON' }, null, 2) };
         }
-        const report = sharedValidator.detectSyncConflicts(deltaSpecs);
-        return {
-          title: 'Sync Conflict Detection',
-          output: JSON.stringify(report, null, 2),
-        };
+        const resolved: Array<{ changeName: string; content: string }> = [];
+        for (const entry of entries) {
+          const filePath = resolvePath(context, entry.deltaSpecPath, `.sflow/delta-specs/${entry.changeName}.md`);
+          const content = await readFileContent(filePath);
+          if (content !== null) {
+            resolved.push({ changeName: entry.changeName, content });
+          }
+        }
+        const report = sharedValidator.detectSyncConflicts(resolved);
+        return { title: 'Sync Conflict Detection', output: JSON.stringify(report, null, 2) };
       },
     },
   };

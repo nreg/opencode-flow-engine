@@ -22,7 +22,7 @@ import {
   extractRequirementsSection,
 } from '../parsing/requirement-blocks.js';
 
-const REQUIREMENT_HEADER_REGEX = /^###\s*Requirement:\s*(.+)\s*$/i;
+const REQUIREMENT_HEADER_REGEX = /^#{3,4}\s*Requirement:\s*(.+)\s*$/i;
 const SCENARIO_HEADER_REGEX = /^####\s+Scenario:/gim;
 
 function normalizeLineEndings(content: string): string {
@@ -611,16 +611,16 @@ export class Validator {
   validateDesign(content: string): ValidationReport {
     const issues: ValidationIssue[] = [];
 
-    const DESIGN_REQUIRED_SECTIONS = [
+    const DESIGN_REQUIRED_SECTIONS: Array<{ key: string; pattern: RegExp; level?: 'ERROR' | 'WARNING' }> = [
       { key: 'Architecture Decision', pattern: /## Architecture\b|### Architecture\b/i },
       { key: 'Design Constraints', pattern: /## Constraints\b|## Design Constraints\b/i },
-      { key: 'Implementation Approach', pattern: /## Approach\b|## Implementation\b/i },
-    ] as const;
+      { key: 'Implementation Approach', pattern: /## Approach\b|## Implementation\b/i, level: 'WARNING' },
+    ];
 
     for (const section of DESIGN_REQUIRED_SECTIONS) {
       if (!section.pattern.test(content)) {
         issues.push({
-          level: 'ERROR',
+          level: section.level ?? 'ERROR',
           path: 'design.md',
           message: `Missing section: ${section.key}`,
           suggestion: `Add a section describing ${section.key.toLowerCase()}`,

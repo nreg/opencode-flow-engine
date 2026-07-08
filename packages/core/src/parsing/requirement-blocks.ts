@@ -9,7 +9,7 @@ import type { RequirementBlock, RequirementsSectionParts, DeltaPlan, ParsedDelta
 /**
  * Regex for requirement headers (### Requirement: Name)
  */
-export const REQUIREMENT_HEADER_REGEX = /^###\s*Requirement:\s*(.+)\s*$/i;
+export const REQUIREMENT_HEADER_REGEX = /^#{3,4}\s*Requirement:\s*(.+)\s*$/i;
 
 /**
  * Normalize a requirement name (trim)
