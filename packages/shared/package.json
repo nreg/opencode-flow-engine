@@ -1,7 +1,7 @@
 {
-  "name": "@opencode-sflow/shared",
-  "version": "0.1.0",
-  "description": "Shared utilities for opencode-sflow",
+  "name": "@opencode-flow-engine/shared",
+  "version": "1.0.0",
+  "description": "Shared utilities for opencode-flow-engine",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

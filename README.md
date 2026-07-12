@@ -389,14 +389,14 @@ const hasOmo = cfg.plugin.some(p =>
 ### 通过 npm
 
 ```bash
-npm install -g opencode-sflow
+npm install -g opencode-flow-engine
 ```
 
 ### 从源码编译
 
 ```bash
-git clone https://gitee.com/opencode-plugin/opencode-sflow.git
-cd opencode-sflow
+git clone https://gitee.com/opencode-plugin/opencode-flow-engine.git
+cd opencode-flow-engine
 npm install
 npm run build
 ```
@@ -411,6 +411,14 @@ npm run build
 
 ```json
 {
+  "plugin": ["opencode-flow-engine"]
+}
+```
+
+或向后兼容（旧插件名）：
+
+```json
+{
   "plugin": ["opencode-sflow"]
 }
 ```
@@ -419,7 +427,7 @@ npm run build
 
 ```json
 {
-  "plugin": ["oh-my-openagent", "opencode-sflow"]
+  "plugin": ["oh-my-openagent", "opencode-flow-engine"]
 }
 ```
 
@@ -436,7 +444,7 @@ sflow init --user
 配置加载优先级（从高到低）：
 
 1. **项目级 `.sflow/config.json`** — 覆盖用户级配置
-2. **用户级 `~/.sFlow/config.json`** — 全局默认
+2. **用户级 `~/.config/opencode/opencode-flow-engine.json`** — 全局默认
 
 ### 自定义智能体模型
 
@@ -484,28 +492,28 @@ sFlow 会：
 | "帮我看看" | 检查当前状态 |
 | "解释这个" | 解释当前状态或产物 |
 
-### 斜杠命令
+### 智能体命名与说明
 
-sFlow 命令：
+sFlow 智能体：
 ```
-/workflow-start     # 进入工作流主入口
-/need-explorer      # 需求澄清
-/spec-writer        # 规格生成
-/contract-builder   # 合约构建
-/build-executor     # 实现
-/bug-investigator   # 调试
-/code-reviewer      # 代码审查
-/release-archivist  # 归档
-/spec-merger        # 规格合并
+workflow-start     # 进入工作流主入口
+need-explorer      # 需求澄清
+spec-writer        # 规格生成
+contract-builder   # 合约构建
+build-executor     # 实现
+bug-investigator   # 调试
+code-reviewer      # 代码审查
+release-archivist  # 归档
+spec-merger        # 规格合并
 ```
 
-iFlow 命令：
+iFlow 智能体：
 ```
-/iflow-discuss      # 讨论阶段
-/iflow-plan         # 规划阶段
-/iflow-execute      # 执行阶段
-/iflow-verify       # 验证阶段
-/iflow-ship         # 发布阶段
+iflow-discuss      # 讨论阶段
+iflow-plan         # 规划阶段
+iflow-execute      # 执行阶段
+iflow-verify       # 验证阶段
+iflow-ship         # 发布阶段
 ```
 
 ---
@@ -581,27 +589,29 @@ iFlow 命令：
 ## 项目结构
 
 ```
-opencode-sflow/
+opencode-flow-engine/
 ├── packages/
 │   ├── core/                    # 模式、校验、解析引擎
-│   ├── opencode-adapter/        # 智能体、钩子、工具、功能
+│   ├── plugin-infra/            # 插件基础设施（智能体工厂、钩子、工具、功能）
 │   │   └── src/
-│   │       ├── agents/          # sFlow(10) + iFlow(6) = 16 个子智能体 + agent 构建器
+│   │       ├── agents/          # 基础设施：agent 构建器、类型、配置加载
 │   │       ├── hooks/           # 6 类插件的生命周期钩子 + iFlow guard
 │   │       ├── tools/           # 工具定义和实现（含 iflow-router）
 │   │       ├── features/        # 工作流管理器、状态管理器、MCP
 │   │       └── helpers/         # 轮询等辅助函数
 │   └── shared/                  # 共享工具函数
-├── skills/                      # 工作流技能定义（SKILL.md）
-│   ├── workflow-start/          # sFlow 入口技能
-│   ├── build-executor/          # 执行器技能
-│   ├── iflow-discuss/           # iFlow 讨论技能
-│   ├── iflow-plan/              # iFlow 规划技能
-│   ├── iflow-execute/           # iFlow 执行技能
-│   ├── iflow-verify/            # iFlow 验证技能
-│   └── iflow-ship/              # iFlow 发布技能
-├── .sflow-templates/            # sFlow 产物模板
-├── .iflow-templates/            # iFlow 产物模板（CONTEXT.md, PLAN.md, SUMMARY.md, UAT.md）
+├── workflows/
+│   ├── sflow/                   # SFlow 工作流定义
+│   │   ├── agents/              # 10 个 SFlow agent 工厂
+│   │   ├── skills/              # SFlow 技能定义（SKILL.md）
+│   │   └── templates/           # SFlow 产物模板
+│   └── iflow/                   # IFlow 工作流定义
+│       ├── agents/              # 6 个 IFlow agent 工厂
+│       ├── skills/              # IFlow 技能定义
+│       └── templates/           # IFlow 产物模板（CONTEXT.md, PLAN.md, SUMMARY.md, UAT.md）
+├── sflow-plugin.ts              # SFlow 专属 PluginModule
+├── iflow-plugin.ts              # IFlow 专属 PluginModule
+├── shared-plugin.ts             # 组合 PluginModule（默认导出）
 ├── docs/                        # 技术文档
 ├── config.example.json          # 配置示例
 └── .sflow/

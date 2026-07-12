@@ -1,7 +1,7 @@
 {
-  "name": "@opencode-sflow/core",
-  "version": "0.1.0",
-  "description": "Core engine for sFlow - schema, validation, and parsing",
+  "name": "@opencode-flow-engine/core",
+  "version": "1.0.0",
+  "description": "Core engine for opencode-flow-engine - schema, validation, and parsing",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -1,0 +1,26 @@
+{
+  "name": "@opencode-flow-engine/plugin-infra",
+  "version": "1.0.0",
+  "description": "Plugin infrastructure for opencode-flow-engine - agent factories, hooks, tools, and features",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "bun build --target=node --outdir=dist --external=@opencode-ai/sdk --external=@opencode-ai/plugin --external=@opencode-flow-engine/core --external=@opencode-flow-engine/shared src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opencode-flow-engine/core": "*",
+    "@opencode-flow-engine/shared": "*",
+    "@opencode-ai/plugin": "latest",
+    "@opencode-ai/sdk": "latest",
+    "js-yaml": "^4.1.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "typescript": "^5.4.0"
+  },
+  "license": "MIT"
+}

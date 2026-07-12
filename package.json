@@ -1,18 +1,32 @@
 {
-  "name": "opencode-sflow",
-  "version": "0.1.0",
-  "description": "OpenCode plugin for sFlow workflow - integrating OpenSpec planning engine with Superpowers execution discipline",
+  "name": "opencode-flow-engine",
+  "version": "1.0.0",
+  "description": "OpenCode plugin engine - SFlow (OpenSpec + Superpowers) and IFlow (GSD-style) workflow orchestration",
   "type": "module",
-  "main": "packages/opencode-adapter/dist/index.js",
-  "types": "packages/opencode-adapter/dist/index.d.ts",
+  "main": "packages/plugin-infra/dist/index.js",
+  "types": "packages/plugin-infra/dist/index.d.ts",
   "bin": {
     "sflow": "./bin/sflow.js"
   },
+  "exports": {
+    ".": {
+      "import": "./packages/plugin-infra/dist/index.js",
+      "types": "./packages/plugin-infra/dist/index.d.ts"
+    },
+    "./sflow": {
+      "import": "./sflow-plugin.js",
+      "types": "./sflow-plugin.d.ts"
+    },
+    "./iflow": {
+      "import": "./iflow-plugin.js",
+      "types": "./iflow-plugin.d.ts"
+    }
+  },
   "scripts": {
     "build": "bun run clean && bun run build:core && bun run build:shared && bun run build:adapter",
-    "clean": "rm -rf packages/core/dist packages/core/tsconfig.tsbuildinfo packages/shared/dist packages/shared/tsconfig.tsbuildinfo packages/opencode-adapter/dist",
+    "clean": "rm -rf packages/core/dist packages/core/tsconfig.tsbuildinfo packages/shared/dist packages/shared/tsconfig.tsbuildinfo packages/plugin-infra/dist",
     "build:core": "cd packages/core && bun run build",
-    "build:adapter": "cd packages/opencode-adapter && bun run build",
+    "build:adapter": "cd packages/plugin-infra && bun run build",
     "build:shared": "cd packages/shared && bun run build",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
@@ -22,7 +36,7 @@
   "workspaces": [
     "packages/core",
     "packages/shared",
-    "packages/opencode-adapter"
+    "packages/plugin-infra"
   ],
   "dependencies": {
     "@opencode-ai/plugin": "latest",
@@ -44,9 +58,11 @@
   "keywords": [
     "opencode",
     "plugin",
-    "spec-superflow",
+    "sflow",
+    "iflow",
     "workflow",
     "openspec",
-    "superpowers"
+    "superpowers",
+    "gsd"
   ]
 }

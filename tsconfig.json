@@ -21,6 +21,13 @@
     "exactOptionalPropertyTypes": false,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["packages/**/src/**/*","bin/**/*"],
+  "include": [
+    "packages/**/src/**/*",
+    "bin/**/*",
+    "workflows/**/*",
+    "sflow-plugin.ts",
+    "iflow-plugin.ts",
+    "shared-plugin.ts"
+  ],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
 }
