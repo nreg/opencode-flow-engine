@@ -17,6 +17,7 @@
 import type { ToolDefinition, ToolContext } from '@opencode-ai/plugin';
 import { z } from 'zod';
 import { sharedValidator } from '@opencode-sflow/core';
+import type { DecisionPoint } from '@opencode-sflow/core';
 
 async function readFileContent(filePath: string): Promise<string | null> {
   try {
@@ -218,11 +219,12 @@ export function createWorkflowTools(): Record<string, ToolDefinition> {
         try {
           const result = await stateFileMutex.runExclusive(async () => {
             const state = await readJsonFile<Record<string, unknown>>(statePath) || {};
-            const dps = (state.decisionPoints as Array<Record<string, unknown>> || []);
-            const record: Record<string, unknown> = {
+            const dps = (state.decisionPoints as DecisionPoint[] || []);
+            const record: DecisionPoint = {
               id: args.dp_id,
-              confirmedInState: args.state,
-              targetState: args.target_state,
+              name: args.dp_id,
+              confirmedInState: args.state as DecisionPoint['confirmedInState'],
+              targetState: args.target_state as DecisionPoint['targetState'],
               timestamp: new Date().toISOString(),
             };
             if (args.metadata) {
