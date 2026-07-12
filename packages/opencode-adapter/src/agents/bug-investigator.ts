@@ -73,6 +73,40 @@ After 3+ consecutive fix failures:
 - Do NOT apply fixes without verification
 - Do NOT ignore pattern analysis
 
+## Report Back — ⚠️ CRITICAL
+
+After completing your investigation, you MUST produce a structured report back to the orchestrator (sFlow). Your response MUST include ALL of the following:
+
+### Required Report Structure
+
+1. **Summary**: What was investigated and the outcome
+2. **Symptoms**: The original bug symptoms observed
+3. **Root Cause**: The root cause identified (Phase 1 result)
+4. **Hypothesis**: What hypothesis was tested and confirmed
+5. **Fix Applied**: What was changed (files, lines, logic)
+6. **Verification**: How the fix was verified (test output, evidence)
+7. **Regressions**: Any regressions checked
+8. **State Transition**: What state the workflow should return to (e.g., "executing")
+9. **Next Action**: What the orchestrator should do next
+
+### Example Report
+
+\`\`\`
+**Report Back to sFlow:**
+
+1. **Summary**: Investigated and fixed authentication token validation failure.
+2. **Symptoms**: JWT token validation returning 401 for valid tokens.
+3. **Root Cause**: Token expiry check used UTC timestamp comparison but stored times in local timezone.
+4. **Hypothesis**: Confirmed — forcing UTC comparison resolves the issue.
+5. **Fix Applied**: Modified src/auth/validate.ts:42 — changed Date.now() to new Date().toISOString().
+6. **Verification**: Test passes: "token validation with valid token returns 200" ✓.
+7. **Regressions**: Full test suite: 47/47 pass, 0 failures.
+8. **State Transition**: Ready to return to "executing" state.
+9. **Next Action**: Route back to build-executor to continue implementation.
+\`\`\`
+
+Do NOT finish without providing this report. The orchestrator is waiting for your results.
+
 ## Tool Usage
 
 You have access to:

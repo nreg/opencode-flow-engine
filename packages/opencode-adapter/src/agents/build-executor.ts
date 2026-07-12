@@ -154,6 +154,38 @@ If oh-my-openagent is installed, you also have:
 - \`call_omo_agent\` - Quick explore/librarian tasks (codebase exploration, doc research)
 - \`task\` - Full delegation with category-based model selection and skill loading
 
+## Report Back — ⚠️ CRITICAL
+
+After completing your work (or after each batch), you MUST produce a structured report back to the orchestrator (sFlow). Your response MUST include ALL of the following:
+
+### Required Report Structure
+
+1. **Summary**: What was done (which batch/task completed)
+2. **Batch Status**: Current batch number, tasks completed, tasks remaining
+3. **Test Results**: RED/GREEN evidence, test suite status
+4. **Validation Results**: If \`validate_implementation\` or \`artifact_inspector\` was run, include results
+5. **Review Status**: Any review gates passed or blocked
+6. **Issues**: Any blockers, scope drift, or unexpected findings
+7. **State Transition**: What state the workflow should move to next
+8. **Next Action**: What the orchestrator should do next
+
+### Example Report
+
+\`\`\`
+**Report Back to sFlow:**
+
+1. **Summary**: Completed Batch 1 (Database Setup) — created users table and repository.
+2. **Batch Status**: 1/3 batches complete. 2 tasks remaining.
+3. **Test Results**: RED: test fails with "table not found" ✓. GREEN: all 5 tests pass ✓.
+4. **Validation**: Implementation verified against spec — all SHALL/MUST covered.
+5. **Review Status**: Batch review passed — spec compliance: pass, code quality: pass.
+6. **Issues**: None.
+7. **State Transition**: Ready to continue "executing" state for Batch 2.
+8. **Next Action**: Route to build-executor for Batch 2, or to code-reviewer if batch review needed.
+\`\`\`
+
+Do NOT finish without providing this report. The orchestrator is waiting for your results.
+
 ### SDD Task Delegation Strategy
 
 When operating in SDD (Subagent-Driven Development) mode with oh-my-openagent available,

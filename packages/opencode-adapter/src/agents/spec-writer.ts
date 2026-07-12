@@ -58,10 +58,83 @@ When generating ui-design.md for frontend projects, include:
 
 ## Schema Validation
 
-After generating each artifact, run validation:
-\`\`\`bash
-node scripts/validate-artifacts.js <change-dir>
+After generating each artifact, run validation using the available validation tools:
+
+### validate_spec — Spec Format Requirements
+
+The \`validate_spec\` tool enforces these exact format requirements:
+
+1. **\`## Requirements\` section heading** — Every spec file MUST have a \`## Requirements\` section (not \`## Requirement\`).
+2. **\`### Requirement: Name\` format** — Each requirement must use a level-3 heading with \`Requirement:\` prefix.
+3. **\`#### Scenario: Name\` format** — Each scenario MUST use a level-4 heading (4 hash marks + \`Scenario:\` prefix). Do NOT use **bold** or bullet lists for scenarios.
+4. **\`SHALL\` or \`MUST\` keyword** — Every requirement text must contain \`SHALL\` or \`MUST\` (uppercase). The keyword must be in the requirement body, not just in the heading.
+5. **At least 1 scenario per requirement** — Every requirement must have at least one \`#### Scenario:\` block.
+6. **\`## Purpose\` section** — Required, minimum 50 characters.
+
+Example of correct spec format:
+\`\`\`markdown
+# Spec: Auth Service
+
+## Purpose
+The auth service handles user authentication and authorization.
+
+## Requirements
+
+### Requirement: User Login
+
+The system SHALL validate user credentials against the database.
+
+#### Scenario: Successful Login
+
+**Given:** A registered user with valid credentials
+**When:** The user submits correct username and password
+**Then:** The system returns a JWT token
+
+#### Scenario: Failed Login
+
+**Given:** A registered user with invalid password
+**When:** The user submits incorrect password
+**Then:** The system returns a 401 error
 \`\`\`
+
+### validate_tasks — Tasks Format Requirements
+
+The \`validate_tasks\` tool enforces these exact format requirements:
+
+1. **\`- [ ]\` checkbox format** — Every task MUST use markdown checkbox syntax: \`- [ ] Task description\`.
+2. **Completion definition** — Each task must include a completion definition separated by \`:\`, \`—\`, or \`-\`.
+
+Example of correct tasks format:
+\`\`\`markdown
+# Tasks: Auth Service
+
+## Task Batch 1: Database Setup
+
+- [ ] Task 1.1: Create users table schema — SQL migration file created and tested
+- [ ] Task 1.2: Implement UserRepository — CRUD operations working with tests
+\`\`\`
+
+### validate_design — Design Format Requirements
+
+The \`validate_design\` tool expects:
+1. \`## Architecture\` or \`### Architecture\` section
+2. \`## Constraints\` or \`## Design Constraints\` section
+3. \`## Approach\` or \`## Implementation\` section (optional)
+
+### validate_proposal — Proposal Format Requirements
+
+The \`validate_proposal\` tool expects:
+1. \`## Why\` section (minimum 50 characters)
+2. \`## What Changes\` section
+
+### Running Validation
+
+Use these tools to validate each artifact:
+- \`validate_spec(spec_path="<change-dir>/specs/<file>.md")\` for spec files
+- \`validate_tasks(tasks_path="<change-dir>/tasks.md")\` for tasks
+- \`validate_design(design_path="<change-dir>/design.md")\` for design
+- \`validate_proposal(proposal_path="<change-dir>/proposal.md")\` for proposal
+- \`artifact_inspector(artifact_path="<change-dir>")\` for bulk inspection of all artifacts
 
 Fix any errors before proceeding.
 
@@ -70,12 +143,40 @@ Fix any errors before proceeding.
 1. Detect if project is frontend (check package.json + directory structure)
 2. Generate artifact content
 3. Write to change directory
-4. Run validation
+4. Run validation using validate_spec, validate_tasks, validate_design, validate_proposal
 5. Report validation results
 6. Fix errors if any
 7. **P18**: After all artifacts generated, scan for LESSONS.md nomination opportunities:
    - Check if any design decisions involved significant dead-ends or debugging (> 30 min)
    - If yes, nominate new lesson entry to .sflow/lessons.md
+
+## Report Back — ⚠️ CRITICAL
+
+After completing your work, you MUST produce a structured report back to the orchestrator (sFlow). Your response MUST include ALL of the following:
+
+### Required Report Structure
+
+1. **Summary**: What was done (which artifacts created/modified, frontend detection result)
+2. **Files Created/Modified**: List of all file paths with brief descriptions
+3. **Validation Results**:
+   - For each artifact: pass/fail
+   - If failed: what errors and how they were fixed
+4. **State Transition**: What state the workflow should move to next (e.g., "bridging" for contract-builder)
+5. **Next Action**: What the orchestrator should do next (e.g., "Route to contract-builder")
+
+### Example Report
+
+\`\`\`
+**Report Back to sFlow:**
+
+1. **Summary**: Generated all planning artifacts for "Auth Service" feature. Frontend: false.
+2. **Files Created**: proposal.md, specs/auth-service.md, design.md, tasks.md
+3. **Validation Results**: All artifacts passed validation (0 errors, 2 warnings).
+4. **State Transition**: Ready for "bridging" state.
+5. **Next Action**: Route to contract-builder to generate execution-contract.md.
+\`\`\`
+
+Do NOT finish without providing this report. The orchestrator is waiting for your results.
 
 ## Guardrails
 

@@ -82,13 +82,54 @@ If stale, regenerate the contract.
 - Do NOT proceed with stale contracts
 - Ensure all sections are present
 
+## Validation
+
+After generating the contract, validate it using:
+- \`validate_contract(contract_path="<change-dir>/execution-contract.md")\` — Check contract completeness
+- \`artifact_inspector(artifact_path="<change-dir>")\` — Verify all planning artifacts are consistent
+
+Fix any validation errors before presenting the contract for user approval.
+
+## Report Back — ⚠️ CRITICAL
+
+After completing your work, you MUST produce a structured report back to the orchestrator (sFlow). Your response MUST include ALL of the following:
+
+### Required Report Structure
+
+1. **Summary**: What was done (contract created/refreshed)
+2. **Contract Details**: Intent lock, scope fence, key constraints
+3. **Validation Results**: Pass/fail, any errors found and fixed
+4. **Coverage Gaps**: Any requirements that could not be mapped to test obligations or batches
+5. **User Approval Status**: Whether user has approved the contract (DP-3)
+6. **State Transition**: What state the workflow should move to next (e.g., "approved-for-build")
+7. **Next Action**: What the orchestrator should do next (e.g., "Route to build-executor after user approval")
+
+### Example Report
+
+\`\`\`
+**Report Back to sFlow:**
+
+1. **Summary**: Created execution-contract.md for "Auth Service" feature.
+2. **Contract Details**: Intent lock defined, 5 task batches, TDD required.
+3. **Validation Results**: Contract passed validation (0 errors).
+4. **Coverage Gaps**: None — all requirements mapped to test obligations.
+5. **User Approval**: Pending — awaiting user review of contract.
+6. **State Transition**: Ready for "approved-for-build" state after user approval.
+7. **Next Action**: Wait for user approval, then route to build-executor.
+\`\`\`
+
+Do NOT finish without providing this report. The orchestrator is waiting for your results.
+
 ## Tool Usage
 
 You have access to:
 - \`read\` - Read planning artifacts
 - \`write\` - Write execution contract
 - \`edit\` - Edit contract
-- \`bash\` - Run validation scripts`,
+- \`bash\` - Run validation scripts
+- \`validate_contract\` - Validate execution contract
+- \`artifact_inspector\` - Inspect planning artifacts for consistency
+- \`contract_validator\` - Validate contract completeness`,
       temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('contract-builder'),
 });

@@ -76,22 +76,30 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     skill: false,
   },
 
-  /** Spec writer - full file manipulation */
+/** Spec writer - full file manipulation + validation tools */
   'spec-writer': {
     ...COMMON_TOOLS,
     write: true,
     edit: true,
     bash: true,
     skill: false,
+    validate_spec: true,
+    validate_tasks: true,
+    validate_design: true,
+    validate_proposal: true,
+    artifact_inspector: true,
   },
 
-  /** Contract builder - read/write/validate */
+/** Contract builder - read/write/validate/contract validation */
   'contract-builder': {
     ...COMMON_TOOLS,
     write: true,
     edit: true,
     bash: true,
     skill: false,
+    validate_contract: true,
+    artifact_inspector: true,
+    contract_validator: true,
   },
 
   /**
@@ -100,7 +108,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
    * in Subagent-Driven Development mode via call_flow_agent.
    * When oh-my-openagent is available, also has access to task() and call_omo_agent().
    */
-  'build-executor': {
+'build-executor': {
     ...COMMON_TOOLS,
     write: true,
     edit: true,
@@ -112,6 +120,11 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     lsp_diagnostics: true,
     lsp_goto_definition: true,
     lsp_find_references: true,
+    validate_implementation: true,
+    artifact_inspector: true,
+    agnes_image_generate: true,
+    agnes_video_generate: true,
+    agnes_image_understand: true,
   },
 
   /** Bug investigator - debug tools */
@@ -138,13 +151,14 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     lsp_find_references: true,
   },
 
-  /** Release archivist - read/write + test runner */
+/** Release archivist - read/write + test runner + artifact inspection */
   'release-archivist': {
     ...COMMON_TOOLS,
     write: true,
     edit: false,
     bash: true,
     skill: false,
+    artifact_inspector: true,
   },
 
   /** Spec merger - full file manipulation */

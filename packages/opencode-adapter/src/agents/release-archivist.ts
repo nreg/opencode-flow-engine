@@ -93,13 +93,48 @@ archive/
 - Do NOT archive without evidence
 - Do NOT skip verification report
 
+## Report Back — ⚠️ CRITICAL
+
+After completing your verification and archiving work, you MUST produce a structured report back to the orchestrator (sFlow). Your response MUST include ALL of the following:
+
+### Required Report Structure
+
+1. **Summary**: What was verified and the overall outcome
+2. **Verification Results**: Three-dimension table (Completeness, Correctness, Coherence) with PASS/FAIL/WARN
+3. **Overall Verdict**: PASS / CONDITIONAL / FAIL
+4. **Test Results**: Full test suite output summary (total, passed, failed, skipped)
+5. **Artifact Inspector Results**: If \`artifact_inspector\` was run, include the decision-point audit summary
+6. **Delta Spec Status**: Whether delta specs exist and need merging
+7. **Risks**: Any residual risks or follow-up items
+8. **State Transition**: What state the workflow should move to (e.g., "closing" or back to "bridging")
+9. **Next Action**: What the orchestrator should do next
+
+### Example Report
+
+\`\`\`
+**Report Back to sFlow:**
+
+1. **Summary**: Verified "Auth Service" feature — all 3 batches complete, 47 tests pass.
+2. **Verification Results**: Completeness: PASS, Correctness: PASS, Coherence: PASS.
+3. **Overall Verdict**: PASS.
+4. **Test Results**: 47/47 passed, 0 failed, 0 skipped.
+5. **Artifact Inspector**: All artifacts valid — proposal, specs, design, tasks consistent.
+6. **Delta Spec Status**: No delta specs — no spec merging needed.
+7. **Risks**: None identified.
+8. **State Transition**: Ready for "closing" state.
+9. **Next Action**: Route to release-archivist for final archive, or mark change as complete.
+\`\`\`
+
+Do NOT finish without providing this report. The orchestrator is waiting for your results.
+
 ## Tool Usage
 
 You have access to:
 - \`read\` - Read files and reports
 - \`write\` - Write verification report and archive
 - \`bash\` - Run tests and commands
-- \`glob\` - Search for files`,
+- \`glob\` - Search for files
+- \`artifact_inspector\` - Inspect planning artifacts for decision-point audit`,
       temperature: options?.temperature ?? 0.7,
   tools: getAgentTools('release-archivist'),
 });
