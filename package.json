@@ -26,7 +26,7 @@
     "build": "bun run clean && bun run build:core && bun run build:shared && bun run build:adapter",
     "clean": "rm -rf packages/core/dist packages/core/tsconfig.tsbuildinfo packages/shared/dist packages/shared/tsconfig.tsbuildinfo packages/plugin-infra/dist",
     "build:core": "cd packages/core && bun run build",
-    "build:adapter": "cd packages/plugin-infra && bun run build",
+    "build:adapter": "bun build --target=node --outdir=packages/plugin-infra/dist --external=@opencode-ai/sdk --external=@opencode-ai/plugin packages/plugin-infra/src/index.ts",
     "build:shared": "cd packages/shared && bun run build",
     "test": "bun test",
     "typecheck": "tsc --noEmit",

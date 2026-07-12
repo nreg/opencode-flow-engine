@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "bun build --target=node --outdir=dist --external=@opencode-ai/sdk --external=@opencode-ai/plugin --external=@opencode-flow-engine/core --external=@opencode-flow-engine/shared src/index.ts",
+    "build": "bun build --target=node --outdir=dist --external=@opencode-ai/sdk --external=@opencode-ai/plugin src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
