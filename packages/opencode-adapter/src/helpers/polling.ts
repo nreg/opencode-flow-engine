@@ -9,15 +9,19 @@ export interface SFlowClientSession {
 }
 
 /**
- * Polls a subagent session until it completes (becomes idle with messages).
+ * Polls a subagent session until the subagent responds.
  *
- * Behavior contract (polling-fix spec):
- * - Default maxWaitMs shortened from 300s to 30s.
- * - Non-isNew sessions: return immediately once any message is detected.
- * - isNew sessions: return on first message, or on idle status, with a max-polls
- *   safety cap to avoid the historical infinite-loop when status never flips to idle.
+ * Behavior contract:
+ * - Default maxWaitMs: 30s (was 300s).
+ * - Returns immediately when the session status is "idle".
+ * - Returns immediately when message count exceeds the initial count
+ *   (distinguishes the user's prompt from the assistant's response).
+ * - For isNew sessions: initial count is 1 (the prompt just sent),
+ *   so returns when count >= 2 (at least 1 assistant response).
  * - status() failures fall back to messages(); repeated dual-failure triggers
  *   session-disappearance handling via readSessionLastMessage.
+ * - isNew sessions have a max-polls safety cap (60) to avoid infinite loop
+ *   when status never flips to idle.
  */
 export async function pollSessionCompletion(
   client: { session: SFlowClientSession },
@@ -31,12 +35,26 @@ export async function pollSessionCompletion(
   const isNew = options.isNew ?? false;
   const MAX_POLLS_FOR_NEW = 60;
 
+  // Capture the initial message count so we can distinguish
+  // the user's prompt from the subagent's response.
+  let initialMsgCount = 0;
+  try {
+    const mr = await client.session.messages({ path: { id: sessionID } });
+    const msgs = mr.data as Array<unknown> | undefined;
+    initialMsgCount = Array.isArray(msgs) ? msgs.length : 0;
+  } catch { /* ignore */ }
+  // For isNew sessions, the prompt was just sent, so initialMsgCount = 1.
+  // We need at least 1 assistant response → require count >= 2.
+  const minDetectCount = isNew ? Math.max(initialMsgCount + 1, 2) : initialMsgCount + 1;
+
+  let lastMessage: string | null = null;
   let pollCount = 0;
 
   while (Date.now() - startTime < MAX_WAIT) {
     await sleep(POLL_INTERVAL);
     pollCount++;
 
+    // ── Status check: session idle → return immediately ──
     let isIdle = false;
     let statusFailed = false;
     try {
@@ -52,20 +70,19 @@ export async function pollSessionCompletion(
     } catch {
       statusFailed = true;
     }
-
-    // isNew session: status is idle -> return immediately
-    if (isNew && isIdle) {
+    if (isIdle) {
       return readSessionLastMessage(client, sessionID);
     }
 
-    // Try messages API
-    let lastMessage: string | null = null;
+    // ── Messages check: return immediately when assistant responds ──
     let messagesFailed = false;
-
+    let currentMsgCount = 0;
     try {
       const mr = await client.session.messages({ path: { id: sessionID } });
       const msgs = mr.data as Array<{ parts: Array<{ type: string; text?: string }> }> | undefined;
       if (Array.isArray(msgs)) {
+        currentMsgCount = msgs.length;
+        // Read last text from any message (skips user prompt by count check)
         for (const msg of msgs) {
           if (msg.parts) {
             for (const part of msg.parts) {
@@ -75,8 +92,8 @@ export async function pollSessionCompletion(
             }
           }
         }
-        if (msgs.length > 0) {
-          // Fast path: any message content detected -> return immediately
+        // Fast path: return immediately when assistant has responded
+        if (currentMsgCount >= minDetectCount) {
           return lastMessage;
         }
       }
@@ -84,20 +101,19 @@ export async function pollSessionCompletion(
       messagesFailed = true;
     }
 
-    // Session disappearance: both status and messages failed in this iteration
+    // ── Session disappearance: both status and messages failed ──
     if (statusFailed && messagesFailed) {
       consecutiveFailures++;
       if (consecutiveFailures >= 2) {
-        return lastMessage || readSessionLastMessage(client, sessionID);
+        return readSessionLastMessage(client, sessionID);
       }
     } else {
       consecutiveFailures = 0;
     }
 
-    // isNew session safety: avoid the historical infinite loop when status
-    // never flips to idle by capping polls and falling back to message read.
+    // ── isNew safety cap: avoid infinite loop when status never flips to idle ──
     if (isNew && pollCount >= MAX_POLLS_FOR_NEW) {
-      return lastMessage || readSessionLastMessage(client, sessionID);
+      return readSessionLastMessage(client, sessionID);
     }
   }
 
