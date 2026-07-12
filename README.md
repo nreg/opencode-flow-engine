@@ -1,4 +1,4 @@
-﻿# sFlow — OpenCode Workflow Orchestration Plugin
+# sFlow — OpenCode Workflow Orchestration Plugin
 
 OpenSpec 规划引擎 + Superpowers 执行纪律，集成于 OpenCode。
 
@@ -37,6 +37,8 @@ sFlow 是一个 OpenCode 插件，融合了两大核心能力：
 > **架构说明**：sFlow 的核心验证引擎（schema、validation、parsing）从 [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) 移植。Agent 工厂模式、5 层钩子系统、工具注册、状态管理等运行时架构为适配 OpenCode 插件机制而全新设计，借鉴了 [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) 的架构模式。
 >
 > sFlow **零外部依赖**——子智能体路由使用自注册的 `call_flow_agent` 工具，无需安装 oh-my-openagent。当同时安装 oh-my-openagent 时，sFlow 可自动检测并利用其 `call_omo_agent`（探索/图书馆员）和 `task`（分类委托）工具，获得更强的代码库探索和技能注入能力。
+
+![SFlow.png](./docs/SFlow.png)
 
 ---
 
@@ -85,6 +87,31 @@ sFlow 有 **9 个工作流状态**，按顺序执行：
 | **code-reviewer** | 子智能体 | 对照规格审查代码质量 |
 | **release-archivist** | 子智能体 | 验证、归档、关闭变更 |
 | **spec-merger** | 子智能体 | 增量规格变更合并 |
+| **ui-implementer** | 子智能体 | 前端 UI 实现，融合 9 项前端专业技能 |
+
+### UI Implementer 子智能体
+
+前端 UI 实现专用子智能体，融合了 9 项前端专业技能，由 `skills/ui-implementer/SKILL.md` 统一注入：
+
+| 技能来源 | 作用 | 说明 |
+|---------|------|------|
+| **taste-skill** | 设计品味控制 | 三旋钮设计系统、Design Read、AI 反模式禁令 |
+| **impeccable** | 审查修复 | 生产级设计准则、Absolute Bans、交互规范 |
+| **ui-ux-pro-max** | 视觉与交互 | 50+ 风格、调色板、字体配对 |
+| **frontend-design** | 页面设计 | 组件布局与整页设计 |
+| **shadcn-ui** | 组件库模式 | 组件选择、安装配置、主题定制 |
+| **svg-architect** | SVG 图标设计 | 图标库选择、自定义 SVG 规范 |
+| **polish** | 质量终检 | 间距系统、类名语义、响应式适配 |
+| **frontend-code-review** | 代码质量 | 代码扫描、严重级别分级 |
+| **frontend-performance-optimization** | 性能优化 | 加载/运行时性能、Core Web Vitals |
+
+**调用方式**（双重入口）：
+- **SFlow 直接委托** — 用于后工作流的小型前端修补
+- **build-executor 委托** — 在 SDD 执行模式中，前端任务自动路由到 ui-implementer
+
+**可选增强**（检测到 agnesmore provider 时自动启用）：
+- `agnes_image_generate` 工具 — 生成产品图片、轮播图、卡片背景等
+- `agnes_video_generate` 工具 — 生成页面背景视频、产品演示视频等
 
 ### 路由原则
 

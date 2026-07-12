@@ -29,7 +29,8 @@ export type BuiltinAgentName =
   | 'bug-investigator'   // Debugging (subagent)
   | 'code-reviewer'      // Code review (subagent)
   | 'release-archivist'  // Closure (subagent)
-  | 'spec-merger';       // Sync (subagent)
+  | 'spec-merger'        // Sync (subagent)
+  | 'ui-implementer';    // Frontend UI implementation (subagent)
 
 /**
  * Agent override configuration

@@ -74,6 +74,7 @@ The workflow has 9 states, executed in order:
 | code-reviewer | Batch complete | Review code quality and consistency |
 | release-archivist | All work done | Verify, archive, close |
 | spec-merger | Delta specs need syncing | Merge spec changes back |
+| ui-implementer | Frontend UI fix needed | Build/refine UI components, generate images and assets |
 
 </Delegation>
 <Workflow_Rules>

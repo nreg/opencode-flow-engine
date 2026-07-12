@@ -245,6 +245,8 @@ Use the least powerful model that can handle each role:
 
 **Always specify the model explicitly when dispatching a subagent.** An omitted model inherits the session's model, defeating cost optimization.
 
+**Frontend UI tasks**: For tasks involving UI components, design tokens, SVG, or visual assets, delegate to the `ui-implementer` subagent instead of a general implementer. ui-implementer is specialized in frontend code with merged design skills (taste-skill, impeccable, shadcn-ui, svg-architect, polish, etc.).
+
 ### Per-Task Loop
 
 For each task in the execution batch:

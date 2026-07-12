@@ -11,6 +11,7 @@ export { createBugInvestigatorAgent } from './bug-investigator.js';
 export { createCodeReviewerAgent } from './code-reviewer.js';
 export { createReleaseArchivistAgent } from './release-archivist.js';
 export { createSpecMergerAgent } from './spec-merger.js';
+export { createUiImplementerAgent } from './ui-implementer.js';
 
 export {
   loadSFlowConfig,

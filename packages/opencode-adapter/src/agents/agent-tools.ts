@@ -20,6 +20,7 @@ const COMMON_TOOLS = {
 
 /** Module-level flag: set once at plugin init by index.ts */
 let _hasOmoPlugin = false;
+let _hasAgnesProvider = false;
 
 export function setHasOmoPlugin(v: boolean): void {
   _hasOmoPlugin = v;
@@ -27,6 +28,14 @@ export function setHasOmoPlugin(v: boolean): void {
 
 export function getHasOmoPlugin(): boolean {
   return _hasOmoPlugin;
+}
+
+export function setHasAgnesProvider(v: boolean): void {
+  _hasAgnesProvider = v;
+}
+
+export function getHasAgnesProvider(): boolean {
+  return _hasAgnesProvider;
 }
 
 /**
@@ -145,6 +154,18 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     edit: true,
     bash: true,
     skill: false,
+  },
+
+  /** UI Implementer - frontend UI code specialist */
+  'ui-implementer': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: true,
+    bash: true,
+    skill: true,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true,
   },
 };
 

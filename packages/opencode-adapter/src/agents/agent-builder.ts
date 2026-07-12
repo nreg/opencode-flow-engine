@@ -16,6 +16,7 @@ import {
   createCodeReviewerAgent,
   createReleaseArchivistAgent,
   createSpecMergerAgent,
+  createUiImplementerAgent,
 } from './index.js';
 import {
   loadCascadedSFlowConfig,
@@ -37,6 +38,7 @@ const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
   'code-reviewer': 'subagent',
   'release-archivist': 'subagent',
   'spec-merger': 'subagent',
+  'ui-implementer': 'subagent',
 };
 
 /**
@@ -53,6 +55,7 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
   'code-reviewer': 'deepseek-v4-flash',
   'release-archivist': 'mimo-v2.5-pro',
   'spec-merger': 'mimo-v2.5',
+  'ui-implementer': 'glm-5.1',
 };
 
 /**
@@ -69,6 +72,7 @@ const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
   'code-reviewer': ['glm-5.1', 'kimi-k2.6'],
   'release-archivist': ['mimo-v2.5', 'glm-5.1'],
   'spec-merger': ['mimo-v2.5-pro', 'glm-5.1'],
+  'ui-implementer': ['kimi-k2.6', 'deepseek-v4-flash'],
 };
 
 /**
@@ -84,6 +88,7 @@ const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
   'code-reviewer': createCodeReviewerAgent,
   'release-archivist': createReleaseArchivistAgent,
   'spec-merger': createSpecMergerAgent,
+  'ui-implementer': createUiImplementerAgent,
 };
 
 /**
