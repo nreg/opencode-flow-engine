@@ -197,21 +197,10 @@ export function createWorkflowTools(): Record<string, ToolDefinition> {
         dp_id: z.enum(['dp-0', 'dp-1', 'dp-2', 'dp-3', 'dp-4', 'dp-5']).describe('Decision point identifier'),
         state: z.enum(['exploring', 'specifying', 'bridging', 'approved-for-build', 'executing', 'debugging', 'closing', 'abandoned']).describe('Current workflow state when the decision was confirmed'),
         target_state: z.enum(['exploring', 'specifying', 'bridging', 'approved-for-build', 'executing', 'debugging', 'closing', 'abandoned']).describe('State the workflow will transition to after confirmation'),
-        metadata: z.string().optional().describe('Optional JSON-encoded metadata (e.g. {"notes": "..."})'),
+        metadata: z.string().optional().describe('Optional note about this decision point (e.g. "contract validated by user")'),
         change_dir: z.string().optional().describe('Absolute path to the change directory (project root). Defaults to the current working directory.'),
       },
       execute: async (args: { dp_id: string; state: string; target_state: string; metadata?: string; change_dir?: string }, context) => {
-        let parsedMeta: Record<string, unknown> | undefined;
-        if (args.metadata) {
-          try {
-            parsedMeta = JSON.parse(args.metadata);
-          } catch {
-            return {
-              title: 'Record Decision Point',
-              output: JSON.stringify({ success: false, error: 'Invalid JSON in metadata' }, null, 2),
-            };
-          }
-        }
 
         const changeDir = args.change_dir || context.directory || '';
         if (!changeDir) {
@@ -230,13 +219,15 @@ export function createWorkflowTools(): Record<string, ToolDefinition> {
           const result = await stateFileMutex.runExclusive(async () => {
             const state = await readJsonFile<Record<string, unknown>>(statePath) || {};
             const dps = (state.decisionPoints as Array<Record<string, unknown>> || []);
-            const record = {
+            const record: Record<string, unknown> = {
               id: args.dp_id,
               confirmedInState: args.state,
               targetState: args.target_state,
               timestamp: new Date().toISOString(),
-              metadata: parsedMeta,
             };
+            if (args.metadata) {
+              record.metadata = args.metadata;
+            }
             dps.push(record);
             await writeJsonFile(statePath, { ...state, decisionPoints: dps });
             return { record, total: dps.length };

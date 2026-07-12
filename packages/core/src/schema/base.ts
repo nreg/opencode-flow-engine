@@ -112,10 +112,10 @@ export interface DecisionPoint {
   confirmedInState: WorkflowState;
   /** State the workflow transitioned to after confirmation */
   targetState: WorkflowState;
-  /** ISO-8601 timestamp */
+/** ISO-8601 timestamp */
   timestamp: string;
-  /** Optional metadata (e.g. approvedBy, notes) */
-  metadata?: Record<string, unknown>;
+  /** Optional note about this decision point */
+  metadata?: string;
 }
 
 /**
