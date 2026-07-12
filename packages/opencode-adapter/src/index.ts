@@ -1098,22 +1098,6 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       }
     },
 
-    // ── chat.message hook ──
-    "chat.message": async (input, output) => {
-      const agent = input.agent;
-      if (!agent) return;
-
-      const currentState = await getCurrentWorkflowState(workDir);
-      if (!currentState) return;
-
-      const stateInfo = `[sFlow] Current workflow state: ${currentState}`;
-      const textParts = output.parts.filter((p): p is typeof p & { text: string } => p.type === 'text');
-      const firstText = textParts[0];
-      if (firstText) {
-        firstText.text = `${stateInfo}\n\n${firstText.text}`;
-      }
-    },
-
     // ── experimental.compaction.autocontinue hook ──
     "experimental.compaction.autocontinue": async (input, output) => {
       const continuationHook = hookComposer.getHook('continuation');
@@ -1130,46 +1114,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       output.enabled = shouldContinue;
     },
 
-    // ── experimental.chat.messages.transform hook ──
-    "experimental.chat.messages.transform": async (input, output) => {
-      const currentState = await getCurrentWorkflowState(workDir);
-      if (!currentState) return;
-
-      const transformHook = hookComposer.getHook('pre_process');
-      if (!transformHook) return;
-
-      const result = await transformHook.execute({
-        changeDir: workDir,
-        stateFile: `${workDir}/${STATE_FILE_PATH}`,
-        pluginRoot: '',
-        action: 'messages.transform',
-        data: { currentState },
-      });
-
-      if (result.success) {
-        const transformData = result.data as { context?: string } | null;
-        if (transformData?.context) {
-          output.messages.push({
-            info: {
-              id: 'sflow-context',
-              sessionID: '',
-              role: 'user',
-              time: { created: Date.now() },
-              agent: 'sFlow',
-              model: { providerID: '', modelID: '' },
-            } satisfies Message,
-            parts: [{
-              id: `sflow-ctx-${Date.now()}`,
-              sessionID: '',
-              messageID: '',
-              type: 'text',
-              text: transformData.context,
-            }] satisfies Part[],
-          });
-        }
-      }
-    },
-  };
+    };
 }
 
 // ─── Plugin module export ─────────────────────────────────────────────────────
