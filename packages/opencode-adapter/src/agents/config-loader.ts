@@ -24,9 +24,11 @@ export interface SFlowConfig {
 }
 
 /**
- * User-level config path: ~/.sflow/config.json
+ * User-level config path: ~/.config/opencode/sflow.json
+ * Follows the same convention as oh-my-openagent which stores its config
+ * under ~/.config/opencode/. Override via SFLOW_USER_CONFIG_FILE env var.
  */
-export const USER_CONFIG_FILE = join(homedir(), '.sflow', 'config.json');
+export const USER_CONFIG_FILE = join(homedir(), '.config', 'opencode', 'sflow.json');
 
 /**
  * Load sflow config from a specific directory's .sflow/config.json
@@ -51,27 +53,30 @@ export async function loadSFlowConfig(projectDir?: string): Promise<SFlowConfig>
 }
 
 /**
- * Load user-level config from ~/.sflow/config.json
+ * Load user-level config from ~/.config/opencode/sflow.json
+ * (or SFLOW_USER_CONFIG_FILE env var override, used in tests).
  */
-export async function loadUserSFlowConfig(): Promise<SFlowConfig> {
+export async function loadUserSFlowConfig(configPath?: string): Promise<SFlowConfig> {
+  const path = configPath || process.env.SFLOW_USER_CONFIG_FILE || USER_CONFIG_FILE;
+
   try {
-    await access(USER_CONFIG_FILE);
+    await access(path);
   } catch {
-    console.warn(`[sflow] No user-level config found at ${USER_CONFIG_FILE}. Run 'sflow init --user' to create one.`);
+    console.warn(`[sflow] No user-level config found at ${path}. Run 'sflow init --user' to create one.`);
     return {};
   }
 
   try {
-    const raw = await readFile(USER_CONFIG_FILE, 'utf-8');
+    const raw = await readFile(path, 'utf-8');
     return JSON.parse(raw);
   } catch {
-    console.warn(`[sflow] Failed to parse user config: ${USER_CONFIG_FILE}`);
+    console.warn(`[sflow] Failed to parse user config: ${path}`);
     return {};
   }
 }
 
 /**
- * Load cascading config: user-level (~/.sflow/config.json) as base,
+ * Load cascading config: user-level (~/.config/opencode/sflow.json) as base,
  * project-level (.sflow/config.json) as higher-priority override.
  */
 export async function loadCascadedSFlowConfig(projectDir?: string): Promise<SFlowConfig> {

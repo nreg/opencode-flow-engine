@@ -2,9 +2,10 @@
  * Config Loader tests
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { existsSync, unlinkSync, mkdirSync, rmdirSync, writeFileSync } from 'fs';
+import { existsSync, unlinkSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import {
   loadSFlowConfig,
   loadUserSFlowConfig,
@@ -28,8 +29,19 @@ function writeTestConfig(data: unknown) {
 
 function cleanTestDir() {
   try { unlinkSync(TEST_CONFIG); } catch {}
-  try { unlinkSync(join(TEST_DIR, '.sflow')); } catch {}
-  try { unlinkSync(TEST_DIR); } catch {}
+  try { rmSync(join(TEST_DIR, '.sflow'), { recursive: true, force: true }); } catch {}
+  try { rmSync(TEST_DIR, { recursive: true, force: true }); } catch {}
+}
+
+/**
+ * Create a temp directory for user-level config tests.
+ * Returns { dir, file } where file is the full path to sflow.json.
+ */
+function createTempUserConfigDir(): { dir: string; file: string } {
+  const dir = join(tmpdir(), `sflow-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'sflow.json');
+  return { dir, file };
 }
 
 describe('Config Loader', () => {
@@ -64,59 +76,64 @@ describe('Config Loader', () => {
 
   describe('loadUserSFlowConfig', () => {
     it('should return empty object when no user config exists', async () => {
-      try { unlinkSync(USER_CONFIG_FILE); } catch {}
-      const config = await loadUserSFlowConfig();
-      expect(config).toEqual({});
+      // Use a non-existent path — temp dir so we never touch the real user config
+      const { dir, file } = createTempUserConfigDir();
+      try {
+        const config = await loadUserSFlowConfig(file);
+        expect(config).toEqual({});
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('should parse user config correctly', async () => {
-      const userDir = join(USER_CONFIG_FILE, '..');
-      if (!existsSync(userDir)) {
-        mkdirSync(userDir, { recursive: true });
-      }
-      writeFileSync(USER_CONFIG_FILE, JSON.stringify({
-        agents: { sFlow: { model: 'user-model' } },
-      }));
+      const { dir, file } = createTempUserConfigDir();
       try {
-        const config = await loadUserSFlowConfig();
+        writeFileSync(file, JSON.stringify({
+          agents: { sFlow: { model: 'user-model' } },
+        }));
+        const config = await loadUserSFlowConfig(file);
         expect(config.agents?.sFlow?.model).toBe('user-model');
       } finally {
-        try { unlinkSync(USER_CONFIG_FILE); } catch {}
-        try { rmdirSync(userDir); } catch {}
+        rmSync(dir, { recursive: true, force: true });
       }
     });
   });
 
   describe('loadCascadedSFlowConfig', () => {
     it('should return project config when no user config exists', async () => {
-      try { unlinkSync(USER_CONFIG_FILE); } catch {}
-      writeTestConfig({
-        agents: { sFlow: { model: 'project-model' } },
-      });
-      const config = await loadCascadedSFlowConfig(TEST_DIR);
-      expect(config.agents?.sFlow?.model).toBe('project-model');
+      // Use environment variable to point to a non-existent temp path
+      const { dir, file } = createTempUserConfigDir();
+      process.env.SFLOW_USER_CONFIG_FILE = file;
+      try {
+        writeTestConfig({
+          agents: { sFlow: { model: 'project-model' } },
+        });
+        const config = await loadCascadedSFlowConfig(TEST_DIR);
+        expect(config.agents?.sFlow?.model).toBe('project-model');
+      } finally {
+        delete process.env.SFLOW_USER_CONFIG_FILE;
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('should merge user and project config with project winning', async () => {
-      // Write user config first, then project config that overrides
-      const userDir = join(USER_CONFIG_FILE, '..');
-      if (!existsSync(userDir)) {
-        mkdirSync(userDir, { recursive: true });
-      }
-      writeFileSync(USER_CONFIG_FILE, JSON.stringify({
+      const { dir, file } = createTempUserConfigDir();
+      writeFileSync(file, JSON.stringify({
         version: '0.1.0',
         agents: {
           sFlow: { model: 'user-sFlow', temperature: 0.8 },
           'need-explorer': { model: 'user-need' },
         },
       }));
-      writeTestConfig({
-        agents: {
-          sFlow: { model: 'project-sFlow' },
-          'spec-writer': { model: 'project-spec' },
-        },
-      });
+      process.env.SFLOW_USER_CONFIG_FILE = file;
       try {
+        writeTestConfig({
+          agents: {
+            sFlow: { model: 'project-sFlow' },
+            'spec-writer': { model: 'project-spec' },
+          },
+        });
         const config = await loadCascadedSFlowConfig(TEST_DIR);
         // Project overrides user for sFlow
         expect(config.agents?.sFlow?.model).toBe('project-sFlow');
@@ -127,8 +144,8 @@ describe('Config Loader', () => {
         // Project-only agent added
         expect(config.agents?.['spec-writer']?.model).toBe('project-spec');
       } finally {
-        try { unlinkSync(USER_CONFIG_FILE); } catch {}
-        try { rmdirSync(userDir); } catch {}
+        delete process.env.SFLOW_USER_CONFIG_FILE;
+        rmSync(dir, { recursive: true, force: true });
       }
     });
   });
@@ -213,7 +230,8 @@ describe('Config File Integration with Agent Builder', () => {
 
   function cleanCwdConfig() {
     try { unlinkSync(CWD_CONFIG); } catch {}
-    try { rmdirSync(CWD_SFLOW); } catch {}
+    // Only remove .sflow if it's empty (i.e., only our test config file was in it)
+    try { rmSync(CWD_SFLOW, { recursive: true, force: true }); } catch {}
   }
 
   beforeEach(() => {
