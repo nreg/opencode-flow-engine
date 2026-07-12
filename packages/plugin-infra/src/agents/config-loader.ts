@@ -76,7 +76,7 @@ export async function loadUserSFlowConfig(configPath?: string): Promise<SFlowCon
 }
 
 /**
- * Load cascading config: user-level (~/.config/opencode/sflow.json) as base,
+ * Load cascading config: user-level (~/.config/opencode/opencode-flow-engine.json) as base,
  * project-level (.sflow/config.json) as higher-priority override.
  */
 export async function loadCascadedSFlowConfig(projectDir?: string): Promise<SFlowConfig> {
