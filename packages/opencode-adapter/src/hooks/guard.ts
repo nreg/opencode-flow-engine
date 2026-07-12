@@ -16,6 +16,7 @@ import { sharedValidator, HOTFIX_UPGRADE_THRESHOLDS, TWEAK_UPGRADE_THRESHOLDS } 
 import { checkArtifactPreflight, findPreflightState } from "../features/artifact-preflight.js";
 import { readProgressFile, searchLessonsInFile } from "../features/state-manager.js";
 import { getHasOmoPlugin } from "../agents/agent-tools.js";
+import { iflowDirectoryExists, checkIFlowGuards } from "./iflow-guard.js";
 
 let _omoUsedInCurrentExploring = false;
 
@@ -73,6 +74,8 @@ export function createGuardHook(): HookHandler {
           // P21: LESSONS.md knowledge base guard (warnings, not blocking)
           await checkLessonsGuard(changeDir, data),
           await checkOmoUsageGuard(changeDir, data),
+          // IFlow guards (only active when .iflow/ directory exists)
+          ...(await getIFlowGuards(changeDir, data)),
         ];
 
         const allWarnings: string[] = [];
@@ -763,6 +766,19 @@ async function checkOmoUsageGuard(changeDir: string, data?: Record<string, unkno
   }
 
   return { success: true };
+}
+
+/**
+ * Get IFlow guards — only active when .iflow/ directory exists.
+ * This ensures IFlow guards never interfere with SFlow workflows.
+ */
+async function getIFlowGuards(changeDir: string, data?: Record<string, unknown>): Promise<HookResult[]> {
+  if (!changeDir) return [];
+  const hasIflow = await iflowDirectoryExists(changeDir);
+  if (!hasIflow) return [];
+
+  const iflowResult = await checkIFlowGuards(changeDir, data);
+  return [iflowResult];
 }
 
 

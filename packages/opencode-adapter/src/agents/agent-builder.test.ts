@@ -81,7 +81,7 @@ describe('Agent Builder', () => {
 
     it('should use default model when not specified', async () => {
       const agent = await createAgent('sFlow');
-      expect(agent.model).toBe('glm-5.1');
+      expect(agent.model).toBe('atomcode/deepseek-v4-flash');
     });
   });
 
@@ -89,7 +89,7 @@ describe('Agent Builder', () => {
     it('should create all agents', async () => {
       const agents = await createAllAgents();
       expect(agents).toBeDefined();
-      expect(Object.keys(agents)).toHaveLength(9);
+      expect(Object.keys(agents)).toHaveLength(16);
     });
 
     it('should have all required agents', async () => {
@@ -103,6 +103,13 @@ describe('Agent Builder', () => {
       expect(agents['code-reviewer']).toBeDefined();
       expect(agents['release-archivist']).toBeDefined();
       expect(agents['spec-merger']).toBeDefined();
+      // IFlow agents
+      expect(agents.iFlow).toBeDefined();
+      expect(agents['iflow-discuss-planner']).toBeDefined();
+      expect(agents['iflow-plan-executor']).toBeDefined();
+      expect(agents['iflow-verifier']).toBeDefined();
+      expect(agents['iflow-researcher']).toBeDefined();
+      expect(agents['iflow-shipper']).toBeDefined();
     });
 
     it('should use specified model for all agents', async () => {
@@ -145,7 +152,14 @@ describe('Agent Builder', () => {
       expect(names).toContain('code-reviewer');
       expect(names).toContain('release-archivist');
       expect(names).toContain('spec-merger');
-      expect(names).toHaveLength(9);
+      // IFlow agents
+      expect(names).toContain('iFlow');
+      expect(names).toContain('iflow-discuss-planner');
+      expect(names).toContain('iflow-plan-executor');
+      expect(names).toContain('iflow-verifier');
+      expect(names).toContain('iflow-researcher');
+      expect(names).toContain('iflow-shipper');
+      expect(names).toHaveLength(16);
     });
   });
 
@@ -167,17 +181,18 @@ describe('Agent Builder', () => {
   });
 
   describe('getPrimaryAgents', () => {
-    it('should return only sFlow as primary', () => {
+    it('should return sFlow and iFlow as primary', () => {
       const primaries = getPrimaryAgents();
-      expect(primaries).toHaveLength(1);
+      expect(primaries).toHaveLength(2);
       expect(primaries).toContain('sFlow');
+      expect(primaries).toContain('iFlow');
     });
   });
 
   describe('getSubagentAgents', () => {
     it('should return all subagents', () => {
       const subagents = getSubagentAgents();
-      expect(subagents).toHaveLength(8);
+      expect(subagents).toHaveLength(14);
       expect(subagents).toContain('need-explorer');
       expect(subagents).toContain('spec-writer');
       expect(subagents).toContain('contract-builder');
@@ -186,7 +201,14 @@ describe('Agent Builder', () => {
       expect(subagents).toContain('code-reviewer');
       expect(subagents).toContain('release-archivist');
       expect(subagents).toContain('spec-merger');
+      // IFlow subagents
+      expect(subagents).toContain('iflow-discuss-planner');
+      expect(subagents).toContain('iflow-plan-executor');
+      expect(subagents).toContain('iflow-verifier');
+      expect(subagents).toContain('iflow-researcher');
+      expect(subagents).toContain('iflow-shipper');
       expect(subagents).not.toContain('sFlow');
+      expect(subagents).not.toContain('iFlow');
     });
   });
 
@@ -218,10 +240,17 @@ describe('Agent Builder', () => {
   describe('getAllDefaultModels', () => {
     it('should return models for all agents', () => {
       const models = getAllDefaultModels();
-      expect(Object.keys(models)).toHaveLength(9);
+      expect(Object.keys(models)).toHaveLength(16);
       expect(models.sFlow).toBe('deepseek-v4-flash');
       expect(models['need-explorer']).toBe('kimi-k2.6');
       expect(models['spec-writer']).toBe('glm-5.1');
+      // IFlow models
+      expect(models.iFlow).toBe('deepseek-v4-flash');
+      expect(models['iflow-discuss-planner']).toBe('kimi-k2.6');
+      expect(models['iflow-plan-executor']).toBe('step-3.7-flash');
+      expect(models['iflow-verifier']).toBe('minimax-m2.7');
+      expect(models['iflow-researcher']).toBe('glm-5.1');
+      expect(models['iflow-shipper']).toBe('mimo-v2.5-pro');
     });
   });
 

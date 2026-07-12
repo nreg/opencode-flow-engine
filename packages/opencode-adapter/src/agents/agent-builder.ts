@@ -17,6 +17,12 @@ import {
   createReleaseArchivistAgent,
   createSpecMergerAgent,
   createUiImplementerAgent,
+  createIFlowAgent,
+  createIFlowDiscussPlannerAgent,
+  createIFlowPlanExecutorAgent,
+  createIFlowVerifierAgent,
+  createIFlowResearcherAgent,
+  createIFlowShipperAgent,
 } from './index.js';
 import {
   loadCascadedSFlowConfig,
@@ -29,6 +35,7 @@ import {
  * This avoids the unsafe pattern of assigning .mode to a function object
  */
 const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
+  // SFlow
   sFlow: 'primary',
   'need-explorer': 'subagent',
   'spec-writer': 'subagent',
@@ -39,6 +46,13 @@ const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
   'release-archivist': 'subagent',
   'spec-merger': 'subagent',
   'ui-implementer': 'subagent',
+  // IFlow
+  iFlow: 'primary',
+  'iflow-discuss-planner': 'subagent',
+  'iflow-plan-executor': 'subagent',
+  'iflow-verifier': 'subagent',
+  'iflow-researcher': 'subagent',
+  'iflow-shipper': 'subagent',
 };
 
 /**
@@ -46,6 +60,7 @@ const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
  * 国产模型默认配置
  */
 const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
+  // SFlow
   sFlow: 'deepseek-v4-flash',
   'need-explorer': 'kimi-k2.6',
   'spec-writer': 'glm-5.1',
@@ -56,6 +71,13 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
   'release-archivist': 'mimo-v2.5-pro',
   'spec-merger': 'mimo-v2.5',
   'ui-implementer': 'glm-5.1',
+  // IFlow
+  iFlow: 'deepseek-v4-flash',
+  'iflow-discuss-planner': 'kimi-k2.6',
+  'iflow-plan-executor': 'step-3.7-flash',
+  'iflow-verifier': 'minimax-m2.7',
+  'iflow-researcher': 'glm-5.1',
+  'iflow-shipper': 'mimo-v2.5-pro',
 };
 
 /**
@@ -63,6 +85,7 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
  * When the primary model is unavailable, try these in order
  */
 const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
+  // SFlow
   sFlow: ['glm-5.1', 'kimi-k2.6'],
   'need-explorer': ['glm-5.1', 'deepseek-v4-flash'],
   'spec-writer': ['kimi-k2.6', 'deepseek-v4-flash'],
@@ -73,12 +96,20 @@ const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
   'release-archivist': ['mimo-v2.5', 'glm-5.1'],
   'spec-merger': ['mimo-v2.5-pro', 'glm-5.1'],
   'ui-implementer': ['kimi-k2.6', 'deepseek-v4-flash'],
+  // IFlow
+  iFlow: ['glm-5.1', 'kimi-k2.6'],
+  'iflow-discuss-planner': ['glm-5.1', 'deepseek-v4-flash'],
+  'iflow-plan-executor': ['deepseek-v4-flash', 'glm-5.1'],
+  'iflow-verifier': ['deepseek-v4-flash', 'glm-5.1'],
+  'iflow-researcher': ['kimi-k2.6', 'deepseek-v4-flash'],
+  'iflow-shipper': ['mimo-v2.5', 'glm-5.1'],
 };
 
 /**
  * Agent registry with factory functions
  */
 const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
+  // SFlow
   sFlow: createSFlowAgent,
   'need-explorer': createNeedExplorerAgent,
   'spec-writer': createSpecWriterAgent,
@@ -89,6 +120,13 @@ const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
   'release-archivist': createReleaseArchivistAgent,
   'spec-merger': createSpecMergerAgent,
   'ui-implementer': createUiImplementerAgent,
+  // IFlow
+  iFlow: createIFlowAgent,
+  'iflow-discuss-planner': createIFlowDiscussPlannerAgent,
+  'iflow-plan-executor': createIFlowPlanExecutorAgent,
+  'iflow-verifier': createIFlowVerifierAgent,
+  'iflow-researcher': createIFlowResearcherAgent,
+  'iflow-shipper': createIFlowShipperAgent,
 };
 
 /**

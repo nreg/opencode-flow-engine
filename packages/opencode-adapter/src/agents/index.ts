@@ -12,6 +12,12 @@ export { createCodeReviewerAgent } from './code-reviewer.js';
 export { createReleaseArchivistAgent } from './release-archivist.js';
 export { createSpecMergerAgent } from './spec-merger.js';
 export { createUiImplementerAgent } from './ui-implementer.js';
+export { createIFlowAgent } from './iflow.js';
+export { createIFlowDiscussPlannerAgent } from './iflow-discuss-planner.js';
+export { createIFlowPlanExecutorAgent } from './iflow-plan-executor.js';
+export { createIFlowVerifierAgent } from './iflow-verifier.js';
+export { createIFlowResearcherAgent } from './iflow-researcher.js';
+export { createIFlowShipperAgent } from './iflow-shipper.js';
 
 export {
   loadSFlowConfig,

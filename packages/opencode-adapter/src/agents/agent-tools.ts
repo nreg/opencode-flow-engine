@@ -181,6 +181,81 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     lsp_goto_definition: true,
     lsp_find_references: true,
   },
+
+  // ── IFlow Agents ──
+
+  /** IFlow orchestrator - delegates to subagents */
+  iflow: {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: true,
+    bash: true,
+    call_flow_agent: true,
+    flowagent_output: true,
+    flowagent_cancel: true,
+    skill: true,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true,
+    session_list: true,
+    session_read: true,
+    session_search: true,
+    session_info: true,
+  },
+
+  /** Discuss-planner - read/write, no bash */
+  'iflow-discuss-planner': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: true,
+    bash: false,
+    skill: false,
+  },
+
+  /** Plan-executor - full dev tools + subagent dispatch */
+  'iflow-plan-executor': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: true,
+    bash: true,
+    skill: false,
+    call_flow_agent: true,
+    flowagent_output: true,
+    flowagent_cancel: true,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true,
+  },
+
+  /** Verifier - read-only + bash for tests */
+  'iflow-verifier': {
+    ...COMMON_TOOLS,
+    write: false,
+    edit: false,
+    bash: true,
+    skill: false,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true,
+  },
+
+  /** Researcher - read/write, no edit, context tools */
+  'iflow-researcher': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: false,
+    bash: false,
+    skill: false,
+  },
+
+  /** Shipper - read/write + bash, no edit */
+  'iflow-shipper': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: false,
+    bash: true,
+    skill: false,
+  },
 };
 
 /**

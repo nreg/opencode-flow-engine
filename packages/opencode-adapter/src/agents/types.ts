@@ -21,6 +21,7 @@ export type AgentFactory = (model: string, options?: { temperature?: number; ski
  * Built-in agent names for sFlow
  */
 export type BuiltinAgentName =
+  // SFlow workflow
   | 'sFlow'              // Main orchestrator (primary)
   | 'need-explorer'      // Requirement clarification (subagent)
   | 'spec-writer'        // Artifact generation (subagent)
@@ -30,7 +31,14 @@ export type BuiltinAgentName =
   | 'code-reviewer'      // Code review (subagent)
   | 'release-archivist'  // Closure (subagent)
   | 'spec-merger'        // Sync (subagent)
-  | 'ui-implementer';    // Frontend UI implementation (subagent)
+  | 'ui-implementer'     // Frontend UI implementation (subagent)
+  // IFlow workflow
+  | 'iFlow'              // Main orchestrator (primary)
+  | 'iflow-discuss-planner'   // Discussion + planning (subagent)
+  | 'iflow-plan-executor'     // Execution governor (subagent)
+  | 'iflow-verifier'          // Adversarial verification (subagent)
+  | 'iflow-researcher'        // Research (subagent)
+  | 'iflow-shipper';          // Ship/release (subagent)
 
 /**
  * Agent override configuration

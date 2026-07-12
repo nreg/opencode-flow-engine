@@ -29,6 +29,8 @@ export {
   createContractBuilderAgent, createBuildExecutorAgent, createBugInvestigatorAgent,
   createCodeReviewerAgent, createReleaseArchivistAgent, createSpecMergerAgent,
   createUiImplementerAgent,
+  createIFlowAgent, createIFlowDiscussPlannerAgent, createIFlowPlanExecutorAgent,
+  createIFlowVerifierAgent, createIFlowResearcherAgent, createIFlowShipperAgent,
 } from './agents/index.js';
 export type {
   ModelProvenance, ModelResolutionResult,
@@ -37,7 +39,7 @@ export type {
 import { createWorkflowRouterTool } from './tools/index.js';
 
 export {
-  createWorkflowRouterTool, createContractValidatorTool, createArtifactInspectorTool,
+  createWorkflowRouterTool, createIFlowRouterTool, createContractValidatorTool, createArtifactInspectorTool,
 } from './tools/index.js';
 
 export {
@@ -72,7 +74,15 @@ export const PLUGIN_ID = 'opencode-sflow';
 export const PLUGIN_VERSION = '0.1.0';
 
 /** sFlow native tool names (used in tool.execute.after for post-processing) */
-const SFLOW_TOOLS = new Set(['workflow_router', 'contract_validator', 'artifact_inspector', 'validate_spec', 'validate_proposal', 'validate_delta_spec', 'validate_tasks', 'validate_contract', 'validate_design', 'validate_implementation', 'detect_sync_conflicts', 'record_decision_point', 'call_flow_agent', 'flowagent_output', 'flowagent_cancel']);
+const SFLOW_TOOLS = new Set(['workflow_router', 'iflow_router', 'contract_validator', 'artifact_inspector', 'validate_spec', 'validate_proposal', 'validate_delta_spec', 'validate_tasks', 'validate_contract', 'validate_design', 'validate_implementation', 'detect_sync_conflicts', 'record_decision_point', 'call_flow_agent', 'flowagent_output', 'flowagent_cancel']);
+
+/**
+ * Agent color mapping
+ */
+const AGENT_COLORS: Record<string, string> = {
+  sFlow: '#f8cd93',
+  iFlow: '#FFB6C1',
+};
 
 // Lightweight in-memory background task registry
 // Maps taskId → { sessionID, status, result, error }
@@ -168,6 +178,17 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
       execute: async (args, context) => {
         
         return createWorkflowRouterTool().execute({ ...args, changeDir: context.directory || '' }, context);
+      },
+    },
+
+    iflow_router: {
+      description: 'Detect current IFlow state from .iflow/ directory artifacts and route to the appropriate agent. Supports IFlow-specific intent patterns.',
+      args: {
+        state: z.string().optional().describe('Optional state hint to override detection'),
+      },
+      execute: async (args, context) => {
+        const { createIFlowRouterTool } = await import('./tools/iflow-router.js');
+        return createIFlowRouterTool().execute({ ...args, changeDir: context.directory || '' }, context);
       },
     },
 
@@ -914,6 +935,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
           prompt: instructions,
           mode: getAgentMode(name),
           tools,
+          color: AGENT_COLORS[name],
           temperature: override?.temperature ?? temperature,
           description: (typeof agentCfg.id === 'string')
             ? `${agentCfg.id} agent from sFlow plugin`
