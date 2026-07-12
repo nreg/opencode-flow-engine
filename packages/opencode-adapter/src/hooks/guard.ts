@@ -9,12 +9,23 @@
  */
 
 import type { HookHandler, HookContext, HookResult } from "./types.js";
-import { isArtifactPath, isSourceCodePath, simpleContractHash } from "./guard/helpers.js";
+import { simpleContractHash } from "./guard/helpers.js";
 import { parseFileBoundaryPatterns, matchesBoundary, getActiveTaskId, boundaryCache, getBoundaryCacheKey, READ_FILES_WHITELIST } from "./guard/boundary.js";
 import { fileExists, readFile, readJsonFile, directoryExists, isContractStale, getContractStalenessReport } from "@opencode-sflow/shared";
 import { sharedValidator, HOTFIX_UPGRADE_THRESHOLDS, TWEAK_UPGRADE_THRESHOLDS } from "@opencode-sflow/core";
 import { checkArtifactPreflight, findPreflightState } from "../features/artifact-preflight.js";
 import { readProgressFile, searchLessonsInFile } from "../features/state-manager.js";
+import { getHasOmoPlugin } from "../agents/agent-tools.js";
+
+let _omoUsedInCurrentExploring = false;
+
+export function markOmoUsed(): void {
+  _omoUsedInCurrentExploring = true;
+}
+
+export function resetOmoTracking(): void {
+  _omoUsedInCurrentExploring = false;
+}
 
 const SOURCE_CODE_PATTERNS = /\.(ts|js|tsx|jsx|mjs|cjs|mts|cts|py|java|kt|rs|go|rb|php|c|cpp|h|hpp|cs|swift|vue|svelte|css|scss|less)$/i;
 const ARTIFACT_NAMES = new Set(['proposal.md', 'design.md', 'tasks.md', 'execution-contract.md']);
@@ -61,6 +72,7 @@ export function createGuardHook(): HookHandler {
           await checkGitCommitBoundary(changeDir, data),
           // P21: LESSONS.md knowledge base guard (warnings, not blocking)
           await checkLessonsGuard(changeDir, data),
+          await checkOmoUsageGuard(changeDir, data),
         ];
 
         const allWarnings: string[] = [];
@@ -726,7 +738,32 @@ async function checkDebuggingState(changeDir: string, action?: string, data?: Re
   return { success: true };
 }
 
+/**
+ * PXX: OMO usage guard — warns when sFlow uses read/grep in exploring phase
+ * without first calling call_omo_agent when omo is available.
+ */
+async function checkOmoUsageGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+  if (!changeDir || !data) return { success: true };
 
+  const toolName = (data.toolName as string) || '';
+  if (toolName !== 'read' && toolName !== 'grep') return { success: true };
+
+  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
+  const currentState = stateData?.state || '';
+  if (currentState !== 'exploring') return { success: true };
+
+  const hasOmo = getHasOmoPlugin();
+  if (!hasOmo) return { success: true };
+
+  if (!_omoUsedInCurrentExploring) {
+    return {
+      success: true,
+      warnings: ['[SFLOW] OMO guard: sFlow used read/grep in exploring phase without calling call_omo_agent first. When omo is available, you MUST use call_omo_agent for code exploration.'],
+    };
+  }
+
+  return { success: true };
+}
 
 
 

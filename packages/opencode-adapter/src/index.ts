@@ -65,6 +65,7 @@ import { detectStateMismatch, simpleHash } from './features/state-manager.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
 import { setHasOmoPlugin, setHasAgnesProvider } from './agents/agent-tools.js';
+import { markOmoUsed, resetOmoTracking } from './hooks/guard.js';
 import { pollSessionCompletion } from './helpers/polling.js';
 
 export const PLUGIN_ID = 'opencode-sflow';
@@ -996,6 +997,10 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       const toolName = input.tool;
       const lowerTool = toolName?.toLowerCase();
 
+      if (lowerTool === 'call_omo_agent') {
+        markOmoUsed();
+      }
+
       // Gather file path for write/edit tools to pass to guard hook
       const filePath = (lowerTool === 'write' || lowerTool === 'edit')
         ? (((output.args ?? {}) as Record<string, unknown>).filePath
@@ -1068,6 +1073,10 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
             data: { newState },
           });
         }
+        // Reset omo tracking when leaving exploring state
+        if (newState !== 'exploring') {
+          resetOmoTracking();
+        }
       }
 
       // Post-process: detect state transitions from agent responses
@@ -1092,6 +1101,10 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
                 action: 'state-transition',
                 data: { newState: ppData.stateTransitionSignal.to },
               });
+            }
+            // Reset omo tracking when leaving exploring state
+            if (ppData.stateTransitionSignal.to !== 'exploring') {
+              resetOmoTracking();
             }
           }
         }
