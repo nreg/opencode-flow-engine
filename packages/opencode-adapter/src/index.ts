@@ -212,7 +212,7 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
         const changeDir = context.directory || '';
         const { subagent_type, prompt, run_in_background, session_id, description } = args;
         const sessionLabel = `sFlow → ${subagent_type}`;
-        const MAX_WAIT_MS = 300_000;
+        const MAX_WAIT_MS = 30_000;
         const POLL_INTERVAL_MS = 500;
 
         try {
