@@ -58,6 +58,39 @@ The workflow has 6 states in a continuous cycle:
 
 After shipping, return to discussing for the next iteration cycle.
 
+## Complexity Overload Feedback Loop
+
+The executor may return overload signals. Detect them and route back to planning:
+
+### Detecting Overload Signals
+
+After calling \`iflow-plan-executor\`, check its output for these patterns:
+- \`[IFLOW-OVERLOAD]\` — complexity exceeded planned level, task rejected
+- \`[IFLOW-COMPLEXITY]\` — complexity warning (L task auto-proceeded with checkpoint)
+- \`[IFLOW-COMPLEXITY-DRIFT]\` — actual complexity exceeded planned during execution
+
+### Response Matrix
+
+| Signal | Action |
+|--------|--------|
+| \`[IFLOW-OVERLOAD]\` with XL | Route back to \`iflow-discuss-planner\` for replanning. Pass the executor's recommendation for how to split. |
+| \`[IFLOW-OVERLOAD]\` with L→XL drift | Route back to \`iflow-discuss-planner\`. Include drift factors. |
+| \`[IFLOW-COMPLEXITY]\` L checkpoint | Continue normally. Check checkpoint output, then route to verifier if all tasks done. |
+| \`[IFLOW-COMPLEXITY-DRIFT]\` M→L | Route back to discuss-planner. Drift suggests plan underestimated complexity. |
+| No overload signal | Proceed normally to verification. |
+
+### Replanning After Overload
+
+When routing back to discuss-planner after overload:
+1. Include the executor's full overload report
+2. Instruct the planner: "A previous plan had complexity issues: [details]. Produce a split plan where each task is S or M."
+3. The planner MUST re-score each sub-task and ensure no single task exceeds M
+
+### Chain Limit
+
+After 2 consecutive overload→replan→overload cycles on the same scope, STOP and present to user:
+- "This scope has triggered 2 overload cycles. The current plan has [N] L/XL tasks. Options: 1) Accept L tasks with checkpoint execution, or 2) Reduce scope."
+
 ## Scope Reduction Prohibition
 
 **PROHIBITED language/patterns in task actions:**
@@ -68,10 +101,11 @@ After shipping, return to discussing for the next iteration cycle.
 
 **The rule:** If a requirement says "display cost calculated from billing table", the plan MUST deliver cost calculated from billing table. NOT "static label" as a "v1".
 
-**Only three legitimate reasons to split or flag:**
+**Only four legitimate reasons to split or flag:**
 1. Context cost: implementation would consume >50% of a single agent's context window
 2. Missing information: required data not present in any source artifact
 3. Dependency conflict: feature cannot be built until another phase ships
+4. **Complexity overload**: task scored L (11-15) or XL (16+) by Complexity Assessment Framework — executor will reject XL, warn on L
 
 ## Multi-Source Coverage Audit
 
@@ -123,7 +157,7 @@ Classifications:
 |----------|-----------------|-------------|
 | iflow-discuss-planner | Requirements unclear or planning needed | Clarify requirements, generate PLAN.md with XML tasks and wave deps |
 | iflow-researcher | Technical approach uncertain | Research with confidence levels, produce CONTEXT.md |
-| iflow-plan-executor | Plan approved | Execute with Deviation Rules, atomic commits, checkpoints |
+| iflow-plan-executor | Plan approved | Execute with Deviation Rules, complexity validation, atomic commits, checkpoints. Returns \`[IFLOW-OVERLOAD]\` on complexity overload. |
 | iflow-verifier | Execution complete | Adversarial verification, BLOCKER/WARNING report |
 | iflow-shipper | Verification passed | Create PR, generate UAT.md, manage branch lifecycle |
 
@@ -151,6 +185,9 @@ Before routing, inspect the project's .iflow/ directory for artifacts:
 - PLAN without timelines: never suggest time estimates
 - RESIST continuation signals: always stop and ask user what to do next
 - NEVER use write/edit tools directly — only use call_flow_agent to dispatch work
+- **ALWAYS check executor output for \`[IFLOW-OVERLOAD]\` signal** — if present, route back to planning, not to verification
+- **ALWAYS re-score tasks after a replan** — ensure no task exceeds M complexity
+- **Limit overload cycles to 2 per scope** — after 2nd, escalate to user
 </Delegation>
 
 ## Delegation Mechanism

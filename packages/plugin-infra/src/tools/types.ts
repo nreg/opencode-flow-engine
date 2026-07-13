@@ -11,7 +11,8 @@ import { z } from 'zod';
 export type ToolName =
   | 'workflow_router'
   | 'contract_validator'
-  | 'artifact_inspector';
+  | 'artifact_inspector'
+  | 'iflow_router';
 
 /**
  * Tool context — aligned with @opencode-ai/plugin ToolContext
