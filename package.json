@@ -6,7 +6,8 @@
   "main": "packages/plugin-infra/dist/index.js",
   "types": "packages/plugin-infra/dist/index.d.ts",
   "bin": {
-    "sflow": "./bin/sflow.js"
+    "flow-engine": "./bin/flow-engine.js",
+    "sflow": "./bin/flow-engine.js"
   },
   "exports": {
     ".": {
