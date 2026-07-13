@@ -104,6 +104,136 @@ describe('Guard Hook — Preset Upgrade Detection', () => {
 });
 
 
+// ─── IFlow guard skip tests (Batch 3 — P2 Architecture Fix) ──────────────────
+
+describe('Guard Hook — IFlow mode skips SFlow guards', () => {
+  const dir = tempDir('guard-iflow-skip');
+  let guard: ReturnType<typeof createGuardHook>;
+
+  async function writeIFlowDir(d: string): Promise<void> {
+    await ensureDir(d + '/.iflow');
+  }
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    guard = createGuardHook();
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should skip checkArtifactAndPhaseConsistency when .iflow/ exists (no .sflow/)', async () => {
+    // IFlow mode: .iflow/ exists, no .sflow/ — should not block even without SFlow artifacts
+    await writeIFlowDir(dir);
+
+    const result = await guard.execute({
+      changeDir: dir,
+      stateFile: '',
+      pluginRoot: '',
+      action: 'check',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.block).toBeUndefined();
+  });
+
+  it('should skip checkPresetUpgrade when .iflow/ exists', async () => {
+    // IFlow mode with tasks.md that would trigger hotfix upgrade in SFlow
+    await writeIFlowDir(dir);
+    await writeFileContent(dir + '/tasks.md', '- [ ] t1\n- [ ] t2\n- [ ] t3');
+
+    const result = await guard.execute({
+      changeDir: dir,
+      stateFile: '',
+      pluginRoot: '',
+      action: 'check',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.block).toBeUndefined();
+  });
+
+  it('should skip checkDebuggingState when .iflow/ exists', async () => {
+    // IFlow mode — no debugging state concept, should not block
+    await writeIFlowDir(dir);
+
+    const result = await guard.execute({
+      changeDir: dir,
+      stateFile: '',
+      pluginRoot: '',
+      action: 'tool:write',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.block).toBeUndefined();
+  });
+
+  it('should skip checkFileWriteGuard SFlow rules when .iflow/ exists', async () => {
+    // IFlow mode — SFlow write guards should not apply
+    await writeIFlowDir(dir);
+
+    const result = await guard.execute({
+      changeDir: dir,
+      stateFile: '',
+      pluginRoot: '',
+      action: 'tool:write',
+      data: {
+        toolName: 'write',
+        filePath: 'src/feature.ts',
+        agent: 'iflow-plan-executor',
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should skip checkContractStalenessGuard when .iflow/ exists', async () => {
+    // IFlow mode — no SFlow contract staleness concept
+    await writeIFlowDir(dir);
+
+    const result = await guard.execute({
+      changeDir: dir,
+      stateFile: '',
+      pluginRoot: '',
+      action: 'check',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should skip checkTaskCompletion when .iflow/ exists', async () => {
+    // IFlow mode with incomplete tasks.md — should not block
+    await writeIFlowDir(dir);
+    await writeFileContent(dir + '/tasks.md', '- [ ] incomplete task');
+
+    const result = await guard.execute({
+      changeDir: dir,
+      stateFile: '',
+      pluginRoot: '',
+      action: 'check',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should maintain backward compatibility — SFlow still works without .iflow/', async () => {
+    // No .iflow/ directory — SFlow guards should still function normally
+    await writeStateFile(dir, { state: 'exploring', mode: 'full' });
+
+    const result = await guard.execute({
+      changeDir: dir,
+      stateFile: '',
+      pluginRoot: '',
+      action: 'tool:read',
+      data: { toolName: 'read', filePath: 'src/test.ts' },
+    });
+
+    expect(result.success).toBe(true);
+  });
+});
+
 describe('Guard Hook — Debugging State', () => {
   const dir = tempDir('guard-debugging');
   let guard: ReturnType<typeof createGuardHook>;

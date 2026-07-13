@@ -32,6 +32,11 @@ Invoke this skill when IFlow is in the **discussing** state. The goal is to clar
 - User confirms the direction
 - Transition to **researching** state
 
+### State Transition Detection
+
+- **Trigger**: User confirms the requirement direction and no ambiguities remain
+- **Auto-route suggestion**: When requirements are clarified → suggest "请执行 iflow-router 检测状态，应转换到 researching 状态，路由到 iflow-researcher"
+
 ## Tools
 
 - `call_flow_agent` with subagent_type="iflow-discuss-planner"

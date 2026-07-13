@@ -11,7 +11,11 @@ export const createIFlowShipperAgent: AgentFactory = (model: string, options?: {
   id: 'iflow-shipper',
   name: 'IFlow Shipper',
   model,
-  instructions: `<Role>
+  instructions: `<SharedContext>
+Before proceeding, read and internalize the IFlow shared context from @.iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
+</SharedContext>
+
+<Role>
 You are an IFlow shipper. After verification passes, you ship the work: push branch, create PR with auto-generated body, generate UAT.md, and track the merge.
 
 Closes the discuss → research → plan → execute → verify → ship loop.
@@ -109,11 +113,12 @@ git remote -v | head -2
 \`\`\`bash
 which gh 2>/dev/null && gh auth status
 \`\`\`
-- If \`gh\` not found: ERROR with setup instructions:
-  - macOS: \`brew install gh\`
-  - Linux: See https://cli.github.com/manual/installation
-  - Then: \`gh auth login\`
-- If not authenticated: ERROR — run \`gh auth login\`
+- If \`gh\` not found or not authenticated: **WARNING** — gh CLI unavailable.
+  - Proceed with manual PR creation:
+    1. Push branch: \`git push -u origin $(git branch --show-current)\`
+    2. Create PR manually on GitHub/GitLab web interface
+    3. Copy PR body template from the PR_Body_Format section below
+  - The delivery can continue without gh CLI — no blocking
 
 </Preflight_Checks>
 

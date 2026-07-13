@@ -11,7 +11,11 @@ export const createIFlowResearcherAgent: AgentFactory = (model: string, options?
   id: 'iflow-researcher',
   name: 'IFlow Researcher',
   model,
-  instructions: `<Role>
+  instructions: `<SharedContext>
+Before proceeding, read and internalize the IFlow shared context from @.iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
+</SharedContext>
+
+<Role>
 You are an IFlow researcher. You answer "What do I need to know to PLAN this phase well?" and produce a single CONTEXT.md that the planner consumes.
 
 **Core responsibilities:**

@@ -38,6 +38,11 @@ Invoke this skill when IFlow is in the **executing** state. The goal is to execu
 - SUMMARY.md generated
 - Transition to **verifying** state
 
+### State Transition Detection
+
+- **Trigger**: SUMMARY.md is generated and all tasks are marked complete
+- **Auto-route suggestion**: When SUMMARY.md is generated → suggest "transition to verifying state, route to iflow-verify"
+
 ## Tools
 
 - `call_flow_agent` with subagent_type="iflow-plan-executor"

@@ -84,9 +84,17 @@ async function checkScopeReductionGuard(changeDir: string, data?: Record<string,
   if (!data) return { success: true };
 
   const toolName = (data.toolName as string) || '';
+  if (!toolName) {
+    console.warn('[IFlow Guard] checkScopeReductionGuard called without toolName — skipping');
+    return { success: true };
+  }
   if (toolName !== 'write' && toolName !== 'edit') return { success: true };
 
   const filePath = (data.filePath as string) || '';
+  if (!filePath) {
+    console.warn('[IFlow Guard] checkScopeReductionGuard called without filePath — skipping');
+    return { success: true };
+  }
   if (!filePath.includes('PLAN.md')) return { success: true };
 
   // Read current PLAN.md if it exists
@@ -141,7 +149,11 @@ async function checkArtifactCompletenessGuard(changeDir: string, data?: Record<s
   if (!data) return { success: true };
 
   const targetState = data.targetState as string;
-  if (!targetState || !IFLOW_STATES.includes(targetState as IFlowState)) return { success: true };
+  if (!targetState) {
+    console.warn('[IFlow Guard] checkArtifactCompletenessGuard called without targetState — skipping');
+    return { success: true };
+  }
+  if (!IFLOW_STATES.includes(targetState as IFlowState)) return { success: true };
 
   const required = REQUIRED_ARTIFACTS[targetState as IFlowState];
   if (!required || required.length === 0) return { success: true };
@@ -173,7 +185,12 @@ async function checkCyclicTransitionGuard(changeDir: string, data?: Record<strin
   const currentState = data.currentState as string;
   const targetState = data.targetState as string;
 
-  if (!currentState || !targetState) return { success: true };
+  if (!currentState || !targetState) {
+    if (data && (!currentState || !targetState)) {
+      console.warn('[IFlow Guard] checkCyclicTransitionGuard called without currentState or targetState — skipping');
+    }
+    return { success: true };
+  }
   if (!IFLOW_STATES.includes(currentState as IFlowState) || !IFLOW_STATES.includes(targetState as IFlowState)) {
     return { success: true };
   }

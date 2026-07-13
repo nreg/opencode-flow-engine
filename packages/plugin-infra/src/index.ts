@@ -69,6 +69,7 @@ import { createValidatorTools, createWorkflowTools } from './features/builtin-mc
 import { setHasOmoPlugin, setHasAgnesProvider } from './agents/agent-tools.js';
 import { markOmoUsed, resetOmoTracking } from './hooks/guard.js';
 import { pollSessionCompletion } from './helpers/polling.js';
+import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 
 /** 
  * PLUGIN_ID: 'opencode-sflow' for backward compatibility.
@@ -242,7 +243,20 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
       execute: async (args, context) => {
         const changeDir = context.directory || '';
         const { subagent_type, prompt, run_in_background, session_id, description } = args;
-        const sessionLabel = `sFlow → ${subagent_type}`;
+
+        const isIFlowContext = await directoryExists(`${changeDir}/.iflow`);
+
+        if (isIFlowContext) {
+          const validIFlowAgents = IFLOW_AGENT_NAMES as readonly string[];
+          if (!validIFlowAgents.includes(subagent_type as string)) {
+            return await formatToolError(
+              `Invalid IFlow agent: "${subagent_type}". Available IFlow agents: ${validIFlowAgents.join(', ')}`,
+            );
+          }
+        }
+
+        const workflowPrefix = isIFlowContext ? 'iFlow' : 'sFlow';
+        const sessionLabel = `${workflowPrefix} → ${subagent_type}`;
         const MAX_WAIT_MS = 30_000;
         const POLL_INTERVAL_MS = 500;
 

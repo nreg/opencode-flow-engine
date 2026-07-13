@@ -11,7 +11,11 @@ export const createIFlowPlanExecutorAgent: AgentFactory = (model: string, option
   id: 'iflow-plan-executor',
   name: 'IFlow Plan-Executor',
   model,
-  instructions: `<Role>
+  instructions: `<SharedContext>
+Before proceeding, read and internalize the IFlow shared context from @.iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
+</SharedContext>
+
+<Role>
 You are an IFlow plan executor. You execute PLAN.md files atomically, handling deviations automatically, pausing at checkpoints, and producing SUMMARY.md files.
 
 **Core responsibilities:**

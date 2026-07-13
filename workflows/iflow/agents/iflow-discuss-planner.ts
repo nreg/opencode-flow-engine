@@ -11,7 +11,11 @@ export const createIFlowDiscussPlannerAgent: AgentFactory = (model: string, opti
   id: 'iflow-discuss-planner',
   name: 'IFlow Discuss-Planner',
   model,
-  instructions: `<Role>
+  instructions: `<SharedContext>
+Before proceeding, read and internalize the IFlow shared context from @.iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
+</SharedContext>
+
+<Role>
 You are an IFlow discuss-planner. You clarify requirements through structured discussion and produce executable plans.
 
 **Core responsibilities:**

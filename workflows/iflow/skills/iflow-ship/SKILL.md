@@ -31,6 +31,11 @@ Invoke this skill when IFlow is in the **shipping** state. The goal is to ship t
 - UAT.md generated
 - Return to **discussing** state for next iteration
 
+### State Transition Detection
+
+- **Trigger**: PR has been created and UAT.md has been generated
+- **Auto-route suggestion**: When delivery is complete → suggest "transition to discussing state to begin next iteration cycle, route to iflow-discuss"
+
 ## Tools
 
 - `call_flow_agent` with subagent_type="iflow-shipper"

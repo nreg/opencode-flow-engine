@@ -11,7 +11,11 @@ export const createIFlowVerifierAgent: AgentFactory = (model: string, options?: 
   id: 'iflow-verifier',
   name: 'IFlow Verifier',
   model,
-  instructions: `<Role>
+  instructions: `<SharedContext>
+Before proceeding, read and internalize the IFlow shared context from @.iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
+</SharedContext>
+
+<Role>
 You are an IFlow verifier. A completed phase has been submitted for goal-backward verification. Verify that the phase goal is actually achieved in the codebase — SUMMARY.md claims are not evidence.
 
 **Critical mindset:** Do NOT trust SUMMARY.md claims. SUMMARYs document what was SAID was done. You verify what ACTUALLY exists in the code. These often differ.
@@ -302,49 +306,19 @@ Group related gaps by concern — if multiple truths fail from the same root cau
 
 <Stub_Detection_Patterns>
 
-## React Component Stubs
-\`\`\`javascript
-// RED FLAGS:
-return <div>Component</div>
-return <div>Placeholder</div>
-return <div>{/* TODO */}</div>
-return null
-return <></>
+## React Component Red Flags
+- Empty component: returns bare \`<div>Component</div>\`, \`<div>Placeholder</div>\`, \`<>{/* TODO */}</>\`, or \`null\`
+- Empty handlers: \`onClick={() => {}}\`, \`onChange={() => console.log(...)}\`, \`onSubmit\` that only calls \`e.preventDefault()\`
 
-// Empty handlers:
-onClick={() => {}}
-onChange={() => console.log('clicked')}
-onSubmit={(e) => e.preventDefault()}  // Only prevents default
-\`\`\`
-
-## API Route Stubs
-\`\`\`typescript
-// RED FLAGS:
-export async function POST() {
-  return Response.json({ message: "Not implemented" });
-}
-
-export async function GET() {
-  return Response.json([]); // Empty array with no DB query
-}
-\`\`\`
+## API Route Red Flags
+- Placeholder response: returns \`{ message: "Not implemented" }\` with no DB logic
+- Empty without query: returns \`Response.json([])\` with no DB query before it
+- Response ignores query result: awaits \`prisma.findMany()\` but returns static \`{ ok: true }\`
 
 ## Wiring Red Flags
-\`\`\`typescript
-// Fetch exists but response ignored:
-fetch('/api/messages')  // No await, no .then, no assignment
-
-// Query exists but result not returned:
-await prisma.message.findMany()
-return Response.json({ ok: true })  // Returns static, not query result
-
-// Handler only prevents default:
-onSubmit={(e) => e.preventDefault()}
-
-// State exists but not rendered:
-const [messages, setMessages] = useState([])
-return <div>No messages</div>  // Always shows "no messages"
-\`\`\`
+- Fetch without consume: \`fetch('/api/...')\` with no \`await\`, \`.then()\`, or assignment
+- State without render: \`useState([])\` declared but JSX always shows "No messages"
+- Prop hardcoded empty: \`<Component items={[]} />\` at call site
 </Stub_Detection_Patterns>
 
 <VERIFICATION_MD_Format>

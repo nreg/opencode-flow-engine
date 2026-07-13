@@ -29,8 +29,14 @@ Invoke this skill when IFlow is in the **planning** state. The goal is to genera
 
 - PLAN.md is generated and validated
 - Plan covers all requirements from CONTEXT.md
+- Goal-backward verification passed (every truth maps to a task)
 - Transition to **executing** state
+
+### State Transition Detection
+
+- **Trigger**: PLAN.md is complete and passes goal-backward verification
+- **Auto-route suggestion**: When PLAN.md passes goal-backward verification → suggest "transition to executing state, route to iflow-execute"
 
 ## Tools
 
-- `call_flow_agent` with subagent_type="iflow-discuss-planner"
+- `call_flow_agent` with subagent_type="iflow-discuss-planner" (for planning task generation)
