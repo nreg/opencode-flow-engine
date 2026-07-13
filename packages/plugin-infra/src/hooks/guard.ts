@@ -67,23 +67,21 @@ export function createGuardHook(): HookHandler {
       const { changeDir, data } = context;
 
       try {
+        const activeWorkflow = await detectActiveWorkflow(changeDir);
+
         const guards = [
-          await checkArtifactAndPhaseConsistency(changeDir),
-          await checkPresetUpgrade(changeDir),
-          await checkContractStalenessGuard(changeDir),
-          await checkTaskCompletion(changeDir),
-          await checkDebuggingState(changeDir, context.action, data),
-          await checkProgressAntiRepeatGuard(changeDir, data),
-          await checkFileWriteGuard(changeDir, data),
-          // P19: Read files boundary check (warnings, not blocking)
-          await checkReadFilesBoundary(changeDir, data),
-          // P20: Git diff boundary verify at commit time (blocking)
-          await checkGitCommitBoundary(changeDir, data),
-          // P21: LESSONS.md knowledge base guard (warnings, not blocking)
-          await checkLessonsGuard(changeDir, data),
-          await checkOmoUsageGuard(changeDir, data),
-          // IFlow guards (only active when .iflow/ directory exists)
-          ...(await getIFlowGuards(changeDir, data)),
+          await checkArtifactAndPhaseConsistency(changeDir, activeWorkflow),
+          await checkPresetUpgrade(changeDir, activeWorkflow),
+          await checkContractStalenessGuard(changeDir, activeWorkflow),
+          await checkTaskCompletion(changeDir, activeWorkflow),
+          await checkDebuggingState(changeDir, context.action, data, activeWorkflow),
+          await checkProgressAntiRepeatGuard(changeDir, data, activeWorkflow),
+          await checkFileWriteGuard(changeDir, data, activeWorkflow),
+          await checkReadFilesBoundary(changeDir, data, activeWorkflow),
+          await checkGitCommitBoundary(changeDir, data, activeWorkflow),
+          await checkLessonsGuard(changeDir, data, activeWorkflow),
+          await checkOmoUsageGuard(changeDir, data, activeWorkflow),
+          ...(await getIFlowGuards(changeDir, data, activeWorkflow)),
         ];
 
         const allWarnings: string[] = [];
@@ -123,10 +121,9 @@ export function createGuardHook(): HookHandler {
  * Merges checkArtifactExistence (C6 dedup) and checkPhaseConsistency into one pass.
  * Covers both: "does the artifact exist at this state" and "full mode consistency".
  */
-async function checkArtifactAndPhaseConsistency(changeDir: string): Promise<HookResult> {
+async function checkArtifactAndPhaseConsistency(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
-  const activeWorkflow = await detectActiveWorkflow(changeDir);
   if (activeWorkflow === 'iflow') {
     return { success: true };
   }
@@ -190,10 +187,9 @@ async function checkArtifactAndPhaseConsistency(changeDir: string): Promise<Hook
  * Does NOT write state. Returns block reason and upgrade signal;
  * the caller (state-manager or index.ts) is responsible for applying the upgrade.
  */
-async function checkPresetUpgrade(changeDir: string): Promise<HookResult> {
+async function checkPresetUpgrade(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
-  const activeWorkflow = await detectActiveWorkflow(changeDir);
   if (activeWorkflow === 'iflow') {
     return { success: true };
   }
@@ -265,10 +261,9 @@ async function checkPresetUpgrade(changeDir: string): Promise<HookResult> {
   return { success: true };
 }
 
-async function checkContractStalenessGuard(changeDir: string): Promise<HookResult> {
+async function checkContractStalenessGuard(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
-  const activeWorkflow = await detectActiveWorkflow(changeDir);
   if (activeWorkflow === 'iflow') {
     return { success: true };
   }
@@ -294,10 +289,9 @@ async function checkContractStalenessGuard(changeDir: string): Promise<HookResul
   return { success: true };
 }
 
-async function checkTaskCompletion(changeDir: string): Promise<HookResult> {
+async function checkTaskCompletion(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
-  const activeWorkflow = await detectActiveWorkflow(changeDir);
   if (activeWorkflow === 'iflow') {
     return { success: true };
   }
@@ -324,10 +318,9 @@ async function checkTaskCompletion(changeDir: string): Promise<HookResult> {
  * Reads .sflow/progress.md and checks if the current operation (inferred from tool/agent/filePath)
  * matches any previously excluded approach.
  */
-async function checkProgressAntiRepeatGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+async function checkProgressAntiRepeatGuard(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
 
-  const activeWorkflow = await detectActiveWorkflow(changeDir);
   if (activeWorkflow === 'iflow') {
     return { success: true };
   }
@@ -389,10 +382,9 @@ async function checkProgressAntiRepeatGuard(changeDir: string, data?: Record<str
  * - C5: Debugging state only allows bug-investigator and build-executor agents
  * - Illegal phase jump: full mode executing without design.md
  */
-async function checkFileWriteGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+async function checkFileWriteGuard(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
 
-  const activeWorkflow = await detectActiveWorkflow(changeDir);
   if (activeWorkflow === 'iflow') {
     return { success: true };
   }
@@ -482,10 +474,9 @@ async function checkFileWriteGuard(changeDir: string, data?: Record<string, unkn
  * These are infrastructure/config files, not source code.
  */
 
-async function checkReadFilesBoundary(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+async function checkReadFilesBoundary(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
 
-  const activeWorkflow = await detectActiveWorkflow(changeDir);
   if (activeWorkflow === 'iflow') {
     return { success: true };
   }
@@ -539,10 +530,9 @@ async function checkReadFilesBoundary(changeDir: string, data?: Record<string, u
  * P20: Git diff boundary verify at commit time — blocks git commit when
  * staged files include paths outside the active task's write_files.
  */
-async function checkGitCommitBoundary(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+async function checkGitCommitBoundary(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
 
-  const activeWorkflow = await detectActiveWorkflow(changeDir);
   if (activeWorkflow === 'iflow') {
     return { success: true };
   }
@@ -707,10 +697,9 @@ async function checkFileBoundary(changeDir: string, filePath: string): Promise<H
  * Inspired by flow-kit R1.8: "每个 DEV 任务进入实现前必扫 LESSONS.md"
  * Only warns (does not block) — the AI must declare differences in the execution plan.
  */
-async function checkLessonsGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+async function checkLessonsGuard(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
 
-  const activeWorkflow = await detectActiveWorkflow(changeDir);
   if (activeWorkflow === 'iflow') {
     return { success: true };
   }
@@ -771,11 +760,10 @@ async function checkLessonsGuard(changeDir: string, data?: Record<string, unknow
   return { success: true };
 }
 
-async function checkDebuggingState(changeDir: string, action?: string, data?: Record<string, unknown>): Promise<HookResult> {
+async function checkDebuggingState(changeDir: string, action?: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
-  const debuggingWorkflow = await detectActiveWorkflow(changeDir);
-  if (debuggingWorkflow === 'iflow') {
+  if (activeWorkflow === 'iflow') {
     return { success: true };
   }
 
@@ -803,10 +791,9 @@ async function checkDebuggingState(changeDir: string, action?: string, data?: Re
  * PXX: OMO usage guard — warns when sFlow uses read/grep in exploring phase
  * without first calling call_omo_agent when omo is available.
  */
-async function checkOmoUsageGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+async function checkOmoUsageGuard(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
 
-  const activeWorkflow = await detectActiveWorkflow(changeDir);
   if (activeWorkflow === 'iflow') {
     return { success: true };
   }
@@ -835,10 +822,13 @@ async function checkOmoUsageGuard(changeDir: string, data?: Record<string, unkno
  * Get IFlow guards — only active when .iflow/ directory exists.
  * This ensures IFlow guards never interfere with SFlow workflows.
  */
-async function getIFlowGuards(changeDir: string, data?: Record<string, unknown>): Promise<HookResult[]> {
+async function getIFlowGuards(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult[]> {
   if (!changeDir) return [];
-  const hasIflow = await iflowDirectoryExists(changeDir);
-  if (!hasIflow) return [];
+  if (activeWorkflow === 'sflow') return [];
+  if (activeWorkflow !== 'iflow') {
+    const hasIflow = await iflowDirectoryExists(changeDir);
+    if (!hasIflow) return [];
+  }
 
   const iflowResult = await checkIFlowGuards(changeDir, data);
   return [iflowResult];

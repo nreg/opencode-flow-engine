@@ -1,10 +1,11 @@
 /**
  * Guard hook tests — preset upgrade, phase consistency, debugging gate
  */
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { createGuardHook } from '../hooks/guard.js';
+import * as shared from '@opencode-flow-engine/shared';
 
 function tempDir(name: string): string {
   return join(import.meta.dir, '..', '__test_workdir__', name);
@@ -267,5 +268,88 @@ describe('Guard Hook — Debugging State', () => {
     const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'build-executor:verify' });
     expect(result.block).toBeUndefined();
     expect(result.success).toBe(true);
+  });
+});
+
+// ─── P0: detectActiveWorkflow single-call optimization ───────────────────────
+
+describe('Guard Hook — detectActiveWorkflow single-call optimization', () => {
+  const dir = tempDir('guard-detect-single-call');
+  let guard: ReturnType<typeof createGuardHook>;
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    guard = createGuardHook();
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should call directoryExists only 2 times (once for .iflow, once for .sflow) in SFlow mode', async () => {
+    // SFlow mode: .sflow/ exists, no .iflow/
+    await writeStateFile(dir, { state: 'exploring', mode: 'full' });
+
+    let directoryExistsCallCount = 0;
+    const originalDirectoryExists = shared.directoryExists;
+    const spy = spyOn(shared, 'directoryExists').mockImplementation(async (path: string) => {
+      directoryExistsCallCount++;
+      return originalDirectoryExists(path);
+    });
+
+    try {
+      await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+
+      // After optimization: detectActiveWorkflow called once at entry,
+      // which calls directoryExists at most 2 times (.iflow + .sflow)
+      expect(directoryExistsCallCount).toBeLessThanOrEqual(2);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('should call directoryExists only 1 time in IFlow mode (.iflow/ exists, short-circuit)', async () => {
+    // IFlow mode: .iflow/ exists — detectActiveWorkflow returns 'iflow' after first check
+    await ensureDir(dir + '/.iflow');
+
+    let directoryExistsCallCount = 0;
+    const originalDirectoryExists = shared.directoryExists;
+    const spy = spyOn(shared, 'directoryExists').mockImplementation(async (path: string) => {
+      directoryExistsCallCount++;
+      return originalDirectoryExists(path);
+    });
+
+    try {
+      await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+
+      // IFlow short-circuit: only 1 directoryExists call for .iflow/
+      expect(directoryExistsCallCount).toBeLessThanOrEqual(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('should maintain SFlow behavior after optimization — full workflow still works', async () => {
+    // Verify no regression: SFlow full workflow still passes guards
+    await writeStateFile(dir, { state: 'executing', mode: 'full' });
+    await writeFileContent(dir + '/proposal.md', '# Proposal\n\n## Why\nMotivation.');
+    await writeFileContent(dir + '/design.md', '# Design\n\n## Architecture\nArch.');
+    await ensureDir(dir + '/specs');
+    await writeFileContent(dir + '/specs/test.md', '# Spec');
+    await writeFileContent(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nFull scope.');
+    await writeFileContent(dir + '/tasks.md', '- [x] done task');
+
+    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    expect(result.success).toBe(true);
+  });
+
+  it('should maintain IFlow skip behavior after optimization', async () => {
+    // IFlow mode: all SFlow guards should still be skipped
+    await ensureDir(dir + '/.iflow');
+
+    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    expect(result.success).toBe(true);
+    expect(result.block).toBeUndefined();
   });
 });

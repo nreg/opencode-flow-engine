@@ -88,15 +88,14 @@ async function detectIFlowState(changeDir: string): Promise<{
     previousState = stateData?.previousState;
 
     if (stateData?.state && IFLOW_STATES.includes(stateData.state as IFlowState)) {
-      // Check if state is stale: artifacts suggest a different state than state.json
       const hasContext = await fileExists(`${iflowDir}/CONTEXT.md`);
       const hasPlan = await fileExists(`${iflowDir}/PLAN.md`);
       const hasSummary = await fileExists(`${iflowDir}/SUMMARY.md`);
       const hasUat = await fileExists(`${iflowDir}/UAT.md`);
-      const artifacts = { CONTEXT: hasContext, PLAN: hasPlan, SUMMARY: hasSummary, UAT: hasUat };
+      const hasExecuting = await fileExists(`${iflowDir}/EXECUTING`);
+      const artifacts = { CONTEXT: hasContext, PLAN: hasPlan, SUMMARY: hasSummary, UAT: hasUat, EXECUTING: hasExecuting };
 
-      // Detect rollbacks: if artifacts suggest earlier state than persisted
-      const artifactState = determineArtifactState({ CONTEXT: hasContext, PLAN: hasPlan, SUMMARY: hasSummary, UAT: hasUat });
+      const artifactState = determineArtifactState({ CONTEXT: hasContext, PLAN: hasPlan, SUMMARY: hasSummary, UAT: hasUat, EXECUTING: hasExecuting });
       const currentPersisted = stateData.state as IFlowState;
       const stateOrder = ['discussing', 'researching', 'planning', 'executing', 'verifying', 'shipping'];
       const artifactIdx = stateOrder.indexOf(artifactState);
@@ -123,17 +122,18 @@ async function detectIFlowState(changeDir: string): Promise<{
         skipWrite = true;
       }
     } else {
-      // Artifact-based detection
       const hasContext = await fileExists(`${iflowDir}/CONTEXT.md`);
       const hasPlan = await fileExists(`${iflowDir}/PLAN.md`);
       const hasSummary = await fileExists(`${iflowDir}/SUMMARY.md`);
       const hasUat = await fileExists(`${iflowDir}/UAT.md`);
+      const hasExecuting = await fileExists(`${iflowDir}/EXECUTING`);
 
       const artifacts = {
         CONTEXT: hasContext,
         PLAN: hasPlan,
         SUMMARY: hasSummary,
         UAT: hasUat,
+        EXECUTING: hasExecuting,
       };
 
       result = {
@@ -163,9 +163,10 @@ async function detectIFlowState(changeDir: string): Promise<{
  * Determine the IFlow state from which artifacts exist.
  * Ordered by "most advanced artifact wins" (highest state first).
  */
-function determineArtifactState(artifacts: { CONTEXT: boolean; PLAN: boolean; SUMMARY: boolean; UAT: boolean }): IFlowState {
+function determineArtifactState(artifacts: { CONTEXT: boolean; PLAN: boolean; SUMMARY: boolean; UAT: boolean; EXECUTING: boolean }): IFlowState {
   if (artifacts.UAT) return 'shipping';
   if (artifacts.SUMMARY) return 'verifying';
+  if (artifacts.EXECUTING) return 'executing';
   if (artifacts.PLAN) return 'planning';
   if (artifacts.CONTEXT) return 'researching';
   return 'discussing';
@@ -174,9 +175,10 @@ function determineArtifactState(artifacts: { CONTEXT: boolean; PLAN: boolean; SU
 /**
  * Generate a human-readable reason message based on which artifacts exist.
  */
-function getArtifactReason(artifacts: { CONTEXT: boolean; PLAN: boolean; SUMMARY: boolean; UAT: boolean }): string {
+function getArtifactReason(artifacts: { CONTEXT: boolean; PLAN: boolean; SUMMARY: boolean; UAT: boolean; EXECUTING: boolean }): string {
   if (artifacts.UAT) return 'UAT.md found — ready to ship';
   if (artifacts.SUMMARY) return 'SUMMARY.md found — ready to verify';
+  if (artifacts.EXECUTING) return 'EXECUTING marker found — in execution phase';
   if (artifacts.PLAN) return 'PLAN.md found — ready to execute';
   if (artifacts.CONTEXT) return 'CONTEXT.md found — ready to plan';
   return '.iflow/ directory exists but no artifacts found — start discussing';
