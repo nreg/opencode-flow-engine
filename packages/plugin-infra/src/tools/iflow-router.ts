@@ -4,7 +4,7 @@
  */
 
 import type { ToolDefinition, ToolContext, ToolResult } from "./types.js";
-import { fileExists, directoryExists, readJsonFile } from "@opencode-flow-engine/shared";
+import { fileExists, directoryExists, readJsonFile, ensureDir, writeJsonFile } from "@opencode-flow-engine/shared";
 
 /**
  * IFlow workflow states in cyclic order
@@ -62,59 +62,77 @@ async function detectIFlowState(changeDir: string): Promise<{
   const iflowDir = `${changeDir}/.iflow`;
   const dirExists = await directoryExists(iflowDir);
 
+  let result: {
+    state: IFlowState;
+    iteration: number;
+    artifacts: Record<string, boolean>;
+    reasons: string[];
+  };
+  let skipWrite = false;
+
   if (!dirExists) {
-    return {
+    result = {
       state: 'discussing',
       iteration: 0,
       artifacts: {},
       reasons: ['No .iflow/ directory found — starting fresh'],
     };
+  } else {
+    // Check for state file
+    const stateData = await readJsonFile<{ state?: string; iteration?: number }>(`${iflowDir}/state.json`);
+    if (stateData?.state && IFLOW_STATES.includes(stateData.state as IFlowState)) {
+      result = {
+        state: stateData.state as IFlowState,
+        iteration: stateData.iteration ?? 1,
+        artifacts: { stateFile: true },
+        reasons: [`Restored from state.json: ${stateData.state}`],
+      };
+      skipWrite = true; // Already have persisted state, no unnecessary overwrite
+    } else {
+      // Artifact-based detection
+      const hasContext = await fileExists(`${iflowDir}/CONTEXT.md`);
+      const hasPlan = await fileExists(`${iflowDir}/PLAN.md`);
+      const hasSummary = await fileExists(`${iflowDir}/SUMMARY.md`);
+      const hasUat = await fileExists(`${iflowDir}/UAT.md`);
+
+      const artifacts = {
+        CONTEXT: hasContext,
+        PLAN: hasPlan,
+        SUMMARY: hasSummary,
+        UAT: hasUat,
+      };
+
+      // Determine state from artifacts
+      if (hasUat) {
+        result = { state: 'shipping', iteration: 1, artifacts, reasons: ['UAT.md found — ready to ship'] };
+      } else if (hasSummary) {
+        result = { state: 'verifying', iteration: 1, artifacts, reasons: ['SUMMARY.md found — ready to verify'] };
+      } else if (hasPlan) {
+        result = { state: 'planning', iteration: 1, artifacts, reasons: ['PLAN.md found — ready to execute'] };
+      } else if (hasContext) {
+        result = { state: 'researching', iteration: 1, artifacts, reasons: ['CONTEXT.md found — ready to plan'] };
+      } else {
+        result = {
+          state: 'discussing',
+          iteration: 1,
+          artifacts,
+          reasons: ['.iflow/ directory exists but no artifacts found — start discussing'],
+        };
+      }
+    }
   }
 
-  // Check for state file
-  const stateData = await readJsonFile<{ state?: string; iteration?: number }>(`${iflowDir}/state.json`);
-  if (stateData?.state && IFLOW_STATES.includes(stateData.state as IFlowState)) {
-    return {
-      state: stateData.state as IFlowState,
-      iteration: stateData.iteration ?? 1,
-      artifacts: { stateFile: true },
-      reasons: [`Restored from state.json: ${stateData.state}`],
-    };
+  // Persist detected state to .iflow/state.json
+  if (!skipWrite) {
+    await ensureDir(iflowDir);
+    await writeJsonFile(`${iflowDir}/state.json`, {
+      state: result.state,
+      iteration: result.iteration,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
-  // Artifact-based detection
-  const hasContext = await fileExists(`${iflowDir}/CONTEXT.md`);
-  const hasPlan = await fileExists(`${iflowDir}/PLAN.md`);
-  const hasSummary = await fileExists(`${iflowDir}/SUMMARY.md`);
-  const hasUat = await fileExists(`${iflowDir}/UAT.md`);
-
-  const artifacts = {
-    CONTEXT: hasContext,
-    PLAN: hasPlan,
-    SUMMARY: hasSummary,
-    UAT: hasUat,
-  };
-
-  // Determine state from artifacts
-  if (hasUat) {
-    return { state: 'shipping', iteration: 1, artifacts, reasons: ['UAT.md found — ready to ship'] };
-  }
-  if (hasSummary) {
-    return { state: 'verifying', iteration: 1, artifacts, reasons: ['SUMMARY.md found — ready to verify'] };
-  }
-  if (hasPlan) {
-    return { state: 'planning', iteration: 1, artifacts, reasons: ['PLAN.md found — ready to execute'] };
-  }
-  if (hasContext) {
-    return { state: 'researching', iteration: 1, artifacts, reasons: ['CONTEXT.md found — ready to plan'] };
-  }
-
-  return {
-    state: 'discussing',
-    iteration: 1,
-    artifacts,
-    reasons: ['.iflow/ directory exists but no artifacts found — start discussing'],
-  };
+  return result;
 }
 
 /**

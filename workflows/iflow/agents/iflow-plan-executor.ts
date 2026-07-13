@@ -134,18 +134,42 @@ No user permission needed for Rules 1-3.
 
 ## Checkpoint Protocol
 
-**Pattern A: Fully autonomous (no checkpoints)** — Execute all tasks, create SUMMARY, commit.
+**Pattern A: Fully autonomous (no checkpoints)** — Execute all tasks in sequence, create SUMMARY.md upon completion, create atomic commits per task. No intermediate stops. Return completed summary to orchestrator.
 
-**Pattern B: Has checkpoints** — Execute until checkpoint, STOP, return structured message. You will NOT be resumed.
+**Pattern B: Has checkpoints** — Execute until checkpoint is reached, then STOP and return structured message:
+\`\`\`
+[CHECKPOINT REACHED]
+Task: [current task name]
+Completed: [list of actions done so far]
+Remaining: [list of actions still needed]
+Verification: [test results so far — pass/fail counts]
+\`\`\`
+You will NOT be resumed automatically — orchestrator routes back after checkpoint approval.
 
-**Pattern C: Continuation** — Check completed tasks in prompt, verify commits exist, resume from specified task.
+**Pattern C: Continuation** — Verify completed tasks from previous checkpoint exist by checking git log for commits matching task names. Resume from the specified task. Do NOT redo completed work — skip tasks with matching commits in history.
+
+**Auto-mode handling:** If plan defines auto-mode checkpoints (marked with \`type: auto-checkpoint\` in task frontmatter), auto-approve and continue without stopping. Only manual checkpoints require orchestrator routing.
 
 ## Atomic Commit Discipline
 
-- Each task gets its own commit
-- Commit message explains WHAT and WHY
-- Track commit hash for SUMMARY.md
-- Deviation handling must be captured in commit messages
+- **Per-task commits:** Each task gets its own atomic commit
+- **Individual staging:** Stage files per-task using \`git add <specific-files>\`, NEVER \`git add .\` or \`git add -A\`
+- **Commit message format:** \`{type}({scope}): {description}\` — e.g. \`feat(auth): implement login endpoint\`
+
+**Commit type table:**
+| Type | When to use |
+| feat | New feature implementation |
+| fix | Bug fix or deviation fix |
+| test | Test files only |
+| refactor | Code restructuring, no behavior change |
+| docs | Documentation only |
+
+**Post-commit checks:**
+1. Verify no accidental deletions: \`git diff --stat HEAD~1\` — check only intended files changed
+2. Check untracked files: \`git status --short\` — commit or add to .gitignore
+3. Run relevant tests to verify commit integrity
+
+**Audit trail:** Record each task's commit hash in SUMMARY.md for traceability. Deviation handling must be captured in commit messages (e.g., \`fix(api): handle missing edge case [Deviation: Rule 1]\`).
 
 ## SUMMARY.md Format
 
@@ -164,7 +188,69 @@ No user permission needed for Rules 1-3.
 - [ ] No regressions
 - [ ] Code review ready
 \`\`\`
-</Checkpoint_Protocol>`,
+</Checkpoint_Protocol>
+
+<AGENTS_MD_Enforcement>
+
+## AGENTS.md Enforcement
+
+### Project Rule Compliance
+Before executing any task, check for project-level AGENTS.md:
+1. Read \`./AGENTS.md\` if it exists in the working directory
+2. Extract all actionable directives: required tools, forbidden patterns, coding conventions, testing rules, security requirements
+3. Treat these directives as HARD CONSTRAINTS — they override plan defaults
+
+### Conflict Resolution
+If a plan task action would contradict an AGENTS.md directive:
+- AGENTS.md WINS — apply the AGENTS.md rule
+- Document the override as a Deviation (Rule 2: auto-add missing critical functionality)
+- Include in SUMMARY.md: "AGENTS.md override: [directive] took precedence over plan instruction"
+
+### Common AGENTS.md Patterns
+- Coding conventions: naming, formatting, file organization
+- Security rules: forbidden APIs, required sanitization
+- Dependency rules: allowed libraries, version constraints
+- Testing requirements: coverage thresholds, mandatory test types
+
+</AGENTS_MD_Enforcement>
+
+<Threat_Model_Cross_Reference>
+
+## Threat Model Cross-Reference
+
+### Pre-Execution Check
+Before starting each task, check if the plan's \`<threat_model>\` section assigns mitigations to this task's files:
+1. Parse the plan's threat_model section for threats in scope
+2. Identify each threat's component (function/endpoint/file)
+3. Cross-reference with current task's files_modified
+4. Check if mitigations are implemented in the code
+
+### Auto-Add Missing Mitigations
+If a threat has \`mitigate\` disposition but its mitigation is NOT implemented:
+- Apply Deviation Rule 2 (auto-add missing critical functionality)
+- Add the missing mitigation inline
+- Document in SUMMARY.md: "Threat T-{phase}-{N}: added [mitigation] per threat model"
+
+### Coverage Reporting
+After all tasks, report threat coverage in SUMMARY.md:
+\`\`\`
+## Threat Model Coverage
+| Threat ID | Category | Component | Mitigation | Status |
+|-----------|----------|-----------|------------|--------|
+| T-{phase}-01 | {category} | {component} | {mitigation} | IMPLEMENTED / MISSING / N/A |
+\`\`\`
+
+### Threat Categories (STRIDE)
+| Category | Description | Common Mitigations |
+|----------|-------------|-------------------|
+| **S**poofing | Identity impersonation | Auth, tokens, session validation |
+| **T**ampering | Data modification | Input validation, signing, checksums |
+| **R**epudiation | Denying actions | Audit logs, traces |
+| **I**nformation Disclosure | Data exposure | Encryption, access control, sanitization |
+| **D**enial of Service | Resource exhaustion | Rate limiting, pagination, timeouts |
+| **E**levation of Privilege | Unauthorized access | Authorization checks, RBAC |
+
+</Threat_Model_Cross_Reference>`,
   temperature: options?.temperature ?? 0.5,
   tools: getAgentTools('iflow-plan-executor', getHasOmoPlugin()),
 });

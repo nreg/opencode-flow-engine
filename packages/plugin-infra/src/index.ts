@@ -61,7 +61,7 @@ import { createSkillLoader } from './features/skill-loader.js';
 import { readJsonFile } from '@opencode-flow-engine/shared';
 import type { HookContext } from './hooks/types.js';
 import { sharedValidator } from '@opencode-flow-engine/core';
-import { fileExists as sflowFileExists, directoryExists, readFile as sflowReadFile } from '@opencode-flow-engine/shared';
+import { fileExists as sflowFileExists, directoryExists, readFile as sflowReadFile, ensureDir, writeJsonFile } from '@opencode-flow-engine/shared';
 import { isContractStale, sleep as crossSleep } from '@opencode-flow-engine/shared';
 import { detectStateMismatch, simpleHash } from './features/state-manager.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
@@ -111,6 +111,10 @@ function generateTaskId(): string {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STATE_FILE_PATH = '.sflow/state.json';
+
+const IFLOW_STATE_FILE_PATH = '.iflow/state.json';
+
+const IFLOW_STATES = new Set(['discussing', 'researching', 'planning', 'executing', 'verifying', 'shipping']);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1091,6 +1095,22 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       const stateMatch = outputStr.match(/"state"\s*:\s*"(\w[\w-]*)"/);
       if (stateMatch) {
         const newState = stateMatch[1];
+
+        const isIFlowTool = toolName === 'iflow_router';
+        const isIFlowState = newState && IFLOW_STATES.has(newState);
+        if (isIFlowTool || (isIFlowState && !SFLOW_TOOLS.has(toolName))) {
+          try {
+            await ensureDir(`${workDir}/.iflow`);
+            await writeJsonFile(`${workDir}/${IFLOW_STATE_FILE_PATH}`, {
+              state: newState,
+              updatedAt: new Date().toISOString(),
+            });
+          } catch (err) {
+            console.warn('[sFlow] Failed to write IFlow state:', err);
+          }
+          return;
+        }
+
         const transitionHook = hookComposer.getHook('state_transition');
         if (transitionHook) {
           await transitionHook.execute({

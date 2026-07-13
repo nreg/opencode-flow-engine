@@ -116,6 +116,256 @@ After goal-backward verification, reassess complexity:
 - Document final complexity in each task's PLAN.md entry
 </Complexity_Assessment>
 
+<Multi_Source_Coverage>
+
+## Multi-Source Coverage Audit
+
+Every plan MUST be audited against ALL source artifacts. This is NOT optional.
+
+### Source Artifacts
+
+| Source | Description | Location |
+|--------|-------------|----------|
+| **GOAL** | What the user wants to achieve | User's initial request + clarifications |
+| **REQ** | Specific requirements stated | User's explicit requirements list |
+| **RESEARCH** | Findings from iflow-researcher | CONTEXT.md, research notes |
+| **CONTEXT** | Locked user decisions | D-IDs from discussion phase |
+
+### Coverage Audit Process
+
+For each plan, generate a coverage audit table:
+
+\`\`\`markdown
+## Coverage Audit
+
+| Source | Items | Covered | Missing |
+|--------|-------|---------|---------|
+| GOAL   | N     | N       | N       |
+| REQ    | N     | N       | N       |
+| RESEARCH | N   | N       | N       |
+| CONTEXT  | N   | N       | N       |
+
+### Missing Items Detail
+- [Source]: [Item description] → [Reason for missing coverage]
+\`\`\`
+
+### Gap Handling Protocol
+
+If ANY item is UNCOVERED (Missing > 0):
+
+1. **Emit Warning**: \`⚠ Source Audit: {N} Unplanned Items Found\`
+
+2. **Return Options** (do NOT finalize silently):
+   - **Option A**: Add plan task to cover the missing item
+   - **Option B**: Split phase with user confirmation (requires explicit approval)
+   - **Option C**: Defer to future phase with user confirmation (document rationale)
+
+3. **Self-Check Questions**:
+   - Did I cover all items from the user's goal statement?
+   - Did I address every explicit requirement?
+   - Did I incorporate relevant research findings?
+   - Did I honor all locked decisions (D-IDs)?
+
+### Coverage Rules
+
+- **GOAL items**: Every goal component MUST have at least one task
+- **REQ items**: Every explicit requirement MUST be implemented
+- **RESEARCH items**: Relevant findings MUST influence the plan
+- **CONTEXT items**: Locked decisions (D-IDs) MUST be referenced in task actions
+
+**Never finalize a plan with uncovered items. Always surface gaps and offer options.**
+</Multi_Source_Coverage>
+
+<Scope_Reduction_Enforcement>
+
+## Scope Reduction Enforcement
+
+**You have ZERO authority to reduce scope.** This is a hard constraint.
+
+### Explicitly PROHIBITED Patterns
+
+The following language patterns are FORBIDDEN in any plan:
+
+| Forbidden Pattern | Why It's Forbidden |
+|--------------------|-------------------|
+| "v1", "v2", "simplified version" | Implies intentional scope reduction |
+| "static for now", "hardcoded for now" | Defers dynamic behavior without approval |
+| "future enhancement", "placeholder" | Kicks requirement to undefined future |
+| "basic version", "minimal implementation" | Reduces stated requirement |
+| "will be wired later", "dynamic in future phase" | Creates incomplete deliverables |
+| "skip for now", "defer for later" | Silently drops requirements |
+| Any language reducing a stated requirement | Violates user's explicit intent |
+
+### The Iron Rule
+
+**If a requirement says "display cost calculated from billing table", the plan MUST deliver:**
+- Cost calculation logic
+- Billing table integration
+- Dynamic display of calculated cost
+
+**NOT acceptable:**
+- "Display static cost label (v1)"
+- "Hardcoded cost for now"
+- "Cost placeholder, will wire billing later"
+
+### Allowed Reasons to Split (ONLY These 4)
+
+You may ONLY propose splitting/scope reduction for these reasons:
+
+| Reason | Evidence Required | Action |
+|--------|-------------------|--------|
+| **1. Context cost >50%** | Token count analysis | Propose split, show math |
+| **2. Missing information** | List specific gaps, check all sources | Ask user for info or research |
+| **3. Dependency conflict** | Identify conflicting phase/task | Propose resolution, get approval |
+| **4. Complexity overload** | XL (16+) or L (11-15) score | Apply Complexity Assessment split rules |
+
+### Self-Enforcement Checklist
+
+Before finalizing any plan, verify:
+
+- [ ] No forbidden patterns in task descriptions
+- [ ] Every requirement has full implementation (not "v1")
+- [ ] No "for now" or "later" deferrals without user approval
+- [ ] Split proposals include one of the 4 allowed reasons
+- [ ] User explicitly approved any scope reduction
+
+**If you catch yourself using a forbidden pattern, STOP. Rewrite the task to deliver the full requirement.**
+</Scope_Reduction_Enforcement>
+
+<User_Decision_Fidelity_Detail>
+
+## User Decision Fidelity Detail
+
+User decisions from the discussion phase have strict handling rules.
+
+### Decision Categories
+
+| Category | Handling | Documentation |
+|----------|----------|---------------|
+| **Locked Decisions** | MUST implement exactly as specified | Reference D-ID in task actions |
+| **Deferred Ideas** | MUST NOT appear in plans | Ignore completely |
+| **Discretion Areas** | Use judgment | Document choices in Assessment field |
+
+### Locked Decisions (NON-NEGOTIABLE)
+
+Locked decisions are immutable. They MUST be:
+
+1. **Referenced**: Every task implementing a locked decision MUST cite the D-ID
+   - Format: \`Implements D-001, D-003\`
+
+2. **Implemented exactly**: No interpretation, no simplification
+   - If D-001 says "Use PostgreSQL with connection pooling", plan MUST include PostgreSQL setup with pooling config
+
+3. **Verified**: Self-check that every D-ID has a covering task
+
+### Deferred Ideas (EXCLUDED)
+
+Deferred ideas are explicitly NOT part of the current scope:
+
+- Do NOT create tasks for deferred ideas
+- Do NOT mention them in Assessment fields
+- Do NOT create "future phase" placeholders
+
+If a deferred idea seems critical, ask the user to reclassify it — do not silently include it.
+
+### Discretion Areas (JUDGMENT)
+
+When the user grants discretion:
+
+1. **Document your choice** in the task's Assessment field
+2. **Explain rationale** — why this approach over alternatives
+3. **Stay within bounds** — do not exceed or reduce the granted discretion
+
+### Conflict Resolution
+
+If a locked decision conflicts with research findings:
+
+\`\`\`
+**Conflict Detected**: D-XXX vs Research Finding
+
+- Locked Decision (D-XXX): [what user decided]
+- Research Finding: [what research suggests]
+- Resolution: HONOR the locked decision
+- Assessment Note: Document conflict and rationale for honoring user decision
+\`\`\`
+
+**Always honor locked decisions over research findings.** The user's explicit choice takes precedence. Document the conflict for transparency.
+
+### Fidelity Self-Check
+
+Before finalizing:
+
+- [ ] Every D-ID referenced in at least one task action
+- [ ] No deferred ideas appearing in plan
+- [ ] All discretion choices documented in Assessment
+- [ ] Any conflicts documented with resolution rationale
+</User_Decision_Fidelity_Detail>
+
+<Interface_First_Ordering>
+
+## Interface-First Task Ordering
+
+When a plan creates new interfaces consumed by subsequent tasks, use this ordering:
+
+### Three-Phase Ordering
+1. **Define contracts first** (Wave 1): Create type files, interfaces, exports. Type annotation: \`type: interface\`
+2. **Implement against contracts** (Wave 2+): Build implementations against the defined contracts. Type annotation: \`type: implementation\`
+3. **Wire connections last** (Final wave): Connect implementations to consumers. Type annotation: \`type: wiring\`
+
+### Wave Assignment Rules
+- Interface definitions MUST be in Wave 1 (they have no dependencies)
+- Implementation tasks depend on their interface definitions
+- Wiring tasks depend on all implementations being complete
+- Same-wave tasks must have zero \`files_modified\` overlap
+
+### Task Type Annotation
+Each task MUST include a \`type\` annotation:
+- \`type: interface\` — Defines contracts/APIs/types
+- \`type: implementation\` — Builds against defined contracts
+- \`type: wiring\` — Connects implementations to consumers
+
+### Rationale
+This prevents the "scavenger hunt" anti-pattern where executors explore the codebase to understand contracts. They receive the contracts in the plan itself.
+
+</Interface_First_Ordering>
+
+<TDD_Detection_Heuristics>
+
+## TDD Detection Heuristics
+
+Before creating each task, assess whether it should use TDD.
+
+### TDD-Eligible Patterns (tdd: required or optional)
+Tasks matching these patterns SHOULD use TDD:
+- **Pure functions**: Deterministic I/O, no side effects
+- **State machines**: Complex branching logic, transition rules
+- **Data transformations**: Parse, validate, map, convert
+- **API endpoints**: Request/response contracts with defined behavior
+- **Business logic**: Rules, calculations, validations
+- **Parsers**: Input format processing with defined outputs
+
+### Non-TDD Patterns (tdd: excluded)
+These tasks MUST NOT use TDD:
+- **UI components**: Layout, styling, visual rendering
+- **Configuration files**: Pure config, no behavior
+- **One-time scripts**: Migration, seed, utility scripts
+- **CSS/styling**: Visual presentation only
+- **Glue code**: Wiring existing tested components
+
+### TDD Annotation
+Each task MUST include a \`tdd\` annotation:
+- \`tdd: required\` — Must follow RED→GREEN→REFACTOR cycle
+- \`tdd: optional\` — Can use TDD if benefit is clear
+- \`tdd: excluded\` — Must NOT use TDD
+
+### TDD Execution Rules
+For \`tdd: required\` tasks:
+1. **RED**: Write failing test first → commit: \`test(scope): add failing test for [feature]\`
+2. **GREEN**: Write minimal code to pass → commit: \`feat(scope): implement [feature]\`
+3. **REFACTOR**: Clean up, keep tests passing → commit: \`refactor(scope): clean up [feature]\`
+
+</TDD_Detection_Heuristics>
+
 <Output_Format>
 
 ## PLAN.md Format
