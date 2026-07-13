@@ -91,6 +91,14 @@ const AGENT_COLORS: Record<string, string> = {
   iFlow: '#FFB6C1',
 };
 
+/**
+ * Agent → model mapping populated during config hook.
+ * Used by call_flow_agent to explicitly pass the model when creating
+ * subagent sessions — ensures OpenCode assigns the correct model
+ * even when the subagent's mode is 'subagent'.
+ */
+const AGENT_MODEL_MAP: Record<string, string> = {};
+
 // Lightweight in-memory background task registry
 // Maps taskId → { sessionID, status, result, error }
 interface BackgroundTaskEntry {
@@ -267,6 +275,14 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
             }
             sessionID = session_id as string;
           } else {
+            // Look up the subagent's model from the map populated during config hook
+            const subagentModel = AGENT_MODEL_MAP[subagent_type as string];
+            if (!subagentModel) {
+              return await formatToolError(
+                `No model configured for subagent "${subagent_type}". Available agents: ${Object.keys(AGENT_MODEL_MAP).join(', ')}`,
+              );
+            }
+
             const createResult = await (client.session.create as (args: {
               body: Record<string, unknown>;
               query?: Record<string, unknown>;
@@ -275,6 +291,7 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
                 parentID: context.sessionID,
                 title: sessionLabel,
                 agent: subagent_type as string,
+                model: subagentModel,
               },
               query: { directory: changeDir },
             });
@@ -961,6 +978,11 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
             ? `${agentCfg.id} agent from sFlow plugin`
             : undefined,
         };
+
+        // Populate model map for call_flow_agent to use when creating subagent sessions
+        if (modelName) {
+          AGENT_MODEL_MAP[name] = modelName;
+        }
       }
 
       // --- Register skill-embedded MCPs (Tier 3) ---
