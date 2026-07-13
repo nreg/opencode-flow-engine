@@ -279,17 +279,32 @@ function extractTaskDescriptions(planContent: string): string[] {
   const lines = planContent.split('\n');
   const tasks: string[] = [];
   let inTask = false;
+  let inActionsBlock = false;
   for (const line of lines) {
     if (line.startsWith('### Task ')) {
       inTask = true;
+      inActionsBlock = false;
       // Extract task title after "### Task N: "
       const titleMatch = line.match(/###\s+Task\s+\d+:\s*(.+)/);
       if (titleMatch?.[1]) tasks.push(titleMatch[1]);
       continue;
     }
     if (inTask && line.startsWith('- **Actions**')) {
-      // Collect action descriptions
+      inActionsBlock = true;
       continue;
+    }
+    if (inActionsBlock) {
+      // Collect numbered action items (e.g. "  1. Do something")
+      const actionMatch = line.match(/^\s+\d+\.\s+(.+)/);
+      if (actionMatch?.[1]) {
+        tasks.push(actionMatch[1]);
+        continue;
+      }
+      // Actions block ends when line is not an indented numbered item
+      // and is not blank — it's a new section like - **Verification**
+      if (line.trim().length > 0 && !/^\s+\d+\./.test(line)) {
+        inActionsBlock = false;
+      }
     }
     if (inTask && line.startsWith('- **')) {
       // Still in task, collect verification line
@@ -299,6 +314,7 @@ function extractTaskDescriptions(planContent: string): string[] {
     // End of task detection: next ### or end of section
     if (line.startsWith('### ') && !line.startsWith('### Task ')) {
       inTask = false;
+      inActionsBlock = false;
     }
   }
   return tasks;
