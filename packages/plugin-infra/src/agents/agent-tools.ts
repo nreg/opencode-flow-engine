@@ -185,7 +185,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
   // ── IFlow Agents ──
 
   /** IFlow orchestrator - delegates to subagents */
-  iflow: {
+  iFlow: {
     ...COMMON_TOOLS,
     write: true,
     edit: true,

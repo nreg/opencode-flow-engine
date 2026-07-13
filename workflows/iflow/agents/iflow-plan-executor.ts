@@ -150,7 +150,43 @@ Verification: [test results so far — pass/fail counts]
 \`\`\`
 You will NOT be resumed automatically — orchestrator routes back after checkpoint approval.
 
-**Pattern C: Continuation** — Verify completed tasks from previous checkpoint exist by checking git log for commits matching task names. Resume from the specified task. Do NOT redo completed work — skip tasks with matching commits in history.
+**Pattern C: Continuation** — Resume from checkpoint by detecting already-completed work via git history:
+
+**Step-by-step implementation:**
+
+1. **Read the checkpoint file** (\`.iflow/checkpoint.json\` or orchestrator-provided state):
+   \`\`\`bash
+   cat .iflow/SUMMARY.md 2>/dev/null || echo "no summary"
+   \`\`\`
+
+2. **Discover completed tasks from git log** — scan commit messages for task references:
+   \`\`\`bash
+   # List all commits on current branch with their messages
+   git log --oneline --no-merges -30
+   
+   # Match commit messages against plan task names/IDs
+   # Pattern matching: "feat(auth): implement T01 login" or "Task 1:*"
+   git log --oneline --no-merges --grep="Task 1\|T01\|T-01" 2>/dev/null
+   git log --oneline --no-merges --grep="Task 2\|T02\|T-02" 2>/dev/null
+   \`\`\`
+
+3. **Build completion map** — for each task in PLAN.md, determine if git log shows a matching commit:
+   - Task X has matching commit → mark COMPLETED
+   - Task X has no matching commit → mark PENDING
+
+4. **Resume from the first PENDING task** — do NOT redo completed tasks:
+   - Skip all tasks marked COMPLETED
+   - Start execution at the first PENDING task
+   - Proceed with standard execution flow (Pattern A or B)
+
+5. **Verify no partial execution** — if a task's commit exists but the task spans multiple actions:
+   - Check git diff from that commit: \`git diff HEAD~1 --name-only\`
+   - If the diff shows correct files → task is complete, skip
+   - If the diff is incomplete → flag for user: "Task X has a commit but may be incomplete"
+
+6. **Update SUMMARY.md** — when resuming, append to existing SUMMARY.md rather than overwriting:
+   - Preserve previously completed task entries
+   - Add resumed task entries below
 
 **Auto-mode handling:** If plan defines auto-mode checkpoints (marked with \`type: auto-checkpoint\` in task frontmatter), auto-approve and continue without stopping. Only manual checkpoints require orchestrator routing.
 

@@ -374,7 +374,16 @@ For \`tdd: required\` tasks:
 
 ## PLAN.md Format
 
-Generate PLAN.md files with the following structure:
+Generate PLAN.md files with the following structure. **Each task MUST include an [automated] verification command** (Nyquist Rule).
+
+### Task Structure
+
+Every task has four required behavioral fields enforced by the PLAN.md template:
+
+- **Files**: Exact file paths created or modified (e.g., \`src/app/api/auth/login/route.ts\`, not "the auth files")
+- **Actions**: Specific implementation instructions, including what to avoid and WHY
+- **Verification**: How to prove completion — MUST include \`<automated>command</automated>\` tag
+- **Assessment**: Complexity rationale
 
 \`\`\`markdown
 # Plan: [Title]
@@ -387,6 +396,8 @@ Generate PLAN.md files with the following structure:
 
 ## Tasks
 
+> **Nyquist Rule**: 每个任务必须包含可执行的自动化验证命令（\`<automated>\` 标签）。
+
 ### Task 1: [Description]
 - **Type**: auto | checkpoint | tdd
 - **Complexity**: S | M | L | XL
@@ -397,8 +408,12 @@ Generate PLAN.md files with the following structure:
 - **Actions**:
   1. [specific action]
   2. [specific action]
-- **Assessment**: [brief rationale: "3 files, single module, CRUD — S" / "6 files, cross-module, schema change — L, split into sub-tasks"]
-- **Verification**: [how to verify completion]
+- **Assessment**: [brief rationale: "3 files, single module, CRUD — S"]
+- **Verification**:
+  \`\`\`xml
+  <automated>[exact automatable command — e.g., npm test -- --grep "auth"]</automated>
+  \`\`\`
+  [manual steps if any — always prefer automation]
 
 ### Task 2: [Description]
 - **Type**: auto
@@ -406,12 +421,25 @@ Generate PLAN.md files with the following structure:
 - **Score**: 4
 - **Wave**: 1
 - **Depends On**: Task 1
-...
+- **Files**: [files to modify]
+- **Actions**:
+  1. [specific action]
+- **Assessment**: [brief rationale]
+- **Verification**:
+  \`\`\`xml
+  <automated>[automated command]</automated>
+  \`\`\`
+  [manual steps if needed]
 
 ## Success Criteria
 - [measurable outcome 1]
 - [measurable outcome 2]
 \`\`\`
+
+**Nyquist Rule enforcement:**
+- If no test exists yet: \`<automated>MISSING - Wave 0 must create {test_file} first</automated>\` and add a Wave 0 task to scaffold the test
+- Prefer automated verification (\`npm test\`, \`curl\`, \`node -e\`) over manual ("check looks good")
+- Each task's Verification field MUST include the \`<automated>\` tag - guard layer will enforce this
 
 ## Wave Dependency Analysis
 

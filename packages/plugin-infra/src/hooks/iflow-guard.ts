@@ -48,8 +48,10 @@ export async function iflowDirectoryExists(changeDir: string): Promise<boolean> 
 export async function checkIFlowGuards(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
   const guards = [
     await checkScopeReductionGuard(changeDir, data),
+    await checkNyquistRuleGuard(changeDir, data),
     await checkArtifactCompletenessGuard(changeDir, data),
     await checkCyclicTransitionGuard(changeDir, data),
+    await checkDeviationComplianceGuard(changeDir, data),
   ];
 
   const allWarnings: string[] = [];
@@ -138,21 +140,60 @@ async function checkScopeReductionGuard(changeDir: string, data?: Record<string,
     }
   }
 
-  return { success: true };
+  // === Requirement Coverage Tracking (P3 enhancement) ===
+  // Extract requirements from CONTEXT.md and check if PLAN.md covers them
+  const reqItems = extractRequirementsFromContext(contextContent);
+  const taskDescs = extractTaskDescriptions(planContent);
+  const uncoveredReqs: string[] = [];
+
+  if (reqItems.length > 0 && taskDescs.length > 0) {
+    for (const req of reqItems) {
+      const reqClean = req.replace(/^[-*\s]+/, '').toLowerCase();
+      // Extract key terms from requirement
+      const keyTerms = reqClean.split(/\s+/).filter(w => {
+        // Chinese words: min 2 chars, English words: min 4 chars
+        const isChinese = /[\u4e00-\u9fff]/.test(w);
+        if (isChinese) return w.length > 1 && !['需要', '一个', '进行', '这个', '那个'].includes(w);
+        return w.length > 3 && !['with', 'that', 'this', 'from', 'have', 'will', 'should', 'shall', 'must'].includes(w);
+      });
+      // Check if any task description covers these key terms
+      const isCovered = taskDescs.some(desc => {
+        const descLower = desc.toLowerCase();
+        const matchCount = keyTerms.filter(term => descLower.includes(term)).length;
+        return matchCount >= Math.ceil(keyTerms.length * 0.4); // 40% key term overlap = covered
+      });
+      if (!isCovered) {
+        uncoveredReqs.push(req);
+      }
+    }
+  }
+
+  const warnings: string[] = [];
+  if (uncoveredReqs.length > 0) {
+    warnings.push(`[IFLOW] Requirement coverage: ${uncoveredReqs.length} requirement(s) from CONTEXT.md not found in PLAN.md tasks:`);
+    for (const ur of uncoveredReqs) {
+      warnings.push(`  - ${ur}`);
+    }
+  }
+
+  return { success: true, warnings: warnings.length > 0 ? warnings : undefined };
 }
 
 /**
  * Artifact Completeness Guard
- * Blocks state transitions when required .iflow/ artifacts are missing
+ * Blocks state transitions when required .iflow/ artifacts are missing.
+ * When targetState is not provided, auto-detects from .iflow/state.json (for tool-level guard calls).
  */
 async function checkArtifactCompletenessGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
-  if (!data) return { success: true };
+  let targetState = data?.targetState as string | undefined;
 
-  const targetState = data.targetState as string;
+  // Auto-detect state from state.json when no targetState provided
   if (!targetState) {
-    console.warn('[IFlow Guard] checkArtifactCompletenessGuard called without targetState — skipping');
-    return { success: true };
+    const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.iflow/state.json`);
+    targetState = stateData?.state;
   }
+
+  if (!targetState) return { success: true };
   if (!IFLOW_STATES.includes(targetState as IFlowState)) return { success: true };
 
   const required = REQUIRED_ARTIFACTS[targetState as IFlowState];
@@ -177,20 +218,14 @@ async function checkArtifactCompletenessGuard(changeDir: string, data?: Record<s
 
 /**
  * Cyclic Transition Validation Guard
- * Blocks invalid state jumps (e.g., executing → shipping without verifying)
+ * Blocks invalid state jumps (e.g., executing → shipping without verifying).
+ * Silently skips when no currentState/targetState provided (called from tool.execute.before context).
  */
 async function checkCyclicTransitionGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
-  if (!data) return { success: true };
+  const currentState = data?.currentState as string | undefined;
+  const targetState = data?.targetState as string | undefined;
 
-  const currentState = data.currentState as string;
-  const targetState = data.targetState as string;
-
-  if (!currentState || !targetState) {
-    if (data && (!currentState || !targetState)) {
-      console.warn('[IFlow Guard] checkCyclicTransitionGuard called without currentState or targetState — skipping');
-    }
-    return { success: true };
-  }
+  if (!currentState || !targetState) return { success: true };
   if (!IFLOW_STATES.includes(currentState as IFlowState) || !IFLOW_STATES.includes(targetState as IFlowState)) {
     return { success: true };
   }
@@ -210,6 +245,149 @@ async function checkCyclicTransitionGuard(changeDir: string, data?: Record<strin
       success: false,
       block: true,
       blockReason: `[IFLOW] Invalid transition: "${currentState}" → "${targetState}". Valid targets: ${validTargets}`,
+    };
+  }
+
+  return { success: true };
+}
+
+// ─── Helper: Extract requirements from CONTEXT.md ────────────────────────────
+
+/**
+ * Parse CONTEXT.md and extract requirement items from Goals/Constraints/Requirements sections.
+ */
+function extractRequirementsFromContext(content: string): string[] {
+  const lines = content.split('\n');
+  const requirements: string[] = [];
+  let inTargetSection = false;
+  for (const line of lines) {
+    if (line.startsWith('## ')) {
+      inTargetSection = line.includes('Goal') || line.includes('Constraint') || line.includes('Requirement');
+      continue;
+    }
+    if (inTargetSection && line.trim().startsWith('-')) {
+      requirements.push(line.trim());
+    }
+  }
+  return requirements;
+}
+
+/**
+ * Parse PLAN.md and extract task descriptions.
+ */
+function extractTaskDescriptions(planContent: string): string[] {
+  const lines = planContent.split('\n');
+  const tasks: string[] = [];
+  let inTask = false;
+  for (const line of lines) {
+    if (line.startsWith('### Task ')) {
+      inTask = true;
+      // Extract task title after "### Task N: "
+      const titleMatch = line.match(/###\s+Task\s+\d+:\s*(.+)/);
+      if (titleMatch?.[1]) tasks.push(titleMatch[1]);
+      continue;
+    }
+    if (inTask && line.startsWith('- **Actions**')) {
+      // Collect action descriptions
+      continue;
+    }
+    if (inTask && line.startsWith('- **')) {
+      // Still in task, collect verification line
+      const verifyMatch = line.match(/- \*\*Verification\*\*:\s*(.+)/);
+      if (verifyMatch?.[1]) tasks.push(verifyMatch[1]);
+    }
+    // End of task detection: next ### or end of section
+    if (line.startsWith('### ') && !line.startsWith('### Task ')) {
+      inTask = false;
+    }
+  }
+  return tasks;
+}
+
+// ─── P2: Nyquist Rule Guard ──────────────────────────────────────────────────
+
+/**
+ * Nyquist Rule Guard — 每个 PLAN.md 中的任务必须有 `<automated>` 验证命令。
+ * 读取 .iflow/PLAN.md，检查每个任务的 Verification 字段是否包含自动化验证命令。
+ */
+async function checkNyquistRuleGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+  const planContent = await readFile(`${changeDir}/.iflow/PLAN.md`);
+  if (!planContent) return { success: true };
+
+  const warnings: string[] = [];
+  const lines = planContent.split('\n');
+  let currentTask = '';
+  let inTaskBlock = false;
+  let hasAutomated = false;
+
+  for (const line of lines) {
+    const taskMatch = line.match(/###\s+Task\s+(\d+):\s*(.+)/);
+    if (taskMatch) {
+      // Check previous task before moving to next
+      if (inTaskBlock && !hasAutomated) {
+        warnings.push(`Task "${currentTask}" missing <automated> verification command`);
+      }
+      currentTask = taskMatch[2] || '';
+      inTaskBlock = true;
+      hasAutomated = false;
+      continue;
+    }
+
+    if (inTaskBlock) {
+      if (line.includes('<automated>')) {
+        hasAutomated = true;
+      }
+      // End of task detected
+      if (line.startsWith('### ') && !line.startsWith('### Task ')) {
+        if (!hasAutomated) {
+          warnings.push(`Task "${currentTask}" missing <automated> verification command`);
+        }
+        inTaskBlock = false;
+      }
+    }
+  }
+
+  // Check last task
+  if (inTaskBlock && !hasAutomated && currentTask) {
+    warnings.push(`Task "${currentTask}" missing <automated> verification command`);
+  }
+
+  if (warnings.length > 0) {
+    return {
+      success: true,
+      block: true,
+      blockReason: `[IFLOW] Nyquist Rule violation: ${warnings.length} task(s) missing automated verification. Each task must have an <automated> command in its Verification field.`,
+      warnings,
+    };
+  }
+
+  return { success: true };
+}
+
+// ─── P4: Deviation Compliance Guard ─────────────────────────────────────────
+
+/**
+ * Deviation Compliance Guard — 检查 executor 的 SUMMARY.md 是否记录了偏差处理。
+ * 读取 .iflow/SUMMARY.md，检查是否有 `## Deviations` 段落且标注了 Rule 编号。
+ */
+async function checkDeviationComplianceGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+  const summaryContent = await readFile(`${changeDir}/.iflow/SUMMARY.md`);
+  if (!summaryContent) return { success: true };
+
+  const hasDeviationsSection = /^##\s+Deviations/m.test(summaryContent);
+  if (!hasDeviationsSection) {
+    return {
+      success: true,
+      warnings: ['[IFLOW] SUMMARY.md exists but missing "## Deviations" section — executor should document any deviations encountered.'],
+    };
+  }
+
+  // Check each deviation entry has a Rule number
+  const devLines = summaryContent.split('\n').filter(l => /^-/.test(l.trim()) && l.includes('Rule'));
+  if (devLines.length === 0) {
+    return {
+      success: true,
+      warnings: ['[IFLOW] SUMMARY.md has "## Deviations" section but entries don\'t reference Rule numbers (e.g., "Rule 1", "Rule 2").'],
     };
   }
 

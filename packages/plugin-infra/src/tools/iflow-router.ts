@@ -58,6 +58,8 @@ async function detectIFlowState(changeDir: string): Promise<{
   iteration: number;
   artifacts: Record<string, boolean>;
   reasons: string[];
+  rollbackDetected?: boolean;
+  previousState?: string;
 }> {
   const iflowDir = `${changeDir}/.iflow`;
   const dirExists = await directoryExists(iflowDir);
@@ -67,8 +69,11 @@ async function detectIFlowState(changeDir: string): Promise<{
     iteration: number;
     artifacts: Record<string, boolean>;
     reasons: string[];
+    rollbackDetected?: boolean;
+    previousState?: string;
   };
   let skipWrite = false;
+  let previousState: string | undefined;
 
   if (!dirExists) {
     result = {
@@ -78,16 +83,45 @@ async function detectIFlowState(changeDir: string): Promise<{
       reasons: ['No .iflow/ directory found — starting fresh'],
     };
   } else {
-    // Check for state file
-    const stateData = await readJsonFile<{ state?: string; iteration?: number }>(`${iflowDir}/state.json`);
+    // Check for state file with previous state tracking
+    const stateData = await readJsonFile<{ state?: string; iteration?: number; previousState?: string }>(`${iflowDir}/state.json`);
+    previousState = stateData?.previousState;
+
     if (stateData?.state && IFLOW_STATES.includes(stateData.state as IFlowState)) {
-      result = {
-        state: stateData.state as IFlowState,
-        iteration: stateData.iteration ?? 1,
-        artifacts: { stateFile: true },
-        reasons: [`Restored from state.json: ${stateData.state}`],
-      };
-      skipWrite = true; // Already have persisted state, no unnecessary overwrite
+      // Check if state is stale: artifacts suggest a different state than state.json
+      const hasContext = await fileExists(`${iflowDir}/CONTEXT.md`);
+      const hasPlan = await fileExists(`${iflowDir}/PLAN.md`);
+      const hasSummary = await fileExists(`${iflowDir}/SUMMARY.md`);
+      const hasUat = await fileExists(`${iflowDir}/UAT.md`);
+      const artifacts = { CONTEXT: hasContext, PLAN: hasPlan, SUMMARY: hasSummary, UAT: hasUat };
+
+      // Detect rollbacks: if artifacts suggest earlier state than persisted
+      const artifactState = determineArtifactState({ CONTEXT: hasContext, PLAN: hasPlan, SUMMARY: hasSummary, UAT: hasUat });
+      const currentPersisted = stateData.state as IFlowState;
+      const stateOrder = ['discussing', 'researching', 'planning', 'executing', 'verifying', 'shipping'];
+      const artifactIdx = stateOrder.indexOf(artifactState);
+      const persistedIdx = stateOrder.indexOf(currentPersisted);
+
+      if (artifactIdx >= 0 && persistedIdx >= 0 && artifactIdx < persistedIdx) {
+        // Artifacts suggest we're earlier than state.json — this is a rollback
+        result = {
+          state: artifactState,
+          iteration: stateData.iteration ?? 1,
+          artifacts,
+          reasons: [`Rollback detected: state.json says "${currentPersisted}" but artifacts indicate "${artifactState}". User likely navigated back.`],
+          rollbackDetected: true,
+          previousState: currentPersisted,
+        };
+        // Don't skip write — we need to update state.json with the corrected state
+      } else {
+        result = {
+          state: currentPersisted,
+          iteration: stateData.iteration ?? 1,
+          artifacts: { stateFile: true },
+          reasons: [`Restored from state.json: ${currentPersisted}`],
+        };
+        skipWrite = true;
+      }
     } else {
       // Artifact-based detection
       const hasContext = await fileExists(`${iflowDir}/CONTEXT.md`);
@@ -102,37 +136,50 @@ async function detectIFlowState(changeDir: string): Promise<{
         UAT: hasUat,
       };
 
-      // Determine state from artifacts
-      if (hasUat) {
-        result = { state: 'shipping', iteration: 1, artifacts, reasons: ['UAT.md found — ready to ship'] };
-      } else if (hasSummary) {
-        result = { state: 'verifying', iteration: 1, artifacts, reasons: ['SUMMARY.md found — ready to verify'] };
-      } else if (hasPlan) {
-        result = { state: 'planning', iteration: 1, artifacts, reasons: ['PLAN.md found — ready to execute'] };
-      } else if (hasContext) {
-        result = { state: 'researching', iteration: 1, artifacts, reasons: ['CONTEXT.md found — ready to plan'] };
-      } else {
-        result = {
-          state: 'discussing',
-          iteration: 1,
-          artifacts,
-          reasons: ['.iflow/ directory exists but no artifacts found — start discussing'],
-        };
-      }
+      result = {
+        state: determineArtifactState(artifacts),
+        iteration: 1,
+        artifacts,
+        reasons: [getArtifactReason(artifacts)],
+      };
     }
   }
 
-  // Persist detected state to .iflow/state.json
+  // Persist detected state to .iflow/state.json with previous state tracking
   if (!skipWrite) {
     await ensureDir(iflowDir);
     await writeJsonFile(`${iflowDir}/state.json`, {
       state: result.state,
+      previousState: result.previousState || previousState,
       iteration: result.iteration,
       updatedAt: new Date().toISOString(),
     });
   }
 
   return result;
+}
+
+/**
+ * Determine the IFlow state from which artifacts exist.
+ * Ordered by "most advanced artifact wins" (highest state first).
+ */
+function determineArtifactState(artifacts: { CONTEXT: boolean; PLAN: boolean; SUMMARY: boolean; UAT: boolean }): IFlowState {
+  if (artifacts.UAT) return 'shipping';
+  if (artifacts.SUMMARY) return 'verifying';
+  if (artifacts.PLAN) return 'planning';
+  if (artifacts.CONTEXT) return 'researching';
+  return 'discussing';
+}
+
+/**
+ * Generate a human-readable reason message based on which artifacts exist.
+ */
+function getArtifactReason(artifacts: { CONTEXT: boolean; PLAN: boolean; SUMMARY: boolean; UAT: boolean }): string {
+  if (artifacts.UAT) return 'UAT.md found — ready to ship';
+  if (artifacts.SUMMARY) return 'SUMMARY.md found — ready to verify';
+  if (artifacts.PLAN) return 'PLAN.md found — ready to execute';
+  if (artifacts.CONTEXT) return 'CONTEXT.md found — ready to plan';
+  return '.iflow/ directory exists but no artifacts found — start discussing';
 }
 
 /**
