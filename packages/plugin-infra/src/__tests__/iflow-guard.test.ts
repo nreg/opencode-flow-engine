@@ -247,3 +247,103 @@ describe('checkIFlowGuards — cyclic transition guard', () => {
     expect(result.success).toBe(true);
   });
 });
+
+// ─── checkIFlowGuards — Nyquist Rule Guard (Task 3: over-strict fix) ────────
+
+describe('checkIFlowGuards — Nyquist Rule Guard', () => {
+  const dir = tempDir('iflow-nyquist');
+
+  const PLAN_WITHOUT_AUTOMATED = `# Plan
+
+### Task 1: Setup database
+- **Actions**: Create schema
+- **Verification**: Manual check
+
+### Task 2: Build API
+- **Actions**: Implement endpoints
+- **Verification**: Run curl commands
+`;
+
+  const PLAN_WITH_AUTOMATED = `# Plan
+
+### Task 1: Setup database
+- **Actions**: Create schema
+- **Verification**: <automated> bun test db.test.ts
+
+### Task 2: Build API
+- **Actions**: Implement endpoints
+- **Verification**: <automated> bun test api.test.ts
+`;
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await ensureDir(dir + '/.iflow');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should only warn (not block) when in non-executing state and tasks lack <automated>', async () => {
+    await writeIFlowArtifact(dir, 'PLAN.md', PLAN_WITHOUT_AUTOMATED);
+    await writeIFlowState(dir, 'planning');
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'some-file.ts',
+      currentState: 'planning',
+      targetState: 'executing',
+    });
+
+    // In non-executing state, Nyquist guard should only warn, not block
+    expect(result.success).toBe(true);
+    expect(result.block).toBeFalsy();
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.length).toBeGreaterThan(0);
+    expect(result.warnings!.some(w => w.includes('missing <automated>') || w.includes('Nyquist'))).toBe(true);
+  });
+
+  it('should block when in executing state and tasks lack <automated>', async () => {
+    await writeIFlowArtifact(dir, 'PLAN.md', PLAN_WITHOUT_AUTOMATED);
+    await writeIFlowArtifact(dir, 'PLAN.md', PLAN_WITHOUT_AUTOMATED);
+    await writeIFlowState(dir, 'executing');
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'some-file.ts',
+      currentState: 'executing',
+      targetState: 'verifying',
+    });
+
+    // In executing state, Nyquist guard should still block
+    expect(result.block).toBe(true);
+    expect(result.blockReason).toContain('Nyquist');
+  });
+
+  it('should pass when all tasks have <automated> verification', async () => {
+    await writeIFlowArtifact(dir, 'PLAN.md', PLAN_WITH_AUTOMATED);
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'some-file.ts',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.block).toBeFalsy();
+  });
+
+  it('should only warn when no state info provided (not executing)', async () => {
+    await writeIFlowArtifact(dir, 'PLAN.md', PLAN_WITHOUT_AUTOMATED);
+
+    // No state info at all — should not block, only warn
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'some-file.ts',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.block).toBeFalsy();
+    expect(result.warnings).toBeDefined();
+  });
+});

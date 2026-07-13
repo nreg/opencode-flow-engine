@@ -323,7 +323,6 @@ async function checkNyquistRuleGuard(changeDir: string, data?: Record<string, un
   for (const line of lines) {
     const taskMatch = line.match(/###\s+Task\s+(\d+):\s*(.+)/);
     if (taskMatch) {
-      // Check previous task before moving to next
       if (inTaskBlock && !hasAutomated) {
         warnings.push(`Task "${currentTask}" missing <automated> verification command`);
       }
@@ -337,7 +336,6 @@ async function checkNyquistRuleGuard(changeDir: string, data?: Record<string, un
       if (line.includes('<automated>')) {
         hasAutomated = true;
       }
-      // End of task detected
       if (line.startsWith('### ') && !line.startsWith('### Task ')) {
         if (!hasAutomated) {
           warnings.push(`Task "${currentTask}" missing <automated> verification command`);
@@ -347,17 +345,24 @@ async function checkNyquistRuleGuard(changeDir: string, data?: Record<string, un
     }
   }
 
-  // Check last task
   if (inTaskBlock && !hasAutomated && currentTask) {
     warnings.push(`Task "${currentTask}" missing <automated> verification command`);
   }
 
   if (warnings.length > 0) {
+    const currentState = data?.currentState as string | undefined;
+    if (currentState === 'executing') {
+      return {
+        success: false,
+        block: true,
+        blockReason: `[IFLOW] Nyquist Rule violation in executing state: ${warnings.length} task(s) missing automated verification. Each task must have an <automated> command in its Verification field.`,
+        warnings,
+      };
+    }
+
     return {
       success: true,
-      block: true,
-      blockReason: `[IFLOW] Nyquist Rule violation: ${warnings.length} task(s) missing automated verification. Each task must have an <automated> command in its Verification field.`,
-      warnings,
+      warnings: ['[IFLOW] ' + warnings.join('; ')],
     };
   }
 
