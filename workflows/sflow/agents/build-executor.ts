@@ -215,7 +215,7 @@ task(category="deep", load_skills=["programming"],
 > **Note**: The \`task\` tool is only available when oh-my-openagent is installed.
 > If not available, fall back to \`call_flow_agent\` with \`subagent_type="build-executor"\`
 > for all sub-tasks. Both approaches work correctly without oh-my-openagent.`,
-  temperature: options?.temperature ?? 0.7,
+  temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('build-executor', getHasOmoPlugin()),
 });
 

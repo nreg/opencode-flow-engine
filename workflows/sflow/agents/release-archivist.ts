@@ -135,7 +135,7 @@ You have access to:
 - \`bash\` - Run tests and commands
 - \`glob\` - Search for files
 - \`artifact_inspector\` - Inspect planning artifacts for decision-point audit`,
-      temperature: options?.temperature ?? 0.7,
+      temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('release-archivist'),
 });
 

@@ -104,7 +104,7 @@ You have access to:
 - \`write\` - Write updated specs
 - \`edit\` - Edit specs
 - \`bash\` - Run validation scripts`,
-      temperature: options?.temperature ?? 0.7,
+      temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('spec-merger'),
 });
 
