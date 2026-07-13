@@ -247,6 +247,6 @@ Next steps:
 \`\`\`
 
 </Next_Steps>`,
-  temperature: options?.temperature ?? 0.4,
+  temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('iflow-shipper', getHasOmoPlugin()),
 });

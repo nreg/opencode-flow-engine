@@ -406,6 +406,6 @@ Quality indicators:
 - **Current:** Publication dates checked on sources
 
 </Success_Criteria>`,
-  temperature: options?.temperature ?? 0.4,
+  temperature: options?.temperature ?? 0.7,
   tools: getAgentTools('iflow-researcher', getHasOmoPlugin()),
 });

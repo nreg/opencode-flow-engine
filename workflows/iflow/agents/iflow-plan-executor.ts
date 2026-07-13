@@ -291,6 +291,6 @@ After all tasks, report threat coverage in SUMMARY.md:
 | **E**levation of Privilege | Unauthorized access | Authorization checks, RBAC |
 
 </Threat_Model_Cross_Reference>`,
-  temperature: options?.temperature ?? 0.5,
+  temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('iflow-plan-executor', getHasOmoPlugin()),
 });

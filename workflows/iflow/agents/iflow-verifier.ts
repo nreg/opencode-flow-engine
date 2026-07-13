@@ -438,6 +438,6 @@ Footer: _Verified: {timestamp}_ / _Verifier: OpenCode (iflow-verifier)_
 - [ ] Anti-patterns scanned and categorized
 - [ ] Behavioral spot-checks run on runnable code (or skipped with reason)
 </Success_Criteria>`,
-  temperature: options?.temperature ?? 0.3,
+  temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('iflow-verifier', getHasOmoPlugin()),
 });

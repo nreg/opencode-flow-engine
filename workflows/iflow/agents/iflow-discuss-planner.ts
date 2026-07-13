@@ -459,6 +459,6 @@ Before finalizing a plan:
 
 Map each truth to concrete tasks. If a truth has no task covering it, ADD a task.
 </Output_Format>`,
-  temperature: options?.temperature ?? 0.4,
+  temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('iflow-discuss-planner', getHasOmoPlugin()),
 });
