@@ -14,7 +14,7 @@ import { parseFileBoundaryPatterns, matchesBoundary, getActiveTaskId, boundaryCa
 import { fileExists, readFile, readJsonFile, directoryExists, isContractStale, getContractStalenessReport } from "@opencode-flow-engine/shared";
 import { sharedValidator, HOTFIX_UPGRADE_THRESHOLDS, TWEAK_UPGRADE_THRESHOLDS } from "@opencode-flow-engine/core";
 import { checkArtifactPreflight, findPreflightState } from "../features/artifact-preflight.js";
-import { readProgressFile, searchLessonsInFile } from "../features/state-manager.js";
+import { readProgressFile, searchLessonsInFile, getStateFilePath } from "../features/state-manager.js";
 import { getHasOmoPlugin } from "../agents/agent-tools.js";
 import { iflowDirectoryExists, checkIFlowGuards } from "./iflow-guard.js";
 
@@ -131,7 +131,7 @@ async function checkArtifactAndPhaseConsistency(changeDir: string, activeWorkflo
   const dirExists = await fileExists(changeDir);
   if (!dirExists) return { success: true };
 
-  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/.sflow/state.json`);
+  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
   const currentState = stateData?.state || "exploring";
   const mode = stateData?.mode;
 
@@ -194,7 +194,7 @@ async function checkPresetUpgrade(changeDir: string, activeWorkflow: 'iflow' | '
     return { success: true };
   }
 
-  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/.sflow/state.json`);
+  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
   const mode = stateData?.mode;
 
   if (mode !== "hotfix" && mode !== "tweak") {
@@ -398,7 +398,7 @@ async function checkFileWriteGuard(changeDir: string, data?: Record<string, unkn
   const agent = (data.agent as string) || '';
   if (!filePath) return { success: true };
 
-  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/.sflow/state.json`);
+  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
   if (!stateData?.state) return { success: true };
 
   const currentState = stateData.state;
@@ -487,7 +487,7 @@ async function checkReadFilesBoundary(changeDir: string, data?: Record<string, u
   const filePath = (data.filePath as string) || '';
   if (!filePath) return { success: true };
 
-  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
+  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
   if (!stateData?.state) return { success: true };
 
   const currentState = stateData.state;
@@ -546,7 +546,7 @@ async function checkGitCommitBoundary(changeDir: string, data?: Record<string, u
   // Detect git commit commands (with -m flag, or commit with -c/--amend)
   if (!/\bgit\s+commit\s+/.test(command)) return { success: true };
 
-  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
+  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
   if (!stateData?.state) return { success: true };
 
   const currentState = stateData.state;
@@ -713,7 +713,7 @@ async function checkLessonsGuard(changeDir: string, data?: Record<string, unknow
   // Read state to determine if we're in debugging
   let currentState = '';
   try {
-    const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
+    const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
     currentState = stateData?.state || '';
   } catch { /* ignore */ }
   const isDebuggingState = currentState === 'debugging';
@@ -767,7 +767,7 @@ async function checkDebuggingState(changeDir: string, action?: string, data?: Re
     return { success: true };
   }
 
-  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
+  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
   if (stateData?.state !== "debugging") return { success: true };
 
   const agent = (data?.agent as string) || '';
@@ -801,7 +801,7 @@ async function checkOmoUsageGuard(changeDir: string, data?: Record<string, unkno
   const toolName = (data.toolName as string) || '';
   if (toolName !== 'read' && toolName !== 'grep') return { success: true };
 
-  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`);
+  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
   const currentState = stateData?.state || '';
   if (currentState !== 'exploring') return { success: true };
 

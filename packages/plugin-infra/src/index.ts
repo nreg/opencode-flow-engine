@@ -63,7 +63,7 @@ import type { HookContext } from './hooks/types.js';
 import { sharedValidator } from '@opencode-flow-engine/core';
 import { fileExists as sflowFileExists, directoryExists, readFile as sflowReadFile, ensureDir, writeJsonFile } from '@opencode-flow-engine/shared';
 import { isContractStale, sleep as crossSleep } from '@opencode-flow-engine/shared';
-import { detectStateMismatch, simpleHash } from './features/state-manager.js';
+import { detectStateMismatch, simpleHash, getStateFilePath } from './features/state-manager.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
 import { setHasOmoPlugin, setHasAgnesProvider } from './agents/agent-tools.js';
@@ -111,16 +111,12 @@ function generateTaskId(): string {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STATE_FILE_PATH = '.sflow/state.json';
-
-const IFLOW_STATE_FILE_PATH = '.iflow/state.json';
-
 const IFLOW_STATES = new Set(['discussing', 'researching', 'planning', 'executing', 'verifying', 'shipping']);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function getCurrentWorkflowState(changeDir: string): Promise<string | null> {
-  const state = await readJsonFile<{ state?: string }>(`${changeDir}/${STATE_FILE_PATH}`);
+  const state = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
   return state?.state ?? null;
 }
 
@@ -913,7 +909,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
         if (sessionStartHook) {
           await sessionStartHook.execute({
             changeDir: workDir,
-            stateFile: `${workDir}/${STATE_FILE_PATH}`,
+            stateFile: `${workDir}/${getStateFilePath('sflow')}`,
             pluginRoot: '',
             action: 'session.created',
           });
@@ -923,7 +919,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
         if (sessionEndHook) {
           await sessionEndHook.execute({
             changeDir: workDir,
-            stateFile: `${workDir}/${STATE_FILE_PATH}`,
+            stateFile: `${workDir}/${getStateFilePath('sflow')}`,
             pluginRoot: '',
             action: 'session.deleted',
           });
@@ -1060,7 +1056,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       if (guardHook) {
         const guardResult = await guardHook.execute({
           changeDir: workDir,
-          stateFile: `${workDir}/${STATE_FILE_PATH}`,
+          stateFile: `${workDir}/${getStateFilePath('sflow')}`,
           pluginRoot: '',
           action: `tool:${toolName}`,
           data: {
@@ -1093,7 +1089,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
         const currentState = await getCurrentWorkflowState(workDir);
         const validationCtx: HookContext = {
           changeDir: workDir,
-          stateFile: `${workDir}/${STATE_FILE_PATH}`,
+          stateFile: `${workDir}/${getStateFilePath('sflow')}`,
           pluginRoot: '',
           action: `tool:${toolName}:after`,
           data: { newState: currentState },
@@ -1115,7 +1111,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
         if (isIFlowTool || (isIFlowState && !SFLOW_TOOLS.has(toolName))) {
           try {
             await ensureDir(`${workDir}/.iflow`);
-            await writeJsonFile(`${workDir}/${IFLOW_STATE_FILE_PATH}`, {
+            await writeJsonFile(`${workDir}/${getStateFilePath('iflow')}`, {
               state: newState,
               updatedAt: new Date().toISOString(),
             });
@@ -1129,7 +1125,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
         if (transitionHook) {
           await transitionHook.execute({
             changeDir: workDir,
-            stateFile: `${workDir}/${STATE_FILE_PATH}`,
+            stateFile: `${workDir}/${getStateFilePath('sflow')}`,
             pluginRoot: '',
             action: 'state-transition',
             data: { newState },
@@ -1146,7 +1142,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
       if (postProcessHook) {
         const ppResult = await postProcessHook.execute({
           changeDir: workDir,
-          stateFile: `${workDir}/${STATE_FILE_PATH}`,
+          stateFile: `${workDir}/${getStateFilePath('sflow')}`,
           pluginRoot: '',
           action: `tool:${toolName}:after`,
           data: { output: outputStr },
@@ -1158,7 +1154,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
             if (transitionHook) {
               await transitionHook.execute({
                 changeDir: workDir,
-                stateFile: `${workDir}/${STATE_FILE_PATH}`,
+                stateFile: `${workDir}/${getStateFilePath('sflow')}`,
                 pluginRoot: '',
                 action: 'state-transition',
                 data: { newState: ppData.stateTransitionSignal.to },
@@ -1180,7 +1176,7 @@ async function sflowPlugin(input: PluginInput, _options?: PluginOptions): Promis
 
       const result = await continuationHook.execute({
         changeDir: workDir,
-        stateFile: `${workDir}/${STATE_FILE_PATH}`,
+        stateFile: `${workDir}/${getStateFilePath('sflow')}`,
         pluginRoot: '',
         action: 'autocontinue',
       });

@@ -4,6 +4,10 @@ import { fileExists, readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir
 
 const BOULDER_STATE_FILE = ".sflow/boulder-state.json";
 
+export function getStateFilePath(workflowType: 'sflow' | 'iflow'): string {
+  return workflowType === 'iflow' ? '.iflow/state.json' : '.sflow/state.json';
+}
+
 type WorkflowManager = ReturnType<typeof createWorkflowManager>;
 
 
