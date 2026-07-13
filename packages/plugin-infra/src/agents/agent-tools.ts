@@ -267,7 +267,7 @@ export function getAgentTools(name: string, hasOmoPlugin?: boolean): Record<stri
   const base = AGENT_TOOLS[name] || { ...COMMON_TOOLS };
   // Use passed-in flag or fall back to module-level flag
   const omoAvailable = hasOmoPlugin ?? _hasOmoPlugin;
-  if (omoAvailable && (name === 'sFlow' || name === 'build-executor')) {
+  if (omoAvailable && (name === 'sFlow' || name === 'build-executor' || name === 'iFlow' || name === 'iflow-plan-executor')) {
     return { ...base, ...OMO_TOOLS };
   }
   return { ...base };
