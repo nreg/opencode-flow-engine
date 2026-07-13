@@ -1,0 +1,61 @@
+{
+  "changeName": "iflow-code-review-fixes",
+  "archivedAt": "2026-07-13T20:35:00+08:00",
+  "verdict": "PASS",
+  "batches": [
+    {
+      "name": "P0 - 基础架构",
+      "tasks": [
+        { "id": 1, "title": "guard.ts detectActiveWorkflow优化", "commit": "71d0373", "status": "completed" },
+        { "id": 2, "title": "iflow-router.ts增加EXECUTING marker", "commit": "71d0373", "status": "completed" }
+      ]
+    },
+    {
+      "name": "P1 - 守卫和工具",
+      "tasks": [
+        { "id": 3, "title": "NyquistRuleGuard过严修复", "commit": "88edbba", "status": "completed" },
+        { "id": 4, "title": "OMO工具注入IFlow", "commit": "45ecc5f", "status": "completed" }
+      ]
+    },
+    {
+      "name": "P2 - 功能完善",
+      "tasks": [
+        { "id": 5, "title": "extractTaskDescriptions增加Actions block", "commit": "be0b6cb", "status": "completed" },
+        { "id": 6, "title": "verifier few-shot校准示例", "commit": "510cb23", "status": "completed" },
+        { "id": 7, "title": "state.json路径统一管理", "commit": "1a7e68b", "status": "completed" }
+      ]
+    }
+  ],
+  "testResults": {
+    "total": 392,
+    "passed": 384,
+    "failed": 8,
+    "preExistingFailures": 8,
+    "newFailures": 0
+  },
+  "filesChanged": 11,
+  "linesAdded": 604,
+  "linesDeleted": 82,
+  "commits": [
+    "71d0373",
+    "88edbba",
+    "45ecc5f",
+    "be0b6cb",
+    "510cb23",
+    "1a7e68b"
+  ],
+  "risks": [
+    {
+      "description": "Pre-existing test failures (8) — not caused by this change",
+      "severity": "LOW"
+    },
+    {
+      "description": "Pre-existing tsc errors (57) — Zod version mismatch",
+      "severity": "LOW"
+    },
+    {
+      "description": "EXECUTING marker fallback may mask state.json corruption",
+      "severity": "MEDIUM"
+    }
+  ]
+}
