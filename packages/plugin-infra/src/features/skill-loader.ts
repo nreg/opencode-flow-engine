@@ -19,12 +19,10 @@ const __dirname = dirname(__filename);
 function resolveSkillsDir(givenDir?: string): string {
   if (givenDir) return givenDir;
   const candidates = [
-    // 方案 C: workflows/*/skills/ directories
-    join(__dirname, '..', '..', '..', '..', 'workflows', 'sflow', 'skills'),
-    join(__dirname, '..', '..', '..', '..', 'workflows', 'iflow', 'skills'),
-    // Legacy: root skills/ directory
-    join(__dirname, '..', '..', '..', 'skills'),
-    join(__dirname, '..', '..', '..', '..', 'skills'),
+    // 方案 C: workflows/*/skills/ directories (3x .. from dist/ to root)
+    join(__dirname, '..', '..', '..', 'workflows', 'sflow', 'skills'),
+    join(__dirname, '..', '..', '..', 'workflows', 'iflow', 'skills'),
+    // Fallback: process.cwd() based path
     join(process.cwd(), 'skills'),
   ];
   for (const dir of candidates) {
@@ -36,8 +34,7 @@ function resolveSkillsDir(givenDir?: string): string {
 /** Resolve workflow-specific template directories */
 export function resolveTemplatesDir(workflow: 'sflow' | 'iflow'): string {
   const candidates = [
-    join(__dirname, '..', '..', '..', '..', 'workflows', workflow, 'templates'),
-    join(__dirname, '..', '..', '..', '..', `.${workflow}-templates`),
+    join(__dirname, '..', '..', '..', 'workflows', workflow, 'templates'),
     join(process.cwd(), `.${workflow}-templates`),
   ];
   for (const dir of candidates) {
