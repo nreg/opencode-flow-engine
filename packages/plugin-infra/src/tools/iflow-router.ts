@@ -4,7 +4,7 @@
  */
 
 import type { ToolDefinition, ToolContext, ToolResult } from "./types.js";
-import { fileExists, directoryExists, readJsonFile, ensureDir, writeJsonFile, writeFile, removeFile } from "@opencode-flow-engine/shared";
+import { fileExists, directoryExists, readFile, readJsonFile, ensureDir, writeJsonFile, writeFile, removeFile } from "@opencode-flow-engine/shared";
 
 /**
  * IFlow workflow states in cyclic order
@@ -87,6 +87,23 @@ async function detectIFlowState(changeDir: string): Promise<{
     const stateData = await readJsonFile<{ state?: string; iteration?: number; previousState?: string }>(`${iflowDir}/state.json`);
     previousState = stateData?.previousState;
 
+    // Fallback: read from STATE.md if state.json is missing
+    if (!stateData?.state) {
+      const stateMdContent = await readFile(`${iflowDir}/STATE.md`);
+      if (stateMdContent) {
+        const stateMatch = stateMdContent.match(/\*\*Current State\*\*:\s*(\w+)/);
+        if (stateMatch && IFLOW_STATES.includes(stateMatch[1] as IFlowState)) {
+          result = {
+            state: stateMatch[1] as IFlowState,
+            iteration: 1,
+            artifacts: {},
+            reasons: ['Restored from STATE.md (state.json missing)'],
+          };
+          skipWrite = false;
+        }
+      }
+    }
+
     if (stateData?.state && IFLOW_STATES.includes(stateData.state as IFlowState)) {
       const hasContext = await fileExists(`${iflowDir}/CONTEXT.md`);
       const hasPlan = await fileExists(`${iflowDir}/PLAN.md`);
@@ -154,6 +171,34 @@ async function detectIFlowState(changeDir: string): Promise<{
       iteration: result.iteration,
       updatedAt: new Date().toISOString(),
     });
+  }
+
+  // Persist STATE.md as redundant state mechanism for context-recovery resilience
+  if (result.state) {
+    const stateMdLines = [
+      '# IFlow State',
+      '',
+      `- **Current State**: ${result.state}`,
+      result.previousState ? `- **Previous State**: ${result.previousState}` : '',
+      `- **Iteration**: ${result.iteration}`,
+      `- **Updated**: ${new Date().toISOString()}`,
+      '',
+      '## Artifact Status',
+      ...Object.entries(result.artifacts).map(([k, v]) => `- **${k}**: ${v ? '✅' : '❌'}`),
+      '',
+      result.rollbackDetected ? '> ⚠️ Rollback detected from previous state' : '',
+      '',
+      '## Valid Transitions',
+      '| From | To |',
+      '|------|----|',
+      '| discussing | researching |',
+      '| researching | planning, discussing |',
+      '| planning | executing, researching |',
+      '| executing | verifying, planning |',
+      '| verifying | shipping, executing |',
+      '| shipping | discussing |',
+    ].filter(Boolean).join('\n');
+    await writeFile(`${iflowDir}/STATE.md`, stateMdLines);
   }
 
   // Manage EXECUTING marker file lifecycle

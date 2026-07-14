@@ -155,7 +155,66 @@ Footer: _Verified: {timestamp}_ / _Verifier: OpenCode (iflow-verifier)_
 6. DO NOT commit — leave that to the orchestrator
 
 **Success criteria:** Previous VERIFICATION checked | Must-haves established from CONTEXT or derived | All truths verified with status/evidence | 4-level artifact check complete | Key links verified | Anti-patterns scanned | Behavioral checks on runnable code (or skipped with reason)
-</Critical_Rules>`,
+</Critical_Rules>
+
+<Few_Shot_Examples>
+
+## BLOCKER Example
+
+**Scenario**: Phase goal is "User can log in with email and password". The login endpoint exists but always returns 500.
+
+**Must-have truth**: "POST /api/auth/login accepts email+password and returns session token"
+
+**Verification result**:
+- Level 1 EXISTS: ✅ \`src/app/api/auth/login/route.ts\` exists
+- Level 2 SUBSTANTIVE: ✅ Has actual implementation, not a stub
+- Level 3 WIRED: ✅ Called from login form component
+- Level 4 DATA_FLOW: ⛔ Endpoint returns 500 — no database query, no session creation
+
+**Key link**: Component → API: WIRED. API → Database: NOT_WIRED — no prisma.query, no DB call found.
+
+**Status**: BLOCKER — the must-have truth is FAILED (endpoint doesn't work). Phase goal not achieved.
+
+**Correct classification**: BLOCKER, because the core observable behavior (user can log in) is not working. Don't be fooled by the fact that 3/4 files exist — the data flow is broken.
+
+## WARNING Example
+
+**Scenario**: Phase goal is "Display user profile with avatar, name, and bio". The profile page renders but the avatar shows a placeholder.
+
+**Must-have truth**: "Profile page shows user avatar"
+
+**Verification result**:
+- Level 1 EXISTS: ✅ \`src/components/UserAvatar.tsx\` exists
+- Level 2 SUBSTANTIVE: ✅ Not a stub, has actual Image component
+- Level 3 WIRED: ✅ Imported in ProfilePage.tsx
+- Level 4 DATA_FLOW: ⚠️ \`src\` prop is hardcoded to \`/default-avatar.png\` instead of coming from API response
+
+**Key link**: Component → API: WIRED. API → Database: WIRED. State → Render: PARTIAL — avatar src is static.
+
+**Status**: WARNING — the avatar exists but always shows default. The wiring is partial (API returns avatar URL but component doesn't use it).
+
+**Correct classification**: WARNING, not BLOCKER. The page renders, the user can see their name and bio. The avatar is a non-blocking defect. And not PASS because the requirement says "show user avatar", not "show default avatar."
+
+## PASS Example
+
+**Scenario**: Phase goal is "Add dark mode toggle to settings page". The toggle exists, persists preference, and applies correctly.
+
+**Must-have truth**: "User can toggle dark mode on/off in settings"
+
+**Verification result**:
+- Level 1 EXISTS: ✅ \`src/components/DarkModeToggle.tsx\` exists
+- Level 2 SUBSTANTIVE: ✅ Has actual implementation with localStorage persistence
+- Level 3 WIRED: ✅ Imported in SettingsPage.tsx, CSS variables connected
+- Level 4 DATA_FLOW: ✅ Toggle writes to localStorage, CSS variables react to state change, page re-renders with dark theme
+
+**Key link**: Form → Handler: WIRED — onChange calls setTheme(). State → Render: WIRED — CSS variables applied via useEffect.
+
+**Anti-patterns**: None found. No console.log, no TODO, no hardcoded values.
+
+**Status**: PASS — all truths VERIFIED, all links WIRED, no blockers.
+
+**Correct classification**: PASS. The feature works end-to-end. Don't invent problems where there are none.
+</Few_Shot_Examples>`,
   temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('iflow-verifier', getHasOmoPlugin()),
 });
