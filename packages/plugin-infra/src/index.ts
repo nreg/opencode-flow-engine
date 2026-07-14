@@ -269,27 +269,29 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
           let sessionID: string;
           let isNew = false;
 
-          // Look up the subagent's model (needed for both create and prompt)
-          const subagentModel = AGENT_MODEL_MAP[subagent_type as string];
-          if (!subagentModel) {
-            return await formatToolError(
-              `No model configured for subagent "${subagent_type}". Available agents: ${Object.keys(AGENT_MODEL_MAP).join(', ')}`,
-            );
-          }
-
           if (session_id) {
             if (run_in_background) {
               return await formatToolError('session_id is not supported in background mode. Use run_in_background=false to continue an existing session.');
             }
             sessionID = session_id as string;
           } else {
+            // Look up the subagent's model from the map populated during config hook
+            const subagentModel = AGENT_MODEL_MAP[subagent_type as string];
+            if (!subagentModel) {
+              return await formatToolError(
+                `No model configured for subagent "${subagent_type}". Available agents: ${Object.keys(AGENT_MODEL_MAP).join(', ')}`,
+              );
+            }
+
             const createResult = await (client.session.create as (args: {
-              body: { parentID?: string; title?: string };
-              query?: { directory?: string };
+              body: Record<string, unknown>;
+              query?: Record<string, unknown>;
             }) => Promise<{ data?: { id?: string } }>)({
               body: {
                 parentID: context.sessionID,
                 title: sessionLabel,
+                agent: subagent_type as string,
+                model: subagentModel,
               },
               query: { directory: changeDir },
             });
@@ -301,11 +303,7 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
             isNew = true;
           }
 
-          // Send the prompt to the subagent with agent and model
-          const modelParts = subagentModel.split('/');
-          const modelObj = modelParts.length >= 2
-            ? { providerID: modelParts[0], modelID: modelParts.slice(1).join('/') }
-            : { providerID: subagentModel, modelID: subagentModel };
+          // Send the prompt to the subagent
           await (client.session.prompt as (args: {
             path: { id: string };
             body: Record<string, unknown>;
@@ -313,7 +311,6 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
             path: { id: sessionID },
             body: {
               agent: subagent_type as string,
-              model: modelObj,
               parts: [{ type: 'text', text: prompt as string }],
             },
           }).catch((err: unknown) => {
