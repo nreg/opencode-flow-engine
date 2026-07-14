@@ -291,7 +291,6 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
                 parentID: context.sessionID,
                 title: sessionLabel,
                 agent: subagent_type as string,
-                model: subagentModel,
               },
               query: { directory: changeDir },
             });
