@@ -452,16 +452,129 @@ sflow init --user
 
 ```json
 {
+  "version": "0.1.0",
+  "mode": "full",
   "agents": {
-    "sflow": {
-      "model": "deepseek-v4-flash",
+    "sFlow": {
+      "model": "your-provider/glm-5.2",
       "temperature": 0.6,
-      "fallback_models": ["glm-5.1", "kimi-k2.6"]
+      "fallbackModels": [
+        "your-provider/minimax-m3",
+        "your-provider/deepseek-v4-flash"
+      ]
+    },
+    "iFlow": {
+      "model": "your-provider/deepseek-v4-flash",
+      "temperature": 0.6,
+      "fallbackModels": [
+        "your-provider/minimax-m3"
+      ]
+    },
+    "need-explorer": {
+      "model": "your-provider/step-3.7-flash",
+      "temperature": 0.6,
+      "fallbackModels": [
+        "your-provider/step-3.7-flash"
+      ]
+    },
+    "spec-writer": {
+      "model": "your-provider/glm-5.1",
+      "temperature": 0.6,
+      "fallbackModels": [
+         "your-provider/glm-5"
+      ]
+    },
+    "contract-builder": {
+      "model": "your-provider/glm-5.1",
+      "temperature": 0.6,
+      "fallbackModels": [
+        "your-provider/glm-5"
+      ]
     },
     "build-executor": {
-      "model": "step-3.7-flash",
-      "temperature": 0.7
+      "model": "your-provider/glm-5.1",
+      "temperature": 0.7,
+      "fallbackModels": [
+        "your-provider/glm-5"
+      ]
+    },
+    "bug-investigator": {
+      "model": "your-provider/minimax-m2.7",
+      "temperature": 0.6,
+      "fallbackModels": [
+        "your-provider/kimi-k2.6"
+      ]
+    },
+    "code-reviewer": {
+      "model": "your-provider/glm-5.1",
+      "temperature": 0.6,
+      "fallbackModels": [
+        "your-provider/glm-5"
+      ]
+    },
+    "release-archivist": {
+      "model": "your-provider/glm-5.1",
+      "temperature": 0.7,
+      "fallbackModels": [
+        "your-provider/glm-5"
+      ]
+    },
+    "spec-merger": {
+      "model": "your-provider/glm-5.1",
+      "temperature": 0.7,
+      "fallbackModels": [
+        "your-provider/glm-5"
+      ]
+    },
+    "iflow-discuss-planner": {
+      "model": "your-provider/kimi-k2.6",
+      "temperature": 0.6,
+      "fallbackModels": [
+        "your-provider/minimax-m2.7"
+      ]
+    },
+    "iflow-plan-executor": {
+      "model": "your-provider/glm-5.1",
+      "temperature": 0.6,
+      "fallbackModels": [
+        "your-provider/glm-5"
+      ]
+    },
+    "iflow-verifier": {
+      "model": "your-provider/minimax-m2.7",
+      "temperature": 0.6,
+      "fallbackModels": [
+        "your-provider/kimi-k2.6"
+      ]
+    },
+    "iflow-researcher": {
+      "model": "your-provider/glm-5.1",
+      "temperature": 0.7,
+      "fallbackModels": [
+        "your-provider/glm-5"
+      ]
+    },
+    "iflow-shipper": {
+      "model": "your-provider/glm-5.1",
+      "temperature": 0.6,
+      "fallbackModels": [
+        "your-provider/glm-5"
+      ]
     }
+  },
+  "features": {
+    "workflow_manager": true,
+    "state_manager": true
+  },
+  "hooks": {
+    "state_transition": true,
+    "artifact_validation": true,
+    "guard": true
+  },
+  "tools": {
+    "workflow_router": true,
+    "contract_validator": true,
+    "artifact_inspector": true
   }
 }
 ```
