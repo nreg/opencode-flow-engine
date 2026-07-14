@@ -147,10 +147,11 @@ iFlow has **6 workflow states**, forming a continuous cycle: discuss → researc
 |-------|------|-------------|
 | **iFlow** | Main orchestrator | Cyclic workflow controller: 6-state orchestration, never writes code directly |
 | **iflow-discuss-planner** | Subagent | Discuss + plan: clarifies requirements, generates PLAN.md (XML tasks + wave dependencies) |
-| **iflow-plan-executor** | Subagent | Executor: 4 deviation rules (auto-fix bugs → auto-add critical functionality → auto-fix blockers → ask about architectural changes) |
+| **iflow-plan-executor** | Subagent | Executor: 4 deviation rules (auto-fix bugs → auto-add critical functionality → auto-fix blockers → ask about architectural changes). Can delegate frontend tasks to `ui-implementer` |
 | **iflow-verifier** | Subagent | Adversarial verification: goal-backward verification, BLOCKER/WARNING classification, 3-level artifact checks |
 | **iflow-researcher** | Subagent | Technical research: discovery levels (0-3), tool priority chain, confidence markers |
 | **iflow-shipper** | Subagent | Shipping: creates PR, generates UAT.md, manages branch lifecycle |
+| **ui-implementer** | Subagent | Frontend UI implementation, integrating 9 frontend specialized skills. Shared with sFlow — callable by `iflow-plan-executor` in SDD mode |
 
 ### UI Implementer Subagent
 
@@ -168,9 +169,10 @@ A dedicated frontend UI implementation subagent, integrating 9 frontend speciali
 | **frontend-code-review** | Code quality | Code scanning, severity grading |
 | **frontend-performance-optimization** | Performance optimization | Load/runtime performance, Core Web Vitals |
 
-**Invocation** (dual entry):
+**Invocation** (triple entry):
 - **SFlow direct delegation** — for post-workflow small frontend patches
 - **build-executor delegation** — in SDD execution mode, frontend tasks are automatically routed to ui-implementer
+- **iflow-plan-executor delegation** — in iFlow execution mode, frontend tasks are automatically routed to ui-implementer
 
 **Optional enhancements** (auto-enabled when agnesmore provider is detected):
 - `agnes_image_generate` tool — generate product images, carousels, card backgrounds, etc.
@@ -526,6 +528,13 @@ Configuration loading priority (highest to lowest):
         "your-provider/glm-5"
       ]
     },
+    "ui-implementer": {
+      "model": "your-provider/glm-5.1",
+      "temperature": 0.6,
+      "fallbackModels": [
+        "your-provider/kimi-k2.6"
+      ]
+    },
     "iflow-discuss-planner": {
       "model": "your-provider/kimi-k2.6",
       "temperature": 0.6,
@@ -661,6 +670,7 @@ Any single item triggers an upgrade:
 | iflow-verifier | minimax-m2.7 | deepseek-v4-flash, glm-5.1 |
 | iflow-researcher | glm-5.1 | kimi-k2.6, deepseek-v4-flash |
 | iflow-shipper | mimo-v2.5-pro | mimo-v2.5, glm-5.1 |
+| ui-implementer | deepseek-v4-flash | glm-5.1, kimi-k2.6 |
 
 ---
 
