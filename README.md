@@ -1,398 +1,400 @@
-# sFlow + iFlow — OpenCode Workflow Orchestration Plugin
+# Opencode-Flow-Engine — OpenCode Workflow Orchestration Plugin
 
-OpenSpec 规划引擎 + Superpowers 执行纪律 + GSD 迭代循环，集成于 OpenCode。
+[**简体中文**](./README.zh.md) | **English**
 
-opencode-flow-engine 是一个完整的开发流程编排插件，提供两种互补的工作流模式：
+OpenSpec planning engine + Superpowers execution discipline + GSD iterative cycle, integrated as an OpenCode Plugin.
 
-- **sFlow** — 线性工作流：从需求澄清到规划、实现、审查、调试、归档，全生命周期覆盖
-- **iFlow** — 迭代工作流：GSD（Get Stuff Done）风格循环：讨论 → 研究 → 规划 → 执行 → 验证 → 发布 → 循环
+opencode-flow-engine is a complete development workflow orchestration plugin providing two complementary workflow modes:
 
----
-
-## 目录
-
-- [概述](#概述)
-- [工作流选择](#工作流选择)
-- [sFlow 工作流状态](#sflow-工作流状态)
-- [iFlow 工作流状态](#iflow-工作流状态)
-- [智能体](#智能体)
-- [工具](#工具)
-- [执行模式](#执行模式)
-- [执行纪律](#执行纪律)
-- [oh-my-openagent 集成](#oh-my-openagent-集成)
-- [功能特性](#功能特性)
-- [安装](#安装)
-- [配置](#配置)
-- [使用方式](#使用方式)
-- [预设升级机制](#预设升级机制)
-- [智能体默认模型](#智能体默认模型)
-- [模型优先级](#模型优先级)
-- [项目结构](#项目结构)
-- [致谢](#致谢)
+- **sFlow** — Linear workflow: full lifecycle coverage from requirements clarification to planning, implementation, review, debugging, and archival
+- **iFlow** — Iterative workflow: GSD (Get Stuff Done) iterative cycle: discuss → research → plan → execute → verify → ship → repeat
 
 ---
 
-## 概述
+## Table of Contents
 
-opencode-flow-engine 是一个 OpenCode 插件，融合了三大核心能力：
+- [Overview](#overview)
+- [Workflow Selection](#workflow-selection)
+- [sFlow Workflow States](#sflow-workflow-states)
+- [iFlow Workflow States](#iflow-workflow-states)
+- [Agents](#agents)
+- [Tools](#tools)
+- [Execution Modes](#execution-modes)
+- [Execution Discipline](#execution-discipline)
+- [oh-my-openagent Integration](#oh-my-openagent-integration)
+- [Features](#features)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Preset Upgrade Mechanism](#preset-upgrade-mechanism)
+- [Agent Default Models](#agent-default-models)
+- [Model Priority](#model-priority)
+- [Project Structure](#project-structure)
+- [Acknowledgments](#acknowledgments)
 
-- **OpenSpec** — 需求、规格说明书与提案的规划引擎
-- **Superpowers** — TDD、代码审查与系统化调试的执行纪律
-- **GSD** — Get Stuff Done 迭代方法论（scope reduction prohibition、deviation rules、adversarial verification）
+---
 
-> **架构说明**：sFlow/iFlow 的核心验证引擎（schema、validation、parsing）从 [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) 移植。Agent 工厂模式、5 层钩子系统、工具注册、状态管理等运行时架构为适配 OpenCode 插件机制而全新设计，借鉴了 [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) 的架构模式。
+## Overview
+
+opencode-flow-engine is an OpenCode plugin that integrates three core capabilities:
+
+- **OpenSpec** — Planning engine for requirements, specifications, and proposals
+- **Superpowers** — Execution discipline with TDD, code review, and systematic debugging
+- **GSD** — Get Stuff Done iterative methodology (scope reduction prohibition, deviation rules, adversarial verification)
+
+> **Architecture Note**: The core validation engine (schema, validation, parsing) for sFlow/iFlow is ported from [spec-superflow](https://github.com/MageByte-Zero/spec-superflow). The runtime architecture — agent factory pattern, 5-tier hook system, tool registration, state management — is newly designed for the OpenCode plugin mechanism, drawing inspiration from [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent)'s architecture patterns.
 >
-> sFlow/iFlow **零外部依赖**——子智能体路由使用自注册的 `call_flow_agent` 工具，无需安装 oh-my-openagent。当同时安装 oh-my-openagent 时，可自动检测并利用其 `call_omo_agent`（探索/图书馆员）和 `task`（分类委托）工具，获得更强的代码库探索和技能注入能力。
+> sFlow/iFlow have **zero external dependencies** — subagent routing uses the self-registered `call_flow_agent` tool, no oh-my-openagent required. When oh-my-openagent is also installed, it is automatically detected and its `call_omo_agent` (explore/librarian) and `task` (category delegation) tools become available, enabling stronger codebase exploration and skill injection.
 
 ---
 
-## 工作流选择
+## Workflow Selection
 
-sFlow 和 iFlow 共用同一个插件，在 OpenCode 中按需选择对话 agent：
+sFlow and iFlow share the same plugin. Select the appropriate conversation agent in OpenCode:
 
-| 工作流 | 适用场景 | 风格 | 颜色 |
-|--------|---------|------|------|
-| **sFlow** | 需要严格规划、文档先行、门禁驱动的开发任务 | 线性（9 状态，顺序执行） | `#f8cd93` |
-| **iFlow** | 快速迭代、研究驱动、持续交付的开发任务 | 循环（6 状态，ship 后回到 discuss） | `#FFB6C1` |
+| Workflow | Use Case | Style | Color |
+|----------|---------|-------|-------|
+| **sFlow** | Tasks requiring strict planning, documentation-first, gate-driven development | Linear (9 states, sequential) | `#f8cd93` |
+| **iFlow** | Fast iteration, research-driven, continuous delivery tasks | Cyclic (6 states, ship returns to discuss) | `#FFB6C1` |
 
-选择建议：
-- **复杂功能**（3+ 文件、跨模块、DB schema 变更）→ 使用 sFlow
-- **快速迭代**（小型功能、修复、研究探索）→ 使用 iFlow
-- **不确定** → 从 sFlow 开始，小任务可切换到 iFlow
+Selection guidance:
+- **Complex features** (3+ files, cross-module, DB schema changes) → use sFlow
+- **Quick iterations** (small features, fixes, research exploration) → use iFlow
+- **Uncertain** → start with sFlow, switch to iFlow for small tasks
 
 ![Flow.png](./docs/Flow.png)
 
 ---
 
-## sFlow 工作流状态
+## sFlow Workflow States
 
-sFlow 有 **9 个工作流状态**，按顺序执行：
+sFlow has **9 workflow states**, executed sequentially:
 
-| # | 状态 | 子智能体 | 产物 | 关卡 |
-|---|------|---------|------|------|
-| 1 | **exploring**（探索） | need-explorer | 澄清的需求 | 用户确认 |
-| 2 | **specifying**（规格说明） | spec-writer | proposal.md, specs/, design.md, tasks.md | 产物校验 |
-| 3 | **ui-design**（UI 设计）* | spec-writer | ui-design.md | UI Token 校验 |
-| 4 | **bridging**（桥接） | contract-builder | execution-contract.md | 合约校验 |
-| 5 | **approved-for-build**（批准构建） | — | 已批准的合约 | 用户批准 |
-| 6 | **executing**（执行） | build-executor | 实现的代码 | 测试通过, 审查通过 |
-| 7 | **debugging**（调试） | bug-investigator | Bug 报告, 修复 | 问题解决 |
-| 8 | **closing**（关闭） | release-archivist | 验证报告 | 全部检查通过 |
-| 9 | **abandoned**（废弃） | — | — | 终止状态 |
+| # | State | Subagent | Artifact | Gate |
+|---|-------|----------|----------|------|
+| 1 | **exploring** | need-explorer | Clarified requirements | User confirmation |
+| 2 | **specifying** | spec-writer | proposal.md, specs/, design.md, tasks.md | Artifact validation |
+| 3 | **ui-design**\* | spec-writer | ui-design.md | UI Token validation |
+| 4 | **bridging** | contract-builder | execution-contract.md | Contract validation |
+| 5 | **approved-for-build** | — | Approved contract | User approval |
+| 6 | **executing** | build-executor | Implemented code | Tests pass, review passed |
+| 7 | **debugging** | bug-investigator | Bug report, fix | Issue resolved |
+| 8 | **closing** | release-archivist | Verification report | All checks passed |
+| 9 | **abandoned** | — | — | Terminal state |
 
-> *ui-design 状态仅对前端项目自动启用（通过 package.json 和目录结构检测）。
+> \*The ui-design state is automatically enabled for frontend projects (detected via package.json and directory structure).
 
-### 自动状态修复
+### Automatic State Repair
 
-每次上下文恢复时，sFlow 会重新检测当前产物状态，自动修复不一致：
+On each context restoration, sFlow re-detects current artifact state and automatically repairs inconsistencies:
 
-| 状态文件说 | 但产物显示 | 自动修复 |
-|-----------|----------|---------|
-| `exploring` | proposal.md 存在 | → 跳转到 `specifying` |
-| `specifying` | design.md + tasks.md 已生成 | → 跳转到 `bridging` |
-| `bridging` | execution-contract.md 已批准 | → 跳转到 `approved-for-build` |
-| `approved-for-build` | 所有任务已完成 | → 跳转到 `closing` |
-| `executing` | 合约已过期 | → 回退到 `bridging` |
-
----
-
-## iFlow 工作流状态
-
-iFlow 有 **6 个工作流状态**，形成持续循环：discuss → research → plan → execute → verify → ship → (回到 discuss)
-
-| # | 状态 | 子智能体 | 产物 | 关卡 |
-|---|------|---------|------|------|
-| 1 | **discussing**（讨论） | iflow-discuss-planner | 澄清的需求、用户决策 | 用户确认 |
-| 2 | **researching**（研究） | iflow-researcher | CONTEXT.md（目标、约束、研究发现） | 研究完成 |
-| 3 | **planning**（规划） | iflow-discuss-planner | PLAN.md（XML 任务、波次依赖） | 计划校验 |
-| 4 | **executing**（执行） | iflow-plan-executor | 实现的代码 | 测试通过、偏差已处理 |
-| 5 | **verifying**（验证） | iflow-verifier | VERIFICATION.md（BLOCKER/WARNING） | 全部检查通过 |
-| 6 | **shipping**（发布） | iflow-shipper | UAT.md、PR/分支 | 发布完成，回到 discuss |
-
-### 与 sFlow 的关键差异
-
-| 维度 | sFlow | iFlow |
-|------|-------|-------|
-| **流程形状** | 线性管道（9 状态，终止于 closed/abandoned） | 循环（6 状态，ship 后回到 discuss） |
-| **产物** | proposal.md, specs/, design.md, tasks.md, execution-contract.md | CONTEXT.md, PLAN.md, SUMMARY.md, VERIFICATION.md, UAT.md |
-| **状态目录** | `.sflow/` | `.iflow/` |
-| **方法论** | OpenSpec + Superpowers | GSD（Get Stuff Done） |
-| **范围缩减** | 由 guard hook 强制执行 | 在 agent prompt 中声明 scope reduction prohibition |
-| **验证立场** | 基于合约的校验 | 对抗性验证（adversarial stance） |
+| State file says | But artifacts show | Auto-repair |
+|----------------|-------------------|-------------|
+| `exploring` | proposal.md exists | → Jump to `specifying` |
+| `specifying` | design.md + tasks.md generated | → Jump to `bridging` |
+| `bridging` | execution-contract.md approved | → Jump to `approved-for-build` |
+| `approved-for-build` | All tasks completed | → Jump to `closing` |
+| `executing` | Contract expired | → Fall back to `bridging` |
 
 ---
 
-## 智能体
+## iFlow Workflow States
 
-### sFlow 智能体
+iFlow has **6 workflow states**, forming a continuous cycle: discuss → research → plan → execute → verify → ship → (back to discuss)
 
-| 智能体 | 模式 | 说明 |
-|--------|------|------|
-| **sFlow** | 主编排器 | 工作流总控，检测状态 → 路由到子智能体，不直接写代码 |
-| **need-explorer** | 子智能体 | 需求澄清：用户需求模糊时提问，文档化需求 |
-| **spec-writer** | 子智能体 | 生成 proposal.md、规格、设计、任务、ui-design.md |
-| **contract-builder** | 子智能体 | 创建执行合约，含边界控制、测试计划 |
-| **build-executor** | 子智能体 | TDD/SDD 执行器，实现代码并按批次审查 |
-| **bug-investigator** | 子智能体 | 系统化调试，诊断失败原因并修复 |
-| **code-reviewer** | 子智能体 | 对照规格审查代码质量 |
-| **release-archivist** | 子智能体 | 验证、归档、关闭变更 |
-| **spec-merger** | 子智能体 | 增量规格变更合并 |
-| **ui-implementer** | 子智能体 | 前端 UI 实现，融合 9 项前端专业技能 |
+| # | State | Subagent | Artifact | Gate |
+|---|-------|----------|----------|------|
+| 1 | **discussing** | iflow-discuss-planner | Clarified requirements, user decisions | User confirmation |
+| 2 | **researching** | iflow-researcher | CONTEXT.md (goals, constraints, research findings) | Research complete |
+| 3 | **planning** | iflow-discuss-planner | PLAN.md (XML tasks, wave dependencies) | Plan validated |
+| 4 | **executing** | iflow-plan-executor | Implemented code | Tests pass, deviations handled |
+| 5 | **verifying** | iflow-verifier | VERIFICATION.md (BLOCKER/WARNING) | All checks pass |
+| 6 | **shipping** | iflow-shipper | UAT.md, PR/branch | Shipped, return to discuss |
 
-### iFlow 智能体
+### Key Differences from sFlow
 
-| 智能体 | 模式 | 说明 |
-|--------|------|------|
-| **iFlow** | 主编排器 | 循环工作流总控，6 状态编排，不直接写代码 |
-| **iflow-discuss-planner** | 子智能体 | 讨论 + 规划：澄清需求、生成 PLAN.md（XML 任务 + 波次依赖） |
-| **iflow-plan-executor** | 子智能体 | 执行器：4 条偏差规则（自动修复 bug → 自动补全关键功能 → 自动修复阻塞 → 架构变更需询问） |
-| **iflow-verifier** | 子智能体 | 对抗性验证：目标反向验证、BLOCKER/WARNING 分类、3 级产物检查 |
-| **iflow-researcher** | 子智能体 | 技术研究：发现等级（0-3）、工具优先级链、置信度标记 |
-| **iflow-shipper** | 子智能体 | 发布：创建 PR、生成 UAT.md、管理分支生命周期 |
-
-### UI Implementer 子智能体
-
-前端 UI 实现专用子智能体，融合了 9 项前端专业技能，由 `skills/ui-implementer/SKILL.md` 统一注入：
-
-| 技能来源 | 作用 | 说明 |
-|---------|------|------|
-| **taste-skill** | 设计品味控制 | 三旋钮设计系统、Design Read、AI 反模式禁令 |
-| **impeccable** | 审查修复 | 生产级设计准则、Absolute Bans、交互规范 |
-| **ui-ux-pro-max** | 视觉与交互 | 50+ 风格、调色板、字体配对 |
-| **frontend-design** | 页面设计 | 组件布局与整页设计 |
-| **shadcn-ui** | 组件库模式 | 组件选择、安装配置、主题定制 |
-| **svg-architect** | SVG 图标设计 | 图标库选择、自定义 SVG 规范 |
-| **polish** | 质量终检 | 间距系统、类名语义、响应式适配 |
-| **frontend-code-review** | 代码质量 | 代码扫描、严重级别分级 |
-| **frontend-performance-optimization** | 性能优化 | 加载/运行时性能、Core Web Vitals |
-
-**调用方式**（双重入口）：
-- **SFlow 直接委托** — 用于后工作流的小型前端修补
-- **build-executor 委托** — 在 SDD 执行模式中，前端任务自动路由到 ui-implementer
-
-**可选增强**（检测到 agnesmore provider 时自动启用）：
-- `agnes_image_generate` 工具 — 生成产品图片、轮播图、卡片背景等
-- `agnes_video_generate` 工具 — 生成页面背景视频、产品演示视频等
-
-### 路由原则
-
-- **NEVER** 自己实现代码 — 总是委托给子智能体
-- **NEVER** 跳过状态 — 必须按顺序通过管线
-- **NEVER** 自己批准自己的合约 — 用户必须批准
-- **NEVER** 未经验证就关闭 — release-archivist 必须先验证
+| Dimension | sFlow | iFlow |
+|-----------|-------|-------|
+| **Flow shape** | Linear pipeline (9 states, terminates at closed/abandoned) | Cyclic (6 states, ship returns to discuss) |
+| **Artifacts** | proposal.md, specs/, design.md, tasks.md, execution-contract.md | CONTEXT.md, PLAN.md, SUMMARY.md, VERIFICATION.md, UAT.md |
+| **State directory** | `.sflow/` | `.iflow/` |
+| **Methodology** | OpenSpec + Superpowers | GSD (Get Stuff Done) |
+| **Scope reduction** | Enforced by guard hook | Declared in agent prompt as scope reduction prohibition |
+| **Verification stance** | Contract-based validation | Adversarial verification |
 
 ---
 
-## 工具
+## Agents
 
-### sFlow 原生工具
+### sFlow Agents
 
-| 工具 | 说明 |
-|------|------|
-| `workflow_router` | 检测 sFlow 工作流状态，路由到对应子智能体 |
-| `call_flow_agent` | **核心**：向子智能体委派任务（支持同步/异步，sFlow 和 iFlow 共用） |
-| `flowagent_output` | 获取异步子智能体的执行结果 |
-| `flowagent_cancel` | 取消正在运行的异步子智能体任务 |
-| `contract_validator` | 校验执行合约的正确性和完整性 |
-| `artifact_inspector` | 审查规划产物的完整性和一致性 |
-| `record_decision_point` | 记录决策点（DP-0 至 DP-5） |
+| Agent | Mode | Description |
+|-------|------|-------------|
+| **sFlow** | Main orchestrator | Workflow controller: detects state → routes to subagent, never writes code directly |
+| **need-explorer** | Subagent | Requirements clarification: asks questions when user needs are vague, documents requirements |
+| **spec-writer** | Subagent | Generates proposal.md, specs, design, tasks, ui-design.md |
+| **contract-builder** | Subagent | Creates execution contract with boundary control, test plan |
+| **build-executor** | Subagent | TDD/SDD executor: implements code and reviews by batch |
+| **bug-investigator** | Subagent | Systematic debugging: diagnoses failures and applies fixes |
+| **code-reviewer** | Subagent | Reviews code quality against specifications |
+| **release-archivist** | Subagent | Verifies, archives, and closes changes |
+| **spec-merger** | Subagent | Incremental spec change merging |
+| **ui-implementer** | Subagent | Frontend UI implementation, integrating 9 frontend specialized skills |
 
-### iFlow 原生工具
+### iFlow Agents
 
-| 工具 | 说明 |
-|------|------|
-| `iflow_router` | 检测 iFlow 工作流状态，从 `.iflow/` 目录产物推断当前状态 |
+| Agent | Mode | Description |
+|-------|------|-------------|
+| **iFlow** | Main orchestrator | Cyclic workflow controller: 6-state orchestration, never writes code directly |
+| **iflow-discuss-planner** | Subagent | Discuss + plan: clarifies requirements, generates PLAN.md (XML tasks + wave dependencies) |
+| **iflow-plan-executor** | Subagent | Executor: 4 deviation rules (auto-fix bugs → auto-add critical functionality → auto-fix blockers → ask about architectural changes) |
+| **iflow-verifier** | Subagent | Adversarial verification: goal-backward verification, BLOCKER/WARNING classification, 3-level artifact checks |
+| **iflow-researcher** | Subagent | Technical research: discovery levels (0-3), tool priority chain, confidence markers |
+| **iflow-shipper** | Subagent | Shipping: creates PR, generates UAT.md, manages branch lifecycle |
 
-### 产物校验工具集
+### UI Implementer Subagent
 
-| 工具 | 校验对象 |
-|------|---------|
-| `validate_spec` | 单份规格文件（SHALL/MUST 语句） |
-| `validate_proposal` | 提案文件（Why + What Changes） |
-| `validate_delta_spec` | 增量规格变更（ADDED/MODIFIED/REMOVED） |
-| `validate_tasks` | 任务定义完整性 |
-| `validate_contract` | 执行合约结构 |
-| `validate_design` | 架构决策、约束、实现方案 |
-| `validate_implementation` | 实现与规格/设计的一致性 |
-| `detect_sync_conflicts` | 多增量规格之间的同步冲突 |
+A dedicated frontend UI implementation subagent, integrating 9 frontend specialized skills via `skills/ui-implementer/SKILL.md`:
 
-### oh-my-openagent 工具（可选集成）
+| Skill Source | Role | Description |
+|-------------|------|-------------|
+| **taste-skill** | Design taste control | 3-knob design system, Design Read, AI anti-pattern prohibition |
+| **impeccable** | Review & fix | Production-grade design guidelines, Absolute Bans, interaction norms |
+| **ui-ux-pro-max** | Visual & interaction | 50+ styles, color palettes, font pairings |
+| **frontend-design** | Page design | Component layout and full-page design |
+| **shadcn-ui** | Component library patterns | Component selection, installation, theme customization |
+| **svg-architect** | SVG icon design | Icon library selection, custom SVG standards |
+| **polish** | Quality final check | Spacing system, class name semantics, responsive adaptation |
+| **frontend-code-review** | Code quality | Code scanning, severity grading |
+| **frontend-performance-optimization** | Performance optimization | Load/runtime performance, Core Web Vitals |
 
-当检测到 oh-my-openagent 已安装时，sFlow 自动启用以下工具：
+**Invocation** (dual entry):
+- **SFlow direct delegation** — for post-workflow small frontend patches
+- **build-executor delegation** — in SDD execution mode, frontend tasks are automatically routed to ui-implementer
 
-| 工具 | 说明 | 使用场景 |
-|------|------|---------|
-| `call_omo_agent` | 调用 explore（代码探索）或 librarian（文献研究） | Exploring/Specifying 阶段并行探索 |
-| `task` | 完整委托：类别模型选择 + 技能注入 | Build-executor 的 SDD 子任务分发 |
+**Optional enhancements** (auto-enabled when agnesmore provider is detected):
+- `agnes_image_generate` tool — generate product images, carousels, card backgrounds, etc.
+- `agnes_video_generate` tool — generate page background videos, product demo videos, etc.
 
-> **注**：未安装 oh-my-openagent 时，这些工具不可见，sFlow 完全通过 `call_flow_agent` 正常工作。
+### Routing Principles
+
+- **NEVER** implement code yourself — always delegate to subagents
+- **NEVER** skip states — must pass through the pipeline in order
+- **NEVER** approve your own contract — the user must approve
+- **NEVER** close without verification — release-archivist must verify first
 
 ---
 
-## 执行模式
+## Tools
 
-`build-executor` 支持三种执行模式，自动选择或用户覆盖：
+### sFlow Native Tools
 
-### 1. Inline 模式（直接执行）
+| Tool | Description |
+|------|-------------|
+| `workflow_router` | Detects sFlow workflow state, routes to the corresponding subagent |
+| `call_flow_agent` | **Core**: delegates tasks to subagents (supports sync/async, shared by sFlow and iFlow) |
+| `flowagent_output` | Retrieves results from async subagent tasks |
+| `flowagent_cancel` | Cancels a running async subagent task |
+| `contract_validator` | Validates execution contract correctness and completeness |
+| `artifact_inspector` | Reviews planning artifact completeness and consistency |
+| `record_decision_point` | Records decision points (DP-0 through DP-5) |
 
-**条件**：任务 ≤ 3 且无跨模块依赖
-**行为**：当前 agent 直接实现代码（TDD 纪律仍然适用）
-**适用**：小型变更、快速修复
+### iFlow Native Tools
 
-### 2. Batch Inline 模式（批次直接执行）
+| Tool | Description |
+|------|-------------|
+| `iflow_router` | Detects iFlow workflow state, infers current state from `.iflow/` directory artifacts |
 
-**条件**：任务 > 3 但全部在同一个模块内，无 API/Schema 变更，预估 ≤ 15 分钟
-**行为**：一次完成整个批次，每步仍执行 TDD 红-绿-重构循环
-**适用**：同一模块内的多项小改动
+### Artifact Validation Toolset
 
-### 3. SDD 模式（子智能体驱动开发）
+| Tool | Validates |
+|------|-----------|
+| `validate_spec` | Single spec file (SHALL/MUST statements) |
+| `validate_proposal` | Proposal file (Why + What Changes) |
+| `validate_delta_spec` | Incremental spec changes (ADDED/MODIFIED/REMOVED) |
+| `validate_tasks` | Task definition completeness |
+| `validate_contract` | Execution contract structure |
+| `validate_design` | Architecture decisions, constraints, implementation approach |
+| `validate_implementation` | Implementation conformance to spec/design |
+| `detect_sync_conflicts` | Sync conflicts across multiple delta specs |
 
-**条件**：跨模块变更、高风险任务、或有架构影响的变更
-**行为**：
-1. 为每个任务派发独立的 implementer 子智能体
-2. 每完成一批次进行 spec 合规 + 代码质量审查
-3. 最终进行全局审查
+### oh-my-openagent Tools (Optional Integration)
 
-当 **oh-my-openagent** 可用时，SDD 模式可进一步利用：
+When oh-my-openagent is detected, sFlow automatically enables these tools:
+
+| Tool | Description | Use Case |
+|------|-------------|----------|
+| `call_omo_agent` | Invokes explore (codebase exploration) or librarian (literature research) | Parallel exploration during Exploring/Specifying phases |
+| `task` | Full delegation: category model selection + skill injection | SDD sub-task distribution for build-executor |
+
+> **Note**: Without oh-my-openagent, these tools are not visible. sFlow works fully through `call_flow_agent`.
+
+---
+
+## Execution Modes
+
+`build-executor` supports three execution modes, auto-selected or user-overridden:
+
+### 1. Inline Mode
+
+**Condition**: Tasks ≤ 3 with no cross-module dependencies
+**Behavior**: Current agent implements code directly (TDD discipline still applies)
+**Use case**: Small changes, quick fixes
+
+### 2. Batch Inline Mode
+
+**Condition**: Tasks > 3 but all within the same module, no API/Schema changes, estimated ≤ 15 minutes
+**Behavior**: Entire batch completed in one pass, each step still follows TDD red-green-refactor cycle
+**Use case**: Multiple small changes within the same module
+
+### 3. SDD Mode (Subagent-Driven Development)
+
+**Condition**: Cross-module changes, high-risk tasks, or changes with architectural impact
+**Behavior**:
+1. Spawns independent implementer subagents for each task
+2. Runs spec compliance + code quality review per batch
+3. Final global review
+
+When **oh-my-openagent** is available, SDD mode can further leverage:
 
 ```bash
-# 前端任务：visual-engineering 类别 + shadcn-ui 技能
+# Frontend tasks: visual-engineering category + shadcn-ui skill
 task(category="visualEngineering", load_skills=["shadcn-ui"], run_in_background=true, prompt="...")
 
-# 后端任务：deep 类别
+# Backend tasks: deep category
 task(category="deep", load_skills=["programming"], run_in_background=true, prompt="...")
 
-# 简单修改：quick 类别
+# Simple modifications: quick category
 task(category="quick", prompt="Fix typo in README")
 ```
 
 ---
 
-## 执行纪律
+## Execution Discipline
 
-### TDD 铁律
+### TDD Iron Law
 
 ```
 NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
 ```
 
-| 阶段 | 操作 | 证据 |
-|------|------|------|
-| **RED** | 编写会失败的测试 | 运行测试，确认因预期原因失败 |
-| **GREEN** | 编写最小生产代码 | 测试通过（且所有其他测试仍通过） |
-| **REFACTOR** | 在测试保持绿色时清理代码 | 完整测试套件仍然通过 |
+| Phase | Action | Evidence |
+|-------|--------|----------|
+| **RED** | Write a test that fails | Run tests, confirm failure for expected reason |
+| **GREEN** | Write minimal production code | Tests pass (and all other tests still pass) |
+| **REFACTOR** | Clean up code while tests remain green | Full test suite still passes |
 
-### 文件边界控制
+### File Boundary Control
 
-每个任务在执行合约中声明 `read_files`（参考边界）和 `write_files`（修改边界）。
-提交前自动执行 `git diff --name-only` 验证，防止范围蔓延。
+Each task declares `read_files` (reference boundary) and `write_files` (modification boundary) in the execution contract.
+`git diff --name-only` is automatically run before commit to prevent scope creep.
 
-### 失败经验记录
+### Failure Lessons Registry
 
 ```bash
-# 每次调试退出时自动写入 .sflow/lessons.md
-# 每个任务开始前自动扫描 lessons.md 防止重蹈覆辙
+# Automatically written to .sflow/lessons.md on each debug exit
+# Automatically scanned before each task to prevent repeated mistakes
 ```
 
-### 检查点恢复
+### Checkpoint Recovery
 
 ```bash
-.sflow/subagent-progress.md  # 节点状态（implementing/review/done）
-.sflow/progress.md           # 批次完成进度
-.sflow/lessons.md            # 跨任务经验教训库
+.sflow/subagent-progress.md  # Node state (implementing/review/done)
+.sflow/progress.md           # Batch completion progress
+.sflow/lessons.md            # Cross-task lessons learned database
 ```
 
 ---
 
-## oh-my-openagent 集成
+## oh-my-openagent Integration
 
-sFlow 可自动检测 oh-my-openagent 插件并利用其增强工具，**无需任何额外配置**。
+sFlow can automatically detect the oh-my-openagent plugin and leverage its enhanced tools, **with zero additional configuration**.
 
-### 检测机制
+### Detection Mechanism
 
-在插件初始化阶段，sFlow 通过 `cfg.plugin` 列表检测 oh-my-openagent：
+During plugin initialization, sFlow detects oh-my-openagent via the `cfg.plugin` list:
 
 ```javascript
-// 自动检测，无需用户干预
+// Auto-detection, no user intervention required
 const hasOmo = cfg.plugin.some(p => 
   p === 'oh-my-openagent' || p === 'oh-my-opencode'
 );
 ```
 
-### 阶段增强映射
+### Phase Enhancement Mapping
 
-| sFlow 阶段 | 可用 omo 资源 | 增强效果 |
-|-----------|--------------|---------|
-| **exploring** | `call_omo_agent(explore)` 并行探索代码库 | need-explorer 获得代码库上下文 |
-| **specifying** | `call_omo_agent(librarian)` 研究外部文档 | spec-writer 获得 API 最佳实践参考 |
-| **bridging** | `task(category="deep")` 指定更优模型 | 复杂合约使用更强推理模型 |
-| **executing** | `task` 的类别 + 技能注入系统 | build-executor 按任务类型选择模型和技能 |
+| sFlow Phase | Available omo Resource | Enhancement |
+|-------------|----------------------|-------------|
+| **exploring** | `call_omo_agent(explore)` parallel codebase exploration | need-explorer gains codebase context |
+| **specifying** | `call_omo_agent(librarian)` external documentation research | spec-writer gains API best practice references |
+| **bridging** | `task(category="deep")` higher-quality model selection | Complex contracts use stronger reasoning models |
+| **executing** | `task` category + skill injection system | build-executor selects models and skills by task type |
 
-### SDD 任务分类策略
+### SDD Task Classification Strategy
 
-使用 `task` 工具时，按任务类型选择推荐类别：
+When using the `task` tool, select recommended categories by task type:
 
-| 任务类型 | 推荐类别 | 注入技能 | 场景 |
-|---------|---------|---------|------|
-| 前端 UI | `visualEngineering` | shadcn-ui, frontend-design | 页面、组件、样式 |
-| 后端逻辑 | `deep` | programming | API、服务、数据处理 |
-| 简单修改 | `quick` | — | 单文件变更、小修复 |
-| 文档 | `writing` | — | README、注释、文档 |
-| 架构 | `ultrabrain` | — | 复杂设计决策 |
+| Task Type | Recommended Category | Injected Skills | Scenario |
+|-----------|---------------------|-----------------|----------|
+| Frontend UI | `visualEngineering` | shadcn-ui, frontend-design | Pages, components, styling |
+| Backend logic | `deep` | programming | APIs, services, data processing |
+| Simple changes | `quick` | — | Single-file changes, small fixes |
+| Documentation | `writing` | — | README, comments, docs |
+| Architecture | `ultrabrain` | — | Complex design decisions |
 
-### 兼容性说明
+### Compatibility Notes
 
-- **无 oh-my-openagent**：sFlow 独立运行，所有功能正常
-- **有 oh-my-openagent**：sFlow 自动启用增强工具，编排器策略说明会动态包含 omo 章节
-- **两者都安装时**：工具名无冲突（sFlow 原生工具使用 `flowagent_*` 前缀）
-
----
-
-## 功能特性
-
-### 工作流管理
-
-- 9 状态工作流，自动状态检测与路由
-- 守卫条件防止非法状态转换
-- 自动状态修复（artifact ↔ state 不一致时自动修复）
-- 前后端项目自适应（前端自动插入 ui-design 状态）
-
-### 预设升级机制
-
-| 预设 | 降级条件 | 升级触发 |
-|------|---------|---------|
-| **hotfix** | ≤2 文件, 无架构变更 | 触及 3+ 文件、DB schema 改动等自动升级到 full |
-| **tweak** | ≤4 配置文件, 无代码变更 | 触及 5+ 文件、跨模块等自动升级到 full |
-| **full** | — | 标准流程 |
-
-### 增量规格管理
-
-- 跟踪每个变更的 ADDED/MODIFIED/REMOVED/RENAMED 规格
-- 自动检测跨变更的规格同步冲突
-- spec-merger 在关闭时合并增量规格回主线
-
-### 钩子系统
-
-| 钩子 | 触发时机 | 说明 |
-|------|---------|------|
-| `state_transition` | 状态转换时 | 记录转换日志 |
-| `artifact_validation` | 工具执行后 | 校验产物完整性 |
-| `guard` | 工具执行前 | 阻止非法操作（如未经批准就执行） |
-| `pre_process` | 消息处理前 | 注入上下文 |
-| `post_process` | 工具执行后 | 检测状态转换信号 |
-| `continuation` | 上下文压缩后 | 决定是否自动继续 |
+- **Without oh-my-openagent**: sFlow runs independently, all features work normally
+- **With oh-my-openagent**: sFlow automatically enables enhanced tools, orchestrator strategy notes dynamically include omo section
+- **Both installed**: No tool name conflicts (sFlow native tools use `flowagent_*` prefix)
 
 ---
 
-## 安装
+## Features
 
-### 通过 npm
+### Workflow Management
+
+- 9-state workflow with automatic state detection and routing
+- Guard conditions preventing invalid state transitions
+- Automatic state repair (artifact ↔ state inconsistency auto-repair)
+- Frontend/backend project adaptation (frontend projects auto-insert ui-design state)
+
+### Preset Upgrade Mechanism
+
+| Preset | Downgrade Condition | Upgrade Trigger |
+|--------|---------------------|-----------------|
+| **hotfix** | ≤2 files, no architecture changes | Touching 3+ files, DB schema changes, etc. auto-upgrades to full |
+| **tweak** | ≤4 config files, no code changes | Touching 5+ files, cross-module, etc. auto-upgrades to full |
+| **full** | — | Standard process |
+
+### Incremental Spec Management
+
+- Tracks ADDED/MODIFIED/REMOVED/RENAMED specs per change
+- Auto-detects spec sync conflicts across changes
+- spec-merger merges delta specs back to mainline on close
+
+### Hook System
+
+| Hook | Trigger | Description |
+|------|---------|-------------|
+| `state_transition` | On state transition | Logs transition |
+| `artifact_validation` | After tool execution | Validates artifact completeness |
+| `guard` | Before tool execution | Prevents illegal operations (e.g., executing without approval) |
+| `pre_process` | Before message processing | Injects context |
+| `post_process` | After tool execution | Detects state transition signals |
+| `continuation` | After context compression | Decides whether to auto-continue |
+
+---
+
+## Installation
+
+### Via npm
 
 ```bash
 npm install -g opencode-flow-engine
 ```
 
-### 从源码编译
+### Build from Source
 
 ```bash
 git clone https://gitee.com/opencode-plugin/opencode-flow-engine.git
@@ -403,11 +405,11 @@ npm run build
 
 ---
 
-## 配置
+## Configuration
 
-### OpenCode 配置
+### OpenCode Configuration
 
-在 `opencode.json` 中添加插件：
+Add the plugin to `opencode.json`:
 
 ```json
 {
@@ -415,7 +417,7 @@ npm run build
 }
 ```
 
-或向后兼容（旧插件名）：
+Or for backward compatibility (legacy plugin name):
 
 ```json
 {
@@ -423,7 +425,7 @@ npm run build
 }
 ```
 
-如需同时安装 oh-my-openagent：
+To install oh-my-openagent alongside:
 
 ```json
 {
@@ -431,22 +433,22 @@ npm run build
 }
 ```
 
-### 创建 .sflow/config.json
+### Create .sflow/config.json
 
 ```bash
-# 项目级配置（推荐）
+# Project-level configuration (recommended)
 sflow init
 
-# 用户级全局配置（所有项目共享）
+# User-level global configuration (shared across projects)
 sflow init --user
 ```
 
-配置加载优先级（从高到低）：
+Configuration loading priority (highest to lowest):
 
-1. **项目级 `.sflow/config.json`** — 覆盖用户级配置
-2. **用户级 `~/.config/opencode/opencode-flow-engine.json`** — 全局默认
+1. **Project-level `.sflow/config.json`** — overrides user-level config
+2. **User-level `~/.config/opencode/opencode-flow-engine.json`** — global defaults
 
-### 自定义智能体模型
+### Custom Agent Models
 
 ```json
 {
@@ -466,64 +468,66 @@ sflow init --user
 
 ---
 
-## 使用方式
+## Usage
 
-### 开启工作流
+### Start a Workflow
 
-选择 sFlow 或 iFlow agent 开始对话：
+Select the sFlow or iFlow agent to start a conversation:
 
 ```
-sFlow: "开始一个新功能" 或 "start a workflow"
-iFlow: "开始一个迭代" 或 "start an iteration"
+sFlow: "start a workflow"
+iFlow: "start an iteration"
 ```
 
-sFlow 会：
-1. 检测当前工作流状态
-2. 路由到对应子智能体
-3. 引导你逐步完成
+sFlow will:
+1. Detect the current workflow state
+2. Route to the corresponding subagent
+3. Guide you through the process step by step
 
-### 常用指令
+### Common Commands
 
-| 你说 | 动作 |
-|------|------|
-| "开始一个新功能" | 启动 sFlow 工作流 |
-| "开始一个迭代" | 启动 iFlow 工作流 |
-| "继续" | 继续当前工作流 |
-| "帮我看看" | 检查当前状态 |
-| "解释这个" | 解释当前状态或产物 |
-
-## 预设升级机制
-
-在工作流运行过程中，sFlow 持续监控范围。如果触及升级条件，自动提醒用户。
-
-### hotfix → full 升级条件
-
-任务中任何一项触发即升级：
-
-- 修改 3+ 个文件
-- 引入新模块/新接口/新依赖
-- 更改数据库 schema
-- 创建新公开 API
-- 范围超出单个函数/模块
-- 需要跨模块协调
-
-### tweak → full 升级条件
-
-- 修改 5+ 个文件
-- 需要跨模块协调
-- 需要 5+ 个新测试用例
-- 新增或删除配置项（不仅修改值）
-- 需要新能力不在原范围中
-- 影响已有规格（需要 delta spec）
+| You Say | Action |
+|---------|--------|
+| "start a workflow" | Launches sFlow workflow |
+| "start an iteration" | Launches iFlow workflow |
+| "continue" | Continues the current workflow |
+| "check status" | Checks current state |
+| "explain this" | Explains current state or artifact |
 
 ---
 
-## 智能体默认模型
+## Preset Upgrade Mechanism
 
-### sFlow 智能体
+During workflow execution, sFlow continuously monitors scope. If upgrade conditions are triggered, the user is automatically notified.
 
-| 智能体 | 默认模型 | 备用模型 |
-|--------|----------|----------|
+### hotfix → full Upgrade Conditions
+
+Any single item triggers an upgrade:
+
+- Modifying 3+ files
+- Introducing new modules/interfaces/dependencies
+- Changing database schema
+- Creating new public APIs
+- Scope exceeding a single function/module
+- Cross-module coordination required
+
+### tweak → full Upgrade Conditions
+
+- Modifying 5+ files
+- Cross-module coordination required
+- 5+ new test cases needed
+- Adding or removing configuration items (not just changing values)
+- New capabilities required that are outside the original scope
+- Affecting existing specifications (delta spec needed)
+
+---
+
+## Agent Default Models
+
+### sFlow Agents
+
+| Agent | Default Model | Fallback Models |
+|-------|---------------|-----------------|
 | sFlow | deepseek-v4-flash | glm-5.1, kimi-k2.6 |
 | need-explorer | kimi-k2.6 | glm-5.1, deepseek-v4-flash |
 | spec-writer | glm-5.1 | kimi-k2.6, deepseek-v4-flash |
@@ -534,10 +538,10 @@ sFlow 会：
 | release-archivist | mimo-v2.5-pro | mimo-v2.5, glm-5.1 |
 | spec-merger | mimo-v2.5 | mimo-v2.5-pro, glm-5.1 |
 
-### iFlow 智能体
+### iFlow Agents
 
-| 智能体 | 默认模型 | 备用模型 |
-|--------|----------|----------|
+| Agent | Default Model | Fallback Models |
+|-------|---------------|-----------------|
 | iFlow | deepseek-v4-flash | glm-5.1, kimi-k2.6 |
 | iflow-discuss-planner | kimi-k2.6 | glm-5.1, deepseek-v4-flash |
 | iflow-plan-executor | step-3.7-flash | deepseek-v4-flash, glm-5.1 |
@@ -547,57 +551,59 @@ sFlow 会：
 
 ---
 
-## 模型优先级
+## Model Priority
 
-模型选择遵循以下优先级（从高到低）：
+Model selection follows this priority (highest to lowest):
 
-1. **AgentOverrides**（编程传入的覆写参数）
-2. **createAgent 的 model 参数**
-3. **`.sflow/config.json` 配置文件**
-4. **代码内建的 DEFAULT_MODELS**
+1. **AgentOverrides** (programmatic override parameters)
+2. **createAgent's model parameter**
+3. **`.sflow/config.json` configuration file**
+4. **Built-in DEFAULT_MODELS**
 
-模型不可用时，按备用模型列表依次尝试。
+When a model is unavailable, the fallback model list is tried in order.
 
 ---
 
-## 项目结构
+## Project Structure
 
 ```
 opencode-flow-engine/
 ├── packages/
-│   ├── core/                    # 模式、校验、解析引擎
-│   ├── plugin-infra/            # 插件基础设施（智能体工厂、钩子、工具、功能）
+│   ├── core/                    # Schema, validation, parsing engine
+│   ├── plugin-infra/            # Plugin infrastructure (agent factories, hooks, tools, features)
 │   │   └── src/
-│   │       ├── agents/          # 基础设施：agent 构建器、类型、配置加载
-│   │       ├── hooks/           # 6 类插件的生命周期钩子 + iFlow guard
-│   │       ├── tools/           # 工具定义和实现（含 iflow-router）
-│   │       ├── features/        # 工作流管理器、状态管理器、MCP
-│   │       └── helpers/         # 轮询等辅助函数
-│   └── shared/                  # 共享工具函数
+│   │       ├── agents/          # Infrastructure: agent builders, types, config loading
+│   │       ├── hooks/           # 6 life-cycle hook types + iFlow guard
+│   │       ├── tools/           # Tool definitions and implementations (including iflow-router)
+│   │       ├── features/        # Workflow manager, state manager, MCP
+│   │       └── helpers/         # Polling and other utility functions
+│   └── shared/                  # Shared utility functions
 ├── workflows/
-│   ├── sflow/                   # SFlow 工作流定义
-│   │   ├── agents/              # 10 个 SFlow agent 工厂
-│   │   ├── skills/              # SFlow 技能定义（SKILL.md）
-│   │   └── templates/           # SFlow 产物模板
-│   └── iflow/                   # IFlow 工作流定义
-│       ├── agents/              # 6 个 IFlow agent 工厂
-│       ├── skills/              # IFlow 技能定义
-│       └── templates/           # IFlow 产物模板（CONTEXT.md, PLAN.md, SUMMARY.md, UAT.md）
-├── sflow-plugin.ts              # SFlow 专属 PluginModule
-├── iflow-plugin.ts              # IFlow 专属 PluginModule
-├── shared-plugin.ts             # 组合 PluginModule（默认导出）
-├── docs/                        # 技术文档
-├── config.example.json          # 配置示例
+│   ├── sflow/                   # SFlow workflow definitions
+│   │   ├── agents/              # 10 SFlow agent factories
+│   │   ├── skills/              # SFlow skill definitions (SKILL.md)
+│   │   └── templates/           # SFlow artifact templates
+│   └── iflow/                   # IFlow workflow definitions
+│       ├── agents/              # 6 IFlow agent factories
+│       ├── skills/              # IFlow skill definitions
+│       └── templates/           # IFlow artifact templates (CONTEXT.md, PLAN.md, SUMMARY.md, UAT.md)
+├── sflow-plugin.ts              # SFlow-specific PluginModule
+├── iflow-plugin.ts              # IFlow-specific PluginModule
+├── shared-plugin.ts             # Combined PluginModule (default export)
+├── docs/                        # Technical documentation
+├── config.example.json          # Example configuration
 └── .sflow/
-    └── config.json              # 项目配置（由 sflow init 生成）
+    └── config.json              # Project configuration (generated by sflow init)
 ```
 
 ---
 
-## 致谢
+## Acknowledgments
 
-- [OpenSpec](https://github.com/Fission-AI/OpenSpec) — 规划引擎
-- [Superpowers](https://github.com/obra/superpowers) — 执行纪律
-- [GSD (Get Shit Done)](https://github.com/telestrial-org/get-shit-done) — iFlow 迭代方法论来源
-- [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) — 架构灵感 + 可选集成
-- [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) — 验证引擎移植来源
+- [OpenCode](https://github.com/anomalyco/opencode) — Runtime platform, plugin mechanism
+- [OpenSpec](https://github.com/Fission-AI/OpenSpec) — Planning engine
+- [Superpowers](https://github.com/obra/superpowers) — Execution discipline
+- [GSD (Get Shit Done)](https://github.com/telestrial-org/get-shit-done) — iFlow iterative methodology source
+- [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) — Architecture inspiration + optional integration
+- [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) — Validation engine port source
+- [grill-me](https://github.com/mattpocock/skills/tree/main/skills/productivity/grilling) — Requirements clarification reference
