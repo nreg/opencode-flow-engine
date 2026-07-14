@@ -14,9 +14,10 @@ import { parseFileBoundaryPatterns, matchesBoundary, getActiveTaskId, boundaryCa
 import { fileExists, readFile, readJsonFile, directoryExists, isContractStale, getContractStalenessReport } from "@opencode-flow-engine/shared";
 import { sharedValidator, HOTFIX_UPGRADE_THRESHOLDS, TWEAK_UPGRADE_THRESHOLDS } from "@opencode-flow-engine/core";
 import { checkArtifactPreflight, findPreflightState } from "../features/artifact-preflight.js";
-import { readProgressFile, searchLessonsInFile, getStateFilePath } from "../features/state-manager.js";
+import { readProgressFile, searchLessonsInFile, getStateFilePath, findProjectRoot } from "../features/state-manager.js";
 import { getHasOmoPlugin } from "../agents/agent-tools.js";
 import { iflowDirectoryExists, checkIFlowGuards } from "./iflow-guard.js";
+import { checkIFlowFileWriteGuard, checkIFlowLessonsGuard, checkIFlowProgressAntiRepeatGuard, checkIFlowArtifactAndPhaseConsistency, checkIFlowOmoUsageGuard } from "./guard/iflow-shared-guards.js";
 
 async function detectActiveWorkflow(changeDir: string): Promise<'iflow' | 'sflow' | 'none'> {
   const iflowExists = await directoryExists(`${changeDir}/.iflow`);
@@ -124,8 +125,9 @@ export function createGuardHook(): HookHandler {
 async function checkArtifactAndPhaseConsistency(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
+  // IFlow: use dedicated iFlow artifact consistency guard
   if (activeWorkflow === 'iflow') {
-    return { success: true };
+    return checkIFlowArtifactAndPhaseConsistency(changeDir);
   }
 
   const dirExists = await fileExists(changeDir);
@@ -190,9 +192,8 @@ async function checkArtifactAndPhaseConsistency(changeDir: string, activeWorkflo
 async function checkPresetUpgrade(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
-  if (activeWorkflow === 'iflow') {
-    return { success: true };
-  }
+  // IFlow has no hotfix/tweak mode — uses full-cycle only
+  if (activeWorkflow === 'iflow') return { success: true };
 
   const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
   const mode = stateData?.mode;
@@ -264,9 +265,8 @@ async function checkPresetUpgrade(changeDir: string, activeWorkflow: 'iflow' | '
 async function checkContractStalenessGuard(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
-  if (activeWorkflow === 'iflow') {
-    return { success: true };
-  }
+  const hasContract = await fileExists(`${changeDir}/execution-contract.md`);
+  if (!hasContract) return { success: true };
 
   const stale = await isContractStale(changeDir);
   if (stale) {
@@ -292,9 +292,8 @@ async function checkContractStalenessGuard(changeDir: string, activeWorkflow: 'i
 async function checkTaskCompletion(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
-  if (activeWorkflow === 'iflow') {
-    return { success: true };
-  }
+  // IFlow uses PLAN.md (GSD-style) rather than SFlow's tasks.md
+  if (activeWorkflow === 'iflow') return { success: true };
 
   const tasksContent = await readFile(`${changeDir}/tasks.md`);
   if (!tasksContent) return { success: true };
@@ -322,7 +321,7 @@ async function checkProgressAntiRepeatGuard(changeDir: string, data?: Record<str
   if (!changeDir || !data) return { success: true };
 
   if (activeWorkflow === 'iflow') {
-    return { success: true };
+    return checkIFlowProgressAntiRepeatGuard(changeDir, data);
   }
 
   const progress = await readProgressFile(changeDir);
@@ -386,7 +385,7 @@ async function checkFileWriteGuard(changeDir: string, data?: Record<string, unkn
   if (!changeDir || !data) return { success: true };
 
   if (activeWorkflow === 'iflow') {
-    return { success: true };
+    return checkIFlowFileWriteGuard(changeDir, data);
   }
 
   const toolName = data.toolName as string | undefined;
@@ -477,9 +476,8 @@ async function checkFileWriteGuard(changeDir: string, data?: Record<string, unkn
 async function checkReadFilesBoundary(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
 
-  if (activeWorkflow === 'iflow') {
-    return { success: true };
-  }
+  const hasContract = await fileExists(`${changeDir}/execution-contract.md`);
+  if (!hasContract) return { success: true };
 
   const toolName = data.toolName as string | undefined;
   if (toolName !== 'read') return { success: true };
@@ -533,9 +531,8 @@ async function checkReadFilesBoundary(changeDir: string, data?: Record<string, u
 async function checkGitCommitBoundary(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
 
-  if (activeWorkflow === 'iflow') {
-    return { success: true };
-  }
+  const hasContract = await fileExists(`${changeDir}/execution-contract.md`);
+  if (!hasContract) return { success: true };
 
   const toolName = data.toolName as string | undefined;
   if (toolName !== 'bash') return { success: true };
@@ -701,7 +698,7 @@ async function checkLessonsGuard(changeDir: string, data?: Record<string, unknow
   if (!changeDir || !data) return { success: true };
 
   if (activeWorkflow === 'iflow') {
-    return { success: true };
+    return checkIFlowLessonsGuard(changeDir, data);
   }
 
   const agent = (data.agent as string) || '';
@@ -763,9 +760,8 @@ async function checkLessonsGuard(changeDir: string, data?: Record<string, unknow
 async function checkDebuggingState(changeDir: string, action?: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
-  if (activeWorkflow === 'iflow') {
-    return { success: true };
-  }
+  const hasSflowState = await fileExists(`${changeDir}/${getStateFilePath('sflow')}`);
+  if (!hasSflowState) return { success: true };
 
   const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
   if (stateData?.state !== "debugging") return { success: true };
@@ -795,7 +791,7 @@ async function checkOmoUsageGuard(changeDir: string, data?: Record<string, unkno
   if (!changeDir || !data) return { success: true };
 
   if (activeWorkflow === 'iflow') {
-    return { success: true };
+    return checkIFlowOmoUsageGuard(changeDir, data);
   }
 
   const toolName = (data.toolName as string) || '';

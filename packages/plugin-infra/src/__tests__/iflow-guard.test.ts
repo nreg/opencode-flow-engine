@@ -347,3 +347,390 @@ describe('checkIFlowGuards — Nyquist Rule Guard', () => {
     expect(result.warnings).toBeDefined();
   });
 });
+
+// ─── checkIFlowGuards — deviation compliance content validation (Batch 2) ─────
+
+describe('checkIFlowGuards — deviation compliance content validation', () => {
+  const dir = tempDir('iflow-deviation-content');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await ensureDir(dir + '/.iflow');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should warn when deviation entry is missing Problem sub-field', async () => {
+    await writeIFlowArtifact(dir, 'SUMMARY.md', `# Summary
+
+## Deviations
+
+- **Rule 1**: Skipped design review
+  - **Action**: Proceeded without review
+  - **Result**: No issues found
+`);
+
+    const result = await checkIFlowGuards(dir, { toolName: 'write', filePath: 'test.ts' });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.some(w => w.includes('Problem'))).toBe(true);
+  });
+
+  it('should warn when deviation entry is missing Action sub-field', async () => {
+    await writeIFlowArtifact(dir, 'SUMMARY.md', `# Summary
+
+## Deviations
+
+- **Rule 2**: Used different approach
+  - **Problem**: Original approach too slow
+  - **Result**: Faster execution
+`);
+
+    const result = await checkIFlowGuards(dir, { toolName: 'write', filePath: 'test.ts' });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.some(w => w.includes('Action'))).toBe(true);
+  });
+
+  it('should warn when deviation entry is missing Result sub-field', async () => {
+    await writeIFlowArtifact(dir, 'SUMMARY.md', `# Summary
+
+## Deviations
+
+- **Rule 3**: Changed implementation order
+  - **Problem**: Dependency issue
+  - **Action**: Reordered tasks
+`);
+
+    const result = await checkIFlowGuards(dir, { toolName: 'write', filePath: 'test.ts' });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.some(w => w.includes('Result'))).toBe(true);
+  });
+
+  it('should not warn when deviation entry has all required sub-fields', async () => {
+    await writeIFlowArtifact(dir, 'SUMMARY.md', `# Summary
+
+## Deviations
+
+- **Rule 1**: Skipped design review
+  - **Problem**: Time constraint
+  - **Action**: Proceeded without review
+  - **Result**: No issues found
+`);
+
+    const result = await checkIFlowGuards(dir, { toolName: 'write', filePath: 'test.ts' });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+  });
+
+  it('should warn when deviation entry is missing multiple sub-fields', async () => {
+    await writeIFlowArtifact(dir, 'SUMMARY.md', `# Summary
+
+## Deviations
+
+- **Rule 4**: Major deviation
+  (no sub-fields at all)
+`);
+
+    const result = await checkIFlowGuards(dir, { toolName: 'write', filePath: 'test.ts' });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.some(w => w.includes('Problem') && w.includes('Action') && w.includes('Result'))).toBe(true);
+  });
+
+  it('should warn when SUMMARY.md exists but has no Deviations section', async () => {
+    await writeIFlowArtifact(dir, 'SUMMARY.md', `# Summary
+
+## What was done
+- Implemented feature A
+- Fixed bug B
+`);
+
+    const result = await checkIFlowGuards(dir, { toolName: 'write', filePath: 'test.ts' });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.some(w => w.includes('Deviations') || w.includes('missing'))).toBe(true);
+  });
+
+  it('should warn when Deviations section exists but entries do not reference Rule numbers', async () => {
+    await writeIFlowArtifact(dir, 'SUMMARY.md', `# Summary
+
+## Deviations
+
+- Skipped design review due to time constraint
+- Used different approach for data loading
+`);
+
+    const result = await checkIFlowGuards(dir, { toolName: 'write', filePath: 'test.ts' });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.some(w => w.includes('Rule'))).toBe(true);
+  });
+
+  it('should return success when SUMMARY.md does not exist', async () => {
+    // No SUMMARY.md — guard should pass silently
+    const result = await checkIFlowGuards(dir, { toolName: 'write', filePath: 'test.ts' });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+  });
+});
+
+// ─── checkIFlowGuards — scope reduction guard (additional coverage) ────────────
+
+describe('checkIFlowGuards — scope reduction guard (additional coverage)', () => {
+  const dir = tempDir('iflow-scope-reduction-extra');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await ensureDir(dir + '/.iflow');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should block write to PLAN.md with "hardcoded for now" pattern', async () => {
+    await writeIFlowArtifact(dir, 'PLAN.md', '# Plan\n\n## Tasks\n- Build auth module with hardcoded for now config');
+    await writeIFlowArtifact(dir, 'CONTEXT.md', '# Goals\n\n## Goal\n- Dynamic configuration system');
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'PLAN.md',
+    });
+    expect(result.block).toBe(true);
+    expect(result.blockReason).toContain('Scope reduction');
+  });
+
+  it('should block write to PLAN.md with "future enhancement" pattern', async () => {
+    await writeIFlowArtifact(dir, 'PLAN.md', '# Plan\n\n## Tasks\n- Build basic version, future enhancement planned');
+    await writeIFlowArtifact(dir, 'CONTEXT.md', '# Goals\n\n## Goal\n- Full-featured system');
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'PLAN.md',
+    });
+    expect(result.block).toBe(true);
+    expect(result.blockReason).toContain('Scope reduction');
+  });
+
+  it('should not block write to non-PLAN.md files', async () => {
+    await writeIFlowArtifact(dir, 'PLAN.md', '# Plan\n\n## Tasks\n- Build v1 simplified version');
+    await writeIFlowArtifact(dir, 'CONTEXT.md', '# Goals\n\n## Goal\n- Full system');
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'src/feature.ts',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should not block edit operation on PLAN.md without reduction language', async () => {
+    await writeIFlowArtifact(dir, 'PLAN.md', '# Plan\n\n## Tasks\n- Build complete authentication system');
+    await writeIFlowArtifact(dir, 'CONTEXT.md', '# Goals\n\n## Goal\n- Full authentication system');
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'edit',
+      filePath: 'PLAN.md',
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+// ─── checkIFlowGuards — cyclic transition guard (additional coverage) ──────────
+
+describe('checkIFlowGuards — cyclic transition guard (additional coverage)', () => {
+  const dir = tempDir('iflow-cyclic-transition-extra');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await ensureDir(dir + '/.iflow');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should block invalid transition: researching → shipping', async () => {
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+      currentState: 'researching',
+      targetState: 'shipping',
+    });
+    expect(result.block).toBe(true);
+    expect(result.blockReason).toContain('Invalid transition');
+  });
+
+  it('should block invalid transition: planning → shipping', async () => {
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+      currentState: 'planning',
+      targetState: 'shipping',
+    });
+    expect(result.block).toBe(true);
+    expect(result.blockReason).toContain('Invalid transition');
+  });
+
+  it('should allow valid transition: researching → planning', async () => {
+    await writeIFlowArtifact(dir, 'CONTEXT.md', '# Context');
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+      currentState: 'researching',
+      targetState: 'planning',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should allow valid transition: researching → discussing (go back)', async () => {
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+      currentState: 'researching',
+      targetState: 'discussing',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should allow valid transition: planning → researching (go back)', async () => {
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+      currentState: 'planning',
+      targetState: 'researching',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should allow valid transition: executing → planning (go back)', async () => {
+    await writeIFlowArtifact(dir, 'CONTEXT.md', '# Context');
+    await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+      currentState: 'executing',
+      targetState: 'planning',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should allow valid transition: verifying → executing (go back)', async () => {
+    await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+      currentState: 'verifying',
+      targetState: 'executing',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should return success when currentState or targetState is not a valid IFlow state', async () => {
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+      currentState: 'unknown_state',
+      targetState: 'discussing',
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+// ─── checkIFlowGuards — artifact completeness guard (additional coverage) ──────
+
+describe('checkIFlowGuards — artifact completeness guard (additional coverage)', () => {
+  const dir = tempDir('iflow-artifact-completeness-extra');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await ensureDir(dir + '/.iflow');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should block transition to verifying when PLAN.md or SUMMARY.md is missing', async () => {
+    await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
+    // SUMMARY.md is missing
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+      targetState: 'verifying',
+    });
+    expect(result.block).toBe(true);
+    expect(result.blockReason).toContain('SUMMARY.md');
+  });
+
+  it('should allow transition to verifying when both PLAN.md and SUMMARY.md exist', async () => {
+    await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
+    await writeIFlowArtifact(dir, 'SUMMARY.md', '# Summary');
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+      targetState: 'verifying',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should block transition to shipping when VERIFICATION.md is missing', async () => {
+    await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
+    await writeIFlowArtifact(dir, 'SUMMARY.md', '# Summary');
+    // VERIFICATION.md is missing
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+      targetState: 'shipping',
+    });
+    expect(result.block).toBe(true);
+    expect(result.blockReason).toContain('VERIFICATION.md');
+  });
+
+  it('should allow transition to shipping when all required artifacts exist', async () => {
+    await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
+    await writeIFlowArtifact(dir, 'SUMMARY.md', '# Summary');
+    await writeIFlowArtifact(dir, 'VERIFICATION.md', '# Verification');
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+      targetState: 'shipping',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should allow transition to discussing/researching with no required artifacts', async () => {
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+      targetState: 'discussing',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should auto-detect state from state.json when targetState is not provided', async () => {
+    await writeIFlowState(dir, 'executing');
+    // PLAN.md is missing — should block
+
+    const result = await checkIFlowGuards(dir, {
+      toolName: 'write',
+      filePath: 'test.ts',
+    });
+    expect(result.block).toBe(true);
+    expect(result.blockReason).toContain('PLAN.md');
+  });
+});

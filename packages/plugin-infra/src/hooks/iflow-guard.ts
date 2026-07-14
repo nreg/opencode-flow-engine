@@ -412,5 +412,36 @@ async function checkDeviationComplianceGuard(changeDir: string, data?: Record<st
     };
   }
 
+  // Content validation: check each deviation entry has Problem, Action, Result sub-fields
+  const warnings: string[] = [];
+  const sections = summaryContent.split(/^## /m);
+  const deviationsSection = sections.find(s => s.startsWith('Deviations'));
+  if (deviationsSection) {
+    const deviationEntries = deviationsSection.split(/\n(?=- \*\*Rule)/).filter(s => s.trim().startsWith('- **Rule'));
+    for (const entry of deviationEntries) {
+      const ruleMatch = entry.match(/\*\*Rule\s*(\d+)\*\*/i);
+      const ruleNum = ruleMatch ? ruleMatch[1] : 'unknown';
+      const missingFields: string[] = [];
+
+      if (!/\*\*Problem\*\*/i.test(entry) && !/\*\*问题\*\*/i.test(entry)) {
+        missingFields.push('Problem');
+      }
+      if (!/\*\*Action\*\*/i.test(entry) && !/\*\*行动\*\*/i.test(entry) && !/\*\*操作\*\*/i.test(entry)) {
+        missingFields.push('Action');
+      }
+      if (!/\*\*Result\*\*/i.test(entry) && !/\*\*结果\*\*/i.test(entry)) {
+        missingFields.push('Result');
+      }
+
+      if (missingFields.length > 0) {
+        warnings.push(`[IFLOW] Deviation Rule ${ruleNum} is missing sub-fields: ${missingFields.join(', ')}. Each deviation should have Problem, Action, and Result.`);
+      }
+    }
+  }
+
+  if (warnings.length > 0) {
+    return { success: true, warnings };
+  }
+
   return { success: true };
 }

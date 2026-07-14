@@ -154,3 +154,16 @@ export async function ensureDir(dirPath: string): Promise<void> {
     // Directory might already exist or be created concurrently
   }
 }
+
+/**
+ * Remove a file (no-op if file does not exist)
+ */
+export async function removeFile(path: string): Promise<boolean> {
+  try {
+    const { unlink } = await import('fs/promises');
+    await unlink(path);
+    return true;
+  } catch {
+    return false;
+  }
+}

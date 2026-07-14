@@ -4,7 +4,7 @@
  */
 
 import type { ToolDefinition, ToolContext, ToolResult } from "./types.js";
-import { fileExists, directoryExists, readJsonFile, ensureDir, writeJsonFile } from "@opencode-flow-engine/shared";
+import { fileExists, directoryExists, readJsonFile, ensureDir, writeJsonFile, writeFile, removeFile } from "@opencode-flow-engine/shared";
 
 /**
  * IFlow workflow states in cyclic order
@@ -46,7 +46,7 @@ const IFLOW_INTENT_PATTERNS: Array<{
   { pattern: /执行|实现|implement|编码|build|开发|写代码/i, state: 'executing', description: 'Implementation' },
   { pattern: /验证|verify|测试|检查|审核|review|质量/i, state: 'verifying', description: 'Verification' },
   { pattern: /发布|ship|上线|部署|pr|merge|归档/i, state: 'shipping', description: 'Ship/release' },
-  { pattern: /下一轮|下一轮|继续|iterate|cycle|next/i, state: 'discussing', description: 'Next iteration' },
+  { pattern: /下一轮|继续|iterate|cycle|next/i, state: 'discussing', description: 'Next iteration' },
   { pattern: /开始|start|新功能|new|feature|init/i, state: 'discussing', description: 'Start new feature' },
 ];
 
@@ -154,6 +154,21 @@ async function detectIFlowState(changeDir: string): Promise<{
       iteration: result.iteration,
       updatedAt: new Date().toISOString(),
     });
+  }
+
+  // Manage EXECUTING marker file lifecycle
+  const executingPath = `${iflowDir}/EXECUTING`;
+  if (result.state === 'executing' && !result.artifacts.EXECUTING) {
+    await ensureDir(iflowDir);
+    await writeFile(executingPath, JSON.stringify({
+      enteredAt: new Date().toISOString(),
+      fromState: result.previousState || previousState || 'planning',
+      iteration: result.iteration,
+    }));
+    result.artifacts.EXECUTING = true;
+  } else if (result.state !== 'executing' && result.artifacts.EXECUTING) {
+    await removeFile(executingPath);
+    result.artifacts.EXECUTING = false;
   }
 
   return result;

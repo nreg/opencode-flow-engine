@@ -618,17 +618,19 @@ export async function detectWorkflowState(
     reasons.push('Contract approved, ready for implementation');
   }
 
-  // Contract staleness override
+  // Contract staleness override — only applies to sFlow context
   if (artifacts.contract) {
-    try {
-      const { isContractStale: checkStale } = await import('@opencode-flow-engine/shared');
-      const stale = await checkStale(changeDir);
-      if (stale) {
-        state = 'bridging';
-        skill = 'contract-builder';
-        reasons.push('Contract is stale, needs regeneration');
-      }
-    } catch { /* ignore staleness check failures */ }
+    const hasSFlowDir = await directoryExists(`${changeDir}/.sflow`);
+    if (hasSFlowDir) {
+      try {
+        const stale = await checkContractStale(changeDir);
+        if (stale) {
+          state = 'bridging';
+          skill = 'contract-builder';
+          reasons.push('Contract is stale, needs regeneration');
+        }
+      } catch { /* ignore staleness check failures */ }
+    }
   }
 
   return {

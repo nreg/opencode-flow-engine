@@ -19,13 +19,14 @@ describe('Hook Composer', () => {
       expect(hooks).toContain('guard');
       expect(hooks).toContain('artifact_validation');
       expect(hooks).toContain('state_transition');
+      expect(hooks).toContain('iflow_state_transition');
     });
 
     it('should have correct hook count', () => {
       composer.initialize();
       const count = composer.getHookCount();
-      expect(count.total).toBe(8);
-      expect(count.enabled).toBe(8);
+      expect(count.total).toBe(9);
+      expect(count.enabled).toBe(9);
       expect(count.disabled).toBe(0);
     });
   });
@@ -52,6 +53,13 @@ describe('Hook Composer', () => {
       expect(hook!.name).toBe('state_transition');
     });
 
+    it('should return iflow_state_transition hook', () => {
+      composer.initialize();
+      const hook = composer.getHook('iflow_state_transition');
+      expect(hook).toBeDefined();
+      expect(hook!.name).toBe('iflow_state_transition');
+    });
+
     it('should return undefined for unknown hook', () => {
       composer.initialize();
       const hook = composer.getHook('unknown' as any);
@@ -64,7 +72,7 @@ describe('Hook Composer', () => {
       composer.initialize();
       composer.disableHook('guard');
       const count = composer.getHookCount();
-      expect(count.enabled).toBe(7);
+      expect(count.enabled).toBe(8);
       expect(count.disabled).toBe(1);
     });
 
@@ -79,6 +87,7 @@ describe('Hook Composer', () => {
       composer.disableHook('guard');
       expect(composer.isHookEnabled('artifact_validation')).toBe(true);
       expect(composer.isHookEnabled('state_transition')).toBe(true);
+      expect(composer.isHookEnabled('iflow_state_transition')).toBe(true);
     });
   });
 
@@ -88,7 +97,7 @@ describe('Hook Composer', () => {
       composer.disableHook('guard');
       composer.enableHook('guard');
       const count = composer.getHookCount();
-      expect(count.enabled).toBe(8);
+      expect(count.enabled).toBe(9);
       expect(count.disabled).toBe(0);
     });
 
@@ -106,6 +115,7 @@ describe('Hook Composer', () => {
       expect(composer.isHookEnabled('guard')).toBe(true);
       expect(composer.isHookEnabled('artifact_validation')).toBe(true);
       expect(composer.isHookEnabled('state_transition')).toBe(true);
+      expect(composer.isHookEnabled('iflow_state_transition')).toBe(true);
     });
 
     it('should return false for disabled hooks', () => {
@@ -124,17 +134,18 @@ describe('Hook Composer', () => {
     it('should return all enabled hooks', () => {
       composer.initialize();
       const hooks = composer.getEnabledHooks();
-      expect(hooks).toHaveLength(8);
+      expect(hooks).toHaveLength(9);
       expect(hooks).toContain('guard');
       expect(hooks).toContain('artifact_validation');
       expect(hooks).toContain('state_transition');
+      expect(hooks).toContain('iflow_state_transition');
     });
 
     it('should exclude disabled hooks', () => {
       composer.initialize();
       composer.disableHook('guard');
       const hooks = composer.getEnabledHooks();
-      expect(hooks).toHaveLength(7);
+      expect(hooks).toHaveLength(8);
       expect(hooks).not.toContain('guard');
     });
   });
@@ -159,8 +170,8 @@ describe('Hook Composer', () => {
     it('should return correct count', () => {
       composer.initialize();
       const count = composer.getHookCount();
-      expect(count.total).toBe(8);
-      expect(count.enabled).toBe(8);
+      expect(count.total).toBe(9);
+      expect(count.enabled).toBe(9);
       expect(count.disabled).toBe(0);
     });
 
@@ -168,8 +179,8 @@ describe('Hook Composer', () => {
       composer.initialize();
       composer.disableHook('guard');
       const count = composer.getHookCount();
-      expect(count.total).toBe(8);
-      expect(count.enabled).toBe(7);
+      expect(count.total).toBe(9);
+      expect(count.enabled).toBe(8);
       expect(count.disabled).toBe(1);
     });
   });
@@ -215,6 +226,39 @@ describe('Hook Composer', () => {
       expect(result.success).toBe(true);
     });
 
+    it('should execute iflow_state_transition hook', async () => {
+      composer.initialize();
+      const tmpDir = mkdtempSync(join(tmpdir(), 'iflow-hook-test-'));
+      const result = await composer.executeHook('iflow_state_transition', {
+        changeDir: tmpDir,
+        stateFile: '',
+        pluginRoot: '',
+        action: 'state-transition',
+        data: { newState: 'researching' },
+      });
+      expect(result).toBeDefined();
+      expect(result.success).toBe(true);
+    });
+
+    it('should block invalid iflow_state_transition', async () => {
+      composer.initialize();
+      const tmpDir = mkdtempSync(join(tmpdir(), 'iflow-hook-invalid-'));
+      const iflowStateDir = join(tmpDir, '.iflow');
+      const { mkdirSync, writeFileSync } = await import('fs');
+      mkdirSync(iflowStateDir, { recursive: true });
+      writeFileSync(join(iflowStateDir, 'state.json'), JSON.stringify({ state: 'discussing' }));
+      const result = await composer.executeHook('iflow_state_transition', {
+        changeDir: tmpDir,
+        stateFile: '',
+        pluginRoot: '',
+        action: 'state-transition',
+        data: { newState: 'shipping' },
+      });
+      expect(result).toBeDefined();
+      expect(result.success).toBe(false);
+      expect(result.block).toBe(true);
+    });
+
     it('should return error for unknown hook', async () => {
       composer.initialize();
       const result = await composer.executeHook('unknown' as any, {
@@ -240,7 +284,7 @@ describe('Hook Composer', () => {
       expect(result).toBeDefined();
       expect(result.success).toBe(true);
       expect(result.results).toBeDefined();
-      expect(Object.keys(result.results)).toHaveLength(8);
+      expect(Object.keys(result.results)).toHaveLength(9);
     });
 
     it('should exclude disabled hooks', async () => {
@@ -252,7 +296,7 @@ describe('Hook Composer', () => {
         pluginRoot: '',
         action: 'validate',
       });
-      expect(Object.keys(result.results)).toHaveLength(7);
+      expect(Object.keys(result.results)).toHaveLength(8);
     });
   });
 
@@ -266,7 +310,7 @@ describe('Hook Composer', () => {
       };
       composer.addHook('custom_hook' as any, customHook);
       const count = composer.getHookCount();
-      expect(count.total).toBe(9);
+      expect(count.total).toBe(10);
     });
 
     it('should add hook at specific position', () => {
@@ -287,7 +331,7 @@ describe('Hook Composer', () => {
       composer.initialize();
       composer.removeHook('guard');
       const count = composer.getHookCount();
-      expect(count.total).toBe(7);
+      expect(count.total).toBe(8);
     });
 
     it('should not affect other hooks', () => {
@@ -295,6 +339,7 @@ describe('Hook Composer', () => {
       composer.removeHook('guard');
       expect(composer.isHookEnabled('artifact_validation')).toBe(true);
       expect(composer.isHookEnabled('state_transition')).toBe(true);
+      expect(composer.isHookEnabled('iflow_state_transition')).toBe(true);
     });
   });
 });
@@ -319,7 +364,8 @@ describe('Utility Functions', () => {
       expect(names).toContain('guard');
       expect(names).toContain('artifact_validation');
       expect(names).toContain('state_transition');
-      expect(names).toHaveLength(8);
+      expect(names).toContain('iflow_state_transition');
+      expect(names).toHaveLength(9);
     });
   });
 
@@ -328,6 +374,7 @@ describe('Utility Functions', () => {
       expect(hookExists('guard')).toBe(true);
       expect(hookExists('artifact_validation')).toBe(true);
       expect(hookExists('state_transition')).toBe(true);
+      expect(hookExists('iflow_state_transition')).toBe(true);
     });
 
     it('should return false for unknown hooks', () => {

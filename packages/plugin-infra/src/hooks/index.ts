@@ -3,6 +3,7 @@
  */
 
 export { createStateTransitionHook } from './state-transition.js';
+export { createIFlowStateTransitionHook } from './iflow-state-transition.js';
 export { createArtifactValidationHook } from './artifact-validation.js';
 export { createGuardHook } from './guard/index.js';
 export { createSessionStartHook, createSessionEndHook } from './session.js';

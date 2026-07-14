@@ -7,6 +7,7 @@
  */
 export type HookName =
   | 'state_transition'
+  | 'iflow_state_transition'
   | 'artifact_validation'
   | 'guard'
   | 'session_start'

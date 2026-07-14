@@ -7,6 +7,7 @@
 import type { HookName, HookHandler, HookContext, HookResult } from './types.js';
 import {
   createStateTransitionHook,
+  createIFlowStateTransitionHook,
   createArtifactValidationHook,
   createGuardHook,
   createSessionStartHook,
@@ -47,6 +48,7 @@ const TIERED_HOOKS: TieredHook[] = [
 
   // Tier 4: State & Continuation hooks - state management and auto-continue
   { name: 'state_transition', tier: 'continuation', factory: createStateTransitionHook },
+  { name: 'iflow_state_transition', tier: 'continuation', factory: createIFlowStateTransitionHook },
   { name: 'continuation', tier: 'continuation', factory: createContinuationHook },
 ];
 

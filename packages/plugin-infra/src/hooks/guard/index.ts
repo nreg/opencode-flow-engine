@@ -8,3 +8,8 @@ export {
   parseFileBoundaryPatterns, matchesBoundary, getActiveTaskId,
   boundaryCache, getBoundaryCacheKey, READ_FILES_WHITELIST,
 } from './boundary.js';
+export {
+  checkIFlowFileWriteGuard, checkIFlowLessonsGuard,
+  checkIFlowProgressAntiRepeatGuard, checkIFlowArtifactAndPhaseConsistency,
+  checkIFlowOmoUsageGuard, markIFlowOmoUsed, resetIFlowOmoTracking,
+} from './iflow-shared-guards.js';
