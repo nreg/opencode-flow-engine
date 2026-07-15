@@ -1,8 +1,9 @@
 import type { HookHandler, HookContext, HookResult } from './types.js';
 import { isValidTransition, getValidTransitions } from '@opencode-flow-engine/core';
-import { fileExists, directoryExists, readJsonFile } from '@opencode-flow-engine/shared';
+import { fileExists, directoryExists, readJsonFile, readFile } from '@opencode-flow-engine/shared';
 import { checkArtifactPreflight, findPreflightState } from '../features/artifact-preflight.js';
 import { writeStateFile } from '../features/state-manager.js';
+import { recommendExecutionMode } from '../features/execution-plan.js';
 
 const STATE_FILE_PATH = '.sflow/state.json';
 
@@ -60,7 +61,20 @@ export function createStateTransitionHook(): HookHandler {
           };
         }
 
-        await updateState(changeDir, newState);
+        // DP-4: Auto-recommend execution mode on bridging→approved-for-build
+        const extra: Record<string, unknown> = {};
+        if (currentState === 'bridging' && newState === 'approved-for-build') {
+          try {
+            const tasksMdContent = await readFile(`${changeDir}/tasks.md`);
+            if (tasksMdContent) {
+              const dp4Result = recommendExecutionMode(tasksMdContent);
+              extra.dp_4_result = dp4Result;
+            }
+          } catch {
+          }
+        }
+
+        await updateState(changeDir, newState, Object.keys(extra).length > 0 ? extra : undefined);
 
         return {
           success: true,
@@ -93,8 +107,7 @@ async function readStateFile(changeDir: string): Promise<Record<string, unknown>
   return await readJsonFile(`${changeDir}/${STATE_FILE_PATH}`);
 }
 
-async function updateState(changeDir: string, newState: string): Promise<void> {
-  // Delegates to shared writeStateFile — same function used by workflow-manager
-  await writeStateFile(changeDir, newState);
+async function updateState(changeDir: string, newState: string, extra?: Record<string, unknown>): Promise<void> {
+  await writeStateFile(changeDir, newState, extra);
 }
 

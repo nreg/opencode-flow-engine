@@ -519,6 +519,7 @@ export interface WorkflowStateDetection {
     tasks: boolean;
     contract: boolean;
     uiDesign: boolean;
+    executionPlan: boolean;
   };
   isFrontend: boolean;
   isApproved: boolean;
@@ -530,13 +531,15 @@ export interface WorkflowStateDetection {
 export async function detectArtifactExistence(changeDir: string): Promise<{
   proposal: boolean; design: boolean; tasks: boolean; specs: boolean;
   specsFileCount: number; contract: boolean; uiDesign: boolean;
+  executionPlan: boolean;
 }> {
-  const [hp, hd, ht, hc, hui] = await Promise.all([
+  const [hp, hd, ht, hc, hui, hep] = await Promise.all([
     fileExists(changeDir + '/proposal.md'),
     fileExists(changeDir + '/design.md'),
     fileExists(changeDir + '/tasks.md'),
     fileExists(changeDir + '/execution-contract.md'),
     fileExists(changeDir + '/ui-design.md'),
+    fileExists(changeDir + '/.sflow/execution-plan.json'),
   ]);
   const specsDirExists = await directoryExists(changeDir + '/specs');
   const specsFileCount = specsDirExists
@@ -546,6 +549,7 @@ export async function detectArtifactExistence(changeDir: string): Promise<{
     proposal: hp, design: hd, tasks: ht,
     specs: specsDirExists && specsFileCount > 0,
     specsFileCount, contract: hc, uiDesign: hui,
+    executionPlan: hep,
   };
 }
 
@@ -649,6 +653,7 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
   const hsp = artifacts.specs;
   const hc = artifacts.contract;
   const hui = artifacts.uiDesign;
+  const hep = artifacts.executionPlan;
   const pc = hp ? await readFile(changeDir + '/proposal.md') : null;
   const tc = ht ? await readFile(changeDir + '/tasks.md') : null;
   const inc = tc ? tc.split('\n').filter((l: string) => l.match(/^-\s*\[\s\]/)).length : 0;
@@ -660,6 +665,16 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
       const cc = await readFile(changeDir + '/execution-contract.md');
       const ch = await simpleHash(cc || '');
       if (ch !== sh) return 'bridging';
+    }
+  }
+  // Plan-contract hash mismatch: plan's contract_hash stale vs actual contract
+  if (hep && (currentState === 'executing' || currentState === 'debugging')) {
+    const plan = await readJsonFile<Record<string, unknown>>(changeDir + '/.sflow/execution-plan.json');
+    const planContractHash = (plan?.contract_hash as string) || '';
+    if (planContractHash && hc) {
+      const cc = await readFile(changeDir + '/execution-contract.md');
+      const ch = await simpleHash(cc || '');
+      if (ch !== planContractHash) return 'bridging';
     }
   }
   if (currentState === 'exploring' && hp && pc && pc.trim().length > 100) return 'specifying';
@@ -714,6 +729,24 @@ export async function writeStateFile(changeDir: string, newState: string, extra?
     state.state = newState;
     state.updatedAt = now;
     if (extra) Object.assign(state, extra);
+
+    // DP-4: append decision point entry when dp_4_result is provided
+    if (extra && extra.dp_4_result && typeof extra.dp_4_result === 'object') {
+      const dp4 = extra.dp_4_result as Record<string, unknown>;
+      const decisionPoints = Array.isArray(state.decisionPoints)
+        ? (state.decisionPoints as Array<Record<string, unknown>>)
+        : [];
+      if (!decisionPoints.some(dp => dp.id === 'dp-4')) {
+        decisionPoints.push({
+          id: 'dp-4',
+          mode: dp4.mode,
+          rationale: dp4.rationale,
+          timestamp: now,
+        });
+      }
+      state.decisionPoints = decisionPoints;
+    }
+
     await writeJsonFile(statePath, state);
   });
 }

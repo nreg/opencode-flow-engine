@@ -53,6 +53,30 @@ export const TWEAK_UPGRADE_THRESHOLDS = {
   MAX_TASKS: 4,
 } as const;
 
+// ─── Execution Mode Thresholds ────────────────────────────────────────────────
+
+/**
+ * Task count thresholds for execution mode recommendation (DP-4).
+ * - inline: 1–2 tasks, no dependencies
+ * - batch-inline: 3–5 tasks, no dependencies
+ * - sdd: 6+ tasks OR any cross-wave dependencies
+ */
+export const EXECUTION_MODE_THRESHOLDS = {
+  inline: { maxTasks: 2 },
+  'batch-inline': { maxTasks: 5 },
+} as const;
+
+// ─── Receipt Status ───────────────────────────────────────────────────────────
+
+/**
+ * Review receipt status values.
+ * Used by checkReceiptIntegrity and checkClosingGate guards.
+ */
+export const RECEIPT_STATUS = {
+  PASS: 'pass',
+  FAIL: 'fail',
+} as const;
+
 // ─── Artifact Preflight Gate: State → Required Artifacts ───────────────────
 
 /**
@@ -75,7 +99,7 @@ const ARTIFACT_PREFLIGHT_BASE: Record<string, { required: string[]; optional?: s
   specifying:           { required: ['proposal.md'] },
   'ui-design':          { required: ['proposal.md', 'specs/'] },
   bridging:             { required: ['proposal.md', 'specs/', 'design.md', 'tasks.md'], optional: ['ui-design.md'] },
-  'approved-for-build': { required: ['proposal.md', 'specs/', 'design.md', 'tasks.md', 'execution-contract.md'], optional: ['ui-design.md'] },
+  'approved-for-build': { required: ['proposal.md', 'specs/', 'design.md', 'tasks.md', 'execution-contract.md'], optional: ['ui-design.md', 'execution-plan.json'] },
   abandoned:            { required: [] },
 };
 

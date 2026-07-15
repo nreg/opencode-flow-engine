@@ -34,6 +34,8 @@ import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SFLOW_AGENT_NAMES } from '../../../workflows/sflow/index.js';
 import { createAgnesTools } from './agnes-tools.js';
 import { getCurrentWorkflowState, executeContractValidator, executeArtifactInspector } from './sflow-tool-helpers.js';
+import { createExecutionPlan, reviseExecutionPlan, readExecutionPlan, recordReviewReceipt } from './features/execution-plan.js';
+import { fileExists, readJsonFile } from '@opencode-flow-engine/shared';
 // ─── Background task registry (per-factory instance) ──────────────────────────
 
 const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
@@ -45,7 +47,7 @@ const AGENT_MODEL_MAP: AgentModelMap = {};
 
 // ─── SFlow tool definitions ──────────────────────────────────────────────────
 
-function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
+export function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
   const tools: Record<string, ToolDefinition> = {
     workflow_router: {
       description: 'Detect current workflow state and route to the appropriate agent. Supports GO.md-style intent matching.',
@@ -334,6 +336,116 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
         } catch (error) {
           return {
             title: 'FlowAgent Cancel',
+            output: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }, null, 2),
+          };
+        }
+      },
+    },
+
+    record_execution_plan: {
+      description: 'Record or revise an execution plan for the current change. Validates contract existence, checks workflow state, and writes .sflow/execution-plan.json.',
+      args: {
+        mode: z.enum(['inline', 'batch-inline', 'sdd']).describe('Execution mode: inline (1-2 tasks), batch-inline (3-5 tasks), or sdd (complex with dependencies)'),
+        waves: z.array(z.object({
+          id: z.string().describe('Wave identifier (e.g. "W1")'),
+          strategy: z.enum(['parallel', 'serial']).describe('Task scheduling strategy within the wave'),
+          tasks: z.array(z.string()).describe('Task IDs belonging to this wave'),
+          depends_on: z.array(z.string()).describe('Wave IDs this wave depends on'),
+        })).describe('Ordered waves of tasks with dependency graph'),
+        source: z.enum(['user-override', 'default']).describe('Whether the plan was auto-recommended or user-overridden'),
+        rationale: z.string().describe('Rationale for the chosen execution mode'),
+        override: z.boolean().optional().describe('Whether this is a user override of the recommended mode'),
+      },
+      execute: async (args, context) => {
+        const changeDir = context.directory || '';
+        const { mode, waves, source, rationale, override } = args;
+
+        try {
+          // REP-2: Validate contract existence
+          const contractExists = await fileExists(changeDir + '/execution-contract.md');
+          if (!contractExists) {
+            return { title: 'Record Execution Plan', output: JSON.stringify({ success: false, error: 'execution-contract.md not found. Create a contract before recording an execution plan.' }, null, 2) };
+          }
+
+          // REP-3: Validate workflow state
+          const currentState = await getCurrentWorkflowState(changeDir);
+          const validStates = ['approved-for-build', 'executing'];
+          if (!currentState || !validStates.includes(currentState)) {
+            return { title: 'Record Execution Plan', output: JSON.stringify({ success: false, error: `Invalid state for recording execution plan: "${currentState}". Must be one of: ${validStates.join(', ')}` }, null, 2) };
+          }
+
+          const existingPlan = await readExecutionPlan(changeDir);
+          let plan;
+
+          if (currentState === 'approved-for-build' && !existingPlan) {
+            plan = await createExecutionPlan(changeDir, { mode, source, rationale, waves });
+          } else if (currentState === 'executing' && existingPlan) {
+            plan = await reviseExecutionPlan(changeDir, { mode, source, rationale, waves });
+          } else if (currentState === 'approved-for-build' && existingPlan) {
+            plan = await reviseExecutionPlan(changeDir, { mode, source, rationale, waves });
+          } else {
+            plan = await createExecutionPlan(changeDir, { mode, source, rationale, waves });
+          }
+
+          return {
+            title: 'Record Execution Plan',
+            output: JSON.stringify({
+              success: true,
+              plan: {
+                mode: plan.mode,
+                revision: plan.revision,
+                waves: plan.waves,
+                hash: plan.hash,
+              },
+            }, null, 2),
+          };
+        } catch (error) {
+          return {
+            title: 'Record Execution Plan',
+            output: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }, null, 2),
+          };
+        }
+      },
+    },
+
+    record_review_receipt: {
+      description: 'Record a review receipt for a wave. Validates wave existence in the execution plan and writes .sflow/reviews/<wave-id>.json.',
+      args: {
+        waveId: z.string().describe('The wave ID to record the receipt for (e.g. "W1")'),
+        status: z.enum(['pass', 'fail']).describe('Review result: pass or fail'),
+        base: z.string().describe('Git commit hash of the review base'),
+        head: z.string().describe('Git commit hash of the review head'),
+        report: z.string().describe('Review report content or path'),
+      },
+      execute: async (args, context) => {
+        const changeDir = context.directory || '';
+        const { waveId, status, base, head, report } = args;
+
+        try {
+          const receipt = await recordReviewReceipt(changeDir, waveId, { status, base, head, report });
+
+          return {
+            title: 'Record Review Receipt',
+            output: JSON.stringify({
+              success: true,
+              receipt: {
+                waveId,
+                status: receipt.status,
+                base: receipt.base,
+                head: receipt.head,
+                recorded_at: receipt.recorded_at,
+              },
+            }, null, 2),
+          };
+        } catch (error) {
+          return {
+            title: 'Record Review Receipt',
             output: JSON.stringify({
               success: false,
               error: error instanceof Error ? error.message : String(error),

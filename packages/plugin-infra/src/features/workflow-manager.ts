@@ -247,6 +247,7 @@ async function readStateFile(changeDir: string): Promise<{
   isFrontend?: boolean;
   [key: string]: unknown;
 }> {
+  const statePath = `${changeDir}/${STATE_FILE}`;
   const state = await readJsonFile<{
     state: string;
     mode: string;
@@ -260,9 +261,20 @@ async function readStateFile(changeDir: string): Promise<{
     isFrontend?: boolean;
     [key: string]: unknown;
   }>(
-    `${changeDir}/${STATE_FILE}`,
+    statePath,
   ).catch(() => null);
-  return state || {
+
+  if (state) return state;
+
+  // BUG-B fix (GS-1): When state.json does not exist AND .sflow/ directory exists
+  // (indicating an active workflow), throw an error instead of returning silent defaults.
+  // If .sflow/ doesn't exist (no workflow started), still return defaults for backward compat.
+  const sflowDirExists = await directoryExists(`${changeDir}/${SFLOW_DIR}`);
+  if (sflowDirExists) {
+    throw new Error(`[SFLOW] state.json not found at ${statePath}, but .sflow/ directory exists. This indicates an active workflow with a missing state file. Use startWorkflow() to initialize or restore from boulder-state.json.`);
+  }
+
+  return {
     state: 'exploring',
     mode: 'full',
     updatedAt: new Date().toISOString(),

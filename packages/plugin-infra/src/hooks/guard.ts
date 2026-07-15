@@ -18,6 +18,8 @@ import { readProgressFile, searchLessonsInFile, getStateFilePath, findProjectRoo
 import { getHasOmoPlugin } from "../agents/agent-tools.js";
 import { iflowDirectoryExists, checkIFlowGuards } from "./iflow-guard.js";
 import { checkIFlowFileWriteGuard, checkIFlowLessonsGuard, checkIFlowProgressAntiRepeatGuard, checkIFlowArtifactAndPhaseConsistency, checkIFlowOmoUsageGuard } from "./guard/iflow-shared-guards.js";
+import { readExecutionPlan as readExecutionPlanFeature } from "../features/execution-plan.js";
+import type { Wave } from "../features/execution-plan-types.js";
 
 async function detectActiveWorkflow(changeDir: string): Promise<'iflow' | 'sflow' | 'none'> {
   const iflowExists = await directoryExists(`${changeDir}/.iflow`);
@@ -57,6 +59,402 @@ function isSourceCodePath(filePath: string): boolean {
   return SOURCE_CODE_PATTERNS.test(filePath);
 }
 
+// ─── Wave W4: checkWaveDependencies ──────────────────────────────────────────
+
+/**
+ * Topological sort using Kahn's algorithm (BFS-based).
+ * Returns sorted wave IDs or throws if a cycle is detected.
+ */
+function topologicalSort(waves: Wave[]): string[] {
+  if (waves.length === 0) return [];
+
+  const inDegree = new Map<string, number>();
+  const adjacency = new Map<string, string[]>();
+
+  for (const wave of waves) {
+    inDegree.set(wave.id, 0);
+    adjacency.set(wave.id, []);
+  }
+
+  for (const wave of waves) {
+    for (const depId of wave.depends_on) {
+      if (adjacency.has(depId)) {
+        adjacency.get(depId)!.push(wave.id);
+        inDegree.set(wave.id, (inDegree.get(wave.id) || 0) + 1);
+      }
+    }
+  }
+
+  const queue: string[] = [];
+  for (const [id, degree] of inDegree) {
+    if (degree === 0) queue.push(id);
+  }
+
+  const sorted: string[] = [];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    sorted.push(current);
+    for (const neighbor of adjacency.get(current) || []) {
+      const newDegree = (inDegree.get(neighbor) || 1) - 1;
+      inDegree.set(neighbor, newDegree);
+      if (newDegree === 0) queue.push(neighbor);
+    }
+  }
+
+  if (sorted.length !== waves.length) {
+    throw new Error('Circular wave dependencies detected. Wave dependency graph must be acyclic.');
+  }
+
+  return sorted;
+}
+
+/**
+ * WD-1/WD-2/WD-3: Check wave dependencies in execution plan.
+ * Validates: circular dependencies, missing wave references, empty waves.
+ * Only applies for sflow workflow.
+ * READ-ONLY (C4): never writes state.
+ */
+async function checkWaveDependencies(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!changeDir) return { success: true };
+
+  // C7: Only apply for sflow workflow
+  if (activeWorkflow !== 'sflow') return { success: true };
+
+  // Read execution plan — skip if none exists (backward compatible)
+  const plan = await readExecutionPlanFeature(changeDir);
+  if (!plan) return { success: true };
+
+  const waves = plan.waves;
+  if (!waves || waves.length === 0) return { success: true };
+
+  // Check for empty waves
+  for (const wave of waves) {
+    if (!wave.tasks || wave.tasks.length === 0) {
+      return {
+        success: false,
+        block: true,
+        blockReason: `[SFLOW] Wave dependency check: wave "${wave.id}" is empty (no tasks). Every wave must have at least one task.`,
+      };
+    }
+  }
+
+  // Check for missing wave references in depends_on
+  const waveIds = new Set(waves.map(w => w.id));
+  for (const wave of waves) {
+    for (const depId of wave.depends_on) {
+      if (!waveIds.has(depId)) {
+        return {
+          success: false,
+          block: true,
+          blockReason: `[SFLOW] Wave dependency check: wave "${wave.id}" depends on non-existent wave "${depId}". All depends_on references must exist in the execution plan.`,
+        };
+      }
+    }
+  }
+
+  // Check for circular dependencies using topological sort
+  try {
+    topologicalSort(waves);
+  } catch (err) {
+    return {
+      success: false,
+      block: true,
+      blockReason: `[SFLOW] Wave dependency check: ${(err instanceof Error ? err.message : String(err))}`,
+    };
+  }
+
+  return { success: true };
+}
+
+// ─── Wave W4: checkReceiptIntegrity ─────────────────────────────────────────
+
+/**
+ * RR-2/RR-4/RR-5: Check review receipt integrity.
+ * Validates: receipt existence, required fields, symlink detection, commit hash validity.
+ * Only applies for sflow workflow.
+ * READ-ONLY (C4): never writes state.
+ */
+async function checkReceiptIntegrity(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!changeDir) return { success: true };
+
+  // C7: Only apply for sflow workflow
+  if (activeWorkflow !== 'sflow') return { success: true };
+
+  // Read execution plan — skip if none exists (backward compatible)
+  const plan = await readExecutionPlanFeature(changeDir);
+  if (!plan) return { success: true };
+
+  const waves = plan.waves;
+  if (!waves || waves.length === 0) return { success: true };
+
+  const REQUIRED_RECEIPT_FIELDS = ['status', 'base', 'head', 'report'] as const;
+
+  for (const wave of waves) {
+    const receiptPath = `${changeDir}/.sflow/reviews/${wave.id}.json`;
+    const receiptExists = await fileExists(receiptPath);
+
+    if (!receiptExists) {
+      return {
+        success: false,
+        block: true,
+        blockReason: `[SFLOW] Receipt integrity check: missing receipt for wave "${wave.id}". Expected at ${receiptPath}.`,
+      };
+    }
+
+    // RR-5: Symlink detection using fs.realpathSync
+    try {
+      const fs = await import('fs');
+      const realPath = fs.realpathSync(receiptPath);
+      const expectedPath = receiptPath.replace(/\\/g, '/');
+      const resolvedReal = realPath.replace(/\\/g, '/');
+      if (resolvedReal !== expectedPath) {
+        return {
+          success: false,
+          block: true,
+          blockReason: `[SFLOW] Receipt integrity check: symlinked receipt detected for wave "${wave.id}". Receipt path "${expectedPath}" resolves to "${resolvedReal}". Symlinked receipts are not allowed.`,
+        };
+      }
+    } catch {
+      // realpathSync may fail on some systems — skip symlink check
+    }
+
+    const receipt = await readJsonFile<Record<string, unknown>>(receiptPath);
+    if (!receipt) {
+      return {
+        success: false,
+        block: true,
+        blockReason: `[SFLOW] Receipt integrity check: cannot read receipt for wave "${wave.id}".`,
+      };
+    }
+
+    // RR-2: Validate required fields
+    for (const field of REQUIRED_RECEIPT_FIELDS) {
+      if (!(field in receipt) || receipt[field] === undefined || receipt[field] === null) {
+        return {
+          success: false,
+          block: true,
+          blockReason: `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt is missing required field "${field}".`,
+        };
+      }
+      // Check for empty string values on base/head
+      if ((field === 'base' || field === 'head') && receipt[field] === '') {
+        return {
+          success: false,
+          block: true,
+          blockReason: `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt has empty "${field}" commit hash.`,
+        };
+      }
+    }
+
+    // RR-4: Commit hash revalidation via git rev-parse --verify
+    try {
+      const { execSync } = await import('child_process');
+      // First check if this is a git repo
+      try {
+        execSync('git rev-parse --git-dir', {
+          cwd: changeDir,
+          encoding: 'utf8',
+          stdio: 'pipe',
+        });
+      } catch {
+        // Not a git repo — skip commit validation gracefully
+        continue;
+      }
+
+      const baseHash = String(receipt.base);
+      const headHash = String(receipt.head);
+
+      if (baseHash) {
+        try {
+          execSync(`git rev-parse --verify "${baseHash}"`, {
+            cwd: changeDir,
+            encoding: 'utf8',
+            stdio: 'pipe',
+          });
+        } catch {
+          return {
+            success: false,
+            block: true,
+            blockReason: `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt has invalid base commit hash "${baseHash}". Hash not found in git history.`,
+          };
+        }
+      }
+
+      if (headHash) {
+        try {
+          execSync(`git rev-parse --verify "${headHash}"`, {
+            cwd: changeDir,
+            encoding: 'utf8',
+            stdio: 'pipe',
+          });
+        } catch {
+          return {
+            success: false,
+            block: true,
+            blockReason: `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt has invalid head commit hash "${headHash}". Hash not found in git history.`,
+          };
+        }
+      }
+    } catch {
+      // Non-git repo or git not available — skip commit validation gracefully
+    }
+  }
+
+  return { success: true };
+}
+
+// ─── Wave W5: checkClosingGate ────────────────────────────────────────────────
+
+/**
+ * CG-1/CG-3/CG-4: Check closing gate — all review receipts must have status=pass
+ * before transitioning to closing state.
+ * - If no execution-plan.json exists → skip (backward compatible)
+ * - Read all review receipts from .sflow/reviews/
+ * - Check that ALL receipts have status='pass'
+ * - If any receipt has status='fail' or is missing → block transition to closing
+ * Only applies for sflow workflow.
+ * READ-ONLY (C4): never writes state.
+ */
+async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!changeDir) return { success: true };
+
+  // C7: Only apply for sflow workflow
+  if (activeWorkflow !== 'sflow') return { success: true };
+
+  // Read execution plan — skip if none exists (backward compatible, CG-4)
+  const plan = await readExecutionPlanFeature(changeDir);
+  if (!plan) return { success: true };
+
+  const waves = plan.waves;
+  if (!waves || waves.length === 0) return { success: true };
+
+  for (const wave of waves) {
+    const receiptPath = `${changeDir}/.sflow/reviews/${wave.id}.json`;
+    const receiptExists = await fileExists(receiptPath);
+
+    if (!receiptExists) {
+      return {
+        success: false,
+        block: true,
+        blockReason: `[SFLOW] Closing gate: missing receipt for wave "${wave.id}". All waves must have review receipts before closing.`,
+      };
+    }
+
+    const receipt = await readJsonFile<{ status?: string }>(receiptPath);
+    if (!receipt) {
+      return {
+        success: false,
+        block: true,
+        blockReason: `[SFLOW] Closing gate: cannot read receipt for wave "${wave.id}".`,
+      };
+    }
+
+    if (receipt.status !== 'pass') {
+      return {
+        success: false,
+        block: true,
+        blockReason: `[SFLOW] Closing gate: wave "${wave.id}" receipt has status "${receipt.status || 'unknown'}". All receipts must have status "pass" before closing.`,
+      };
+    }
+  }
+
+  return { success: true };
+}
+
+// ─── Wave W5: checkSpecsMerged ────────────────────────────────────────────────
+
+/**
+ * CG-6: Check if specs have been merged before closing (Issue #28).
+ * - Check if .sflow/state.json has spec_merged: true
+ * - If delta-specs directory exists (specs/delta/) and spec_merged is not true → block closing
+ * - If no delta-specs directory → skip (backward compatible)
+ * Only applies for sflow workflow.
+ * READ-ONLY (C4): never writes state.
+ */
+async function checkSpecsMerged(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!changeDir) return { success: true };
+
+  // C7: Only apply for sflow workflow
+  if (activeWorkflow !== 'sflow') return { success: true };
+
+  // Check if delta-specs directory exists
+  const deltaSpecsPath = `${changeDir}/specs/delta`;
+  const deltaSpecsExists = await directoryExists(deltaSpecsPath);
+  if (!deltaSpecsExists) return { success: true };
+
+  // Check if delta-specs directory has any .md files
+  try {
+    const { readdir } = await import('node:fs/promises');
+    const files = await readdir(deltaSpecsPath);
+    const mdFiles = files.filter(f => f.endsWith('.md'));
+    if (mdFiles.length === 0) return { success: true }; // Empty delta-specs dir, skip
+  } catch {
+    return { success: true }; // Can't read dir, skip
+  }
+
+  // Read state.json to check spec_merged
+  const stateData = await readJsonFile<{ spec_merged?: boolean }>(`${changeDir}/${getStateFilePath('sflow')}`);
+  if (!stateData || stateData.spec_merged !== true) {
+    return {
+      success: false,
+      block: true,
+      blockReason: `[SFLOW] Specs merged check: delta-specs exist in specs/delta/ but spec_merged is not true in state.json. Merge delta specs before closing.`,
+    };
+  }
+
+  return { success: true };
+}
+
+// ─── Wave W6: checkGitBranchIsolation ────────────────────────────────────────
+
+/**
+ * GI-1: Warn when on main/master branch during execution.
+ * Only applies for sflow workflow, during executing/debugging states,
+ * and only warns when the agent is build-executor.
+ * READ-ONLY (C4): never writes state.
+ */
+async function checkGitBranchIsolation(
+  changeDir: string,
+  data: Record<string, unknown> | undefined,
+  activeWorkflow: 'iflow' | 'sflow' | 'none',
+): Promise<HookResult> {
+  if (!changeDir) return { success: true };
+
+  // C7: Only apply for sflow workflow
+  if (activeWorkflow !== 'sflow') return { success: true };
+
+  // Only warn during executing/debugging states
+  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
+  const currentState = stateData?.state;
+  if (currentState !== 'executing' && currentState !== 'debugging') return { success: true };
+
+  // Only warn for build-executor agent
+  const agent = data?.agent as string | undefined;
+  if (agent !== 'build-executor') return { success: true };
+
+  try {
+    const { execSync } = await import('child_process');
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+      cwd: changeDir,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    }).trim();
+
+    if (branch === 'main' || branch === 'master') {
+      return {
+        success: true,
+        warnings: [
+          `[SFLOW] Git branch isolation: currently on "${branch}" branch. Consider switching to a feature branch for execution to avoid committing directly to the main branch.`,
+        ],
+      };
+    }
+  } catch {
+    // Not a git repo or git not available — skip silently
+  }
+
+  return { success: true };
+}
+
 /**
  * Create the guard hook
  */
@@ -75,6 +473,11 @@ export function createGuardHook(): HookHandler {
           await checkPresetUpgrade(changeDir, activeWorkflow),
           await checkContractStalenessGuard(changeDir, activeWorkflow),
           await checkTaskCompletion(changeDir, activeWorkflow),
+          await checkWaveDependencies(changeDir, activeWorkflow),
+          await checkReceiptIntegrity(changeDir, activeWorkflow),
+          await checkClosingGate(changeDir, activeWorkflow),
+          await checkSpecsMerged(changeDir, activeWorkflow),
+          await checkGitBranchIsolation(changeDir, data, activeWorkflow),
           await checkDebuggingState(changeDir, context.action, data, activeWorkflow),
           await checkProgressAntiRepeatGuard(changeDir, data, activeWorkflow),
           await checkFileWriteGuard(changeDir, data, activeWorkflow),
@@ -309,6 +712,32 @@ async function checkTaskCompletion(changeDir: string, activeWorkflow: 'iflow' | 
       blockReason: `${incompleteTasks.length} task(s) are incomplete. Complete all tasks before closing.`,
     };
   }
+
+  // CG-3: Also check wave completion when execution-plan.json exists
+  const plan = await readExecutionPlanFeature(changeDir);
+  if (plan && plan.waves && plan.waves.length > 0) {
+    const wavesMissingReceipts: string[] = [];
+    for (const wave of plan.waves) {
+      const receiptPath = `${changeDir}/.sflow/reviews/${wave.id}.json`;
+      const receiptExists = await fileExists(receiptPath);
+      if (!receiptExists) {
+        wavesMissingReceipts.push(wave.id);
+        continue;
+      }
+      const receipt = await readJsonFile<{ status?: string }>(receiptPath);
+      if (!receipt || receipt.status !== 'pass') {
+        wavesMissingReceipts.push(wave.id);
+      }
+    }
+    if (wavesMissingReceipts.length > 0) {
+      return {
+        success: false,
+        block: true,
+        blockReason: `Wave completion check: ${wavesMissingReceipts.length} wave(s) lack passing receipts (${wavesMissingReceipts.join(', ')}). All waves must have passing review receipts before closing.`,
+      };
+    }
+  }
+
   return { success: true };
 }
 

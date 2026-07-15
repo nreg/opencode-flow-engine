@@ -37,6 +37,7 @@ export const SFLOW_TOOLS = new Set([
   'validate_contract', 'validate_design', 'validate_implementation',
   'detect_sync_conflicts', 'record_decision_point',
   'call_flow_agent', 'flowagent_output', 'flowagent_cancel',
+  'record_execution_plan', 'record_review_receipt',
 ]);
 
 /** IFlow workflow states */

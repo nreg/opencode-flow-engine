@@ -397,7 +397,8 @@ describe('Guard Hook — detectActiveWorkflow single-call optimization', () => {
 
       // After optimization: detectActiveWorkflow called once at entry,
       // which calls directoryExists at most 2 times (.iflow + .sflow)
-      expect(directoryExistsCallCount).toBeLessThanOrEqual(2);
+      // + 1 call from checkSpecsMerged (specs/delta/ existence check)
+      expect(directoryExistsCallCount).toBeLessThanOrEqual(3);
     } finally {
       spy.mockRestore();
     }
