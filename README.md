@@ -136,7 +136,7 @@ iFlow has **6 workflow states**, forming a continuous cycle: discuss → researc
 | **contract-builder** | Subagent | Creates execution contract with boundary control, test plan |
 | **build-executor** | Subagent | TDD/SDD executor: implements code and reviews by batch |
 | **bug-investigator** | Subagent | Systematic debugging: diagnoses failures and applies fixes |
-| **code-reviewer** | Subagent | Reviews code quality against specifications |
+| **code-reviewer** | Subagent | Reviews code quality against specifications. Enforces **Minimality Discipline** (5 mandatory gates: no over-engineering, no backwards-compat shims, no unnecessary abstractions, no unnecessary config, reviewer safeguard) |
 | **release-archivist** | Subagent | Verifies, archives, and closes changes |
 | **spec-merger** | Subagent | Incremental spec change merging |
 | **ui-implementer** | Subagent | Frontend UI implementation, integrating 9 frontend specialized skills |
@@ -200,6 +200,8 @@ A dedicated frontend UI implementation subagent, integrating 9 frontend speciali
 | `contract_validator` | Validates execution contract correctness and completeness |
 | `artifact_inspector` | Reviews planning artifact completeness and consistency |
 | `record_decision_point` | Records decision points (DP-0 through DP-5) |
+| `record_execution_plan` | Creates/updates execution plan (`.sflow/execution-plan.json`) with wave structure and mode selection |
+| `record_review_receipt` | Records wave review results (`.sflow/reviews/<wave-id>.json`) |
 
 ### iFlow Native Tools
 
@@ -235,7 +237,7 @@ When oh-my-openagent is detected, sFlow automatically enables these tools:
 
 ## Execution Modes
 
-`build-executor` supports three execution modes, auto-selected or user-overridden:
+`build-executor` supports three execution modes, automatically recommended at DP-4 (bridging→approved-for-build transition) based on task count and dependency analysis:
 
 ### 1. Inline Mode
 
@@ -245,16 +247,16 @@ When oh-my-openagent is detected, sFlow automatically enables these tools:
 
 ### 2. Batch Inline Mode
 
-**Condition**: Tasks > 3 but all within the same module, no API/Schema changes, estimated ≤ 15 minutes
+**Condition**: Tasks 3-5 within the same module, no API/Schema changes, no cross-module dependencies
 **Behavior**: Entire batch completed in one pass, each step still follows TDD red-green-refactor cycle
 **Use case**: Multiple small changes within the same module
 
 ### 3. SDD Mode (Subagent-Driven Development)
 
-**Condition**: Cross-module changes, high-risk tasks, or changes with architectural impact
+**Condition**: 6+ tasks, cross-module changes, or tasks with dependency chains
 **Behavior**:
 1. Spawns independent implementer subagents for each task
-2. Runs spec compliance + code quality review per batch
+2. Runs spec compliance + code quality review per batch (review receipts persisted to `.sflow/reviews/`)
 3. Final global review
 
 When **oh-my-openagent** is available, SDD mode can further leverage:
@@ -304,7 +306,19 @@ Each task declares `read_files` (reference boundary) and `write_files` (modifica
 .sflow/subagent-progress.md  # Node state (implementing/review/done)
 .sflow/progress.md           # Batch completion progress
 .sflow/lessons.md            # Cross-task lessons learned database
+.sflow/checkpoints/          # Structured checkpoints with commit evidence (saveCheckpoint, readCheckpoint, detectStaleCheckpoints)
+.sflow/handoffs/             # Cross-session handoff contracts (createHandoff, finishHandoff, resolveHandoff)
 ```
+
+### Execution Control Plane
+
+SDD-mode execution is orchestrated via a structured **execution plan** (`.sflow/execution-plan.json`):
+
+- **Wave scheduling**: Tasks are grouped into waves with `serial` or `parallel` strategy and explicit `depends_on` dependencies
+- **Wave dependency validation**: Guard hooks detect circular dependencies and missing wave references before execution begins
+- **Review receipts**: Each wave's review result is persisted to `.sflow/reviews/<wave-id>.json` with commit range evidence (base/head hashes, review report path)
+- **Triple hash validation**: Execution plan integrity is verified via content hash + artifacts_hash + contract_hash
+- **Closing gate**: All wave receipts must have status=pass before transitioning to closing state
 
 ---
 
@@ -374,6 +388,30 @@ When using the `task` tool, select recommended categories by task type:
 - Tracks ADDED/MODIFIED/REMOVED/RENAMED specs per change
 - Auto-detects spec sync conflicts across changes
 - spec-merger merges delta specs back to mainline on close
+
+### Execution Control Plane
+
+- **Wave-based execution**: Tasks grouped into waves with serial/parallel strategy and dependency tracking
+- **Review receipts**: Persisted review results per wave with commit range evidence (`.sflow/reviews/`)
+- **Triple hash validation**: Content hash + artifacts_hash + contract_hash integrity check
+- **Closing gate enforcement**: All wave reviews must pass before closing
+
+### Checkpoint & Handoff
+
+- **Checkpoint system**: Structured task checkpoints with commit evidence, stale detection via contract hash comparison
+- **Handoff contracts**: Cross-session handoff with lifecycle (create → finish → resolve: accept/reject/defer)
+- Checkpoints in `.sflow/checkpoints/`, handoffs in `.sflow/handoffs/`
+
+### Model Profiles
+
+- 4-layer model resolution: override → config → profile → fallback → default
+- 4 profiles: mechanical (fast), standard (balanced), strong (powerful), review (specialized)
+- SFlow-only gating (iFlow agents skip profile layer)
+
+### Skill Compression
+
+- build-executor and code-reviewer prompts compressed ~40-50% while preserving all mandatory rules
+- Minimality Discipline in code-reviewer: 5 gates against over-engineering
 
 ### Hook System
 
@@ -584,6 +622,12 @@ Configuration loading priority (highest to lowest):
     "workflow_router": true,
     "contract_validator": true,
     "artifact_inspector": true
+  },
+  "modelProfiles": {
+    "mechanical": "your-provider/step-3.7-flash",
+    "standard": "your-provider/glm-5.1",
+    "strong": "your-provider/glm-5.1",
+    "review": "your-provider/glm-5.1"
   }
 }
 ```
@@ -680,10 +724,35 @@ Model selection follows this priority (highest to lowest):
 
 1. **AgentOverrides** (programmatic override parameters)
 2. **createAgent's model parameter**
-3. **`.sflow/config.json` configuration file**
-4. **Built-in DEFAULT_MODELS**
+3. **`.sflow/config.json` agents section** (per-agent model configuration)
+4. **Model Profiles** (`.sflow/config.json` → `modelProfiles` section — maps agent roles to profile models: mechanical, standard, strong, review)
+5. **Built-in DEFAULT_MODELS**
 
 When a model is unavailable, the fallback model list is tried in order.
+
+### Model Profiles
+
+The `modelProfiles` configuration provides a fallback layer between per-agent config and built-in defaults:
+
+| Profile | Purpose | Typical Agents |
+|---------|---------|----------------|
+| `mechanical` | Fast, cheap models for simple tasks | release-archivist |
+| `standard` | Balanced models for general work | sFlow, need-explorer, spec-merger, ui-implementer |
+| `strong` | Powerful models for complex reasoning | spec-writer, contract-builder, build-executor, bug-investigator |
+| `review` | Specialized models for code review | code-reviewer |
+
+Profile resolution is only active for sFlow workflow (iFlow agents skip this layer). Configure via:
+
+```json
+{
+  "modelProfiles": {
+    "mechanical": "fast-cheap-model",
+    "standard": "balanced-model",
+    "strong": "powerful-model",
+    "review": "review-specialized-model"
+  }
+}
+```
 
 ---
 
