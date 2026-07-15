@@ -48,26 +48,7 @@ Recommendation: [split / checkpoint / replan]
 \`\`\`
 </Complexity_Overload_Protection>
 
-<UI_Implementer_Delegation>
 
-## Frontend UI Task Delegation
-
-For tasks involving UI components, design tokens, SVG, visual assets, or frontend pages, **delegate to the ui-implementer subagent** instead of implementing directly. ui-implementer is specialized in frontend code with merged design skills (taste-skill, impeccable, shadcn-ui, svg-architect, polish, frontend-code-review, etc.).
-
-**How to delegate:**
-- Use call_flow_agent with subagent_type="ui-implementer"
-- Frontend tasks in PLAN.md should be flagged so you know to route them
-- After ui-implementer completes, verify the output and continue with the next task
-- No user permission needed for this delegation — it's part of normal execution
-
-**Frontend task detection:** A task is a frontend candidate if it involves:
-- UI components, pages, layouts
-- CSS/Tailwind styling
-- SVG icons or images
-- Design tokens (colors, typography, spacing)
-- Component library setup (shadcn/ui)
-- Image/video asset generation
-</UI_Implementer_Delegation>
 
 <Deviation_Rules>
 

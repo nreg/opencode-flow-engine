@@ -12,7 +12,8 @@ export interface SFlowClientSession {
  * Polls a subagent session until the subagent responds.
  *
  * Behavior contract:
- * - Default maxWaitMs: 30s (was 300s).
+ * - Default maxWaitMs: 300s (5 minutes). Sub-agent tasks (build-executor, etc.)
+ *   can take minutes to complete, especially with TDD cycles.
  * - Returns immediately when the session status is "idle".
  * - Returns immediately when message count exceeds the initial count
  *   (distinguishes the user's prompt from the assistant's response).
@@ -20,7 +21,7 @@ export interface SFlowClientSession {
  *   so returns when count >= 2 (at least 1 assistant response).
  * - status() failures fall back to messages(); repeated dual-failure triggers
  *   session-disappearance handling via readSessionLastMessage.
- * - isNew sessions have a max-polls safety cap (60) to avoid infinite loop
+ * - isNew sessions have a max-polls safety cap (600) to avoid infinite loop
  *   when status never flips to idle.
  */
 export async function pollSessionCompletion(
@@ -28,12 +29,12 @@ export async function pollSessionCompletion(
   sessionID: string,
   options: { maxWaitMs?: number; pollIntervalMs?: number; isNew?: boolean } = {},
 ): Promise<string | null> {
-  const MAX_WAIT = options.maxWaitMs ?? 30_000;
+  const MAX_WAIT = options.maxWaitMs ?? 300_000;
   const POLL_INTERVAL = options.pollIntervalMs ?? 500;
   const startTime = Date.now();
   let consecutiveFailures = 0;
   const isNew = options.isNew ?? false;
-  const MAX_POLLS_FOR_NEW = 60;
+  const MAX_POLLS_FOR_NEW = 600;
 
   // Capture the initial message count so we can distinguish
   // the user's prompt from the subagent's response.

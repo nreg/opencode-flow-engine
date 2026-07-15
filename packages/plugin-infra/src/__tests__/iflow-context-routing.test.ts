@@ -47,8 +47,8 @@ describe('IFLOW_AGENT_NAMES — agent name validation', () => {
     expect(IFLOW_AGENT_NAMES).toContain('iflow-shipper');
   });
 
-  it('should have exactly 6 agent names', () => {
-    expect(IFLOW_AGENT_NAMES.length).toBe(6);
+  it('should have the correct number of agent names', () => {
+    expect(IFLOW_AGENT_NAMES.length).toBe(7);
   });
 
   it('should not contain SFlow agent names', () => {

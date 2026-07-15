@@ -251,36 +251,12 @@ Use the least powerful model that can handle each role:
 
 For each task in the execution batch:
 
-1. **Dispatch implementer**: Use the template at `skills/build-executor/implementer-prompt.md` to craft the dispatch. Extract the task brief. Compose the dispatch prompt with: (a) where this task fits, (b) the brief path, (c) interfaces/decisions from prior tasks, (d) report file path.
-2. **Handle implementer response**:
-   - **DONE**: Generate review package and dispatch task reviewer
-   - **DONE_WITH_CONCERNS**: Read concerns, assess, then review
-   - **NEEDS_CONTEXT**: Provide missing context, re-dispatch
-   - **BLOCKED**: Assess blocker — if task requires more reasoning, re-dispatch with better model; if plan is wrong, escalate to user
-3. **Review**: Dispatch task reviewer using `skills/build-executor/task-reviewer-prompt.md`. Reviewer returns spec compliance verdict + code quality verdict.
-4. **Fix**: If Critical or Important issues found, dispatch fix subagent. Re-review after fixes.
-5. **Mark complete**: Append one line to `.sflow/progress.md`: `Task N: complete (commits <base7>..<head7>, review clean)`
+1. **Read task brief**: Read the task brief file if provided by sFlow, or read the task directly from execution-contract.md
+2. **Implement directly**: Write failing test (RED) → implement (GREEN) → refactor (REFACTOR)
+3. **Verify**: Run tests, check lsp_diagnostics
+4. **Mark complete**: Update tasks.md and report back to sFlow
 
-### Subagent Dispatch via call_flow_agent
 
-Use the `call_flow_agent` tool for dispatching implementer and reviewer subagents (replaces `sflow_delegate`):
-
-- **Async mode** (`run_in_background=true`): Preferred for SDD. Returns a `task_id` immediately. When the task completes, a `<system-reminder>` is delivered. Use `background_output(task_id=...)` to retrieve results.
-- **Sync mode** (`run_in_background=false`): Waits for the subagent to finish. Use for short tasks.
-
-Concurrent dispatch: Launch multiple implementer subagents in parallel by calling `call_flow_agent` with `run_in_background=true` multiple times. Each returns a unique `task_id`.
-
-### File Handoffs
-
-Keep your context lean by handing artifacts as files, not pasted text:
-
-- **Task brief**: Extract task text to a uniquely named file
-- **Report file**: Named after the brief (`task-N-report.md`) — implementer writes full report there, returns only status summary
-- **Review package**: Write diff to a unique file; reviewer reads one file instead of running git commands
-
-### Subagent Progress Checkpoint
-
-Maintain a structured checkpoint at `.sflow/subagent-progress.md` for durable progress tracking across context compactions. This file stores **only coordinator recovery state** — it does not replace `tasks.md` checkboxes or the progress ledger.
 
 #### Checkpoint File Format
 

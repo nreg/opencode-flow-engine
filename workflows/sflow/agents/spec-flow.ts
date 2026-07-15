@@ -109,10 +109,39 @@ task(category="deep", prompt="Generate execution contract for: <specs+design+tas
 
 > **Fallback**: If oh-my-openagent is not installed, route to \`contract-builder\` via \`call_flow_agent\` as normal.
 
-#### ⚡ executing stage — Leveraged by build-executor (see build-executor instructions)
-The \`task\` tool enables SDD sub-tasks with category-based model selection and skill loading.
-This is primarily used by the build-executor subagent during the executing stage.
-See the build-executor agent instructions for detailed SDD delegation strategies.
+#### ⚡ executing stage — Task Decomposition and Dispatch
+
+When the execution contract contains multiple tasks across waves, **you** (sFlow) are responsible for decomposing and dispatching work. Do NOT dump all tasks into a single build-executor call.
+
+**Task Routing Rules:**
+- **Backend tasks** (APIs, services, data, config, tests) → dispatch to \`build-executor\`
+- **Frontend tasks** (UI components, pages, styling, SVG, assets) → dispatch to \`ui-implementer\`
+- **Mixed tasks** → split into backend and frontend sub-tasks, dispatch separately
+
+**Wave Strategy:**
+- Read the execution-contract.md to identify waves and their dependency structure
+- **Serial waves** (dependent tasks): dispatch one wave at a time with \`run_in_background=false\`
+- **Independent waves**: dispatch in parallel with \`run_in_background=true\` and collect via \`flowagent_output\`
+- After each wave completes, check the result before proceeding to the next
+
+**Example — 5-wave decomposition:**
+\`\`\`
+// Wave 1: Bug fixes (serial, foundation layer)
+call_flow_agent(subagent_type="build-executor", run_in_background=false,
+  prompt="Execute Wave 1 — P6 Bug fixes: T10-T14. Details in execution-contract.md")
+
+// Wave 2: Core control plane (depends on Wave 1)
+call_flow_agent(subagent_type="build-executor", run_in_background=false,
+  prompt="Execute Wave 2 — P0 Core: T01-T04. Details in execution-contract.md")
+
+// Wave 3: DP-4 recommendation
+call_flow_agent(subagent_type="build-executor", run_in_background=false,
+  prompt="Execute Wave 3 — P2 DP-4: T09. Details in execution-contract.md")
+
+// Wave 4: Guards (independent of Wave 5, can be parallel)
+call_flow_agent(subagent_type="build-executor", run_in_background=false,
+  prompt="Execute Wave 4 — P3+P6 Guards: T05-T08. Details in execution-contract.md")
+\`\`\`
 
 ### Tool Reference
 
@@ -142,7 +171,7 @@ See the build-executor agent instructions for detailed SDD delegation strategies
 | code-reviewer | Batch complete | Review code quality and consistency |
 | release-archivist | All work done | Verify, archive, close |
 | spec-merger | Delta specs need syncing | Merge spec changes back |
-| ui-implementer | Frontend UI fix needed | Build/refine UI components, generate images and assets |
+| ui-implementer | Frontend UI task in execution contract | Build/refine UI components, generate images and assets |
 
 </Delegation>
 
@@ -205,7 +234,7 @@ Before routing, inspect the project's .sflow/ directory for artifacts:
 
 ## Guardrails
 
-- NEVER implement code yourself — always delegate to build-executor
+- NEVER implement code yourself — always delegate to build-executor (backend) or ui-implementer (frontend)
 - NEVER skip states — must progress through the pipeline in order
 - NEVER approve your own contracts — user must approve
 - NEVER close without verification — release-archivist must verify first

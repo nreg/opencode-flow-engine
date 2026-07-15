@@ -103,10 +103,9 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
   },
 
   /**
-   * Build executor - full dev tools + subagent dispatch
-   * The build-executor agent can dispatch implementer/reviewer subagents
-   * in Subagent-Driven Development mode via call_flow_agent.
-   * When oh-my-openagent is available, also has access to task() and call_omo_agent().
+   * Build executor - pure implementation agent
+   * Responsible for TDD implementation only. No subagent delegation.
+   * All task decomposition and routing is handled by sFlow orchestrator.
    */
 'build-executor': {
     ...COMMON_TOOLS,
@@ -114,9 +113,6 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     edit: true,
     bash: true,
     skill: false,
-    call_flow_agent: true,
-    flowagent_output: true,
-    flowagent_cancel: true,
     lsp_diagnostics: true,
     lsp_goto_definition: true,
     lsp_find_references: true,
@@ -212,16 +208,13 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     skill: false,
   },
 
-  /** Plan-executor - full dev tools + subagent dispatch */
+  /** Plan-executor - pure implementation agent */
   'iflow-plan-executor': {
     ...COMMON_TOOLS,
     write: true,
     edit: true,
     bash: true,
     skill: false,
-    call_flow_agent: true,
-    flowagent_output: true,
-    flowagent_cancel: true,
     lsp_diagnostics: true,
     lsp_goto_definition: true,
     lsp_find_references: true,
@@ -267,7 +260,7 @@ export function getAgentTools(name: string, hasOmoPlugin?: boolean): Record<stri
   const base = AGENT_TOOLS[name] || { ...COMMON_TOOLS };
   // Use passed-in flag or fall back to module-level flag
   const omoAvailable = hasOmoPlugin ?? _hasOmoPlugin;
-  if (omoAvailable && (name === 'sFlow' || name === 'build-executor' || name === 'iFlow' || name === 'iflow-plan-executor')) {
+  if (omoAvailable && (name === 'sFlow' || name === 'iFlow')) {
     return { ...base, ...OMO_TOOLS };
   }
   return { ...base };

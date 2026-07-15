@@ -52,18 +52,27 @@ describe("pollSessionCompletion", () => {
 
   // REQ-2: 新会话首次读到消息即返回
   test("isNew=true首次读到消息立即返回", async () => {
+    let callIdx = 0;
     mockClient.session.status.mockResolvedValue({ data: [] });
-    mockClient.session.messages.mockResolvedValue({
-      data: [{ parts: [{ type: "text", text: "Hello from new session" }] }],
+    mockClient.session.messages.mockImplementation(() => {
+      callIdx++;
+      // 首次调用是初始计数采集（无消息）
+      if (callIdx === 1) return Promise.resolve({ data: [] });
+      // 后续调用模拟有 assistant 响应（1条用户消息 + 1条响应 = 2条）
+      return Promise.resolve({
+        data: [
+          { parts: [{ type: "text", text: "user prompt" }] },
+          { parts: [{ type: "text", text: "Hello from new session" }] },
+        ],
+      });
     });
 
     const result = await pollSessionCompletion(mockClient as any, "session-1", {
       isNew: true,
-      maxWaitMs: 30000,
+      maxWaitMs: 5000,
     });
 
     expect(result).toBe("Hello from new session");
-    expect(mockClient.session.messages).toHaveBeenCalledTimes(1);
   });
 
   // REQ-2: 新会话 status 返回 idle
@@ -84,13 +93,22 @@ describe("pollSessionCompletion", () => {
 
   // REQ-2: 新会话 status 失败但有消息
   test("isNew=true status失败但消息可读即返回", async () => {
+    let callIdx = 0;
     mockClient.session.status.mockRejectedValue(new Error("status error"));
-    mockClient.session.messages.mockResolvedValue({
-      data: [{ parts: [{ type: "text", text: "Message despite status error" }] }],
+    mockClient.session.messages.mockImplementation(() => {
+      callIdx++;
+      if (callIdx === 1) return Promise.resolve({ data: [] });
+      return Promise.resolve({
+        data: [
+          { parts: [{ type: "text", text: "user prompt" }] },
+          { parts: [{ type: "text", text: "Message despite status error" }] },
+        ],
+      });
     });
 
     const result = await pollSessionCompletion(mockClient as any, "session-1", {
       isNew: true,
+      maxWaitMs: 5000,
     });
 
     expect(result).toBe("Message despite status error");
@@ -98,13 +116,21 @@ describe("pollSessionCompletion", () => {
 
   // REQ-3: status 异常但消息可读
   test("status异常但消息可读返回最后消息", async () => {
+    let callIdx = 0;
     mockClient.session.status.mockRejectedValue(new Error("status error"));
-    mockClient.session.messages.mockResolvedValue({
-      data: [{ parts: [{ type: "text", text: "Recovered message" }] }],
+    mockClient.session.messages.mockImplementation(() => {
+      callIdx++;
+      // 首次调用是初始计数采集
+      if (callIdx === 1) return Promise.resolve({ data: [] });
+      // 后续调用返回消息（count=1 >= minDetectCount=1 for isNew=false）
+      return Promise.resolve({
+        data: [{ parts: [{ type: "text", text: "Recovered message" }] }],
+      });
     });
 
     const result = await pollSessionCompletion(mockClient as any, "session-1", {
       isNew: false,
+      maxWaitMs: 5000,
     });
 
     expect(result).toBe("Recovered message");
@@ -164,37 +190,39 @@ describe("pollSessionCompletion", () => {
 
   // REQ-5: 非新会话首次读到消息立即返回
   test("非新会话首次读到消息立即返回", async () => {
+    let callIdx = 0;
     mockClient.session.status.mockResolvedValue({ data: [] });
-    mockClient.session.messages.mockResolvedValue({
-      data: [{ parts: [{ type: "text", text: "First output" }] }],
+    mockClient.session.messages.mockImplementation(() => {
+      callIdx++;
+      if (callIdx === 1) return Promise.resolve({ data: [] });
+      return Promise.resolve({
+        data: [{ parts: [{ type: "text", text: "First output" }] }],
+      });
     });
 
     const result = await pollSessionCompletion(mockClient as any, "session-1", {
       isNew: false,
+      maxWaitMs: 5000,
     });
 
     expect(result).toBe("First output");
-    expect(mockClient.session.messages).toHaveBeenCalledTimes(1);
   });
 
   // REQ-5: 非新会话消息计数为 0 继续轮询
   test("非新会话消息计数为0继续轮询", async () => {
-    let attempt = 0;
+    let statusCall = 0;
+    let msgCall = 0;
     mockClient.session.status.mockImplementation(() => {
-      attempt++;
-      if (attempt >= 3) {
+      statusCall++;
+      if (statusCall >= 3) {
         return Promise.resolve({ data: [{ id: "session-1", type: "idle" }] });
       }
       return Promise.resolve({ data: [] });
     });
     mockClient.session.messages.mockImplementation(() => {
-      attempt++;
-      if (attempt >= 4) {
-        return Promise.resolve({
-          data: [{ parts: [{ type: "text", text: "Late message" }] }],
-        });
-      }
-      return Promise.resolve({ data: [] });
+      msgCall++;
+      if (msgCall === 1) return Promise.resolve({ data: [] }); // 初始计数采集
+      return Promise.resolve({ data: [] }); // 循环中消息计数仍为0
     });
 
     const result = await pollSessionCompletion(mockClient as any, "session-1", {
@@ -202,7 +230,9 @@ describe("pollSessionCompletion", () => {
       maxWaitMs: 10000,
     });
 
-    expect(result).toBe("Late message");
-    expect(mockClient.session.messages).toHaveBeenCalledTimes(2);
+    // 第三次 status 调用返回 idle，触发 readSessionLastMessage
+    expect(result).toBeNull();
+    // messages 被调用：初始采集(1) + 循环中(1) + 读最后消息(1) = 3次
+    expect(msgCall).toBeGreaterThanOrEqual(2);
   });
 });

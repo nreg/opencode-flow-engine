@@ -115,21 +115,6 @@ Format:
 
 This skill complements `iflow-plan-executor.ts` prompt (260 lines). The agent prompt contains the full Complexity Overload Protection, Deviation Rules, Checkpoint Protocol, Atomic Commit Discipline, AGENTS.md Enforcement, and Threat Model Cross-Reference. This skill provides the concise contextual reference.
 
-## Frontend UI Task Delegation
-
-For frontend tasks (UI components, design tokens, SVG, visual assets, pages), **delegate to `ui-implementer`** instead of implementing directly. `ui-implementer` is specialized in frontend code with merged design skills.
-
-**Detection:** A task is a frontend candidate if it involves:
-- UI components, pages, layouts
-- CSS/Tailwind styling
-- SVG icons or images
-- Design tokens (colors, typography, spacing)
-- Component library setup (shadcn/ui)
-- Image/video asset generation
-
-**Delegation:** Use `call_flow_agent` with `subagent_type="ui-implementer"`. After completion, verify the output and continue.
-
 ## Tools
 
-- `call_flow_agent` with `subagent_type="iflow-plan-executor"` (for task execution)
-- `call_flow_agent` with `subagent_type="ui-implementer"` (for frontend UI tasks)
+- Standard read/write/edit/bash tools for implementation

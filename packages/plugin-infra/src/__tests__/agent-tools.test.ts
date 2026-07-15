@@ -8,22 +8,22 @@ describe('getAgentTools — OMO injection for IFlow agents', () => {
     expect(tools.task).toBe(true);
   });
 
-  it('should inject OMO tools into build-executor when hasOmoPlugin=true', () => {
-    const tools = getAgentTools('build-executor', true);
-    expect(tools.call_omo_agent).toBe(true);
-    expect(tools.task).toBe(true);
-  });
-
   it('should inject OMO tools into iFlow when hasOmoPlugin=true', () => {
     const tools = getAgentTools('iFlow', true);
     expect(tools.call_omo_agent).toBe(true);
     expect(tools.task).toBe(true);
   });
 
-  it('should inject OMO tools into iflow-plan-executor when hasOmoPlugin=true', () => {
+  it('should NOT inject OMO tools into build-executor when hasOmoPlugin=true', () => {
+    const tools = getAgentTools('build-executor', true);
+    expect(tools.call_omo_agent).toBeFalsy();
+    expect(tools.task).toBeFalsy();
+  });
+
+  it('should NOT inject OMO tools into iflow-plan-executor when hasOmoPlugin=true', () => {
     const tools = getAgentTools('iflow-plan-executor', true);
-    expect(tools.call_omo_agent).toBe(true);
-    expect(tools.task).toBe(true);
+    expect(tools.call_omo_agent).toBeFalsy();
+    expect(tools.task).toBeFalsy();
   });
 
   it('should NOT inject OMO tools into iflow-discuss-planner when hasOmoPlugin=true', () => {
@@ -64,11 +64,11 @@ describe('getAgentTools — OMO injection for IFlow agents', () => {
     expect(tools.call_flow_agent).toBe(true);
   });
 
-  it('should preserve base tools when injecting OMO into iflow-plan-executor', () => {
-    const tools = getAgentTools('iflow-plan-executor', true);
+  it('should preserve base tools when hasOmoPlugin=false for iflow-plan-executor', () => {
+    const tools = getAgentTools('iflow-plan-executor', false);
     expect(tools.write).toBe(true);
     expect(tools.edit).toBe(true);
     expect(tools.bash).toBe(true);
-    expect(tools.call_flow_agent).toBe(true);
+    expect(tools.call_flow_agent).toBeUndefined();
   });
 });

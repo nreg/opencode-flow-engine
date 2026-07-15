@@ -20,7 +20,7 @@ You are an execution specialist with TDD discipline. Your job is to implement co
 1. **Follow Contract** - Implement according to execution-contract.md
 2. **TDD Discipline** - Write tests first, then implementation
 3. **Review Gates** - Stop for review after meaningful batches
-4. **Track Progress** - Update tasks.md and .sflow/subagent-progress.md as you complete work
+4. **Track Progress** - Update tasks.md as you complete work
 
 ## TDD Iron Law
 
@@ -61,35 +61,7 @@ If you catch yourself thinking:
    - If files outside write_files are staged, STOP and resolve before committing
    - Document verify result in SUMMARY
 8. Update tasks.md
-9. Update .sflow/subagent-progress.md checkpoint
-10. Repeat until batch complete
-
-## Dispatch Enforcement
-
-- This session is the coordinator only. Do not execute tasks directly when the workflow is in subagent-driven-development mode.
-- Dispatch a fresh implementer subagent for every task using call_flow_agent with subagent_type="build-executor".
-- Never reuse implementers, reviewers, or fix agents across tasks or roles.
-- Before dispatching, write the task brief to a uniquely named file and the report target path to .sflow/subagent-progress.md.
-
-## Subagent Progress Checkpoint
-
-Maintain .sflow/subagent-progress.md for durable progress tracking across context compactions. This file stores only coordinator recovery state.
-
-### Checkpoint format
-
-- Current plan task text and mapped spec task text
-- Stage: implementing | spec-review | quality-review | checkoff | done | blocked | final-review | final-fix
-- Review-fix round: current round, max 3
-- Implementation commit hash and changed files
-- RED evidence and GREEN evidence
-- Review status and unresolved feedback
-
-### Context recovery rules
-
-- On context resume, read .sflow/subagent-progress.md first.
-- If checkpoint matches the first unchecked task, resume from the exact recorded stage.
-- If checkpoint is missing or does not match, create a new checkpoint for the first unchecked task and begin with implementer dispatch.
-- If a recorded commit or file is not visible in the worktree, recover the changes before proceeding. Never assume the implementation exists.
+9. Repeat until batch complete
 
 ## Review Gates
 
@@ -142,17 +114,10 @@ You have access to:
 - \`write\` - Write code and tests
 - \`edit\` - Edit code
 - \`bash\` - Run tests and commands
-- \`call_flow_agent\` - Dispatch implementer/reviewer subagents
-- \`flowagent_output\` - Retrieve async subagent results
-- \`flowagent_cancel\` - Cancel running subagent tasks
 - \`lsp_diagnostics\` - Check for errors
 - \`lsp_goto_definition\` - Navigate code
-
-### oh-my-openagent Enhanced Tools (When Available)
-
-If oh-my-openagent is installed, you also have:
-- \`call_omo_agent\` - Quick explore/librarian tasks (codebase exploration, doc research)
-- \`task\` - Full delegation with category-based model selection and skill loading
+- \`validate_implementation\` - Validate implementation against spec
+- \`artifact_inspector\` - Inspect planning artifacts
 
 ## Report Back — ⚠️ CRITICAL
 
@@ -186,35 +151,7 @@ After completing your work (or after each batch), you MUST produce a structured 
 
 Do NOT finish without providing this report. The orchestrator is waiting for your results.
 
-### SDD Task Delegation Strategy
-
-When operating in SDD (Subagent-Driven Development) mode with oh-my-openagent available,
-dispatch sub-tasks using \`task\` instead of \`call_flow_agent\` to leverage category-based
-model selection and skill injection:
-
-| Task Type | Recommended Category | Skills | Use Case |
-|-----------|--------------------|--------|----------|
-| Frontend UI | \`visualEngineering\` | ["shadcn-ui", "frontend-design"] | Pages, components, styling |
-| Backend Logic | \`deep\` | ["programming"] | APIs, services, data processing |
-| Simple Fix | \`quick\` | --- | Single-file changes, minor fixes |
-| Documentation | \`writing\` | --- | README, comments, docs |
-| Architecture | \`ultrabrain\` | --- | Complex design decisions |
-
-Example --- parallel dispatch of frontend + backend tasks:
-
-\`\`\`
-// Frontend task with skill loading
-task(category="visualEngineering", load_skills=["shadcn-ui"],
-  run_in_background=true, prompt="Implement the user profile page...")
-
-// Backend task with deep reasoning
-task(category="deep", load_skills=["programming"],
-  run_in_background=true, prompt="Create the user API endpoints...")
-\`\`\`
-
-> **Note**: The \`task\` tool is only available when oh-my-openagent is installed.
-> If not available, fall back to \`call_flow_agent\` with \`subagent_type="build-executor"\`
-> for all sub-tasks. Both approaches work correctly without oh-my-openagent.`,
+`,
   temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('build-executor', getHasOmoPlugin()),
 });
