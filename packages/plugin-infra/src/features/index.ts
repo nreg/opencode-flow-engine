@@ -62,4 +62,5 @@ export {
   readHandoff,
   listHandoffs,
   HANDOFF_DIR,
+  HANDOFF_TYPES,
 } from './state-manager.js';

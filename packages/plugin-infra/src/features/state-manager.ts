@@ -42,6 +42,9 @@ export interface HandoffFile {
 
 export const HANDOFF_DIR = '.sflow/handoffs';
 
+/** Allowed handoff types — validates against unexpected type values */
+export const HANDOFF_TYPES = new Set(['prototype', 'research', 'experiment', 'task-handoff', 'code-review', 'architecture']);
+
 export function getStateFilePath(workflowType: 'sflow' | 'iflow'): string {
   return workflowType === 'iflow' ? '.iflow/state.json' : '.sflow/state.json';
 }
@@ -862,6 +865,9 @@ export async function createHandoff(
   changeDir: string,
   params: Omit<HandoffFile, 'id' | 'status' | 'createdAt'>,
 ): Promise<HandoffFile> {
+  if (!HANDOFF_TYPES.has(params.type)) {
+    throw new Error('Unsupported handoff type "' + params.type + '". Allowed types: ' + Array.from(HANDOFF_TYPES).join(', '));
+  }
   const id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   const now = new Date().toISOString();
   const handoff: HandoffFile = {
