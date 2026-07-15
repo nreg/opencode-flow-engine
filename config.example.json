@@ -61,5 +61,11 @@
     "workflow_router": true,
     "contract_validator": true,
     "artifact_inspector": true
+  },
+  "modelProfiles": {
+    "mechanical": "step-3.7-flash",
+    "standard": "glm-5.1",
+    "strong": "glm-5.1",
+    "review": "glm-5.1"
   }
 }

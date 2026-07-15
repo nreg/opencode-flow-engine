@@ -203,6 +203,12 @@ function configTemplate() {
       contract_validator: true,
       artifact_inspector: true,
     },
+    modelProfiles: {
+      mechanical: 'fast-cheap-model',
+      standard: 'balanced-model',
+      strong: 'powerful-model',
+      review: 'review-specialized-model',
+    },
   };
 }
 
