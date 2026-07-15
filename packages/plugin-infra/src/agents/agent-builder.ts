@@ -5,7 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory, AgentMode, BuiltinAgentName, AgentOverrides } from './types.js';
-import type { SFlowConfig } from './config-loader.js';
+import type { SFlowConfig, ModelProfileConfig } from './config-loader.js';
 import {
   createSFlowAgent,
   createNeedExplorerAgent,
@@ -108,6 +108,26 @@ const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
 };
 
 /**
+ * Agent profile mappings — maps each agent to its default model profile.
+ * Used by resolveModelWithFallback to resolve model via modelProfiles config.
+ */
+export type AGENT_PROFILES_TYPE = Record<string, 'mechanical' | 'standard' | 'strong' | 'review'>;
+
+export const AGENT_PROFILES: AGENT_PROFILES_TYPE = {
+  // SFlow
+  sFlow: 'standard',
+  'need-explorer': 'standard',
+  'spec-writer': 'strong',
+  'contract-builder': 'strong',
+  'build-executor': 'strong',
+  'bug-investigator': 'strong',
+  'code-reviewer': 'review',
+  'release-archivist': 'mechanical',
+  'spec-merger': 'standard',
+  'ui-implementer': 'standard',
+};
+
+/**
  * Agent registry with factory functions
  */
 const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
@@ -198,6 +218,7 @@ function normalizeFallbackList(
 export type ModelProvenance =
   | 'override'
   | 'config-override'
+  | 'profile'
   | 'provider-fallback'
   | 'system-default';
 
@@ -211,9 +232,18 @@ export interface ModelResolutionResult {
 }
 
 /**
+ * Options for profile-based model resolution.
+ * Passed to resolveModelWithFallback when modelProfiles config is available.
+ */
+export interface ProfileResolutionOptions {
+  modelProfiles?: ModelProfileConfig;
+  activeWorkflow?: 'iflow' | 'sflow' | 'none';
+}
+
+/**
  * Resolve model with fallback chain and provenance tracking.
  *
- * Priority: override.model > model param > configModel > DEFAULT_MODELS[name]
+ * Priority: override.model > model param > configModel > profile > fallback > DEFAULT_MODELS[name]
  * Provenance is tracked to help diagnose model selection issues.
  */
 export function resolveModelWithFallback(
@@ -221,6 +251,7 @@ export function resolveModelWithFallback(
   model?: string,
   configOverrides?: AgentOverrides,
   overrides?: AgentOverrides,
+  profileOptions?: ProfileResolutionOptions,
 ): ModelResolutionResult {
   const programmaticModel = overrides?.[name]?.model;
   const configModel = configOverrides?.[name]?.model;
@@ -236,6 +267,17 @@ export function resolveModelWithFallback(
   if (configModel) {
     if (isModelAvailable(configModel)) {
       return { model: configModel, provenance: 'config-override' };
+    }
+  }
+
+  // Profile resolution step: only when activeWorkflow is sflow
+  if (profileOptions?.activeWorkflow === 'sflow' && profileOptions?.modelProfiles) {
+    const agentProfile = AGENT_PROFILES[name];
+    if (agentProfile && profileOptions.modelProfiles[agentProfile]) {
+      const profileModel = profileOptions.modelProfiles[agentProfile]!;
+      if (isModelAvailable(profileModel)) {
+        return { model: profileModel, provenance: 'profile' };
+      }
     }
   }
 
@@ -290,7 +332,10 @@ export async function createAgent(
   const merged = mergeOverrides(configOverrides, overrides || {});
   const agentOverride = merged[name];
 
-  const resolved = resolveModelWithFallback(name, model, configOverrides, overrides);
+  const resolved = resolveModelWithFallback(name, model, configOverrides, overrides, {
+      modelProfiles: config.modelProfiles,
+      activeWorkflow: 'sflow',
+    });
 
   // Resolve temperature: override > config > factory default
   const resolvedTemperature = agentOverride?.temperature ?? configOverrides?.[name]?.temperature ?? undefined;
@@ -327,7 +372,10 @@ export async function createAllAgents(
   for (const name of Object.keys(AGENT_REGISTRY) as BuiltinAgentName[]) {
     const factory = AGENT_REGISTRY[name];
 
-    const resolved = resolveModelWithFallback(name, model, configOverrides, overrides);
+const resolved = resolveModelWithFallback(name, model, configOverrides, overrides, {
+    modelProfiles: config.modelProfiles,
+    activeWorkflow: 'sflow',
+  });
 
     const content = skillContents?.[name];
 

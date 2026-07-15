@@ -14,6 +14,13 @@ export interface AgentConfigEntry {
   fallback_models?: string[];
 }
 
+export interface ModelProfileConfig {
+  mechanical?: string;
+  standard?: string;
+  strong?: string;
+  review?: string;
+}
+
 export interface SFlowConfig {
   version?: string;
   mode?: string;
@@ -21,6 +28,7 @@ export interface SFlowConfig {
   features?: Record<string, boolean>;
   hooks?: Record<string, boolean>;
   tools?: Record<string, boolean>;
+  modelProfiles?: ModelProfileConfig;
 }
 
 /**
@@ -264,6 +272,12 @@ export function generateConfigTemplate(): SFlowConfig {
       workflow_router: true,
       contract_validator: true,
       artifact_inspector: true,
+    },
+    modelProfiles: {
+      mechanical: 'fast-cheap-model',
+      standard: 'balanced-model',
+      strong: 'powerful-model',
+      review: 'review-specialized-model',
     },
   };
 }

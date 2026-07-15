@@ -1,8 +1,46 @@
 import type { FeatureConfig, FeatureResult } from "./types.js";
 import { createWorkflowManager } from "./workflow-manager.js";
-import { fileExists, readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, readFile, directoryExists, isContractStale as checkContractStale, writeFile, extractKeywords as jiebaExtractKeywords, calculateDynamicThreshold, calculateOverlapRatio } from "@opencode-flow-engine/shared";
+import { fileExists, readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, readFile, directoryExists, isContractStale as checkContractStale, writeFile, extractKeywords as jiebaExtractKeywords, calculateDynamicThreshold, calculateOverlapRatio, stateFileMutex, removeFile, listFiles } from "@opencode-flow-engine/shared";
 
 const BOULDER_STATE_FILE = ".sflow/boulder-state.json";
+
+// ─── Checkpoint Types ──────────────────────────────────────────────────────
+
+export interface CheckpointFile {
+  taskId: string;
+  commitStart?: string;
+  commitEnd?: string;
+  evidence?: string;
+  reviewStatus?: 'pending' | 'pass' | 'fail';
+  contractHash: string;
+  timestamp: string;
+  nextStep?: string;
+}
+
+export const CHECKPOINT_DIR = '.sflow/checkpoints';
+
+// ─── Handoff Types ──────────────────────────────────────────────────────
+
+export type HandoffStatus = 'created' | 'finished' | 'resolved';
+export type HandoffDecision = 'accept' | 'reject' | 'defer';
+
+export interface HandoffFile {
+  id: string;
+  type: string;
+  objective: string;
+  expectedOutput: string;
+  acceptance: string;
+  boundary: string;
+  status: HandoffStatus;
+  decision?: HandoffDecision;
+  decisionReason?: string;
+  output?: string;
+  createdAt: string;
+  finishedAt?: string;
+  resolvedAt?: string;
+}
+
+export const HANDOFF_DIR = '.sflow/handoffs';
 
 export function getStateFilePath(workflowType: 'sflow' | 'iflow'): string {
   return workflowType === 'iflow' ? '.iflow/state.json' : '.sflow/state.json';
@@ -772,6 +810,152 @@ export async function clearProgressFile(changeDir: string): Promise<void> {
     // File doesn't exist, ignore
   }
 }
+
+// ─── Checkpoint Operations ─────────────────────────────────────────────────
+
+export async function saveCheckpoint(changeDir: string, checkpoint: CheckpointFile): Promise<void> {
+  const checkpointsDir = changeDir + '/' + CHECKPOINT_DIR;
+  const filePath = checkpointsDir + '/' + checkpoint.taskId + '.json';
+  await stateFileMutex.runExclusive(async () => {
+    await ensureDir(checkpointsDir);
+    await writeJsonFile(filePath, checkpoint);
+  });
+}
+
+export async function readCheckpoint(changeDir: string, taskId: string): Promise<CheckpointFile | null> {
+  const filePath = changeDir + '/' + CHECKPOINT_DIR + '/' + taskId + '.json';
+  return readJsonFile<CheckpointFile>(filePath);
+}
+
+export async function detectStaleCheckpoints(changeDir: string): Promise<string[]> {
+  const contractPath = changeDir + '/execution-contract.md';
+  const contractContent = await readFile(contractPath);
+  if (!contractContent) return [];
+
+  const currentHash = await simpleHash(contractContent);
+  const checkpointsDir = changeDir + '/' + CHECKPOINT_DIR;
+  const dirExists = await directoryExists(checkpointsDir);
+  if (!dirExists) return [];
+
+  const files = await listFiles(checkpointsDir, '.json');
+  const staleTaskIds: string[] = [];
+
+  for (const file of files) {
+    const filePath = checkpointsDir + '/' + file;
+    const checkpoint = await readJsonFile<CheckpointFile>(filePath);
+    if (checkpoint && checkpoint.contractHash !== currentHash) {
+      staleTaskIds.push(checkpoint.taskId);
+    }
+  }
+
+  return staleTaskIds;
+}
+
+export async function clearCheckpoint(changeDir: string, taskId: string): Promise<void> {
+  const filePath = changeDir + '/' + CHECKPOINT_DIR + '/' + taskId + '.json';
+  await removeFile(filePath);
+}
+
+// ─── Handoff Operations ──────────────────────────────────────────────────
+
+export async function createHandoff(
+  changeDir: string,
+  params: Omit<HandoffFile, 'id' | 'status' | 'createdAt'>,
+): Promise<HandoffFile> {
+  const id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  const now = new Date().toISOString();
+  const handoff: HandoffFile = {
+    id,
+    type: params.type,
+    objective: params.objective,
+    expectedOutput: params.expectedOutput,
+    acceptance: params.acceptance,
+    boundary: params.boundary,
+    status: 'created',
+    decision: params.decision,
+    decisionReason: params.decisionReason,
+    output: params.output,
+    createdAt: now,
+    finishedAt: params.finishedAt,
+    resolvedAt: params.resolvedAt,
+  };
+  const handoffsDir = changeDir + '/' + HANDOFF_DIR;
+  const filePath = handoffsDir + '/' + id + '.json';
+  await stateFileMutex.runExclusive(async () => {
+    await ensureDir(handoffsDir);
+    await writeJsonFile(filePath, handoff);
+  });
+  return handoff;
+}
+
+export async function finishHandoff(changeDir: string, id: string, output: string): Promise<HandoffFile> {
+  const filePath = changeDir + '/' + HANDOFF_DIR + '/' + id + '.json';
+  return stateFileMutex.runExclusive(async () => {
+    const existing = await readJsonFile<HandoffFile>(filePath);
+    if (!existing) {
+      throw new Error('Handoff not found: ' + id);
+    }
+    if (existing.status === 'finished') {
+      throw new Error('Handoff already finished: ' + id);
+    }
+    existing.status = 'finished';
+    existing.output = output;
+    existing.finishedAt = new Date().toISOString();
+    await writeJsonFile(filePath, existing);
+    return existing;
+  });
+}
+
+export async function resolveHandoff(
+  changeDir: string,
+  id: string,
+  decision: HandoffDecision,
+  reason?: string,
+): Promise<HandoffFile> {
+  const filePath = changeDir + '/' + HANDOFF_DIR + '/' + id + '.json';
+  return stateFileMutex.runExclusive(async () => {
+    const existing = await readJsonFile<HandoffFile>(filePath);
+    if (!existing) {
+      throw new Error('Handoff not found: ' + id);
+    }
+    if (existing.status !== 'finished') {
+      throw new Error('Handoff must be in "finished" status to resolve, current status: ' + existing.status);
+    }
+    existing.status = 'resolved';
+    existing.decision = decision;
+    if (reason !== undefined) {
+      existing.decisionReason = reason;
+    }
+    existing.resolvedAt = new Date().toISOString();
+    await writeJsonFile(filePath, existing);
+    return existing;
+  });
+}
+
+export async function readHandoff(changeDir: string, id: string): Promise<HandoffFile | null> {
+  const filePath = changeDir + '/' + HANDOFF_DIR + '/' + id + '.json';
+  return readJsonFile<HandoffFile>(filePath);
+}
+
+export async function listHandoffs(changeDir: string): Promise<HandoffFile[]> {
+  const handoffsDir = changeDir + '/' + HANDOFF_DIR;
+  const dirExists = await directoryExists(handoffsDir);
+  if (!dirExists) return [];
+
+  const files = await listFiles(handoffsDir, '.json');
+  const handoffs: HandoffFile[] = [];
+
+  for (const file of files) {
+    const filePath = handoffsDir + '/' + file;
+    const handoff = await readJsonFile<HandoffFile>(filePath);
+    if (handoff) {
+      handoffs.push(handoff);
+    }
+  }
+
+  return handoffs;
+}
+
 export function createStateManager(
   config: FeatureConfig = { enabled: true },
   workflowManager?: WorkflowManager,

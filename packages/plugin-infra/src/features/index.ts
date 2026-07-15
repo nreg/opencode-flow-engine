@@ -42,3 +42,24 @@ export type {
   ReviseExecutionPlanParams,
   HashValidationResult,
 } from './execution-plan.js';
+
+export type {
+  CheckpointFile,
+  HandoffFile,
+  HandoffStatus,
+  HandoffDecision,
+} from './state-manager.js';
+
+export {
+  saveCheckpoint,
+  readCheckpoint,
+  detectStaleCheckpoints,
+  clearCheckpoint,
+  CHECKPOINT_DIR,
+  createHandoff,
+  finishHandoff,
+  resolveHandoff,
+  readHandoff,
+  listHandoffs,
+  HANDOFF_DIR,
+} from './state-manager.js';
