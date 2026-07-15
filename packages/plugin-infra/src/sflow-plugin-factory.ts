@@ -204,11 +204,10 @@ function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
               }, null, 2),
             };
           }
-          // Sync mode: poll for completion using shared pollSessionCompletion
+          // Sync mode: poll for completion (no timeout, stability-based detection)
           const lastOutput = await pollSessionCompletion(
             client as unknown as { session: import("./helpers/polling.js").SFlowClientSession },
             sessionID,
-            { isNew },
           ) || '(no output)';
 
           const syncTaskId = generateTaskId(backgroundTaskCounter);

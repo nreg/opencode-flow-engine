@@ -205,7 +205,6 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
           const lastOutput = await pollSessionCompletion(
             client as unknown as { session: import("./helpers/polling.js").SFlowClientSession },
             sessionID,
-            { isNew },
           ) || '(no output)';
 
           const syncTaskId = generateTaskId(backgroundTaskCounter);
