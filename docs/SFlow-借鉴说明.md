@@ -507,3 +507,15 @@ P7	Skill token 压缩 + Guard 测试覆盖	⭐⭐⭐	中
 执行控制平面 — 这是 spec-superflow 最大的架构改进，sFlow 的 build-executor 可以借鉴 wave 分波
 SDD 检查点升级 — sFlow 已有 subagent-progress.md 基础，升级到结构化检查点成本低
 Bug 验证 — closing gate 强制检查、幽灵状态检测、git 分支隔离，这些是质量保障的"最后一公里"
+
+spec-superflow 演进分析（362b238a → fd671ebe）
+
+362b238a → fd671ebe（16 个提交，51 个文件变更，+820/-107 行）
+
+优先级	借鉴点	价值	工作量
+P3	Raw-mode 冒烟测试 — 验证插件在干净环境中的核心功能	⭐⭐⭐	低
+P4	版本一致性检查 — 自动化版本号扫描	⭐⭐	低
+P5	白名单资产读取 — 统一模板读取入口	⭐⭐	低
+总体结论：v0.9.1 的 Portable Runtime 架构变更对 spec-superflow 自身是重要的基础设施升级，但对我们的 sFlow 没有直接影响，因为我们从一开始就采用了 OpenCode 插件机制，不存在本地路径依赖问题。本次更新中值得借鉴的内容相对有限，优先级都不高。
+
+最终决策：不借鉴

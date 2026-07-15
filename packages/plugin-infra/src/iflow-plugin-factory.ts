@@ -363,8 +363,18 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
         const iflowAgentNames = IFLOW_AGENT_NAMES as readonly string[];
         for (const name of iflowAgentNames) {
           const override = configOverrides[name as import('./agents/types.js').BuiltinAgentName];
-          const skill = skillLoader.getSkill(name);
-          const agentCfg = await createAgent(name as import('./agents/types.js').BuiltinAgentName, undefined, undefined, skill?.content);
+
+          let skillContent = skillLoader.getSkill(name)?.content;
+          if (name === 'iflow-plan-executor') {
+            const uiSkill = skillLoader.getSkill('ui-implementer');
+            if (uiSkill?.content) {
+              skillContent = skillContent
+                ? `${skillContent}\n\n---\n\n## Frontend UI Expertise\n\n${uiSkill.content}`
+                : uiSkill.content;
+            }
+          }
+
+          const agentCfg = await createAgent(name as import('./agents/types.js').BuiltinAgentName, undefined, undefined, skillContent);
 
           const instructions = (typeof agentCfg.instructions === 'string' ? agentCfg.instructions : '') || (typeof agentCfg.prompt === 'string' ? agentCfg.prompt : '');
           const modelName = typeof agentCfg.model === 'string' ? agentCfg.model : undefined;
