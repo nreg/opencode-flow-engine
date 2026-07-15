@@ -151,7 +151,7 @@ iFlow has **6 workflow states**, forming a continuous cycle: discuss → researc
 | **iflow-verifier** | Subagent | Adversarial verification: goal-backward verification, BLOCKER/WARNING classification, 3-level artifact checks |
 | **iflow-researcher** | Subagent | Technical research: discovery levels (0-3), tool priority chain, confidence markers |
 | **iflow-shipper** | Subagent | Shipping: creates PR, generates UAT.md, manages branch lifecycle |
-| **ui-implementer** | Subagent | Frontend UI implementation, integrating 9 frontend specialized skills. Shared with sFlow — callable by `iflow-plan-executor` in SDD mode |
+| **ui-implementer** | Subagent | Frontend UI implementation, integrating 9 frontend specialized skills. Shared with sFlow |
 
 ### UI Implementer Subagent
 
