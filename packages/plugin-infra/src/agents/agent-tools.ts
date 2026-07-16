@@ -176,6 +176,9 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     lsp_diagnostics: true,
     lsp_goto_definition: true,
     lsp_find_references: true,
+    agnes_image_generate: true,
+    agnes_video_generate: true,
+    agnes_image_understand: true,
   },
 
   // ── IFlow Agents ──
@@ -218,6 +221,9 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     lsp_diagnostics: true,
     lsp_goto_definition: true,
     lsp_find_references: true,
+    agnes_image_generate: true,
+    agnes_video_generate: true,
+    agnes_image_understand: true,
   },
 
   /** Verifier - read-only + bash for tests */

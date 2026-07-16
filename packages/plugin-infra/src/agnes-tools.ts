@@ -8,8 +8,8 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
       args: {
         prompt: z.string().describe('Text description of the image to generate. Use format: [subject] + [scene] + [style] + [lighting] + [composition]'),
         output_path: z.string().optional().describe('Relative path to save the image (e.g. "public/images/hero.png"). Defaults to src/assets/images/<timestamp>.png'),
-        size: z.string().optional().describe('Size tier: 1K, 2K, 3K, 4K (default: 1K)'),
-        ratio: z.string().optional().describe('Aspect ratio: 1:1, 3:4, 4:3, 16:9, 9:16, 2:3, 3:2, 21:9 (default: 1:1)'),
+        size: z.string().optional().describe('Output image size. Precise format: "1024x768", "1024x1024", "768x1024". Tier format for use with ratio: "1K", "2K", "3K", "4K". Default: "1024x768".'),
+        ratio: z.string().optional().describe('Aspect ratio for tier-based size. Only used when size is in tier format (1K/2K/3K/4K). Supported: 1:1, 3:4, 4:3, 16:9, 9:16, 2:3, 3:2, 21:9. Default: 1:1.'),
         image_paths: z.array(z.string()).optional().describe('Paths to reference images for image-to-image style transfer or multi-image composition. Single path for style transfer, multiple paths for composition.'),
       },
       execute: async (args: { prompt: string; output_path?: string; size?: string; ratio?: string; image_paths?: string[] }, context) => {
@@ -29,7 +29,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
             return { title: 'Agnes Image Gen', output: JSON.stringify({ success: false, error: 'Agnesmore auth not found or invalid. Run /connect in OpenCode to configure agnesmore first.' }, null, 2) };
           }
 
-          const size = args.size || '1K';
+          const size = args.size || '1024x768';
           const ratio = args.ratio || '1:1';
 
           // Convert local image paths to base64 data URIs for image-to-image / multi-image composition
