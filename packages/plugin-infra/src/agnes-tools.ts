@@ -4,19 +4,20 @@ import { z } from 'zod';
 export function createAgnesTools(): Record<string, ToolDefinition> {
   return {
     agnes_image_generate: {
-      description: 'Generate an image using agnesmore provider. Requires agnesmore plugin installed and configured.',
+      description: 'Generate an image using agnesmore provider. Supports text-to-image, image-to-image, and multi-image composition. Requires agnesmore plugin installed and configured.',
       args: {
         prompt: z.string().describe('Text description of the image to generate. Use format: [subject] + [scene] + [style] + [lighting] + [composition]'),
         output_path: z.string().optional().describe('Relative path to save the image (e.g. "public/images/hero.png"). Defaults to src/assets/images/<timestamp>.png'),
         size: z.string().optional().describe('Size tier: 1K, 2K, 3K, 4K (default: 1K)'),
         ratio: z.string().optional().describe('Aspect ratio: 1:1, 3:4, 4:3, 16:9, 9:16, 2:3, 3:2, 21:9 (default: 1:1)'),
+        image_paths: z.array(z.string()).optional().describe('Paths to reference images for image-to-image style transfer or multi-image composition. Single path for style transfer, multiple paths for composition.'),
       },
-      execute: async (args: { prompt: string; output_path?: string; size?: string; ratio?: string }, context) => {
+      execute: async (args: { prompt: string; output_path?: string; size?: string; ratio?: string; image_paths?: string[] }, context) => {
         const changeDir = context.directory || process.cwd();
         try {
           const { readFile, writeFile, mkdir } = await import('node:fs/promises');
           const { homedir } = await import('node:os');
-          const { join, dirname } = await import('node:path');
+          const { join, dirname, extname } = await import('node:path');
 
           let apiKey: string;
           try {
@@ -31,6 +32,19 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
           const size = args.size || '1K';
           const ratio = args.ratio || '1:1';
 
+          // Convert local image paths to base64 data URIs for image-to-image / multi-image composition
+          let imageUrls: string[] | undefined;
+          if (args.image_paths && args.image_paths.length > 0) {
+            imageUrls = await Promise.all(args.image_paths.map(async (imgPath: string) => {
+              const fullImgPath = join(changeDir, imgPath);
+              const imgExt = extname(imgPath).toLowerCase();
+              const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+              const mime = mimeMap[imgExt] || 'image/png';
+              const imgBuffer = await readFile(fullImgPath);
+              return `data:${mime};base64,${imgBuffer.toString('base64')}`;
+            }));
+          }
+
           const response = await fetch('https://apihub.agnes-ai.com/v1/images/generations', {
             method: 'POST',
             headers: {
@@ -42,7 +56,10 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
               prompt: args.prompt,
               size,
               ratio,
-              extra_body: { response_format: 'url' },
+              extra_body: {
+                ...(imageUrls ? { image: imageUrls } : {}),
+                response_format: 'url',
+              },
             }),
           });
 
@@ -73,7 +90,8 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
             output: JSON.stringify({
               success: true,
               prompt: args.prompt,
-              size: `${size} ${ratio}`,
+              size,
+              ratio,
               output_path: outputPath,
               image_url: imageUrl,
             }, null, 2),
