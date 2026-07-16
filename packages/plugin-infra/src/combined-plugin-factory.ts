@@ -98,11 +98,11 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
     },
 
     call_flow_agent: {
-      description: 'Invoke a specialized sFlow subagent. Supports sync (run_in_background=false) and async (run_in_background=true) modes. Async mode returns a task_id; use flowagent_output to retrieve results when complete.',
+      description: 'Invoke a specialized workflow subagent (IFlow or SFlow). Supports sync (run_in_background=false) and async (run_in_background=true) modes. Async mode returns a task_id; use flowagent_output to retrieve results when complete.',
       args: {
         description: z.string().describe('Short (3-5 words) description of the task'),
         prompt: z.string().describe('The task for the subagent to perform'),
-        subagent_type: z.string().describe('The subagent to invoke (e.g. build-executor, spec-writer)'),
+        subagent_type: z.string().describe('The subagent to invoke (e.g. iflow-plan-executor, build-executor)'),
         run_in_background: z.boolean().describe('true=async (returns task_id for flowagent_output), false=sync (waits for completion)'),
         session_id: z.string().optional().describe('Existing session to continue (sync mode only)'),
       },
@@ -110,21 +110,48 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
         const changeDir = context.directory || '';
         const { subagent_type, prompt, run_in_background, session_id, description } = args;
 
+        // 确定调用者所属的 workflow 类型，避免跨 workflow 调用
         const isSFlowContext = await directoryExists(`${changeDir}/.sflow`);
         const isIFlowContext = await directoryExists(`${changeDir}/.iflow`);
 
-        if (isSFlowContext && !isIFlowContext) {
-          const validSFlowAgents = SFLOW_AGENT_NAMES as readonly string[];
-          if (!validSFlowAgents.includes(subagent_type as string)) {
-            return await formatToolError(
-              `Invalid SFlow agent: "${subagent_type}". Available SFlow agents: ${validSFlowAgents.join(', ')}`,
-            );
+        let callerWorkflow: 'iflow' | 'sflow' | 'unknown' = 'unknown';
+        if (isIFlowContext && !isSFlowContext) {
+          callerWorkflow = 'iflow';
+        } else if (isSFlowContext && !isIFlowContext) {
+          callerWorkflow = 'sflow';
+        } else if (isIFlowContext && isSFlowContext) {
+          // 两个目录都存在时，通过调用者 agent 名称判断 workflow 类型
+          const callerAgent = (context as Record<string, unknown>).agent as string | undefined;
+          if (callerAgent) {
+            const lower = callerAgent.toLowerCase();
+            if (lower === 'iflow' || lower.startsWith('iflow-')) {
+              callerWorkflow = 'iflow';
+            } else if (lower === 'sflow' || lower.startsWith('sflow-')) {
+              callerWorkflow = 'sflow';
+            }
           }
-        } else if (isIFlowContext && !isSFlowContext) {
+        }
+
+        if (callerWorkflow === 'iflow') {
           const validIFlowAgents = IFLOW_AGENT_NAMES as readonly string[];
           if (!validIFlowAgents.includes(subagent_type as string)) {
             return await formatToolError(
-              `Invalid IFlow agent: "${subagent_type}". Available IFlow agents: ${validIFlowAgents.join(', ')}`,
+              `无效的 IFlow agent: "${subagent_type}"。可用的 IFlow agent: ${validIFlowAgents.join(', ')}`,
+            );
+          }
+        } else if (callerWorkflow === 'sflow') {
+          const validSFlowAgents = SFLOW_AGENT_NAMES as readonly string[];
+          if (!validSFlowAgents.includes(subagent_type as string)) {
+            return await formatToolError(
+              `无效的 SFlow agent: "${subagent_type}"。可用的 SFlow agent: ${validSFlowAgents.join(', ')}`,
+            );
+          }
+        } else {
+          // 无法确定 workflow 类型时，允许所有已注册 agent
+          const allAgents = [...new Set([...IFLOW_AGENT_NAMES, ...SFLOW_AGENT_NAMES])];
+          if (!allAgents.includes(subagent_type as string)) {
+            return await formatToolError(
+              `无效的 agent: "${subagent_type}"。可用 agent: ${allAgents.join(', ')}`,
             );
           }
         }
@@ -240,7 +267,7 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
     },
 
     flowagent_output: {
-      description: 'Retrieve results from a background sFlow subagent task (call_flow_agent async mode). Call this when a <system-reminder> notifies you that a background task completed. Use block=true to wait for completion (timeout: 120s).',
+      description: 'Retrieve results from a background workflow subagent task (call_flow_agent async mode). Call this when a <system-reminder> notifies you that a background task completed. Use block=true to wait for completion (timeout: 120s).',
       args: {
         task_id: z.string().describe('The task ID returned by call_flow_agent (run_in_background=true, prefix: sf_)'),
         block: z.boolean().optional().describe('Wait for completion (default: false)'),
@@ -304,7 +331,7 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
     },
 
     flowagent_cancel: {
-      description: 'Cancel a running sFlow subagent task by task_id (call_flow_agent async mode). Use this when you no longer need the result.',
+      description: 'Cancel a running workflow subagent task by task_id (call_flow_agent async mode). Use this when you no longer need the result.',
       args: {
         taskId: z.string().describe('Task ID to cancel (required, prefix: sf_)'),
       },

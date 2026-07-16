@@ -19,13 +19,12 @@ import { loadCascadedSFlowConfig, agentOverridesFromConfig } from './agents/conf
 import { createHookComposer } from './hooks/hook-composer.js';
 import { createSkillLoader } from './features/skill-loader.js';
 import type { HookContext } from './hooks/types.js';
-import { directoryExists, ensureDir, writeJsonFile } from '@opencode-flow-engine/shared';
+import { ensureDir, writeJsonFile } from '@opencode-flow-engine/shared';
 import { getStateFilePath } from './features/state-manager.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { setHasOmoPlugin, setHasAgnesProvider } from './agents/agent-tools.js';
 import { pollSessionCompletion } from './helpers/polling.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
-import { SFLOW_AGENT_NAMES } from '../../../workflows/sflow/index.js';
 
 // ─── Background task registry (per-factory instance) ──────────────────────────
 
@@ -64,23 +63,12 @@ function createIFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
         const changeDir = context.directory || '';
         const { subagent_type, prompt, run_in_background, session_id, description } = args;
 
-        const isSFlowContext = await directoryExists(`${changeDir}/.sflow`);
-        const isIFlowContext = await directoryExists(`${changeDir}/.iflow`);
-
-        if (isIFlowContext && !isSFlowContext) {
-          const validIFlowAgents = IFLOW_AGENT_NAMES as readonly string[];
-          if (!validIFlowAgents.includes(subagent_type as string)) {
-            return await formatToolError(
-              `Invalid IFlow agent: "${subagent_type}". Available IFlow agents: ${validIFlowAgents.join(', ')}`,
-            );
-          }
-        } else if (isSFlowContext && !isIFlowContext) {
-          const validSFlowAgents = SFLOW_AGENT_NAMES as readonly string[];
-          if (!validSFlowAgents.includes(subagent_type as string)) {
-            return await formatToolError(
-              `Invalid SFlow agent: "${subagent_type}". Available SFlow agents: ${validSFlowAgents.join(', ')}`,
-            );
-          }
+        // IFlow 独立插件只允许调用 IFlow 子 agent，不依赖目录探测
+        const validIFlowAgents = IFLOW_AGENT_NAMES as readonly string[];
+        if (!validIFlowAgents.includes(subagent_type as string)) {
+          return await formatToolError(
+            `无效的 IFlow agent: "${subagent_type}"。可用的 IFlow agent: ${validIFlowAgents.join(', ')}`,
+          );
         }
 
         const sessionLabel = `iFlow → ${subagent_type}`;
