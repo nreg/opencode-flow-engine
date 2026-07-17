@@ -51,6 +51,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
               'Authorization': `Bearer ${apiKey}`,
               'Content-Type': 'application/json',
             },
+            signal: AbortSignal.timeout(90_000),
             body: JSON.stringify({
               model: 'agnes-image-2.1-flash',
               prompt: args.prompt,
@@ -74,7 +75,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
             return { title: 'Agnes Image Gen', output: JSON.stringify({ success: false, error: 'No image URL in response' }, null, 2) };
           }
 
-          const imgResponse = await fetch(imageUrl);
+          const imgResponse = await fetch(imageUrl, { signal: AbortSignal.timeout(60_000) });
           if (!imgResponse.ok) {
             return { title: 'Agnes Image Gen', output: JSON.stringify({ success: false, error: `Failed to download image: ${imgResponse.status}` }, null, 2) };
           }
@@ -141,6 +142,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
               'Authorization': `Bearer ${apiKey}`,
               'Content-Type': 'application/json',
             },
+            signal: AbortSignal.timeout(90_000),
             body: JSON.stringify({
               model: 'agnes-video-v2.0',
               prompt: args.prompt,
@@ -185,7 +187,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
             return { title: 'Agnes Video Gen', output: JSON.stringify({ success: false, error: 'Video generation timed out after 5 minutes' }, null, 2) };
           }
 
-          const videoResponse = await fetch(videoUrl);
+          const videoResponse = await fetch(videoUrl, { signal: AbortSignal.timeout(120_000) });
           if (!videoResponse.ok) {
             return { title: 'Agnes Video Gen', output: JSON.stringify({ success: false, error: `Failed to download video: ${videoResponse.status}` }, null, 2) };
           }
@@ -254,6 +256,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
               'Authorization': `Bearer ${apiKey}`,
               'Content-Type': 'application/json',
             },
+            signal: AbortSignal.timeout(60_000),
             body: JSON.stringify({
               model: 'agnes-2.0-flash',
               messages: [{
