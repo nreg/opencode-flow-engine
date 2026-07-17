@@ -484,9 +484,9 @@ async function checkSpecsMerged(changeDir: string, activeWorkflow: 'iflow' | 'sf
 // ─── Wave W6: checkGitBranchIsolation ────────────────────────────────────────
 
 /**
- * GI-1: Block when on main/master branch during execution.
- * Blocks build-executor from writing code on main/master branches
- * during executing/debugging states to prevent accidental commits.
+ * GI-1: Warn when on main/master branch during execution.
+ * Warns build-executor about working on main/master branches during executing/debugging
+ * states. Does NOT block — personal/solo projects may intentionally work on main.
  * READ-ONLY (C4): never writes state.
  */
 async function checkGitBranchIsolation(
@@ -499,12 +499,12 @@ async function checkGitBranchIsolation(
   // C7: Only apply for sflow workflow
   if (activeWorkflow !== 'sflow') return { success: true };
 
-  // Only block during executing/debugging states
+  // Only check during executing/debugging states
   const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
   const currentState = stateData?.state;
   if (currentState !== 'executing' && currentState !== 'debugging') return { success: true };
 
-  // Only block for build-executor agent (the agent writing code)
+  // Only check for build-executor agent (the agent writing code)
   const agent = data?.agent as string | undefined;
   if (agent !== 'build-executor') return { success: true };
 
@@ -518,9 +518,10 @@ async function checkGitBranchIsolation(
 
     if (branch === 'main' || branch === 'master') {
       return {
-        success: false,
-        block: true,
-        blockReason: `[SFLOW] Git branch isolation: build-executor is on "${branch}" branch. Execution on main/master is blocked to prevent accidental commits. Switch to a feature branch before continuing.`,
+        success: true,
+        warnings: [
+          `[SFLOW] Git branch isolation: currently on "${branch}" branch. Consider using a feature branch for team projects.`,
+        ],
       };
     }
   } catch {

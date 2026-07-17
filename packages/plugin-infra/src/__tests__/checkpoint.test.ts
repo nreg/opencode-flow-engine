@@ -330,7 +330,7 @@ describe('clearCheckpoint', () => {
     await cleanupDir(dir);
   });
 
-  it('should remove existing checkpoint file', async () => {
+  it('should mark existing checkpoint as stale instead of deleting it', async () => {
     const checkpoint: CheckpointFile = {
       taskId: 'task-1.1',
       contractHash: 'testhash',
@@ -344,13 +344,32 @@ describe('clearCheckpoint', () => {
 
     await clearCheckpoint(dir, 'task-1.1');
 
+    // File still exists on disk
+    const filePath = dir + '/.sflow/checkpoints/task-1.1.json';
+    const fileExists = await Bun.file(filePath).exists();
+    expect(fileExists).toBe(true);
+
+    // readCheckpoint returns null by default (skips stale)
     const after = await readCheckpoint(dir, 'task-1.1');
     expect(after).toBeNull();
+
+    // readCheckpoint with includeStale=true returns the stale record
+    const staleRecord = await readCheckpoint(dir, 'task-1.1', true);
+    expect(staleRecord).not.toBeNull();
+    expect(staleRecord!.status).toBe('stale');
+    expect(staleRecord!.taskId).toBe('task-1.1');
   });
 
-  it('should be no-op when checkpoint file does not exist', async () => {
+  it('should create a stub stale record when checkpoint file does not exist', async () => {
     // Should not throw
     await expect(clearCheckpoint(dir, 'nonexistent-task')).resolves.toBeUndefined();
+
+    // Stub stale record created
+    const staleRecord = await readCheckpoint(dir, 'nonexistent-task', true);
+    expect(staleRecord).not.toBeNull();
+    expect(staleRecord!.status).toBe('stale');
+    expect(staleRecord!.taskId).toBe('nonexistent-task');
+    expect(staleRecord!.contractHash).toBe('');
   });
 });
 
@@ -406,11 +425,17 @@ describe('Checkpoint integration: save → read → detect stale → clear', () 
     staleIds = await detectStaleCheckpoints(dir);
     expect(staleIds).toContain('task-integration');
 
-    // 6. Clear checkpoint
+    // 6. Clear checkpoint (marks as stale, does not delete)
     await clearCheckpoint(dir, 'task-integration');
 
-    // 7. Read returns null
+    // 7. readCheckpoint returns null by default (skips stale)
     const afterClear = await readCheckpoint(dir, 'task-integration');
     expect(afterClear).toBeNull();
+
+    // 8. File still exists on disk with stale status
+    const staleRecord = await readCheckpoint(dir, 'task-integration', true);
+    expect(staleRecord).not.toBeNull();
+    expect(staleRecord!.status).toBe('stale');
+    expect(staleRecord!.taskId).toBe('task-integration');
   });
 });

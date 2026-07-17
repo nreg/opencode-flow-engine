@@ -426,7 +426,7 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
     await cleanupDir(dir);
   });
 
-  it('should block when on main branch with build-executor', async () => {
+  it('should warn when on main branch with build-executor', async () => {
     await writeStateJson(dir, { state: 'executing', mode: 'full' });
     await initGitRepo('main');
 
@@ -438,13 +438,12 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
       data: { agent: 'build-executor' },
     });
 
-    expect(result.success).toBe(false);
-    expect(result.block).toBe(true);
-    expect(result.blockReason).toContain('Git branch isolation');
-    expect(result.blockReason).toContain('main');
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.some(w => w.includes('main') && w.includes('branch isolation'))).toBe(true);
   });
 
-  it('should block when on master branch with build-executor', async () => {
+  it('should warn when on master branch with build-executor', async () => {
     await writeStateJson(dir, { state: 'debugging', mode: 'full' });
     await initGitRepo('master');
 
@@ -456,10 +455,9 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
       data: { agent: 'build-executor' },
     });
 
-    expect(result.success).toBe(false);
-    expect(result.block).toBe(true);
-    expect(result.blockReason).toContain('Git branch isolation');
-    expect(result.blockReason).toContain('master');
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.some(w => w.includes('master') && w.includes('branch isolation'))).toBe(true);
   });
 
   it('should NOT warn when on feature branch', async () => {

@@ -15,6 +15,8 @@ export interface CheckpointFile {
   contractHash: string;
   timestamp: string;
   nextStep?: string;
+  /** 'active' — checkpoint is current; 'stale' — deliberately cleared/marked inactive (not deleted) */
+  status?: 'active' | 'stale';
 }
 
 export const CHECKPOINT_DIR = '.sflow/checkpoints';
@@ -825,9 +827,13 @@ export async function saveCheckpoint(changeDir: string, checkpoint: CheckpointFi
   });
 }
 
-export async function readCheckpoint(changeDir: string, taskId: string): Promise<CheckpointFile | null> {
+export async function readCheckpoint(changeDir: string, taskId: string, includeStale?: boolean): Promise<CheckpointFile | null> {
   const filePath = changeDir + '/' + CHECKPOINT_DIR + '/' + taskId + '.json';
-  return readJsonFile<CheckpointFile>(filePath);
+  const cp = await readJsonFile<CheckpointFile>(filePath);
+  if (!cp) return null;
+  // Skip stale checkpoints unless explicitly requested
+  if (!includeStale && cp.status === 'stale') return null;
+  return cp;
 }
 
 export async function detectStaleCheckpoints(changeDir: string): Promise<string[]> {
@@ -855,8 +861,26 @@ export async function detectStaleCheckpoints(changeDir: string): Promise<string[
 }
 
 export async function clearCheckpoint(changeDir: string, taskId: string): Promise<void> {
-  const filePath = changeDir + '/' + CHECKPOINT_DIR + '/' + taskId + '.json';
-  await removeFile(filePath);
+  const checkpointsDir = changeDir + '/' + CHECKPOINT_DIR;
+  const filePath = checkpointsDir + '/' + taskId + '.json';
+
+  // Read existing checkpoint (if any) and mark as stale instead of deleting
+  const existing = await readJsonFile<CheckpointFile>(filePath);
+  if (existing) {
+    existing.status = 'stale';
+    existing.timestamp = new Date().toISOString();
+    await writeJsonFile(filePath, existing);
+  } else {
+    // No existing checkpoint — create a stub stale record for audit trace
+    await ensureDir(checkpointsDir);
+    const stub: CheckpointFile = {
+      taskId,
+      contractHash: '',
+      timestamp: new Date().toISOString(),
+      status: 'stale',
+    };
+    await writeJsonFile(filePath, stub);
+  }
 }
 
 // ─── Handoff Operations ──────────────────────────────────────────────────
