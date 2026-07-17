@@ -600,9 +600,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
               action: 'state-transition',
               data: { newState },
             });
-            if (!result.success && result.block) {
-              console.warn('[Combined] IFlow state transition blocked:', result.blockReason ?? result.error);
-            }
+
           } else {
             try {
               await ensureDir(`${workDir}/.iflow`);
@@ -610,9 +608,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
                 state: newState,
                 updatedAt: new Date().toISOString(),
               });
-            } catch (err) {
-              console.warn('[sFlow] Failed to write IFlow state:', err);
-            }
+            } catch {}
           }
           return;
         }

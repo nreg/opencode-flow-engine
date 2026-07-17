@@ -681,9 +681,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
                   action: 'state-transition',
                   data: { newState },
                 });
-                if (!result.success && result.block) {
-                  console.warn('[sFlow] IFlow state transition blocked:', result.blockReason ?? result.error);
-                }
+
               } else {
                 try {
                   await ensureDir(`${workDir}/.iflow`);
@@ -691,9 +689,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
                     state: newState,
                     updatedAt: new Date().toISOString(),
                   });
-                } catch (err) {
-                  console.warn('[sFlow] Failed to write IFlow state:', err);
-                }
+                } catch {}
               }
               return;
             }

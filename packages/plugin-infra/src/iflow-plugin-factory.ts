@@ -497,9 +497,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
                 action: 'state-transition',
                 data: { newState },
               });
-              if (!result.success && result.block) {
-                console.warn('[iFlow] State transition blocked:', result.blockReason ?? result.error);
-              }
+
             } else {
               try {
                 await ensureDir(`${workDir}/.iflow`);
@@ -507,9 +505,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
                   state: newState,
                   updatedAt: new Date().toISOString(),
                 });
-              } catch (err) {
-                console.warn('[iFlow] Failed to write IFlow state:', err);
-              }
+              } catch {}
             }
           }
         }
