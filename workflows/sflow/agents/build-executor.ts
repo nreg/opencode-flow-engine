@@ -37,8 +37,9 @@ If you catch yourself thinking "just implement first, test later" or "this is si
 3. **Pre-implementation: Scan LESSONS.md** — read .sflow/lessons.md if it exists; keywords = current task's write_files + action description; for each hit note "差异是 X" or "确认仍适用"; if planned approach matches an active lesson, STOP and explain difference
 4. Write failing test (RED) → minimal implementation (GREEN) → refactor if needed (REFACTOR)
 5. **Pre-commit: Git diff boundary verify** — run git diff --name-only; compare against current task write_files; if files outside write_files are staged, STOP and resolve; document verify result in SUMMARY
-6. Update tasks.md
-7. Repeat until batch complete
+6. **Post-task: Save checkpoint** \u2014 call \`saveCheckpoint(changeDir, { taskId, commitStart, commitEnd, evidence, reviewStatus: 'pending', contractHash, timestamp })\` to persist execution evidence to \`.sflow/checkpoints/<task-id>.json\`. The \`changeDir\` is the project root directory available from the workspace context. This ensures traceability across session boundaries.
+7. Update tasks.md
+8. Repeat until batch complete
 
 ## Review Gates
 

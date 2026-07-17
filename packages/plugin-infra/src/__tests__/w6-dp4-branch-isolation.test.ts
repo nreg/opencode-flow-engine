@@ -355,11 +355,16 @@ describe('Task 8.1: checkGitBranchIsolation guard', () => {
   });
 
   it('should skip silently when not a git repo', async () => {
-    // The temp dir is not a git repo, so the guard should not fail
-    await writeStateJson(dir, { state: 'executing', mode: 'full' });
+    // Use a temp dir OUTSIDE the current git repo to guarantee non-git behavior
+    const os = require('os');
+    const path = require('path');
+    const nonGitDir = path.join(os.tmpdir(), 'w6-non-git-' + Date.now());
+    await ensureDir(nonGitDir);
+    await ensureDir(nonGitDir + '/.sflow');
+    await writeFile(nonGitDir + '/.sflow/state.json', JSON.stringify({ state: 'executing', mode: 'full' }));
 
     const result = await guard.execute({
-      changeDir: dir,
+      changeDir: nonGitDir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -368,6 +373,8 @@ describe('Task 8.1: checkGitBranchIsolation guard', () => {
 
     // Should succeed — not a git repo is handled gracefully
     expect(result.success).toBe(true);
+
+    await cleanupDir(nonGitDir);
   });
 
   it('should not apply for iflow workflow', async () => {
@@ -419,7 +426,7 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
     await cleanupDir(dir);
   });
 
-  it('should warn when on main branch with build-executor', async () => {
+  it('should block when on main branch with build-executor', async () => {
     await writeStateJson(dir, { state: 'executing', mode: 'full' });
     await initGitRepo('main');
 
@@ -431,12 +438,13 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
       data: { agent: 'build-executor' },
     });
 
-    expect(result.success).toBe(true);
-    expect(result.warnings).toBeDefined();
-    expect(result.warnings!.some(w => w.includes('main') && w.includes('branch isolation'))).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.block).toBe(true);
+    expect(result.blockReason).toContain('Git branch isolation');
+    expect(result.blockReason).toContain('main');
   });
 
-  it('should warn when on master branch with build-executor', async () => {
+  it('should block when on master branch with build-executor', async () => {
     await writeStateJson(dir, { state: 'debugging', mode: 'full' });
     await initGitRepo('master');
 
@@ -448,9 +456,10 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
       data: { agent: 'build-executor' },
     });
 
-    expect(result.success).toBe(true);
-    expect(result.warnings).toBeDefined();
-    expect(result.warnings!.some(w => w.includes('master') && w.includes('branch isolation'))).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.block).toBe(true);
+    expect(result.blockReason).toContain('Git branch isolation');
+    expect(result.blockReason).toContain('master');
   });
 
   it('should NOT warn when on feature branch', async () => {

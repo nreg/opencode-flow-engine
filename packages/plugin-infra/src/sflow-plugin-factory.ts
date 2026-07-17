@@ -402,6 +402,66 @@ export function createSFlowTools(client: SFlowClient): Record<string, ToolDefini
       },
     },
 
+    show_execution_plan: {
+      description: 'Read and display the current execution plan from .sflow/execution-plan.json. Shows mode, waves, dependencies, review status, and plan hash.',
+      args: {},
+      execute: async (_args: Record<string, never>, context) => {
+        const changeDir = context.directory || '';
+        try {
+          const plan = await readExecutionPlan(changeDir);
+          if (!plan) {
+            return { title: 'Show Execution Plan', output: JSON.stringify({ success: false, error: 'No execution plan found. Create one with record_execution_plan first.' }, null, 2) };
+          }
+
+          // Read review receipts for each wave
+          const waveStatuses: Array<{ id: string; tasks: number; strategy: string; depends_on: string[]; review: string }> = [];
+          for (const wave of plan.waves) {
+            let reviewStatus = 'no receipt';
+            const receiptPath = `${changeDir}/.sflow/reviews/${wave.id}.json`;
+            try {
+              const receipt = await (await import('@opencode-flow-engine/shared')).readJsonFile<{ status?: string }>(receiptPath);
+              if (receipt) {
+                reviewStatus = receipt.status === 'pass' ? '✅ pass' : '❌ fail';
+              }
+            } catch {
+              // no receipt
+            }
+            waveStatuses.push({
+              id: wave.id,
+              tasks: wave.tasks.length,
+              strategy: wave.strategy,
+              depends_on: wave.depends_on,
+              review: reviewStatus,
+            });
+          }
+
+          const output = {
+            success: true,
+            plan: {
+              mode: plan.mode,
+              source: plan.source,
+              rationale: plan.rationale,
+              revision: plan.revision,
+              hash: plan.hash,
+              artifacts_hash: plan.artifacts_hash,
+              contract_hash: plan.contract_hash,
+              waves: waveStatuses,
+            },
+          };
+
+          return { title: 'Show Execution Plan', output: JSON.stringify(output, null, 2) };
+        } catch (error) {
+          return {
+            title: 'Show Execution Plan',
+            output: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }, null, 2),
+          };
+        }
+      },
+    },
+
     record_review_receipt: {
       description: 'Record a review receipt for a wave. Validates wave existence in the execution plan and writes .sflow/reviews/<wave-id>.json.',
       args: {

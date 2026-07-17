@@ -306,11 +306,12 @@ async function checkReceiptIntegrity(changeDir: string, activeWorkflow: 'iflow' 
 // ─── Wave W5: checkClosingGate ────────────────────────────────────────────────
 
 /**
- * CG-1/CG-3/CG-4: Check closing gate — all review receipts must have status=pass
- * before transitioning to closing state.
- * - If no execution-plan.json exists → skip (backward compatible)
+ * CG-1/CG-3/CG-4/CG-7: Check closing gate — all review receipts must have status=pass
+ * and test results must be verified before transitioning to closing state.
+ * - If no execution-plan.json exists → skip (backward compatible, CG-4)
  * - Read all review receipts from .sflow/reviews/
  * - Check that ALL receipts have status='pass'
+ * - If verification-report.md exists, check test results for pass
  * - If any receipt has status='fail' or is missing → block transition to closing
  * Only applies for sflow workflow.
  * READ-ONLY (C4): never writes state.
@@ -356,6 +357,81 @@ async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow' | 'sf
         blockReason: `[SFLOW] Closing gate: wave "${wave.id}" receipt has status "${receipt.status || 'unknown'}". All receipts must have status "pass" before closing.`,
       };
     }
+  }
+
+  // CG-7: Check verification-report.md for test results if it exists
+  const verificationReportPath = `${changeDir}/.sflow/archive/*/verification-report.md`;
+  // Also check the change archive directory for verification reports
+  let testPassed = true;
+  let testEvidenceFound = false;
+
+  try {
+    const { readFile: fsReadFile } = await import('node:fs/promises');
+    const verificationPaths = [
+      `${changeDir}/verification-report.md`,
+      `${changeDir}/archive/verification-report.md`,
+    ];
+    // Also check change-level archive directories
+    const { readdir } = await import('node:fs/promises');
+    const archiveDir = `${changeDir}/archive`;
+    const archiveExists = await fileExists(archiveDir);
+    if (archiveExists) {
+      try {
+        const changeDirs = await readdir(archiveDir);
+        for (const changeDirName of changeDirs) {
+          verificationPaths.push(`${archiveDir}/${changeDirName}/verification-report.md`);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    for (const vp of verificationPaths) {
+      const reportExists = await fileExists(vp);
+      if (!reportExists) continue;
+      testEvidenceFound = true;
+      try {
+        const reportContent = await fsReadFile(vp, 'utf8');
+        // Check for test failure indicators
+        if (
+          /\b(failed|FAILED|failure|errors)\b/.test(reportContent) &&
+          /tests?\s+(failed|FAILED)/i.test(reportContent)
+        ) {
+          testPassed = false;
+          return {
+            success: false,
+            block: true,
+            blockReason: `[SFLOW] Closing gate: verification report at ${vp} shows test failures. All tests must pass before closing.`,
+          };
+        }
+        // Check for explicit pass evidence
+        const passMatch = reportContent.match(/(\d+)\/(\d+)\s+(passed|passing)/i);
+        if (passMatch && passMatch[1] !== undefined && passMatch[2] !== undefined) {
+          const passed = parseInt(passMatch[1], 10);
+          const total = parseInt(passMatch[2], 10);
+          if (passed < total) {
+            testPassed = false;
+            return {
+              success: false,
+              block: true,
+              blockReason: `[SFLOW] Closing gate: verification report at ${vp} shows ${passed}/${total} tests passed. All tests must pass before closing.`,
+            };
+          }
+        }
+      } catch {
+        // If we can't read the report, don't block — it may be a format issue
+      }
+    }
+  } catch {
+    // File system errors are non-blocking
+  }
+
+  if (testEvidenceFound && !testPassed) {
+    return {
+      success: false,
+      block: true,
+      blockReason: `[SFLOW] Closing gate: test results from verification reports indicate failures. All tests must pass before closing.`,
+    };
   }
 
   return { success: true };
@@ -408,9 +484,9 @@ async function checkSpecsMerged(changeDir: string, activeWorkflow: 'iflow' | 'sf
 // ─── Wave W6: checkGitBranchIsolation ────────────────────────────────────────
 
 /**
- * GI-1: Warn when on main/master branch during execution.
- * Only applies for sflow workflow, during executing/debugging states,
- * and only warns when the agent is build-executor.
+ * GI-1: Block when on main/master branch during execution.
+ * Blocks build-executor from writing code on main/master branches
+ * during executing/debugging states to prevent accidental commits.
  * READ-ONLY (C4): never writes state.
  */
 async function checkGitBranchIsolation(
@@ -423,12 +499,12 @@ async function checkGitBranchIsolation(
   // C7: Only apply for sflow workflow
   if (activeWorkflow !== 'sflow') return { success: true };
 
-  // Only warn during executing/debugging states
+  // Only block during executing/debugging states
   const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
   const currentState = stateData?.state;
   if (currentState !== 'executing' && currentState !== 'debugging') return { success: true };
 
-  // Only warn for build-executor agent
+  // Only block for build-executor agent (the agent writing code)
   const agent = data?.agent as string | undefined;
   if (agent !== 'build-executor') return { success: true };
 
@@ -442,10 +518,9 @@ async function checkGitBranchIsolation(
 
     if (branch === 'main' || branch === 'master') {
       return {
-        success: true,
-        warnings: [
-          `[SFLOW] Git branch isolation: currently on "${branch}" branch. Consider switching to a feature branch for execution to avoid committing directly to the main branch.`,
-        ],
+        success: false,
+        block: true,
+        blockReason: `[SFLOW] Git branch isolation: build-executor is on "${branch}" branch. Execution on main/master is blocked to prevent accidental commits. Switch to a feature branch before continuing.`,
       };
     }
   } catch {
