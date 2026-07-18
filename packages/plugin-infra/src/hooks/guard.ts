@@ -295,6 +295,23 @@ async function checkReceiptIntegrity(changeDir: string, activeWorkflow: 'iflow' 
           };
         }
       }
+
+      // Ancestor validation: base must be an ancestor of head
+      if (baseHash && headHash) {
+        try {
+          execSync(`git merge-base --is-ancestor "${baseHash}" "${headHash}"`, {
+            cwd: changeDir,
+            encoding: 'utf8',
+            stdio: 'pipe',
+          });
+        } catch {
+          return {
+            success: false,
+            block: true,
+            blockReason: `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt base commit "${baseHash}" is not an ancestor of head commit "${headHash}". base must be reachable from head's history.`,
+          };
+        }
+      }
     } catch {
       // Non-git repo or git not available — skip commit validation gracefully
     }
@@ -531,6 +548,51 @@ async function checkGitBranchIsolation(
   return { success: true };
 }
 
+// ─── Workflow Mode Transition Guard ──────────────────────────────────────
+
+/**
+ * Block fast-path transitions when the current workflow mode does not allow them.
+ * - full mode: block exploring→bridging (hotfix path) and exploring→approved-for-build (tweak path)
+ * - hotfix mode: block exploring→approved-for-build (tweak path)
+ * - tweak mode: all transitions are valid
+ */
+async function checkWorkflowModeTransition(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!changeDir || !data) return { success: true };
+
+  if (activeWorkflow !== 'sflow') return { success: true };
+
+  // Only check when a state transition is being attempted
+  const newState = data?.newState as string | undefined;
+  if (!newState) return { success: true };
+
+  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
+  const currentState = stateData?.state || 'exploring';
+  const mode = stateData?.mode || 'full';
+
+  const transitionKey = `${currentState}:${newState}`;
+
+  // Fast-path transitions only allowed for specific modes
+  const fastPathRestrictions: Record<string, string[]> = {
+    'exploring:bridging': ['hotfix'],
+    'exploring:approved-for-build': ['tweak'],
+  };
+
+  const allowedModes = fastPathRestrictions[transitionKey];
+  if (allowedModes && !allowedModes.includes(mode)) {
+    const modeNames = allowedModes.join(' or ');
+    const properPath = mode === 'full'
+      ? 'exploring → specifying → bridging → approved-for-build'
+      : 'exploring → bridging → approved-for-build';
+    return {
+      success: false,
+      block: true,
+      blockReason: `[SFLOW] Workflow mode guard: transition "${currentState} → ${newState}" is a ${modeNames}-only fast-path, but current mode is "${mode}". Route through the proper path: ${properPath}.`,
+    };
+  }
+
+  return { success: true };
+}
+
 /**
  * Create the guard hook
  */
@@ -548,6 +610,7 @@ export function createGuardHook(): HookHandler {
           await checkArtifactAndPhaseConsistency(changeDir, activeWorkflow),
           await checkPresetUpgrade(changeDir, activeWorkflow),
           await checkContractStalenessGuard(changeDir, activeWorkflow),
+          await checkWorkflowModeTransition(changeDir, data, activeWorkflow),
           await checkTaskCompletion(changeDir, activeWorkflow),
           await checkWaveDependencies(changeDir, activeWorkflow),
           await checkReceiptIntegrity(changeDir, activeWorkflow),
