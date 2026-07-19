@@ -670,6 +670,130 @@ export class Validator {
   }
 
   /**
+   * Validate ui-design.md content
+   * Checks V1-V7: color format, font compliance, tone declaration,
+   * component coverage, placeholder strategy, anti-AI-slop coverage, WCAG AA
+   *
+   * Section headings must use "## N. Title" format (e.g. "## 1. Visual Direction")
+   * for extractUiDesignSection to match correctly.
+   */
+  validateUiDesignContent(content: string): { valid: boolean; issues: Array<{ level: 'ERROR' | 'WARNING'; type: string; message: string }> } {
+    const issues: Array<{ level: 'ERROR' | 'WARNING'; type: string; message: string }> = [];
+
+    // V1: Color format check — all color values should include OKLCH format (not pure HEX)
+    const colorLines = content.match(/^(\s+\w+:)\s*["']?oklch\(/gim);
+    const hexOnlyColorLines = content.match(/^(\s+\w+:)\s*["']?#([0-9a-fA-F]{3,8})["']?\s*$/gm);
+    const hexInTableCells = content.match(/\|\s*#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\s*\|/g);
+    const hasHexOnly = (hexOnlyColorLines && hexOnlyColorLines.length > 0) || (hexInTableCells && hexInTableCells.length > 0);
+    if (hasHexOnly && (!colorLines || colorLines.length === 0)) {
+      issues.push({
+        level: 'ERROR',
+        type: 'V1_COLOR_FORMAT',
+        message: 'Color values should include OKLCH format. Pure HEX-only colors are not allowed.',
+      });
+    }
+
+    // V2: Font compliance check — fonts not in default AI list (Inter/Roboto/Arial → WARNING)
+    const AI_DEFAULT_FONTS = ['Inter', 'Roboto', 'Arial'];
+    const fontSection = content.match(/typography:[\s\S]*?(?=\n\w|\n---)/i);
+    if (fontSection) {
+      for (const font of AI_DEFAULT_FONTS) {
+        const fontRegex = new RegExp(`["']?${font}["']?`, 'i');
+        if (fontRegex.test(fontSection[0])) {
+          issues.push({
+            level: 'WARNING',
+            type: 'V2_FONT_COMPLIANCE',
+            message: `Font "${font}" is a common AI-generated default. Consider using a more distinctive typeface.`,
+          });
+        }
+      }
+    }
+
+    // V3: Tone declaration check — frontmatter must contain tone field
+    const normalizedContent = normalizeLineEndings(content);
+    const frontmatterMatch = normalizedContent.match(/^---\n([\s\S]*?)\n---/);
+    if (frontmatterMatch) {
+      const frontmatter = frontmatterMatch[1]!;
+      if (!/^\s*tone\s*:/im.test(frontmatter)) {
+        issues.push({
+          level: 'ERROR',
+          type: 'V3_TONE_DECLARATION',
+          message: 'Frontmatter must include a "tone" field declaring the visual direction.',
+        });
+      }
+    } else {
+      issues.push({
+        level: 'ERROR',
+        type: 'V3_TONE_DECLARATION',
+        message: 'Missing frontmatter. UI design document must include frontmatter with a "tone" field.',
+      });
+    }
+
+    // V4: Component coverage check — at least 5 component categories
+    const componentSection = this.extractUiDesignSection(content, 'Component Architecture');
+    if (componentSection) {
+      const componentCategories = componentSection.match(/^├──|^│   ├──|^└──/gm);
+      const categoryCount = componentCategories ? componentCategories.length : 0;
+      if (categoryCount < 5) {
+        issues.push({
+          level: 'WARNING',
+          type: 'V4_COMPONENT_COVERAGE',
+          message: `Component architecture should define at least 5 categories. Found: ${categoryCount}.`,
+        });
+      }
+    } else {
+      issues.push({
+        level: 'WARNING',
+        type: 'V4_COMPONENT_COVERAGE',
+        message: 'Missing "Component Architecture" section. Define at least 5 component categories.',
+      });
+    }
+
+    // V5: Placeholder strategy check — must include Placeholder Strategy section
+    const placeholderSection = this.extractUiDesignSection(content, 'Placeholder Strategy');
+    if (!placeholderSection) {
+      issues.push({
+        level: 'ERROR',
+        type: 'V5_PLACEHOLDER_STRATEGY',
+        message: 'Missing "Placeholder Strategy" section. Define rules for placeholder content.',
+      });
+    }
+
+    // V6: Anti-AI-slop coverage check — at least 6/8 categories
+    const antiSlopSection = this.extractUiDesignSection(content, 'Anti-AI-Slop Checklist');
+    if (antiSlopSection) {
+      const categoryRows = antiSlopSection.match(/^\|\s*\d+\s*\|/gm);
+      const categoryCount = categoryRows ? categoryRows.length : 0;
+      if (categoryCount < 6) {
+        issues.push({
+          level: 'WARNING',
+          type: 'V6_ANTI_AI_SLOP_COVERAGE',
+          message: `Anti-AI-slop checklist should cover at least 6 of 8 categories. Found: ${categoryCount}.`,
+        });
+      }
+    } else {
+      issues.push({
+        level: 'WARNING',
+        type: 'V6_ANTI_AI_SLOP_COVERAGE',
+        message: 'Missing "Anti-AI-Slop Checklist" section. Cover at least 6 of 8 anti-AI-slop categories.',
+      });
+    }
+
+    // V7: WCAG AA check — must include Accessibility Guidelines section
+    const a11ySection = this.extractUiDesignSection(content, 'Accessibility Guidelines');
+    if (!a11ySection) {
+      issues.push({
+        level: 'ERROR',
+        type: 'V7_WCAG_AA',
+        message: 'Missing "Accessibility Guidelines" section. WCAG 2.1 AA compliance is required.',
+      });
+    }
+
+    const valid = issues.filter(i => i.level === 'ERROR').length === 0;
+    return { valid, issues };
+  }
+
+  /**
    * Check if a report is valid
    */
   isValid(report: ValidationReport): boolean {
@@ -696,6 +820,24 @@ export class Validator {
       names.push(match[1]!.trim());
     }
     return names;
+  }
+
+  private extractUiDesignSection(content: string, heading: string): string | undefined {
+    const normalized = normalizeLineEndings(content);
+    const lines = normalized.split('\n');
+    const headingRegex = new RegExp(`^##\\s+\\d+\\.?\\s*${heading.replace(/\s+/g, '\\s+')}\\s*$`, 'i');
+    const idx = lines.findIndex((l) => headingRegex.test(l));
+    if (idx === -1) return undefined;
+
+    let endIdx = lines.length;
+    for (let i = idx + 1; i < lines.length; i++) {
+      if (/^##\s+/.test(lines[i]!)) {
+        endIdx = i;
+        break;
+      }
+    }
+
+    return lines.slice(idx + 1, endIdx).join('\n').trim();
   }
 }
 

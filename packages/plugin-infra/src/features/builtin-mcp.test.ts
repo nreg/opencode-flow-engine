@@ -62,3 +62,96 @@ describe('BuiltinValidatorTools', () => {
     expect(result.output).toBeDefined();
   });
 });
+
+describe('validate_ui_design', () => {
+  const validUiDesignContent = `---
+tone: premium-minimalist
+---
+
+## Color System
+  primary: oklch(0.7 0.15 250)
+  background: oklch(0.99 0.005 260)
+
+## Typography
+  heading: Geist
+  body: Geist
+
+## 1. Component Architecture
+├── Layout
+│   ├── Header
+│   ├── Footer
+│   └── Sidebar
+├── Navigation
+│   ├── NavBar
+│   └── Breadcrumb
+├── Forms
+│   ├── Input
+│   └── Select
+├── Feedback
+│   ├── Toast
+│   └── Alert
+└── Data Display
+    ├── Card
+    └── Table
+
+## 2. Placeholder Strategy
+Use real content where possible. For images, use gradient placeholders.
+
+## 3. Anti-AI-Slop Checklist
+| # | Category | Status |
+|---|----------|--------|
+| 1 | Typography | Pass |
+| 2 | Color | Pass |
+| 3 | Shadow | Pass |
+| 4 | Border | Pass |
+| 5 | Motion | Pass |
+| 6 | Layout | Pass |
+| 7 | Copy | Pass |
+| 8 | Component | Pass |
+
+## 4. Accessibility Guidelines
+All components must meet WCAG 2.1 AA standards.
+`;
+
+  const invalidUiDesignContent = `# Bad UI Design
+No frontmatter, no tone, no OKLCH colors.
+  primary: #3B82F6
+  background: #FFFFFF
+`;
+
+  it('should validate valid ui-design file and return valid=true', async () => {
+    const tools = createValidatorTools();
+    writeFileSync(join(TEST_DIR, 'ui-design.md'), validUiDesignContent);
+    const result = await tools.validate_ui_design.execute({ ui_design_path: join(TEST_DIR, 'ui-design.md') }, mockContext);
+    expect(result).toBeDefined();
+    expect(result.output).toBeDefined();
+    const parsed = JSON.parse(result.output!);
+    expect(parsed.valid).toBe(true);
+    expect(Array.isArray(parsed.issues)).toBe(true);
+  });
+
+  it('should validate invalid ui-design file and return valid=false with issues', async () => {
+    const tools = createValidatorTools();
+    writeFileSync(join(TEST_DIR, 'ui-design.md'), invalidUiDesignContent);
+    const result = await tools.validate_ui_design.execute({ ui_design_path: join(TEST_DIR, 'ui-design.md') }, mockContext);
+    expect(result).toBeDefined();
+    expect(result.output).toBeDefined();
+    const parsed = JSON.parse(result.output!);
+    expect(parsed.valid).toBe(false);
+    expect(Array.isArray(parsed.issues)).toBe(true);
+    expect(parsed.issues.length).toBeGreaterThan(0);
+    const toneIssue = parsed.issues.find((i: { type: string }) => i.type === 'V3_TONE_DECLARATION');
+    expect(toneIssue).toBeDefined();
+    expect(toneIssue.level).toBe('ERROR');
+  });
+
+  it('should return file not found error when ui-design.md does not exist', async () => {
+    const tools = createValidatorTools();
+    const result = await tools.validate_ui_design.execute({ ui_design_path: join(TEST_DIR, 'nonexistent-ui-design.md') }, mockContext);
+    expect(result).toBeDefined();
+    expect(result.output).toBeDefined();
+    const parsed = JSON.parse(result.output!);
+    expect(parsed.valid).toBe(false);
+    expect(parsed.issues.some((i: { type: string }) => i.type === 'FILE_NOT_FOUND')).toBe(true);
+  });
+});

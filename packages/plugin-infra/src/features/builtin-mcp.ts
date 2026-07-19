@@ -160,6 +160,22 @@ export function createValidatorTools(): Record<string, ToolDefinition> {
       },
     },
 
+    validate_ui_design: {
+      description: 'Validate ui-design.md content. Checks V1-V7: color format, font compliance, tone declaration, component coverage, placeholder strategy, anti-AI-slop coverage, WCAG AA. Reads from <changeDir>/ui-design.md by default.',
+      args: {
+        ui_design_path: z.string().optional().describe('Path to the ui-design.md file. Defaults to <changeDir>/ui-design.md'),
+      },
+      execute: async (args: { ui_design_path?: string }, context: ToolContext) => {
+        const filePath = resolvePath(context, args.ui_design_path, 'ui-design.md');
+        const content = await readFileContent(filePath);
+        if (content === null) {
+          return { title: 'UI Design Validation', output: JSON.stringify({ valid: false, issues: [{ level: 'ERROR', type: 'FILE_NOT_FOUND', message: `UI design file not found: ${filePath}` }] }, null, 2) };
+        }
+        const report = sharedValidator.validateUiDesignContent(content);
+        return { title: 'UI Design Validation', output: JSON.stringify(report, null, 2) };
+      },
+    },
+
     detect_sync_conflicts: {
       description: 'Detect sync conflicts across multiple delta specs (requirements modified by multiple changes). Pass delta spec paths as JSON array.',
       args: {

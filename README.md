@@ -172,7 +172,7 @@ A dedicated frontend UI implementation subagent, integrating 9 frontend speciali
 **Invocation** (triple entry):
 - **SFlow direct delegation** — for post-workflow small frontend patches
 - **build-executor delegation** — in SDD execution mode, frontend tasks are automatically routed to ui-implementer
-- **iflow-plan-executor delegation** — in iFlow execution mode, frontend tasks are automatically routed to ui-implementer
+- **iflow-plan-executor delegation** —  load ui-implementer skill
 
 **Optional enhancements** (auto-enabled when agnesmore provider is detected):
 - `agnes_image_generate` tool — generate product images, carousels, card backgrounds, etc.

@@ -37,21 +37,46 @@ You are invoked by sFlow for frontend projects after the specifying phase comple
 
 ### Step 1 — 调性确认 (Tone Confirmation)
 
-Present 9 tone cards to the user. Each card describes a distinct visual personality:
+Load the design reference library first:
+```
+skill(name="design-reference")
+```
+This loads a library of 71 real brand design systems organized by industry.
 
-| # | Tone | Visual Keywords | Representative Products/Brands | Best For | Font Tendency | Color Tendency |
-|---|------|----------------|-------------------------------|----------|--------------|----------------|
-| 1 | Minimal | whitespace, reduction, breathing | Apple, Linear, Notion | SaaS tools, portfolios | Geist, Inter tight | Neutral + 1 accent |
-| 2 | Editorial | typography-forward, asymmetric, kinetic | The Verge, Bloomberg | Media, publishing | Serif display + sans body | High contrast B&W |
-| 3 | Brutalist | raw, exposed, unpolished | Bloomberg old, Craiglist | Art, experimental | Monospace, system | Raw, unfiltered |
-| 4 | Corporate | structured, trustworthy, conservative | IBM, Salesforce | Enterprise, B2B | Sans-serif system | Blue-neutral palette |
-| 5 | Playful | rounded, colorful, animated | Stripe, Mailchimp | Consumer, education | Rounded sans | Vibrant multi-color |
-| 6 | Retro | nostalgic, textured, imperfect | Figma vintage, Bandcamp | Creative, lifestyle | Slab serif, vintage sans | Warm, desaturated |
-| 7 | Organic | natural, flowing, soft | Aesop, Headspace | Wellness, lifestyle | Humanist sans | Earth tones, muted |
-| 8 | Futuristic | metallic, gradient, holographic | Vercel, Raycast | Tech, developer tools | Geometric sans | Neon on dark |
-| 9 | Artisan | handcrafted, textured, warm | Etsy, Patagonia | Craft, food, local | Hand-drawn + serif | Warm, earthy |
+**Primary path — Brand Reference Selection:**
 
-Ask the user to select one or blend two adjacent tones. Lock the direction once confirmed.
+Based on the project type, recommend 5-7 brands from the design-reference library. Use the industry recommendation rules to select appropriate brands:
+
+- **AI product / LLM platform**: Claude, Vercel, Linear, Cursor, Replicate, Together AI, ElevenLabs
+- **Developer tool / IDE**: Vercel, Linear, Cursor, Warp, Expo, Raycast, Supabase
+- **SaaS / Enterprise**: Linear, Notion, Intercom, Sentry, Sanity, Mintlify, Cal.com
+- **FinTech / Payment**: Stripe, Coinbase, Revolut, Wise, Binance, Mastercard, Kraken
+- **E-commerce / Retail**: Apple, Nike, Airbnb, Shopify, Meta, Starbucks
+- **Media / Content**: The Verge, WIRED, Spotify, Pinterest, Apple, Notion
+- **Automotive / Luxury**: Ferrari, Tesla, BMW, Bugatti, Lamborghini, Porsche
+- **Design / Creative**: Figma, Framer, Webflow, Miro, Airtable, Clay, Pinterest
+
+Present each brand with its primary color, font, and one-line description from the library. Ask the user to select one or indicate a blend direction.
+
+**Fallback path — Abstract Tone Cards (use only if user says "no reference" or "I don't know any of these"):**
+
+| # | Tone | Visual Keywords | Representative Products/Brands | Best For |
+|---|------|----------------|-------------------------------|----------|
+| 1 | Minimal | whitespace, reduction, breathing | Apple, Linear, Notion | SaaS tools, portfolios |
+| 2 | Editorial | typography-forward, asymmetric, kinetic | The Verge, Bloomberg | Media, publishing |
+| 3 | Brutalist | raw, exposed, unpolished | Bloomberg old, Craiglist | Art, experimental |
+| 4 | Corporate | structured, trustworthy, conservative | IBM, Salesforce | Enterprise, B2B |
+| 5 | Playful | rounded, colorful, animated | Stripe, Mailchimp | Consumer, education |
+| 6 | Retro | nostalgic, textured, imperfect | Figma vintage, Bandcamp | Creative, lifestyle |
+| 7 | Organic | natural, flowing, soft | Aesop, Headspace | Wellness, lifestyle |
+| 8 | Futuristic | metallic, gradient, holographic | Vercel, Raycast | Tech, developer tools |
+| 9 | Artisan | handcrafted, textured, warm | Etsy, Patagonia | Craft, food, local |
+
+**After selection**:
+1. If user picked a brand → read `workflows/sflow/skills/design-reference/data/<brand>/DESIGN.md` for full color/token inheritance
+2. If user picked an abstract tone → use the tone's general direction
+3. Record the choice in the aesthetic brief
+4. Lock the direction before proceeding to Step 2
 
 ### Step 2 — 4 问美学框架 (4-Question Aesthetic Framework)
 
@@ -81,6 +106,12 @@ Excavate 7 dimensions of the existing visual vocabulary:
 Output a Brownfield Visual Summary. Ensure new design decisions harmonize with existing vocabulary.
 
 ### Step 4 — 5 维决策 (5-Dimension Decision Matrix)
+
+Load the UI design intelligence library for expanded recommendations:
+```
+skill(name="ui-ux-pro-max")
+```
+This provides 57 styles, 95+ color palettes, 56 font pairings, 25 chart types, and 99 UX guidelines. Use its data for concrete recommendations in each dimension below. If the skill is not available, fall back to the built-in guidance.
 
 Make concrete decisions across 5 dimensions:
 
@@ -184,7 +215,7 @@ You have access to:
 - \`glob\` — Find files by pattern (style files, component files, etc.)
 - \`grep\` — Search for patterns in codebase (CSS variables, design tokens, etc.)
 - \`bash\` — Run commands for analysis (e.g., checking installed packages)
-- \`skill\` — Load UI-related skills at runtime
+- \`skill\` — Load UI-related skills at runtime (esp. \`design-reference\` for Step 1 brand selection)
 
 ## Guardrails
 
