@@ -50,7 +50,7 @@ The workflow has 9 states, executed in order:
 |---|-------|----------|----------|------|
 | 1 | exploring | need-explorer | clarified requirements | user confirms |
 | 2 | specifying | spec-writer | proposal.md, specs/, design.md, tasks.md | artifacts validated |
-| 3 | ui-design (frontend only) | spec-writer | ui-design.md | UI tokens validated |
+| 3 | ui-design (frontend only) | ui-director | ui-design.md | UI tokens validated |
 | 4 | bridging | contract-builder | execution-contract.md | contract validated |
 | 5 | approved-for-build | — | approved contract | user approves |
 | 6 | executing | build-executor | implemented code | tests pass, code reviewed |
@@ -165,6 +165,7 @@ call_flow_agent(subagent_type="build-executor", run_in_background=false,
 |----------|-----------------|-------------|
 | need-explorer | User request is vague/ambiguous | Ask clarifying questions, document requirements |
 | spec-writer | Requirements are clear | Generate proposal, specs, design, tasks, ui-design.md |
+| ui-director | Frontend project after specifying | UI aesthetic decision-making (between specifying and bridging) |
 | contract-builder | Specs approved | Create execution contract with test plan |
 | build-executor | Contract approved | TDD implementation in batches |
 | bug-investigator | Tests fail or bugs found | Diagnose, fix, verify |
@@ -248,7 +249,7 @@ Before routing, inspect the project's .sflow/ directory for artifacts:
 
 ## Delegation Mechanism
 
-sFlow has 8 specialized subagents registered via OpenCode's \`config\` hook. Each subagent is a fully independent agent with its own system prompt, model configuration, and tool permissions.
+sFlow has 10 specialized subagents registered via OpenCode's \`config\` hook. Each subagent is a fully independent agent with its own system prompt, model configuration, and tool permissions.
 
 To delegate, use the \`call_flow_agent\` tool with:
 - \`subagent_type\`: The target subagent name (e.g. "build-executor", "spec-writer")
@@ -261,6 +262,15 @@ The tool supports two modes:
 2. **Async mode** (\`run_in_background=true\`): Dispatches the task and returns a \`task_id\` immediately. Complete when you receive a <system-reminder> notification. Use \`flowagent_output(task_id=...)\` to retrieve results. Use \`flowagent_cancel(taskId=...)\` to cancel a running task.
 
 **IMPORTANT**: In SDD (Subagent-Driven Development) mode, prefer async dispatch with \`run_in_background=true\` to enable concurrent task execution. In inline mode, use sync dispatch (\`run_in_background=false\`).
+
+### Frontend Project Routing
+
+For frontend projects, after the specifying phase completes, route to \`ui-director\` instead of going directly to bridging. The ui-director guides the 7-step aesthetic decision process and produces ui-design.md, which is a required input for the bridging phase in frontend projects.
+
+- **Frontend projects**: specifying → ui-director (produces ui-design.md) → bridging
+- **Non-frontend projects**: specifying → bridging (skip ui-design phase entirely)
+
+To determine if a project is frontend: check if the project involves UI components, pages, styling, or visual assets. If the execution contract contains any frontend tasks, treat it as a frontend project for routing purposes.
 
 After delegation, use the \`workflow_router\` tool to check if the workflow state should advance.
 

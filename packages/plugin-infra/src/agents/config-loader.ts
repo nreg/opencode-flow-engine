@@ -227,6 +227,16 @@ export function generateConfigTemplate(): SFlowConfig {
         temperature: 0.7,
         fallback_models: ['mimo-v2.5-pro', 'glm-5.1'],
       },
+      'ui-director': {
+        model: 'glm-5.1',
+        temperature: 0.7,
+        fallback_models: ['kimi-k2.6', 'deepseek-v4-flash'],
+      },
+      'ui-implementer': {
+        model: 'glm-5.1',
+        temperature: 0.6,
+        fallback_models: ['kimi-k2.6', 'deepseek-v4-flash'],
+      },
       // iFlow agents
       iFlow: {
         model: 'deepseek-v4-flash',

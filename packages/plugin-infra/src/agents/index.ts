@@ -14,6 +14,7 @@ export {
   createCodeReviewerAgent,
   createReleaseArchivistAgent,
   createSpecMergerAgent,
+  createUiDirectorAgent,
   createUiImplementerAgent,
 } from '../../../../workflows/sflow/index.js';
 

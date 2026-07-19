@@ -31,6 +31,7 @@ export type BuiltinAgentName =
   | 'code-reviewer'      // Code review (subagent)
   | 'release-archivist'  // Closure (subagent)
   | 'spec-merger'        // Sync (subagent)
+  | 'ui-director'        // UI aesthetic decision-making (subagent)
   | 'ui-implementer'     // Frontend UI implementation (subagent)
   // IFlow workflow
   | 'iFlow'              // Main orchestrator (primary)

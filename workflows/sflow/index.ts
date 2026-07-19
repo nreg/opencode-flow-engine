@@ -12,6 +12,7 @@ export { createBugInvestigatorAgent } from './agents/bug-investigator.js';
 export { createCodeReviewerAgent } from './agents/code-reviewer.js';
 export { createReleaseArchivistAgent } from './agents/release-archivist.js';
 export { createSpecMergerAgent } from './agents/spec-merger.js';
+export { createUiDirectorAgent } from './agents/ui-director.js';
 export { createUiImplementerAgent } from './agents/ui-implementer.js';
 
 /** SFlow agent names for registration */
@@ -25,6 +26,7 @@ export const SFLOW_AGENT_NAMES = [
   'code-reviewer',
   'release-archivist',
   'spec-merger',
+  'ui-director',
   'ui-implementer',
 ] as const;
 

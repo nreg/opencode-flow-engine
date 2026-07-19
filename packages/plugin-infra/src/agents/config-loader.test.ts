@@ -194,10 +194,10 @@ describe('Config Loader', () => {
   });
 
   describe('generateConfigTemplate', () => {
-    it('should include all 15 agents', () => {
+    it('should include all 17 agents', () => {
       const tmpl = generateConfigTemplate();
       expect(tmpl.agents).toBeDefined();
-      expect(Object.keys(tmpl.agents!)).toHaveLength(15);
+      expect(Object.keys(tmpl.agents!)).toHaveLength(17);
     });
 
     it('should include fallback_models for all agents', () => {

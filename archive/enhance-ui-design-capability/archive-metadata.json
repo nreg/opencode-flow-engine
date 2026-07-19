@@ -1,0 +1,56 @@
+{
+  "changeName": "enhance-ui-design-capability",
+  "archivedAt": "2026-07-19T09:04:41",
+  "verdict": "PASS",
+  "batches": [
+    {
+      "name": "P0 - ui-director Agent Creation",
+      "tasks": [
+        { "id": 1, "title": "createUiDirectorAgent factory function", "status": "completed" },
+        { "id": 2, "title": "ui-director SKILL.md with 7-step process", "status": "completed" },
+        { "id": 3, "title": "ui-director tool configuration", "status": "completed" }
+      ]
+    },
+    {
+      "name": "P1 - ui-implementer Enhancement",
+      "tasks": [
+        { "id": 4, "title": "Add 8-category anti-AI-slop checks to agent instructions", "status": "completed" },
+        { "id": 5, "title": "Update ui-implementer SKILL.md with 8-dimensional review", "status": "completed" }
+      ]
+    },
+    {
+      "name": "P2 - Routing Integration",
+      "tasks": [
+        { "id": 6, "title": "Update workflow state table (9 states -> 9 states + ui-design state)", "status": "completed" },
+        { "id": 7, "title": "Update Subagent Guide table with ui-director entry", "status": "completed" },
+        { "id": 8, "title": "Add frontend project routing documentation", "status": "completed" }
+      ]
+    },
+    {
+      "name": "P3 - Registry Integration",
+      "tasks": [
+        { "id": 9, "title": "Register ui-director in AGENT_REGISTRY", "status": "completed" },
+        { "id": 10, "title": "Register ui-director in AGENT_MODES", "status": "completed" },
+        { "id": 11, "title": "Register ui-director in DEFAULT_MODELS", "status": "completed" },
+        { "id": 12, "title": "Register ui-director in DEFAULT_FALLBACKS", "status": "completed" },
+        { "id": 13, "title": "Register ui-director in AGENT_PROFILES", "status": "completed" },
+        { "id": 14, "title": "Configure tools for ui-director", "status": "completed" },
+        { "id": 15, "title": "Configure tools for ui-implementer", "status": "completed" },
+        { "id": 16, "title": "Update types.ts BuiltinAgentName", "status": "completed" },
+        { "id": 17, "title": "Update config-loader.ts templates", "status": "completed" }
+      ]
+    }
+  ],
+  "testResults": {
+    "total": 707,
+    "passed": 704,
+    "failed": 3,
+    "preExistingFailures": 3,
+    "newFailures": 0
+  },
+  "filesChanged": {
+    "new": 3,
+    "modified": 11
+  },
+  "risks": []
+}

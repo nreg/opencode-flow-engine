@@ -16,6 +16,7 @@ import {
   createCodeReviewerAgent,
   createReleaseArchivistAgent,
   createSpecMergerAgent,
+  createUiDirectorAgent,
   createUiImplementerAgent,
 } from '../../../../workflows/sflow/index.js';
 import {
@@ -47,6 +48,7 @@ const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
   'code-reviewer': 'subagent',
   'release-archivist': 'subagent',
   'spec-merger': 'subagent',
+  'ui-director': 'subagent',
   'ui-implementer': 'subagent',
   // IFlow
   iFlow: 'primary',
@@ -72,6 +74,7 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
   'code-reviewer': 'deepseek-v4-flash',
   'release-archivist': 'mimo-v2.5-pro',
   'spec-merger': 'mimo-v2.5',
+  'ui-director': 'glm-5.1',
   'ui-implementer': 'glm-5.1',
   // IFlow
   iFlow: 'deepseek-v4-flash',
@@ -97,6 +100,7 @@ const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
   'code-reviewer': ['glm-5.1', 'kimi-k2.6'],
   'release-archivist': ['mimo-v2.5', 'glm-5.1'],
   'spec-merger': ['mimo-v2.5-pro', 'glm-5.1'],
+  'ui-director': ['kimi-k2.6', 'deepseek-v4-flash'],
   'ui-implementer': ['kimi-k2.6', 'deepseek-v4-flash'],
   // IFlow
   iFlow: ['glm-5.1', 'kimi-k2.6'],
@@ -124,6 +128,7 @@ export const AGENT_PROFILES: AGENT_PROFILES_TYPE = {
   'code-reviewer': 'review',
   'release-archivist': 'mechanical',
   'spec-merger': 'standard',
+  'ui-director': 'strong',
   'ui-implementer': 'standard',
 };
 
@@ -141,6 +146,7 @@ const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
   'code-reviewer': createCodeReviewerAgent,
   'release-archivist': createReleaseArchivistAgent,
   'spec-merger': createSpecMergerAgent,
+  'ui-director': createUiDirectorAgent,
   'ui-implementer': createUiImplementerAgent,
   // IFlow
   iFlow: createIFlowAgent,

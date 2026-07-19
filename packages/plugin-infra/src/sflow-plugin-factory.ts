@@ -3,7 +3,7 @@
  *
  * Creates an SFlow-only plugin with:
  * - SFlow agents (sFlow, need-explorer, spec-writer, contract-builder, build-executor,
- *   bug-investigator, code-reviewer, release-archivist, spec-merger, ui-implementer)
+ *   bug-investigator, code-reviewer, release-archivist, spec-merger, ui-director, ui-implementer)
  * - SFlow tools (workflow_router, contract_validator, artifact_inspector,
  *   call_flow_agent, flowagent_output, flowagent_cancel, agnes_* tools)
  * - SFlow hooks (state_transition, artifact_validation, guard, session_start,

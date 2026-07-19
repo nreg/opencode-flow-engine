@@ -62,6 +62,92 @@ You can be invoked in two ways:
 3. Check responsive breakpoints
 4. Review code against frontend-code-review standards
 
+## Anti-AI-Slop 8-Category Checks
+
+Before finalizing any UI code, run this 42-rule checklist. Every rule must pass.
+
+### 1. 字体 (Typography) — 6 rules
+
+| # | Rule | Fail Pattern | Fix |
+|---|------|-------------|-----|
+| T1 | No Inter as default body font | font-family: 'Inter' / font-inter | Use Geist, Outfit, Cabinet Grotesk, or Satoshi |
+| T2 | Weight range ≤ 3 distinct weights | 4+ different font-weight values | Reduce to 2-3 weights (e.g., 400, 500, 700) |
+| T3 | Line-height in range | display < 0.9 or body > 1.8 | Display: 0.9-1.1; Body: 1.5-1.7 |
+| T4 | Letter-spacing ≥ -0.04em for display | letter-spacing < -0.04em on h1-h3 | Set letter-spacing ≥ -0.04em |
+| T5 | No system-ui as identity font | font-family: system-ui on branded elements | Use a deliberate typeface; system-ui only for UI chrome |
+| T6 | Type scale is consistent | Random font-size values not following a ratio | Use a modular scale (1.25 major third or 1.333 perfect fourth) |
+
+### 2. 颜色 (Color) — 6 rules
+
+| # | Rule | Fail Pattern | Fix |
+|---|------|-------------|-----|
+| C1 | No pure black #000000 | color: #000 / rgb(0,0,0) | Use off-black: zinc-950, #0a0a0a, or oklch(0.15 0.01 260) |
+| C2 | No pure white #FFFFFF as bg | background: #fff / #FFFFFF on large areas | Use off-white: zinc-50, #fafafa, or oklch(0.99 0.005 260) |
+| C3 | Accent saturation < 80% | oklch chroma > 0.24 or hsl saturation > 80% | Reduce saturation to < 80% |
+| C4 | CSS variables enforced | Hardcoded hex/hsl in component styles | Use var(--color-*) or Tailwind semantic tokens |
+| C5 | WCAG AA contrast | Text contrast < 4.5:1 (normal) / < 3:1 (large) | Adjust foreground/background pair |
+| C6 | No default blue #3B82F6 | primary: #3B82F6 / blue-500 as brand color | Choose a distinctive accent; avoid Tailwind default blue |
+
+### 3. 阴影 (Shadow) — 5 rules
+
+| # | Rule | Fail Pattern | Fix |
+|---|------|-------------|-----|
+| S1 | ≤ 3 shadow levels | 4+ distinct box-shadow values | Use 3 levels: subtle / medium / elevated |
+| S2 | Spread ≤ blur | spread > blur in box-shadow | Keep spread ≤ blur radius |
+| S3 | Shadow color specified | box-shadow with default black (rgba(0,0,0,...)) | Use tinted shadow: rgba(theme-color, 0.1) |
+| S4 | Shadow direction consistent | Mix of top-down and bottom-up shadows | Standardize on one direction (typically down-right) |
+| S5 | No heavy drop shadows | blur > 20px or opacity > 0.3 | Reduce blur ≤ 15px, opacity ≤ 0.2 |
+
+### 4. 边框 (Border) — 5 rules
+
+| # | Rule | Fail Pattern | Fix |
+|---|------|-------------|-----|
+| B1 | No decorative border-left | border-left > 1px as decoration | Use background color block, full border, or whitespace |
+| B2 | Border color from token | Hardcoded border-color hex values | Use var(--border-*) or Tailwind border token |
+| B3 | Border style consistent | Mix of solid/dashed/dotted without system | Pick one style (solid) and use consistently |
+| B4 | Border-radius from token | Random px values for border-radius | Use radius scale: 0 / 2 / 4 / 8 / 12 / 16 / 9999 |
+| B5 | No double borders | Adjacent elements both with borders | Use margin/gap or collapse with negative margin |
+
+### 5. 动效 (Motion) — 5 rules
+
+| # | Rule | Fail Pattern | Fix |
+|---|------|-------------|-----|
+| M1 | Duration 100-700ms | transition < 100ms or > 700ms | Micro: 100-200ms; Transition: 200-400ms; Emphasis: 400-700ms |
+| M2 | Standard easing curves | linear or custom cubic-bezier without rationale | Use standard/decelerate/accelerate curves |
+| M3 | prefers-reduced-motion handled | Animations without @media (prefers-reduced-motion) | Add fallback: instant or opacity-only |
+| M4 | No raw scroll listeners | window.addEventListener('scroll', ...) | Use Motion useScroll / GSAP ScrollTrigger |
+| M5 | No layout thrashing | Reading layout props in animation frame | Batch DOM reads/writes; use transform/opacity |
+
+### 6. 布局 (Layout) — 5 rules
+
+| # | Rule | Fail Pattern | Fix |
+|---|------|-------------|-----|
+| L1 | Spacing uses base unit multiples | Random px values not on 4px/8px grid | Use spacing scale: 4/8/12/16/24/32/48/64 |
+| L2 | No magic numbers | Hardcoded px values without token reference | Use spacing/size tokens or Tailwind scale |
+| L3 | Responsive breakpoints defined | No @media queries or responsive utilities | Define breakpoints: sm/md/lg/xl/2xl |
+| L4 | No fixed pixel widths for containers | width: 1200px / max-width: 960px | Use max-width with rem/percent: max-w-7xl, max-w-4xl |
+| L5 | Content width constrained | Text blocks > 65ch wide | Apply max-w-[65ch] or prose class |
+
+### 7. 文案 (Copy) — 5 rules
+
+| # | Rule | Fail Pattern | Fix |
+|---|------|-------------|-----|
+| X1 | No Lorem ipsum | Lorem ipsum dolor sit amet... | Use real content or meaningful placeholder |
+| X2 | Button text ≤ 3 words | "Click here to submit your application" | "Submit" / "Apply Now" / "Send Request" |
+| X3 | Heading hierarchy consistent | Skipping levels: h1 → h3 (no h2) | Use sequential: h1 → h2 → h3 |
+| X4 | No ALL CAPS for body text | text-transform: uppercase on paragraphs | Use for labels/badges only, not body copy |
+| X5 | No emoji in UI labels | 🔥 Hot Deal / ✅ Confirmed | Use plain text: "Hot Deal" / "Confirmed" |
+
+### 8. 组件 (Component) — 5 rules
+
+| # | Rule | Fail Pattern | Fix |
+|---|------|-------------|-----|
+| P1 | All interactive states defined | Only default state implemented | Implement: hover / focus / active / disabled / loading |
+| P2 | No empty state flash | Empty elements visible before data loads | Use v-if / conditional render; show after data ready |
+| P3 | Form labels present | Input with placeholder but no label | Add visible label or aria-label |
+| P4 | Icon library unified | Mixing Phosphor + Radix + Tabler icons | Pick one library; use consistently |
+| P5 | No # prefix on tags/labels | #tag-name / #category | Use plain text: tag-name / category (badge component) |
+
 ## Files You May Create/Modify
 
 - \`src/components/**/*.tsx\` — React/Vue components

@@ -166,6 +166,16 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     skill: false,
   },
 
+  /** UI Director - aesthetic decision-making specialist */
+  'ui-director': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: true,
+    bash: true,
+    skill: true,
+    agnes_image_understand: true,
+  },
+
   /** UI Implementer - frontend UI code specialist */
   'ui-implementer': {
     ...COMMON_TOOLS,

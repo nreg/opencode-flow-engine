@@ -79,6 +79,20 @@ describe('Agent Builder', () => {
       expect(agent.name).toBe('Spec Merger');
     });
 
+    it('should create ui-director agent', async () => {
+      const agent = await createAgent('ui-director');
+      expect(agent).toBeDefined();
+      expect(agent.id).toBe('ui-director');
+      expect(agent.name).toBe('UI Director');
+    });
+
+    it('should create ui-implementer agent', async () => {
+      const agent = await createAgent('ui-implementer');
+      expect(agent).toBeDefined();
+      expect(agent.id).toBe('ui-implementer');
+      expect(agent.name).toBe('UI Implementer');
+    });
+
     it('should use default model when not specified', async () => {
       const agent = await createAgent('sFlow');
       expect(agent.model).toBe('atomcode/deepseek-v4-flash');
@@ -89,7 +103,7 @@ describe('Agent Builder', () => {
     it('should create all agents', async () => {
       const agents = await createAllAgents();
       expect(agents).toBeDefined();
-      expect(Object.keys(agents)).toHaveLength(16);
+      expect(Object.keys(agents)).toHaveLength(17);
     });
 
     it('should have all required agents', async () => {
@@ -103,6 +117,8 @@ describe('Agent Builder', () => {
       expect(agents['code-reviewer']).toBeDefined();
       expect(agents['release-archivist']).toBeDefined();
       expect(agents['spec-merger']).toBeDefined();
+      expect(agents['ui-director']).toBeDefined();
+      expect(agents['ui-implementer']).toBeDefined();
       // IFlow agents
       expect(agents.iFlow).toBeDefined();
       expect(agents['iflow-discuss-planner']).toBeDefined();
@@ -152,6 +168,8 @@ describe('Agent Builder', () => {
       expect(names).toContain('code-reviewer');
       expect(names).toContain('release-archivist');
       expect(names).toContain('spec-merger');
+      expect(names).toContain('ui-director');
+      expect(names).toContain('ui-implementer');
       // IFlow agents
       expect(names).toContain('iFlow');
       expect(names).toContain('iflow-discuss-planner');
@@ -159,7 +177,7 @@ describe('Agent Builder', () => {
       expect(names).toContain('iflow-verifier');
       expect(names).toContain('iflow-researcher');
       expect(names).toContain('iflow-shipper');
-      expect(names).toHaveLength(16);
+      expect(names).toHaveLength(17);
     });
   });
 
@@ -177,6 +195,8 @@ describe('Agent Builder', () => {
       expect(getAgentMode('code-reviewer')).toBe('subagent');
       expect(getAgentMode('release-archivist')).toBe('subagent');
       expect(getAgentMode('spec-merger')).toBe('subagent');
+      expect(getAgentMode('ui-director')).toBe('subagent');
+      expect(getAgentMode('ui-implementer')).toBe('subagent');
     });
   });
 
@@ -192,7 +212,7 @@ describe('Agent Builder', () => {
   describe('getSubagentAgents', () => {
     it('should return all subagents', () => {
       const subagents = getSubagentAgents();
-      expect(subagents).toHaveLength(14);
+      expect(subagents).toHaveLength(15);
       expect(subagents).toContain('need-explorer');
       expect(subagents).toContain('spec-writer');
       expect(subagents).toContain('contract-builder');
@@ -201,6 +221,8 @@ describe('Agent Builder', () => {
       expect(subagents).toContain('code-reviewer');
       expect(subagents).toContain('release-archivist');
       expect(subagents).toContain('spec-merger');
+      expect(subagents).toContain('ui-director');
+      expect(subagents).toContain('ui-implementer');
       // IFlow subagents
       expect(subagents).toContain('iflow-discuss-planner');
       expect(subagents).toContain('iflow-plan-executor');
@@ -240,7 +262,7 @@ describe('Agent Builder', () => {
   describe('getAllDefaultModels', () => {
     it('should return models for all agents', () => {
       const models = getAllDefaultModels();
-      expect(Object.keys(models)).toHaveLength(16);
+      expect(Object.keys(models)).toHaveLength(17);
       expect(models.sFlow).toBe('deepseek-v4-flash');
       expect(models['need-explorer']).toBe('kimi-k2.6');
       expect(models['spec-writer']).toBe('glm-5.1');
