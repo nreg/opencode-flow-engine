@@ -42,6 +42,19 @@ skill(name="design-reference")
 4. 写入 `ui-design.md` 的 Design Tokens 段
 5. 进入 Step 4（5 维决策）让用户微调
 
+### 品牌色转换规则（重要）
+
+品牌库中的色值为参考值，写入 ui-design.md 前必须执行以下转换：
+
+| 源色值 | 转换规则 | 示例 |
+|--------|---------|------|
+| 纯黑 `#000000` / `#000` | 替换为 off-black：`oklch(0.15 0.01 260)` | Ollama、Runway、SpaceX 等 |
+| 纯白 `#ffffff` / `#fff` | 替换为 off-white：`oklch(0.99 0.005 80)` | xAI、Framer、Mastercard 等 |
+| 其他 HEX 值 | 转换为 OKLCH 格式，保留原色相 | 使用在线转换工具或近似映射 |
+| 缺少 OKLCH 值的颜色 | 根据 HEX 近似计算 OKLCH 值 | 保持色相一致，调整 chroma 合理范围 |
+
+**禁止**：直接将品牌库中的 `#000000` 或 `#ffffff` 原样写入 ui-design.md。V1 验证会拒绝纯 HEX 颜色值。
+
 ---
 
 ## 品牌索引

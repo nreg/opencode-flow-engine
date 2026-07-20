@@ -9,9 +9,9 @@ colors:
   error: "oklch(0.55 0.20 30) / #ff3b30"
   warning: "oklch(0.75 0.15 85) / #ff9500"
 typography:
-  display: "SF Pro Display, system-ui, sans-serif"
-  body: "SF Pro Text, system-ui, sans-serif"
-  mono: "SF Mono, monospace"
+  display: "Geist, system-ui, sans-serif"
+  body: "Geist, system-ui, sans-serif"
+  mono: "Geist Mono, JetBrains Mono, monospace"
   scale: "1.25"
 spacing:
   base: 4
@@ -66,9 +66,9 @@ spacing:
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| `--font-display` | SF Pro Display, system-ui, sans-serif | Headings, hero text |
-| `--font-body` | SF Pro Text, system-ui, sans-serif | Body copy, labels |
-| `--font-mono` | SF Mono, monospace | Code, data, timestamps |
+| `--font-display` | Geist, system-ui, sans-serif | Headings, hero text |
+| `--font-body` | Geist, system-ui, sans-serif | Body copy, labels |
+| `--font-mono` | Geist Mono, JetBrains Mono, monospace | Code, data, timestamps |
 | `--font-scale` | 1.25 | Modular scale ratio |
 | `--text-xs` | 0.64rem (10.24px) | Captions, badges |
 | `--text-sm` | 0.8rem (12.8px) | Secondary text, table cells |
@@ -157,14 +157,92 @@ App
     └── Tabs
 ```
 
-### Key Component Hierarchy Rules
+### Component Visual Rules
 
-- **Card** is the primary container — never nest cards more than 2 levels deep
-- **FormField** wraps every input with label + error + description
-- **EmptyState** uses `v-if` guard — never renders without data check
-- **Button** variants: primary / secondary / ghost / destructive — no custom variants
+Each component maps tokens from §2 (Design Tokens) and interaction patterns from §4 to specific visual states. Below are the required component visual rules — fill in concrete token references for each variant.
 
----
+#### Button
+
+| Variant | Background | Text | Border | Hover | Active |
+|---------|-----------|------|--------|-------|--------|
+| Primary | `--color-primary` | `--on-primary` | none | lightness +0.03 | lightness -0.02, scale 0.98 |
+| Secondary | transparent | `--color-primary` | 1px solid `--color-primary` | bg `--color-primary` at 10% opacity | bg `--color-primary` at 20% opacity |
+| Ghost | transparent | `--color-foreground` | none | bg `--color-muted` at 20% opacity | bg `--color-muted` at 30% opacity |
+| Destructive | `--color-error` | white | none | lightness +0.03 | lightness -0.02 |
+| Disabled | `--color-muted` at 20% | `--color-muted` | none | cursor: not-allowed | — |
+
+- **Shape**: `--radius-md` (8px)
+- **Padding**: 12px 20px (default), 8px 12px (sm), 16px 28px (lg)
+- **Font**: `--font-body`, `--text-base` weight 500
+
+#### Input / Form Field
+
+| State | Border | Background | Text |
+|-------|--------|-----------|------|
+| Default | 1px solid `--color-border` | `--color-surface` | `--color-foreground` |
+| Focus | 2px solid `--color-primary` (ring, offset 2px) | `--color-surface` | `--color-foreground` |
+| Error | 1px solid `--color-error` | `--color-surface` | `--color-foreground` |
+| Disabled | 1px solid `--color-border` | `--color-muted` at 10% | `--color-muted` |
+
+- **Shape**: `--radius-md` (8px)
+- **Padding**: 10px 14px
+- **Label**: `--font-body`, `--text-sm`, `--color-foreground`, margin-bottom 4px
+- **Error text**: `--font-body`, `--text-xs`, `--color-error`, margin-top 4px
+- **Placeholder**: `--color-muted`
+
+#### Card
+
+| State | Background | Shadow | Border |
+|-------|-----------|--------|--------|
+| At rest | `--color-surface` | `--shadow-sm` | none |
+| Hover | `--color-surface` | `--shadow-md` | none |
+| Elevated (modal) | `--color-surface` | `--shadow-lg` | none |
+
+- **Shape**: `--radius-lg` (12px)
+- **Padding**: `--space-6` (24px), or `--space-4` (16px) for dense layouts
+- **Internal spacing**: `--space-4` between child elements
+- **Nesting limit**: cards must not nest more than 2 levels deep
+
+#### Navigation
+
+| Element | Default | Active | Hover |
+|---------|---------|--------|-------|
+| Nav item bg | transparent | `--color-primary` at 10% opacity | `--color-muted` at 15% opacity |
+| Nav item text | `--color-foreground` | `--color-primary` | `--color-foreground` |
+| Nav item indicator | none | 3px left bar `--color-primary` | none |
+| Sub nav indent | 0 | 16px per level | — |
+
+- **Item height**: 36px
+- **Padding**: 0 12px
+- **Active indicator**: `--radius-sm` (4px) left bar or background fill, consistent per project
+
+#### Typography Hierarchy
+
+| Role | Token | Weight | Line Height | Letter Spacing | Usage |
+|------|-------|--------|-------------|----------------|-------|
+| Display | `--text-3xl` (2.441rem) | 700 | 1.1 | -0.02em | Hero headings, landing pages |
+| Headline | `--text-2xl` (1.953rem) | 600 | 1.2 | -0.01em | Page titles, section headers |
+| Title | `--text-xl` (1.563rem) | 600 | 1.25 | 0 | Card titles, modal headers |
+| Body | `--text-base` (1rem) | 400 | 1.5 | 0 | Paragraphs, descriptions |
+| Supporting | `--text-sm` (0.8rem) | 400 | 1.4 | 0 | Secondary text, metadata |
+| Label | `--text-sm` (0.8rem) | 500 | 1.4 | 0.01em | Form labels, button text |
+| Micro | `--text-xs` (0.64rem) | 400 | 1.3 | 0.01em | Captions, badges, timestamps |
+| Mono | `--font-mono` | 400 | 1.5 | 0 | Code, data, file paths |
+
+#### Component State Mapping
+
+All interactive components follow the unified interaction pattern from §4. This table maps which pattern applies to which component:
+
+| Component | Hover | Focus | Active | Disabled | Loading |
+|-----------|-------|-------|--------|----------|---------|
+| Button | ✅ | ✅ | ✅ | ✅ | ✅ (spinner) |
+| Input | — | ✅ | — | ✅ | — |
+| Card | ✅ | — | — | — | ✅ (skeleton) |
+| Nav item | ✅ | ✅ | ✅ | — | — |
+| Link | ✅ | ✅ | ✅ | — | — |
+| Select | ✅ | ✅ | — | ✅ | — |
+| Checkbox | ✅ | ✅ | ✅ | ✅ | — |
+| Toast | — | — | — | — | — |
 
 ## 4. Interaction Patterns
 

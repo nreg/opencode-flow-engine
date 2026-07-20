@@ -15,9 +15,9 @@ colors:
   error: "oklch(0.55 0.20 30) / #ff3b30"
   warning: "oklch(0.75 0.15 85) / #ff9500"
 typography:
-  display: "SF Pro Display, system-ui, sans-serif"
-  body: "SF Pro Text, system-ui, sans-serif"
-  mono: "SF Mono, monospace"
+  display: "Geist, system-ui, sans-serif"
+  body: "system-ui, sans-serif"
+  mono: "Geist Mono, JetBrains Mono, monospace"
   scale: "1.25"
 spacing:
   base: 4
@@ -104,7 +104,7 @@ colors:
   primary: "#0066cc"
   background: "#f5f5f7"
 typography:
-  display: "SF Pro Display, system-ui, sans-serif"
+  display: "Geist, system-ui, sans-serif"
 ---
 
 ## 1. Visual Direction
@@ -150,7 +150,7 @@ No emoji, honest placeholders.
 
   it('should report WARNING for AI default fonts like Inter (V2)', () => {
     const interFontDesign = validUiDesign.replace(
-      'SF Pro Display, system-ui, sans-serif',
+      'Geist, system-ui, sans-serif',
       'Inter, system-ui, sans-serif',
     );
     const result = validator.validateUiDesignContent(interFontDesign);
@@ -160,8 +160,8 @@ No emoji, honest placeholders.
 
   it('should report WARNING for Roboto font (V2)', () => {
     const robotoFontDesign = validUiDesign.replace(
-      'SF Pro Text, system-ui, sans-serif',
-      'Roboto, system-ui, sans-serif',
+      'system-ui, sans-serif',
+      'Roboto, sans-serif',
     );
     const result = validator.validateUiDesignContent(robotoFontDesign);
     expect(result.issues.some(i => i.type === 'V2_FONT_COMPLIANCE' && i.level === 'WARNING')).toBe(true);
@@ -282,7 +282,7 @@ Incomplete.
 
   it('should report WARNING for Arial font (V2)', () => {
     const arialFontDesign = validUiDesign.replace(
-      'SF Pro Display, system-ui, sans-serif',
+      'Geist, system-ui, sans-serif',
       'Arial, sans-serif',
     );
     const result = validator.validateUiDesignContent(arialFontDesign);
@@ -302,5 +302,23 @@ Incomplete.
     const result = validator.validateUiDesignContent(noA11y);
     expect(result.valid).toBe(false);
     expect(result.issues.some(i => i.type === 'V7_WCAG_AA' && i.level === 'ERROR')).toBe(true);
+  });
+
+  it('should report WARNING for Inter font in body text font-family (V2b)', () => {
+    const bodyInterDesign = validUiDesign + '\n```css\n.card { font-family: "Inter", sans-serif; }\n```\n';
+    const result = validator.validateUiDesignContent(bodyInterDesign);
+    expect(result.issues.some(i => i.type === 'V2_FONT_COMPLIANCE' && i.message.includes('body text'))).toBe(true);
+  });
+
+  it('should report WARNING for border-left decorative stripe (V9)', () => {
+    const borderLeftDesign = validUiDesign + '\n.sidebar { border-left: 3px solid var(--color-primary); }\n';
+    const result = validator.validateUiDesignContent(borderLeftDesign);
+    expect(result.issues.some(i => i.type === 'V9_BORDER_LEFT_DECORATION' && i.level === 'WARNING')).toBe(true);
+  });
+
+  it('should NOT report V9 for legitimate border-left usage (with other border sides)', () => {
+    const legitBorderDesign = validUiDesign + '\n.cell { border-left: 1px solid var(--color-border); border-right: 1px solid var(--color-border); }\n';
+    const result = validator.validateUiDesignContent(legitBorderDesign);
+    expect(result.issues.some(i => i.type === 'V9_BORDER_LEFT_DECORATION')).toBe(false);
   });
 });

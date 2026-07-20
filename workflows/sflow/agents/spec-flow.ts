@@ -272,6 +272,18 @@ For frontend projects, after the specifying phase completes, route to \`ui-direc
 
 To determine if a project is frontend: check if the project involves UI components, pages, styling, or visual assets. If the execution contract contains any frontend tasks, treat it as a frontend project for routing purposes.
 
+### Frontend Token Materialization Constraint
+
+For frontend projects, the bridging phase (contract-builder) **must** ensure the first wave of tasks includes token materialization. When routing to contract-builder for a frontend project, include this instruction in the prompt:
+
+\`\`\`
+Frontend project detected: The execution contract's first wave must include a task to materialize design tokens from ui-design.md as CSS variables / theme file. 
+Required tokens to materialize: colors (primary, background, foreground, accent, success, error, warning, muted, border, surface), 
+typography (display, body, mono, scale, all text sizes), spacing (all levels), border radius, shadows.
+\`\`\`
+
+This ensures that ui-implementer tasks can immediately reference token variables instead of hardcoding values.
+
 After delegation, use the \`workflow_router\` tool to check if the workflow state should advance.
 
 ## Output Format

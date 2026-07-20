@@ -40,7 +40,7 @@ You can be invoked in two ways:
 
 Load the relevant frontend skill at the beginning of each phase. The skill content is injected into context and provides specialized rules, patterns, and guidelines.
 
-```
+\`\`\`
 skill(name="taste-skill")        — Design taste, anti-slop, aesthetic direction
 skill(name="frontend-design-pro") — Component design, page layout patterns
 skill(name="shadcn-ui")          — Component library patterns, theming
@@ -50,33 +50,39 @@ skill(name="polish")             — Spacing, alignment, responsive quality chec
 skill(name="frontend-code-review") — Code quality scanning, severity grading
 skill(name="frontend-performance-optimization") — Core Web Vitals, bundle optimization
 skill(name="impeccable")         — Production-grade design standards, absolute bans
-```
+\`\`\`
+
+**Skill availability handling**: Before each \`skill(name="<name>")\` call, check the return value.
+- If the skill is registered (returns content) → proceed with the loaded rules
+- If the skill is NOT registered (returns empty/null/falsy) → **skip it silently**. Do NOT block, warn, or error. Not all sFlow installations include every frontend skill.
+- Skills that load successfully are bonuses, not requirements. The core workflow (Design Intake → Design System → Component Implementation → Quality Pass) always proceeds regardless of which skills are available.
+- The detailed anti-pattern rules and delivery checklist are available as standalone reference files at \`references/anti-patterns.md\` and \`references/delivery-checklist.md\` in the skill directory — these can be read directly if the corresponding skill is unavailable.
 
 ## Workflow
 
 ### Phase 1: Design Intake
-1. **Load skill**: `skill(name="taste-skill")` for design reading and aesthetic direction
+1. **Load skill**: \`skill(name="taste-skill")\` for design reading and aesthetic direction
 2. Read ui-design.md (if exists) for design tokens and component architecture
 3. Read design.md for architectural decisions
 4. Read specs/ for UI behavior requirements
 5. Read tasks.md for implementation plan
 
 ### Phase 2: Design System Setup
-1. **Load skills**: `skill(name="shadcn-ui")` + `skill(name="ui-ux-pro-max")` for theming and design decisions
+1. **Load skills**: \`skill(name="shadcn-ui")\` + \`skill(name="ui-ux-pro-max")\` for theming and design decisions
 2. Extract color tokens → CSS custom properties or Tailwind config
 3. Configure typography scale
 4. Set up spacing system
 5. Set up shadcn/ui theming (if applicable)
 
 ### Phase 3: Component Implementation
-1. **Load skills**: `skill(name="frontend-design-pro")` + `skill(name="svg-architect")` for component design
+1. **Load skills**: \`skill(name="frontend-design-pro")\` + \`skill(name="svg-architect")\` for component design
 2. Implement components following ui-design.md component inventory
 3. Implement all interactive states (hover, focus, active, disabled, loading)
 4. Implement responsive behavior
 5. Implement accessibility (WCAG 2.1 AA)
 
 ### Phase 4: Quality Pass
-1. **Load skills**: `skill(name="polish")` + `skill(name="frontend-code-review")` + `skill(name="impeccable")` + `skill(name="frontend-performance-optimization")` for comprehensive quality check
+1. **Load skills**: \`skill(name="polish")\` + \`skill(name="frontend-code-review")\` + \`skill(name="impeccable")\` + \`skill(name="frontend-performance-optimization")\` for comprehensive quality check
 2. Check anti-AI-slop checklist
 3. Verify contrast ratios
 4. Check responsive breakpoints

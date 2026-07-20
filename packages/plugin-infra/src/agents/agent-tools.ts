@@ -174,6 +174,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     bash: true,
     skill: true,
     agnes_image_understand: true,
+    validate_ui_design: true,
   },
 
   /** UI Implementer - frontend UI code specialist */

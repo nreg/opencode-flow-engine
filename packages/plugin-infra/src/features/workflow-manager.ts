@@ -12,13 +12,26 @@ const STATE_FILE = `${SFLOW_DIR}/state.json`;
 const ARCHIVE_DIR = `${SFLOW_DIR}/archive`;
 
 /**
- * P21: detectFrontend 只读 state.json，不自己猜。
- * AI 在 workflow 初始化时已读完项目上下文，直接设 isFrontend 即可。
+ * P21: detectFrontend 先读 state.json 缓存，若不存在则走 package.json 启发式检测。
  * 前后端混放的项目，AI 根据本次 CHANGE 范围判断，不需要全局启发式检测。
  */
 export async function detectFrontend(changeDir: string): Promise<boolean> {
+  // 1. Check state.json cache first
   const state = await readJsonFile<{ isFrontend?: boolean }>(`${changeDir}/.sflow/state.json`).catch(() => null);
-  return state?.isFrontend === true;
+  if (state?.isFrontend !== undefined) return state.isFrontend;
+
+  // 2. Fallback: heuristic detection from package.json (works even before state.json is initialized)
+  const pkgContent = await readFile(`${changeDir}/package.json`).catch(() => null);
+  if (pkgContent) {
+    try {
+      const pkg = JSON.parse(pkgContent);
+      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+      const frontendDeps = ['react', 'vue', 'next', 'nuxt', 'svelte', 'angular', 'solid-js', 'preact', 'ember', 'sveltekit', 'lit', 'stencil'];
+      return frontendDeps.some(dep => dep in deps);
+    } catch { /* ignore parse errors */ }
+  }
+
+  return false;
 }
 
 /**

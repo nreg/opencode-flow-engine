@@ -679,13 +679,27 @@ export class Validator {
    */
   validateUiDesignContent(content: string): { valid: boolean; issues: Array<{ level: 'ERROR' | 'WARNING'; type: string; message: string }> } {
     const issues: Array<{ level: 'ERROR' | 'WARNING'; type: string; message: string }> = [];
+    const normalized = normalizeLineEndings(content);
 
     // V1: Color format check — all color values should include OKLCH format (not pure HEX)
-    const colorLines = content.match(/^(\s+\w+:)\s*["']?oklch\(/gim);
-    const hexOnlyColorLines = content.match(/^(\s+\w+:)\s*["']?#([0-9a-fA-F]{3,8})["']?\s*$/gm);
-    const hexInTableCells = content.match(/\|\s*#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\s*\|/g);
-    const hasHexOnly = (hexOnlyColorLines && hexOnlyColorLines.length > 0) || (hexInTableCells && hexInTableCells.length > 0);
-    if (hasHexOnly && (!colorLines || colorLines.length === 0)) {
+    const oklchInYaml = normalized.match(/^(\s+\w+:)\s*["']?oklch\(/gim);
+    const oklchInTables = normalized.match(/\|\s*oklch\(/g);
+    const oklchInCssVars = normalized.match(/--[\w-]+:\s*oklch\(/gi);
+    const oklchInline = normalized.match(/oklch\(/g);
+    const hasOklchAnywhere = (oklchInYaml && oklchInYaml.length > 0)
+      || (oklchInTables && oklchInTables.length > 0)
+      || (oklchInCssVars && oklchInCssVars.length > 0)
+      || (oklchInline && oklchInline.length > 0);
+
+    // Detect pure HEX-only colors (OKLCH absent but HEX present)
+    // Valid HEX: 3 digits (#fff), 6 digits (#ffffff), 8 digits (#ffffffff)
+    const hexOnlyInYaml = normalized.match(/^(\s+\w+:)\s*["']?#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})["']?\s*$/gm);
+    const hexInTables = normalized.match(/\|\s*#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\s*\|/g);
+    const hexOnlyInCssVars = normalized.match(/--[\w-]+:\s*#[0-9a-fA-F]{3,8};/gi);
+    const hasHexOnly = (hexOnlyInYaml && hexOnlyInYaml.length > 0)
+      || (hexInTables && hexInTables.length > 0)
+      || (hexOnlyInCssVars && hexOnlyInCssVars.length > 0);
+    if (hasHexOnly && !hasOklchAnywhere) {
       issues.push({
         level: 'ERROR',
         type: 'V1_COLOR_FORMAT',
@@ -695,7 +709,7 @@ export class Validator {
 
     // V2: Font compliance check — fonts not in default AI list (Inter/Roboto/Arial → WARNING)
     const AI_DEFAULT_FONTS = ['Inter', 'Roboto', 'Arial'];
-    const fontSection = content.match(/typography:[\s\S]*?(?=\n\w|\n---)/i);
+    const fontSection = normalized.match(/typography:[\s\S]*?(?=\n\w|\n---)/i);
     if (fontSection) {
       for (const font of AI_DEFAULT_FONTS) {
         const fontRegex = new RegExp(`["']?${font}["']?`, 'i');
@@ -703,9 +717,28 @@ export class Validator {
           issues.push({
             level: 'WARNING',
             type: 'V2_FONT_COMPLIANCE',
-            message: `Font "${font}" is a common AI-generated default. Consider using a more distinctive typeface.`,
+            message: `Font "${font}" is a common AI-generated default (found in frontmatter typography). Consider using a more distinctive typeface.`,
           });
         }
+      }
+    }
+
+    // V2b: Also check body text for font-family with Inter/Roboto/Arial (not just frontmatter)
+    // Matches: font-family: "Inter", font-family: 'Roboto', font-family: Inter, etc.
+    const bodyFontRegex = /font-family:\s*['"]?(Inter|Roboto|Arial)['"]?/gi;
+    let bodyFontMatch: RegExpExecArray | null;
+    const bodyFontMatches = new Set<string>();
+    while ((bodyFontMatch = bodyFontRegex.exec(normalized)) !== null) {
+      bodyFontMatches.add(bodyFontMatch[1]!);
+    }
+    for (const font of bodyFontMatches) {
+      // Only add if not already reported from frontmatter
+      if (!fontSection || !new RegExp(font, 'i').test(fontSection[0])) {
+        issues.push({
+          level: 'WARNING',
+          type: 'V2_FONT_COMPLIANCE',
+          message: `Font "${font}" is a common AI-generated default (found in body text font-family). Consider using a more distinctive typeface.`,
+        });
       }
     }
 
@@ -729,11 +762,22 @@ export class Validator {
       });
     }
 
-    // V4: Component coverage check — at least 5 component categories
+    // V4: Component coverage check — at least 5 component visual rules defined
+    // Counts by matching ####-level sub-headings under Component Architecture section
+    // (e.g. "#### Button", "#### Input / Form Field")
+    // Falls back to counting ASCII tree top-level branches if no sub-headings found.
+    // Excludes structural headings like "Component State Mapping", "Component Tree".
+    const COMPONENT_EXCLUDED_HEADINGS = /^(Component State Mapping|Component Tree|Component Visual Rules)/i;
     const componentSection = this.extractUiDesignSection(content, 'Component Architecture');
     if (componentSection) {
-      const componentCategories = componentSection.match(/^├──|^│   ├──|^└──/gm);
-      const categoryCount = componentCategories ? componentCategories.length : 0;
+      // Primary: count #### sub-headings, excluding structural meta-headings
+      const allHeadings = componentSection.match(/^####\s+\w[^\n]*/gm) || [];
+      const componentHeadings = allHeadings.filter(h => !COMPONENT_EXCLUDED_HEADINGS.test(h.replace(/^####\s+/, '')));
+      // Fallback: count ASCII tree top-level branches (├── / └── at line start)
+      const treeBranches = componentSection.match(/^[├└]──\s/gm);
+      const categoryCount = componentHeadings.length > 0
+        ? componentHeadings.length
+        : (treeBranches ? treeBranches.length : 0);
       if (categoryCount < 5) {
         issues.push({
           level: 'WARNING',
@@ -789,6 +833,60 @@ export class Validator {
       });
     }
 
+    // V8: Component visual rules check — must define visual rules for at least 5 component types
+    const visualRulesSection = this.extractUiDesignSection(content, 'Component Visual Rules');
+    if (visualRulesSection) {
+      // Match exact component headings: "#### Button", "#### Input / Form Field", "#### Typography Hierarchy", etc.
+      // Use heading name + optional suffix (e.g. "Typography" matches "Typography Hierarchy")
+      const requiredComponents = ['Button', 'Input', 'Card', 'Navigation', 'Typography'];
+      const definedComponents = requiredComponents.filter(comp =>
+        new RegExp(`^####\\s+${comp}(\\s|/|$)` , 'im').test(visualRulesSection),
+      );
+      if (definedComponents.length < 5) {
+        issues.push({
+          level: 'WARNING',
+          type: 'V8_COMPONENT_VISUAL_RULES',
+          message: `Component Visual Rules should define all 5 required types. Found: ${definedComponents.length}/5 (${definedComponents.join(', ') || 'none'}). Missing: ${requiredComponents.filter(c => !definedComponents.includes(c)).join(', ')}.`,
+        });
+      }
+    } else {
+      issues.push({
+        level: 'WARNING',
+        type: 'V8_COMPONENT_VISUAL_RULES',
+        message: 'Missing "Component Visual Rules" section. Define visual rules for at least 5 component types: Button, Input, Card, Navigation, Typography.',
+      });
+    }
+
+    // V9: No border-left decoration check — border-left must not be used for decorative stripes
+    // Allow legitimate uses: border-left for table headers, definition lists, multi-border shorthand.
+    // Only flag standalone border-left without other border sides on the same or adjacent lines.
+    const borderLeftPattern = /border-left\s*:\s*[^;]+(?:!important)?\s*;/gi;
+    const borderLeftMatches = normalized.match(borderLeftPattern);
+    if (borderLeftMatches && borderLeftMatches.length > 0) {
+      const suspiciousLines: string[] = [];
+      const lines = normalized.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        if (!/border-left\s*:/i.test(line)) continue;
+        // Check if the same line has other border-* properties (legitimate use)
+        const sameLineOtherBorders = /border(-right|-top|-bottom)?\s*:/i.test(
+          line.replace(/border-left\s*:\s*[^;]+;?/i, ''),
+        );
+        const prevLineHasBorders = i > 0 && /border(-right|-top|-bottom)?\s*:/i.test(lines[i - 1]!);
+        const nextLineHasBorders = i + 1 < lines.length && /border(-right|-top|-bottom)?\s*:/i.test(lines[i + 1]!);
+        if (!sameLineOtherBorders && !prevLineHasBorders && !nextLineHasBorders) {
+          suspiciousLines.push(`line ${i + 1}: ${line.trim().substring(0, 80)}`);
+        }
+      }
+      if (suspiciousLines.length > 0) {
+        issues.push({
+          level: 'WARNING',
+          type: 'V9_BORDER_LEFT_DECORATION',
+          message: `border-left should not be used as decorative stripe. Suspicious usages:\n${suspiciousLines.join('\n')}`,
+        });
+      }
+    }
+
     const valid = issues.filter(i => i.level === 'ERROR').length === 0;
     return { valid, issues };
   }
@@ -825,7 +923,11 @@ export class Validator {
   private extractUiDesignSection(content: string, heading: string): string | undefined {
     const normalized = normalizeLineEndings(content);
     const lines = normalized.split('\n');
-    const headingRegex = new RegExp(`^##\\s+\\d+\\.?\\s*${heading.replace(/\s+/g, '\\s+')}\\s*$`, 'i');
+    // Match "## N. Title" or "## Title" (number prefix optional, dot optional)
+    const headingRegex = new RegExp(
+      `^##\\s+\\d*\\.?\\s*${heading.replace(/\s+/g, '\\s+')}\\s*$`,
+      'i',
+    );
     const idx = lines.findIndex((l) => headingRegex.test(l));
     if (idx === -1) return undefined;
 

@@ -161,12 +161,12 @@ export function createValidatorTools(): Record<string, ToolDefinition> {
     },
 
     validate_ui_design: {
-      description: 'Validate ui-design.md content. Checks V1-V7: color format, font compliance, tone declaration, component coverage, placeholder strategy, anti-AI-slop coverage, WCAG AA. Reads from <changeDir>/ui-design.md by default.',
+      description: 'Validate ui-design.md content. Checks V1-V7: color format, font compliance, tone declaration, component coverage, placeholder strategy, anti-AI-slop coverage, WCAG AA. Reads from <changeDir>/.sflow/ui-design.md by default.',
       args: {
-        ui_design_path: z.string().optional().describe('Path to the ui-design.md file. Defaults to <changeDir>/ui-design.md'),
+        ui_design_path: z.string().optional().describe('Path to the ui-design.md file. Defaults to <changeDir>/.sflow/ui-design.md'),
       },
       execute: async (args: { ui_design_path?: string }, context: ToolContext) => {
-        const filePath = resolvePath(context, args.ui_design_path, 'ui-design.md');
+        const filePath = resolvePath(context, args.ui_design_path, '.sflow/ui-design.md');
         const content = await readFileContent(filePath);
         if (content === null) {
           return { title: 'UI Design Validation', output: JSON.stringify({ valid: false, issues: [{ level: 'ERROR', type: 'FILE_NOT_FOUND', message: `UI design file not found: ${filePath}` }] }, null, 2) };
