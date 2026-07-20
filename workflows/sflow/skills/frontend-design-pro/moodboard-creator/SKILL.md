@@ -1,4 +1,5 @@
 ---
+name: moodboard-creator
 description: Create visual moodboards from collected inspiration with iterative refinement. Use after trend research or website analysis to synthesize design direction before implementation.
 allowed-tools:
   - Read

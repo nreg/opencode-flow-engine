@@ -1,4 +1,5 @@
 ---
+name: color-curator
 description: Browse and select color palettes from Coolors or curated fallbacks. Use to find the perfect color palette for a design project.
 allowed-tools:
   - AskUserQuestion

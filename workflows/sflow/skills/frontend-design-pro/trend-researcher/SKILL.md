@@ -1,4 +1,5 @@
 ---
+name: trend-researcher
 description: Research latest UI/UX trends from Dribbble and design communities. Use when starting a design project to understand current visual trends, color palettes, and layout patterns.
 allowed-tools:
   - mcp__claude-in-chrome__tabs_context_mcp

@@ -140,8 +140,7 @@ export class SkillLoader {
     const skillDir = join(this.skillsDir, name);
     const skillFile = join(skillDir, 'SKILL.md');
 
-    if (!existsSync(skillFile)) {
-      console.warn(`Skill file not found: ${skillFile}`);
+if (!existsSync(skillFile)) {
       return null;
     }
 

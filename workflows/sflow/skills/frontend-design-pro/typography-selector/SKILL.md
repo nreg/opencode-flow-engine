@@ -1,4 +1,5 @@
 ---
+name: typography-selector
 description: Browse and select fonts from Google Fonts or curated pairings. Use to find the perfect typography for a design project.
 allowed-tools:
   - AskUserQuestion

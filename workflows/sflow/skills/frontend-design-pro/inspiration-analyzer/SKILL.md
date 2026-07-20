@@ -1,4 +1,5 @@
 ---
+name: inspiration-analyzer
 description: Analyze websites for design inspiration, extracting colors, typography, layouts, and patterns. Use when you have specific URLs to analyze for a design project.
 allowed-tools:
   - mcp__claude-in-chrome__tabs_context_mcp

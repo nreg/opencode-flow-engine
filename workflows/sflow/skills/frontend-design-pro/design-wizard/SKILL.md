@@ -1,4 +1,5 @@
 ---
+name: design-wizard
 description: Interactive design wizard that guides through a complete frontend design process with discovery, aesthetic selection, and code generation. Use for creating distinctive, production-ready UI.
 allowed-tools:
   - Read
