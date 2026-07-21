@@ -6,6 +6,12 @@ import type { ToolDefinition, ToolContext, ToolResult } from "./types.js";
 import { fileExists, directoryExists, readJsonFile, isContractStale } from "@opencode-flow-engine/shared";
 import { detectFrontend } from "../features/workflow-manager.js";
 import { detectWorkflowState } from "../features/state-manager.js";
+
+/**
+ * Shared agent names that are not bound to any workflow state.
+ * These are horizontal commands that bypass STATE_ALLOWED_AGENTS guard.
+ */
+import { SHARED_AGENT_NAMES, HORIZONTAL_COMMANDS, matchHorizontalCommand } from '../../../../workflows/shared/index.js';
 /**
  * Map from workflow state to allowed agents.
  * Intent routing must respect this — routing to an agent not allowed in current state
@@ -294,6 +300,35 @@ export function createWorkflowRouterTool(): ToolDefinition {
       const p = params as { changeDir?: string; intent?: string };
       const changeDir = await findActiveChangeDir(p.changeDir || '', context.directory || '');
       const userIntent = p.intent || '';
+
+      // Phase 0: Horizontal command detection
+      // Bypasses workflow state guards — these commands are available at any state.
+      if (userIntent) {
+        const hCmd = matchHorizontalCommand(userIntent);
+        if (hCmd) {
+          return {
+            title: "Workflow Router",
+            output: JSON.stringify({
+              success: true,
+              data: {
+                source: 'horizontal-command',
+                state: null,
+                skill: hCmd.agent,
+                action: hCmd.action,
+                description: hCmd.description,
+                isHorizontalCommand: true,
+                reasons: [`Horizontal command detected: "${userIntent}" → ${hCmd.agent} (${hCmd.description})`],
+                stateGuardBlocked: false,
+                routingDeclaration: {
+                  loaded: [],
+                  notLoaded: ['All workflow artifacts — this is a standalone command'],
+                  nextAction: `Dispatch ${hCmd.agent} for ${hCmd.description}`,
+                },
+              },
+            }),
+          };
+        }
+      }
 
       // Phase 1: Intent-based routing (if user gave a clear intent)
       if (userIntent) {

@@ -39,7 +39,10 @@ export type BuiltinAgentName =
   | 'iflow-plan-executor'     // Execution governor (subagent)
   | 'iflow-verifier'          // Adversarial verification (subagent)
   | 'iflow-researcher'        // Research (subagent)
-  | 'iflow-shipper';          // Ship/release (subagent)
+  | 'iflow-shipper'           // Ship/release (subagent)
+  // Shared agents (cross-workflow, standalone, not bound to any workflow state)
+  | 'test-engineer'       // Independent comprehensive testing (subagent)
+  | 'review-engineer';     // Independent comprehensive review (subagent)
 
 /**
  * Agent override configuration

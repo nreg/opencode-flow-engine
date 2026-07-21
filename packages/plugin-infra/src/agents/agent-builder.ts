@@ -28,6 +28,10 @@ import {
   createIFlowShipperAgent,
 } from '../../../../workflows/iflow/index.js';
 import {
+  createTestEngineerAgent,
+  createReviewEngineerAgent,
+} from '../../../../workflows/shared/index.js';
+import {
   loadCascadedSFlowConfig,
   agentOverridesFromConfig,
   mergeOverrides,
@@ -57,6 +61,9 @@ const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
   'iflow-verifier': 'subagent',
   'iflow-researcher': 'subagent',
   'iflow-shipper': 'subagent',
+  // Shared (cross-workflow, standalone)
+  'test-engineer': 'subagent',
+  'review-engineer': 'subagent',
 };
 
 /**
@@ -83,6 +90,9 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
   'iflow-verifier': 'minimax-m2.7',
   'iflow-researcher': 'glm-5.1',
   'iflow-shipper': 'mimo-v2.5-pro',
+  // Shared
+  'test-engineer': 'deepseek-v4-flash',
+  'review-engineer': 'deepseek-v4-flash',
 };
 
 /**
@@ -109,6 +119,9 @@ const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
   'iflow-verifier': ['deepseek-v4-flash', 'glm-5.1'],
   'iflow-researcher': ['kimi-k2.6', 'deepseek-v4-flash'],
   'iflow-shipper': ['mimo-v2.5', 'glm-5.1'],
+  // Shared
+  'test-engineer': ['glm-5.1', 'kimi-k2.6'],
+  'review-engineer': ['glm-5.1', 'kimi-k2.6'],
 };
 
 /**
@@ -155,6 +168,9 @@ const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
   'iflow-verifier': createIFlowVerifierAgent,
   'iflow-researcher': createIFlowResearcherAgent,
   'iflow-shipper': createIFlowShipperAgent,
+  // Shared (cross-workflow, standalone)
+  'test-engineer': createTestEngineerAgent,
+  'review-engineer': createReviewEngineerAgent,
 };
 
 /**

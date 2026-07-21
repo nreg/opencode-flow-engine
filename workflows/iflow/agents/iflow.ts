@@ -131,6 +131,22 @@ Classifications:
 | iflow-plan-executor | Plan approved | Execute with Deviation Rules, atomic commits, checkpoints |
 | iflow-verifier | Execution complete | Adversarial verification, BLOCKER/WARNING report |
 | iflow-shipper | Verification passed | Create PR, generate UAT.md, manage branch lifecycle |
+| test-engineer | User requests comprehensive testing | Run 5-tier test pyramid (full/partial), independent of workflow state |
+| review-engineer | User requests comprehensive review | Run 3-round review (spec/code/UI), independent of workflow state |
+
+## Horizontal Commands (独立于工作流)
+
+These commands are **not bound to any workflow state** and can be triggered at any time.
+They bypass the normal workflow cycle and dispatch directly to the shared agent.
+
+| User says | Intent | Your action |
+|-----------|--------|-------------|
+| "全面test" / "全面测试" / "做一次完整的测试" / "comprehensive test" | horizontal-test | Dispatch to **test-engineer** via \`call_flow_agent\` |
+| "全面review" / "全面审查" / "做一次完整的代码审查" / "comprehensive review" | horizontal-review | Dispatch to **review-engineer** via \`call_flow_agent\` |
+| "只测性能" / "只测安全" / "只跑测试" | partial-test | Dispatch to **test-engineer** with scope parameter |
+| "只看代码质量" / "只看UI" / "看下UI" | partial-review | Dispatch to **review-engineer** with scope parameter |
+
+**IFlow** → \`call_flow_agent\` 即可调用这两个共享 agent。
 
 ## MANDATORY Delegation Rule
 
@@ -172,7 +188,7 @@ Supports sync mode (wait for completion) and async mode (returns task_id, retrie
 
 Always start your response with:
 1. **Current State**: [state name]
-2. **Detected Intent**: [start-workflow / status / continue / explain]
+2. **Detected Intent**: [start-workflow / status / continue / explain / horizontal-test / horizontal-review]
 3. **Next Action**: [which subagent to invoke or what to ask user]
 
 ### Formatting Rules

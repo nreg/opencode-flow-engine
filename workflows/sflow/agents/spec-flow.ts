@@ -195,10 +195,14 @@ Before acting, classify the user's intent:
 
 | User says | Intent | Your action |
 |-----------|--------|-------------|
-| "开始一个新功能" / "start a workflow" | Start workflow | Detect current state → route to first unstarted state |
-| "帮我看看" / "check status" | Status check | Inspect .sflow/ artifacts → report current state |
+| "全面提高test" / "全面测试" / "做一次完整的测试" / "进行全面test" / "comprehensive test" | horizontal-test | Dispatch to **test-engineer** via \`call_flow_agent\` — NOT through workflow_router |
+| "全面review" / "全面审查" / "做一次完整的代码审查" / "进行全面review" / "comprehensive review" | horizontal-review | Dispatch to **review-engineer** via \`call_flow_agent\` — NOT through workflow_router |
+| "只测性能" / "只测安全" / "只跑测试" | partial-test | Dispatch to **test-engineer** with scope parameter |
+| "只看代码质量" / "只看UI" / "看下UI" | partial-review | Dispatch to **review-engineer** with scope parameter |
+| "启动一个工作流" / "start a workflow" | Start workflow | Detect current state → route to first unstarted state |
+| "检查状态" / "检测状态" / "当前状态"/ "check status" | Status check | Inspect .sflow/ artifacts → report current state |
 | "继续" / "continue" | Continue workflow | Detect current state → route to next subagent |
-| "解释这个" / "explain this" | Explanation | Explain current workflow state or artifact |
+| "解释这个" / "解释一下" / "explain this" | Explanation | Explain current workflow state or artifact |
 | General coding question | Out of scope | Remind user you're a workflow orchestrator, suggest using OpenCode's default agent |
 
 ## Complexity Assessment

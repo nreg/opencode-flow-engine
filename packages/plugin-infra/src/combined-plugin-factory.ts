@@ -18,6 +18,8 @@ import { SFLOW_TOOLS, IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolErro
 
 import { getAgentNames, getAgentMode, createAgent } from './agents/index.js';
 import { createWorkflowRouterTool } from './tools/index.js';
+import { createIFlowRouterTool } from './tools/iflow-router.js';
+import { createCallFlowAgentTools } from './tools/call-flow-agent.js';
 
 import { loadCascadedSFlowConfig, agentOverridesFromConfig } from './agents/config-loader.js';
 import { createHookComposer } from './hooks/hook-composer.js';
@@ -29,9 +31,9 @@ import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.j
 import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
 import { setHasOmoPlugin, setHasAgnesProvider } from './agents/agent-tools.js';
 import { markOmoUsed, resetOmoTracking } from './hooks/guard.js';
-import { pollSessionCompletion } from './helpers/polling.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SFLOW_AGENT_NAMES } from '../../../workflows/sflow/index.js';
+import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
 import { createAgnesTools } from './agnes-tools.js';
 import { getCurrentWorkflowState, executeContractValidator, executeArtifactInspector } from './sflow-tool-helpers.js';
 
@@ -47,6 +49,75 @@ const AGENT_MODEL_MAP: AgentModelMap = {};
 // ─── Combined tool definitions (SFlow + IFlow) ────────────────────────────────
 
 function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition> {
+  const callFlowAgentTools = createCallFlowAgentTools({
+    client,
+    backgroundTaskRegistry,
+    backgroundTaskCounter,
+    agentModelMap: AGENT_MODEL_MAP,
+    sessionLabelPrefix: (subagentType, context) => {
+      // Determine workflow prefix based on context
+      const changeDir = (context.directory as string) || '';
+      const isIFlowCtx = changeDir ? true : false; // context available from execute
+      // Use agent name from context to determine prefix
+      const callerAgent = (context.agent as string) || '';
+      const lower = callerAgent.toLowerCase();
+      if (lower === 'iflow' || lower.startsWith('iflow-')) return 'iFlow';
+      if (lower === 'sflow' || lower.startsWith('sflow-')) return 'sFlow';
+      // Fallback: check directory
+      if (changeDir.includes('.iflow')) return 'iFlow';
+      if (changeDir.includes('.sflow')) return 'sFlow';
+      return 'WF';
+    },
+    workflowName: 'workflow',
+    validateAgent: async (subagentType, context) => {
+      const changeDir = (context.directory as string) || '';
+
+      // Detect workflow context
+      const isSFlowContext = await directoryExists(`${changeDir}/.sflow`);
+      const isIFlowContext = await directoryExists(`${changeDir}/.iflow`);
+
+      let callerWorkflow: 'iflow' | 'sflow' | 'unknown' = 'unknown';
+      if (isIFlowContext && !isSFlowContext) {
+        callerWorkflow = 'iflow';
+      } else if (isSFlowContext && !isIFlowContext) {
+        callerWorkflow = 'sflow';
+      } else if (isIFlowContext && isSFlowContext) {
+        const callerAgent = (context.agent as string) || '';
+        const lower = callerAgent.toLowerCase();
+        if (lower === 'iflow' || lower.startsWith('iflow-')) {
+          callerWorkflow = 'iflow';
+        } else if (lower === 'sflow' || lower.startsWith('sflow-')) {
+          callerWorkflow = 'sflow';
+        }
+      }
+
+      const sharedNames = SHARED_AGENT_NAMES as readonly string[];
+
+      if (callerWorkflow === 'iflow') {
+        if (sharedNames.includes(subagentType as string)) return null;
+        const validIFlowAgents = IFLOW_AGENT_NAMES as readonly string[];
+        if (!validIFlowAgents.includes(subagentType as string)) {
+          return `无效的 IFlow agent: "${subagentType}"。可用的 IFlow agent: ${validIFlowAgents.join(', ')}`;
+        }
+        return null;
+      } else if (callerWorkflow === 'sflow') {
+        if (sharedNames.includes(subagentType as string)) return null;
+        const validSFlowAgents = SFLOW_AGENT_NAMES as readonly string[];
+        if (!validSFlowAgents.includes(subagentType as string)) {
+          return `无效的 SFlow agent: "${subagentType}"。可用的 SFlow agent: ${validSFlowAgents.join(', ')}`;
+        }
+        return null;
+      } else {
+        // Unknown context: allow all registered + shared agents
+        const allAgents = [...new Set([...IFLOW_AGENT_NAMES, ...SFLOW_AGENT_NAMES, ...SHARED_AGENT_NAMES])];
+        if (!allAgents.includes(subagentType as string)) {
+          return `无效的 agent: "${subagentType}"。可用 agent: ${allAgents.join(', ')}`;
+        }
+        return null;
+      }
+    },
+  });
+
   const tools: Record<string, ToolDefinition> = {
     workflow_router: {
       description: 'Detect current workflow state and route to the appropriate agent. Supports GO.md-style intent matching.',
@@ -64,7 +135,6 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
       execute: async (args, context) => {
-        const { createIFlowRouterTool } = await import('./tools/iflow-router.js');
         return createIFlowRouterTool().execute({ ...args, changeDir: context.directory || '' }, context);
       },
     },
@@ -97,274 +167,7 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
       },
     },
 
-    call_flow_agent: {
-      description: 'Invoke a specialized workflow subagent (IFlow or SFlow). Supports sync (run_in_background=false) and async (run_in_background=true) modes. Async mode returns a task_id; use flowagent_output to retrieve results when complete.',
-      args: {
-        description: z.string().describe('Short (3-5 words) description of the task'),
-        prompt: z.string().describe('The task for the subagent to perform'),
-        subagent_type: z.string().describe('The subagent to invoke (e.g. iflow-plan-executor, build-executor)'),
-        run_in_background: z.boolean().describe('true=async (returns task_id for flowagent_output), false=sync (waits for completion)'),
-        session_id: z.string().optional().describe('Existing session to continue (sync mode only)'),
-      },
-      execute: async (args, context) => {
-        const changeDir = context.directory || '';
-        const { subagent_type, prompt, run_in_background, session_id, description } = args;
-
-        // 确定调用者所属的 workflow 类型，避免跨 workflow 调用
-        const isSFlowContext = await directoryExists(`${changeDir}/.sflow`);
-        const isIFlowContext = await directoryExists(`${changeDir}/.iflow`);
-
-        let callerWorkflow: 'iflow' | 'sflow' | 'unknown' = 'unknown';
-        if (isIFlowContext && !isSFlowContext) {
-          callerWorkflow = 'iflow';
-        } else if (isSFlowContext && !isIFlowContext) {
-          callerWorkflow = 'sflow';
-        } else if (isIFlowContext && isSFlowContext) {
-          // 两个目录都存在时，通过调用者 agent 名称判断 workflow 类型
-          const callerAgent = (context as Record<string, unknown>).agent as string | undefined;
-          if (callerAgent) {
-            const lower = callerAgent.toLowerCase();
-            if (lower === 'iflow' || lower.startsWith('iflow-')) {
-              callerWorkflow = 'iflow';
-            } else if (lower === 'sflow' || lower.startsWith('sflow-')) {
-              callerWorkflow = 'sflow';
-            }
-          }
-        }
-
-        if (callerWorkflow === 'iflow') {
-          const validIFlowAgents = IFLOW_AGENT_NAMES as readonly string[];
-          if (!validIFlowAgents.includes(subagent_type as string)) {
-            return await formatToolError(
-              `无效的 IFlow agent: "${subagent_type}"。可用的 IFlow agent: ${validIFlowAgents.join(', ')}`,
-            );
-          }
-        } else if (callerWorkflow === 'sflow') {
-          const validSFlowAgents = SFLOW_AGENT_NAMES as readonly string[];
-          if (!validSFlowAgents.includes(subagent_type as string)) {
-            return await formatToolError(
-              `无效的 SFlow agent: "${subagent_type}"。可用的 SFlow agent: ${validSFlowAgents.join(', ')}`,
-            );
-          }
-        } else {
-          // 无法确定 workflow 类型时，允许所有已注册 agent
-          const allAgents = [...new Set([...IFLOW_AGENT_NAMES, ...SFLOW_AGENT_NAMES])];
-          if (!allAgents.includes(subagent_type as string)) {
-            return await formatToolError(
-              `无效的 agent: "${subagent_type}"。可用 agent: ${allAgents.join(', ')}`,
-            );
-          }
-        }
-
-        const workflowPrefix = isIFlowContext ? 'iFlow' : 'sFlow';
-        const sessionLabel = `${workflowPrefix} → ${subagent_type}`;
-
-        try {
-          let sessionID: string;
-          let isNew = false;
-
-          if (session_id) {
-            if (run_in_background) {
-              return await formatToolError('session_id is not supported in background mode. Use run_in_background=false to continue an existing session.');
-            }
-            sessionID = session_id as string;
-          } else {
-            const subagentModel = AGENT_MODEL_MAP[subagent_type as string];
-            if (!subagentModel) {
-              return await formatToolError(
-                `No model configured for subagent "${subagent_type}". Available agents: ${Object.keys(AGENT_MODEL_MAP).join(', ')}`,
-              );
-            }
-
-            const createResult = await (client.session.create as (args: {
-              body: Record<string, unknown>;
-              query?: Record<string, unknown>;
-            }) => Promise<{ data?: { id?: string } }>)({
-              body: {
-                parentID: context.sessionID,
-                title: sessionLabel,
-                agent: subagent_type as string,
-              },
-              query: { directory: changeDir },
-            });
-            const id = createResult.data?.id;
-            if (!id) {
-              return await formatToolError('Failed to create subagent session');
-            }
-            sessionID = id;
-            isNew = true;
-          }
-
-          await (client.session.prompt as (args: {
-            path: { id: string };
-            body: Record<string, unknown>;
-          }) => Promise<unknown>)({
-            path: { id: sessionID },
-            body: {
-              agent: subagent_type as string,
-              parts: [{ type: 'text', text: prompt as string }],
-            },
-          }).catch((err: unknown) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            throw new Error(`Failed to send prompt: ${msg}`);
-          });
-
-          if (run_in_background) {
-            const taskId = generateTaskId(backgroundTaskCounter);
-            backgroundTaskRegistry.set(taskId, {
-              sessionID,
-              status: 'running',
-              createdAt: Date.now(),
-            });
-            return {
-              title: sessionLabel,
-              output: JSON.stringify({
-                success: true,
-                task_id: taskId,
-                session_id: sessionID,
-                status: 'running',
-                description,
-                agent: subagent_type,
-              }, null, 2),
-            };
-          }
-
-          const lastOutput = await pollSessionCompletion(
-            client as unknown as { session: import("./helpers/polling.js").SFlowClientSession },
-            sessionID,
-          ) || '(no output)';
-
-          const syncTaskId = generateTaskId(backgroundTaskCounter);
-          backgroundTaskRegistry.set(syncTaskId, {
-            sessionID,
-            status: 'completed',
-            result: lastOutput,
-            createdAt: Date.now(),
-            completedAt: Date.now(),
-          });
-
-          return {
-            title: sessionLabel,
-            output: JSON.stringify({
-              success: true,
-              subagent: subagent_type,
-              sessionID,
-              task_id: syncTaskId,
-              output: lastOutput,
-            }, null, 2),
-          };
-        } catch (error) {
-          return {
-            title: sessionLabel,
-            output: JSON.stringify({
-              success: false,
-              subagent: subagent_type,
-              error: error instanceof Error ? error.message : String(error),
-            }, null, 2),
-          };
-        }
-      },
-    },
-
-    flowagent_output: {
-      description: 'Retrieve results from a background workflow subagent task (call_flow_agent async mode). Call this when a <system-reminder> notifies you that a background task completed. Use block=true to wait for completion (timeout: 120s).',
-      args: {
-        task_id: z.string().describe('The task ID returned by call_flow_agent (run_in_background=true, prefix: sf_)'),
-        block: z.boolean().optional().describe('Wait for completion (default: false)'),
-      },
-      execute: async (args: { task_id: string; block?: boolean }, _context) => {
-        const { task_id, block } = args;
-
-        const pollAndComplete = async (task: BackgroundTaskEntry): Promise<BackgroundTaskEntry> => {
-          const output = await pollSessionCompletion(
-            client as unknown as { session: import('./helpers/polling.js').SFlowClientSession },
-            task.sessionID,
-            { maxWaitMs: 120000 },
-          );
-          const now = Date.now();
-          const updated: BackgroundTaskEntry = {
-            ...task,
-            status: 'completed',
-            result: output || '(no output)',
-            completedAt: now,
-          };
-          backgroundTaskRegistry.set(task_id, updated);
-          return updated;
-        };
-
-        const buildResponse = (task: BackgroundTaskEntry) => ({
-          title: 'FlowAgent Output',
-          output: JSON.stringify({
-            success: task.status !== 'error',
-            task_id,
-            status: task.status,
-            session_id: task.sessionID,
-            result: task.result,
-            error: task.error,
-          }, null, 2),
-        });
-
-        try {
-          const existingTask = backgroundTaskRegistry.get(task_id);
-          if (!existingTask) {
-            return { title: 'FlowAgent Output', output: JSON.stringify({ success: false, error: `Task ${task_id} not found` }, null, 2) };
-          }
-
-          if (!block) {
-            return buildResponse(existingTask);
-          }
-
-          const completed = existingTask.status !== 'running'
-            ? existingTask
-            : await pollAndComplete(existingTask);
-          return buildResponse(completed);
-        } catch (error) {
-          return {
-            title: 'FlowAgent Output',
-            output: JSON.stringify({
-              success: false,
-              error: error instanceof Error ? error.message : String(error),
-            }, null, 2),
-          };
-        }
-      },
-    },
-
-    flowagent_cancel: {
-      description: 'Cancel a running workflow subagent task by task_id (call_flow_agent async mode). Use this when you no longer need the result.',
-      args: {
-        taskId: z.string().describe('Task ID to cancel (required, prefix: sf_)'),
-      },
-      execute: async (args: { taskId: string }, _context) => {
-        const { taskId } = args;
-        try {
-          const task = backgroundTaskRegistry.get(taskId);
-          if (!task) {
-            return { title: 'FlowAgent Cancel', output: JSON.stringify({ success: false, error: `Task ${taskId} not found` }, null, 2) };
-          }
-          if (task.status !== 'running') {
-            return { title: 'FlowAgent Cancel', output: JSON.stringify({ success: true, message: `Task ${taskId} already in status: ${task.status}` }, null, 2) };
-          }
-
-          try {
-            await client.session.abort({ path: { id: task.sessionID } });
-          } catch {
-            // session.abort may not be available; mark cancelled anyway
-          }
-
-          backgroundTaskRegistry.delete(taskId);
-          return { title: 'FlowAgent Cancel', output: JSON.stringify({ success: true, message: `Task ${taskId} cancelled and removed` }, null, 2) };
-        } catch (error) {
-          return {
-            title: 'FlowAgent Cancel',
-            output: JSON.stringify({
-              success: false,
-              error: error instanceof Error ? error.message : String(error),
-            }, null, 2),
-          };
-        }
-      },
-    },
+    ...callFlowAgentTools,
   };
 
   const agnesTools = createAgnesTools();

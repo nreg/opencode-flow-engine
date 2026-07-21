@@ -7,6 +7,19 @@ import type { ToolDefinition, ToolContext, ToolResult } from "./types.js";
 import { fileExists, directoryExists, readFile, readJsonFile, ensureDir, writeJsonFile, writeFile, removeFile } from "@opencode-flow-engine/shared";
 
 /**
+ * Shared agent names that are not bound to any workflow state.
+ * These are horizontal commands that bypass IFlow state guard.
+ */
+import { SHARED_AGENT_NAMES, HORIZONTAL_COMMANDS, matchHorizontalCommand } from '../../../../workflows/shared/index.js';
+
+/**
+ * IFlow horizontal command patterns — Phase 0 detection.
+ * Independent of IFlow workflow state, bypasses state guards.
+ * Delegates to shared HORIZONTAL_COMMANDS from workflows/shared/horizontal-commands.ts
+ */
+const IFLOW_HORIZONTAL_COMMANDS = HORIZONTAL_COMMANDS;
+
+/**
  * IFlow workflow states in cyclic order
  */
 const IFLOW_STATES = [
@@ -19,6 +32,25 @@ const IFLOW_STATES = [
 ] as const;
 
 type IFlowState = typeof IFLOW_STATES[number];
+
+/** Return type for detectIFlowState */
+interface IFlowStateResult {
+  state: IFlowState;
+  iteration: number;
+  artifacts: Record<string, boolean>;
+  reasons: string[];
+  rollbackDetected?: boolean;
+  previousState?: string;
+}
+
+/** Artifact set used for state detection */
+interface IFlowArtifacts {
+  CONTEXT: boolean;
+  PLAN: boolean;
+  SUMMARY: boolean;
+  UAT: boolean;
+  EXECUTING: boolean;
+}
 
 /**
  * Map from IFlow state to allowed subagents
@@ -53,25 +85,11 @@ const IFLOW_INTENT_PATTERNS: Array<{
 /**
  * Detect IFlow state from .iflow/ directory artifacts
  */
-async function detectIFlowState(changeDir: string): Promise<{
-  state: IFlowState;
-  iteration: number;
-  artifacts: Record<string, boolean>;
-  reasons: string[];
-  rollbackDetected?: boolean;
-  previousState?: string;
-}> {
+async function detectIFlowState(changeDir: string): Promise<IFlowStateResult> {
   const iflowDir = `${changeDir}/.iflow`;
   const dirExists = await directoryExists(iflowDir);
 
-  let result: {
-    state: IFlowState;
-    iteration: number;
-    artifacts: Record<string, boolean>;
-    reasons: string[];
-    rollbackDetected?: boolean;
-    previousState?: string;
-  };
+  let result: IFlowStateResult;
   let skipWrite = false;
   let previousState: string | undefined;
 
@@ -105,14 +123,8 @@ async function detectIFlowState(changeDir: string): Promise<{
     }
 
     if (stateData?.state && IFLOW_STATES.includes(stateData.state as IFlowState)) {
-      const hasContext = await fileExists(`${iflowDir}/CONTEXT.md`);
-      const hasPlan = await fileExists(`${iflowDir}/PLAN.md`);
-      const hasSummary = await fileExists(`${iflowDir}/SUMMARY.md`);
-      const hasUat = await fileExists(`${iflowDir}/UAT.md`);
-      const hasExecuting = await fileExists(`${iflowDir}/EXECUTING`);
-      const artifacts = { CONTEXT: hasContext, PLAN: hasPlan, SUMMARY: hasSummary, UAT: hasUat, EXECUTING: hasExecuting };
-
-      const artifactState = determineArtifactState({ CONTEXT: hasContext, PLAN: hasPlan, SUMMARY: hasSummary, UAT: hasUat, EXECUTING: hasExecuting });
+      const artifacts = await readArtifacts(iflowDir);
+      const artifactState = determineArtifactState(artifacts);
       const currentPersisted = stateData.state as IFlowState;
       const stateOrder = ['discussing', 'researching', 'planning', 'executing', 'verifying', 'shipping'];
       const artifactIdx = stateOrder.indexOf(artifactState);
@@ -139,20 +151,7 @@ async function detectIFlowState(changeDir: string): Promise<{
         skipWrite = true;
       }
     } else {
-      const hasContext = await fileExists(`${iflowDir}/CONTEXT.md`);
-      const hasPlan = await fileExists(`${iflowDir}/PLAN.md`);
-      const hasSummary = await fileExists(`${iflowDir}/SUMMARY.md`);
-      const hasUat = await fileExists(`${iflowDir}/UAT.md`);
-      const hasExecuting = await fileExists(`${iflowDir}/EXECUTING`);
-
-      const artifacts = {
-        CONTEXT: hasContext,
-        PLAN: hasPlan,
-        SUMMARY: hasSummary,
-        UAT: hasUat,
-        EXECUTING: hasExecuting,
-      };
-
+      const artifacts = await readArtifacts(iflowDir);
       result = {
         state: determineArtifactState(artifacts),
         iteration: 1,
@@ -162,7 +161,22 @@ async function detectIFlowState(changeDir: string): Promise<{
     }
   }
 
-  // Persist detected state to .iflow/state.json with previous state tracking
+  // Persist state and manage marker files
+  await persistIFlowState(iflowDir, result, previousState, skipWrite);
+  result.artifacts = await manageExecutingMarker(iflowDir, result, previousState);
+
+  return result;
+}
+
+/**
+ * Persist detected state to .iflow/ artifacts (state.json + STATE.md)
+ */
+async function persistIFlowState(
+  iflowDir: string,
+  result: IFlowStateResult,
+  previousState: string | undefined,
+  skipWrite: boolean,
+): Promise<void> {
   if (!skipWrite) {
     await ensureDir(iflowDir);
     await writeJsonFile(`${iflowDir}/state.json`, {
@@ -200,30 +214,56 @@ async function detectIFlowState(changeDir: string): Promise<{
     ].filter(Boolean).join('\n');
     await writeFile(`${iflowDir}/STATE.md`, stateMdLines);
   }
+}
 
-  // Manage EXECUTING marker file lifecycle
+/**
+ * Manage EXECUTING marker file lifecycle.
+ * Creates marker when entering executing state, removes when leaving.
+ * Returns updated artifacts map.
+ */
+async function manageExecutingMarker(
+  iflowDir: string,
+  result: IFlowStateResult,
+  previousState: string | undefined,
+): Promise<Record<string, boolean>> {
+  const artifacts = { ...result.artifacts };
   const executingPath = `${iflowDir}/EXECUTING`;
-  if (result.state === 'executing' && !result.artifacts.EXECUTING) {
+
+  if (result.state === 'executing' && !artifacts.EXECUTING) {
     await ensureDir(iflowDir);
     await writeFile(executingPath, JSON.stringify({
       enteredAt: new Date().toISOString(),
       fromState: result.previousState || previousState || 'planning',
       iteration: result.iteration,
     }));
-    result.artifacts.EXECUTING = true;
-  } else if (result.state !== 'executing' && result.artifacts.EXECUTING) {
+    artifacts.EXECUTING = true;
+  } else if (result.state !== 'executing' && artifacts.EXECUTING) {
     await removeFile(executingPath);
-    result.artifacts.EXECUTING = false;
+    artifacts.EXECUTING = false;
   }
 
-  return result;
+  return artifacts;
+}
+
+/**
+ * Read IFlow artifacts from the .iflow/ directory
+ */
+async function readArtifacts(iflowDir: string): Promise<IFlowArtifacts> {
+  const [hasContext, hasPlan, hasSummary, hasUat, hasExecuting] = await Promise.all([
+    fileExists(`${iflowDir}/CONTEXT.md`),
+    fileExists(`${iflowDir}/PLAN.md`),
+    fileExists(`${iflowDir}/SUMMARY.md`),
+    fileExists(`${iflowDir}/UAT.md`),
+    fileExists(`${iflowDir}/EXECUTING`),
+  ]);
+  return { CONTEXT: hasContext, PLAN: hasPlan, SUMMARY: hasSummary, UAT: hasUat, EXECUTING: hasExecuting };
 }
 
 /**
  * Determine the IFlow state from which artifacts exist.
  * Ordered by "most advanced artifact wins" (highest state first).
  */
-function determineArtifactState(artifacts: { CONTEXT: boolean; PLAN: boolean; SUMMARY: boolean; UAT: boolean; EXECUTING: boolean }): IFlowState {
+function determineArtifactState(artifacts: IFlowArtifacts): IFlowState {
   if (artifacts.UAT) return 'shipping';
   if (artifacts.SUMMARY) return 'verifying';
   if (artifacts.EXECUTING) return 'executing';
@@ -235,7 +275,7 @@ function determineArtifactState(artifacts: { CONTEXT: boolean; PLAN: boolean; SU
 /**
  * Generate a human-readable reason message based on which artifacts exist.
  */
-function getArtifactReason(artifacts: { CONTEXT: boolean; PLAN: boolean; SUMMARY: boolean; UAT: boolean; EXECUTING: boolean }): string {
+function getArtifactReason(artifacts: IFlowArtifacts): string {
   if (artifacts.UAT) return 'UAT.md found — ready to ship';
   if (artifacts.SUMMARY) return 'SUMMARY.md found — ready to verify';
   if (artifacts.EXECUTING) return 'EXECUTING marker found — in execution phase';
@@ -282,6 +322,31 @@ export function createIFlowRouterTool(): ToolDefinition {
       const userIntent = p.intent || '';
 
       try {
+        // Phase 0: Horizontal command detection
+        // Bypasses IFlow state guards — these commands are available at any state.
+        if (userIntent) {
+          const hCmd = matchHorizontalCommand(userIntent);
+          if (hCmd) {
+            return {
+              title: 'IFlow Router',
+              output: JSON.stringify({
+                success: true,
+                data: {
+                  source: 'horizontal-command',
+                  state: null,
+                  skill: hCmd.agent,
+                  action: hCmd.action,
+                  description: hCmd.description,
+                  isHorizontalCommand: true,
+                  reasons: [`Horizontal command detected: "${userIntent}" → ${hCmd.agent} (${hCmd.description})`],
+                  stateGuardBlocked: false,
+                  nextAction: `Dispatch ${hCmd.agent} for ${hCmd.description}`,
+                },
+              }),
+            };
+          }
+        }
+
         // Phase 1: Intent-based routing
         if (userIntent) {
           const matched = matchIFlowIntent(userIntent);

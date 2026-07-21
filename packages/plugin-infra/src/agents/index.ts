@@ -28,6 +28,13 @@ export {
   createIFlowShipperAgent,
 } from '../../../../workflows/iflow/index.js';
 
+// Re-export Shared agents (cross-workflow, standalone)
+export {
+  createTestEngineerAgent,
+  createReviewEngineerAgent,
+  SHARED_AGENT_NAMES,
+} from '../../../../workflows/shared/index.js';
+
 export {
   loadSFlowConfig,
   loadUserSFlowConfig,
