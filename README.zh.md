@@ -149,6 +149,13 @@ npm install -g opencode-flow-engine
 | **iflow-researcher** | 子智能体 | 技术研究：发现等级、工具优先级链、置信度标记 |
 | **iflow-shipper** | 子智能体 | PR 创建、UAT.md 生成、分支生命周期管理 |
 
+### 跨工作流共享智能体（2 个）
+
+| 智能体 | 模式 | 说明 |
+|--------|------|------|
+| **test-engineer** | 子智能体 | **独立全面测试**：5 轮测试金字塔（功能、性能、安全、兼容、可观测性）。用户通过"全面test"/"全面测试"触发，独立于任何工作流状态。 |
+| **review-engineer** | 子智能体 | **独立全面审查**：3 轮审查（Spec 合规、代码质量、UI 视觉）。用户通过"全面review"/"全面审查"触发，独立于任何工作流状态。 |
+
 ### 路由原则
 
 - **NEVER** 自己实现代码 — 总是委托给子智能体
@@ -449,6 +456,6 @@ opencode-flow-engine/
 - [GSD](https://github.com/telestrial-org/get-shit-done) — iFlow 迭代方法论来源
 - [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) — 架构灵感 + 可选集成
 - [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) — 验证引擎移植来源
-- [flow-kit](https://github.com/rihebty/flow-kit) — UI 设计方法论参考（2a-ui-design、反 AI-slop、brownfield 对齐）
+- [flow-kit](https://github.com/rihebty/flow-kit) — 测试金字塔、审查框架、横向命令系统、UI 设计方法论参考（2a-ui-design、反 AI-slop、brownfield 对齐）
 - [grill-me](https://github.com/mattpocock/skills/tree/main/skills/productivity/grilling) — 需求澄清方法论
 - [getdesign.md](https://getdesign.md) — 71 品牌设计系统参考

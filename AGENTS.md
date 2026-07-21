@@ -36,6 +36,11 @@ GSD-style cyclic workflow for rapid iteration:
 - **Adversarial Verification**: Goal-backward verification with BLOCKER/WARNING classification
 - **Claim Provenance**: Every factual claim tagged with source and confidence level
 
+## Shared Cross-Workflow Agents
+
+- **test-engineer**: Independent comprehensive testing (5-tier test pyramid). Triggered by user commands, not bound to any workflow state.
+- **review-engineer**: Independent comprehensive review (3-round review: spec, code, UI). Triggered by user commands, not bound to any workflow state.
+
 ## Quick Start
 
 ### Installation
@@ -121,3 +126,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 - [OpenSpec](https://github.com/Fission-AI/OpenSpec) - Planning engine
 - [Superpowers](https://github.com/obra/superpowers) - Execution discipline
 - [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) - Architecture inspiration
+- [flow-kit](https://github.com/rihebty/flow-kit) — Test pyramid, review framework, lateral command system

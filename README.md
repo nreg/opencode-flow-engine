@@ -149,6 +149,13 @@ On context restoration, sFlow detects artifact/state mismatches and auto-repairs
 | **iflow-researcher** | Subagent | Technical research: discovery levels, tool priority chain, confidence markers |
 | **iflow-shipper** | Subagent | PR creation, UAT.md generation, branch lifecycle management |
 
+### Shared Cross-Workflow Agents (2)
+
+| Agent | Mode | Description |
+|-------|------|-------------|
+| **test-engineer** | Subagent | **Independent comprehensive testing**: 5-tier test pyramid (functional, performance, security, compatibility, observability). Triggered by user commands like "全面test" / "comprehensive test". Not bound to any workflow state. |
+| **review-engineer** | Subagent | **Independent comprehensive review**: 3-round review (spec compliance, code quality, UI visual). Triggered by user commands like "全面review" / "comprehensive review". Not bound to any workflow state. |
+
 ### Routing Principles
 
 - **NEVER** implement code yourself — always delegate to subagents
@@ -450,6 +457,6 @@ opencode-flow-engine/
 - [GSD](https://github.com/telestrial-org/get-shit-done) — iFlow iterative methodology source
 - [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) — Architecture inspiration + optional integration
 - [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) — Validation engine port source
-- [flow-kit](https://github.com/rihebty/flow-kit) — UI design methodology reference (2a-ui-design, anti-AI-slop, brownfield alignment)
+- [flow-kit](https://github.com/rihebty/flow-kit) — Test pyramid, review framework, lateral command system, UI design methodology reference (2a-ui-design, anti-AI-slop, brownfield alignment)
 - [grill-me](https://github.com/mattpocock/skills/tree/main/skills/productivity/grilling) — Requirements clarification methodology
 - [getdesign.md](https://getdesign.md) — 71 brand design system references
