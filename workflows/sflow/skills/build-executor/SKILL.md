@@ -32,14 +32,14 @@ Read before implementation:
 
 ### Workflow Mode Check
 
-Before anything else, check the current workflow mode from `.sflow/state.json`:
+Before anything else, check the current workflow mode from `.flow-engine/sflow/state.json`:
 
 - If `tweak`: skip contract/spec input requirements. Proceed directly to edit the target files.
 - If `hotfix` or `full`: follow the standard contract-first discipline.
 
 ### Config Check
 
-Before determining execution mode, check the project configuration in `.sflow/config.json` (if it exists):
+Before determining execution mode, check the project configuration in `.flow-engine/sflow/config.json` (if it exists):
 - If `execution.inlineThreshold` is specified, use it as the inline threshold; otherwise use default (3)
 
 ## Core Laws
@@ -123,10 +123,10 @@ During execution, if the workflow is `hotfix` or `tweak`, continuously monitor s
 
 **Upgrade procedure:**
 1. Output: `[SFLOW] Runtime preset upgrade: <hotfix|tweak> — <reason>`
-2. Update `.sflow/state.json`: set `mode` to `full`
+2. Update `.flow-engine/sflow/state.json`: set `mode` to `full`
 3. If in hotfix fast-path: route back to `contract-builder` to create proper execution contract
 4. If in tweak direct-edit mode: pause and ask user to confirm full workflow with proper planning artifacts
-5. Record the upgrade in `.sflow/progress.md`
+5. Record the upgrade in `.flow-engine/sflow/progress.md`
 
 ## Execution Mode Selection
 
@@ -320,12 +320,12 @@ After both reviews pass:
 2. If a mapping exists, also check off the corresponding spec task
 3. Commit this progress update
 4. Update the checkpoint: set stage to `done`, record checkoff timestamp
-5. Append a one-line summary to `.sflow/progress.md`: `Task N: complete (commits <base7>..<head7>, review clean)`
+5. Append a one-line summary to `.flow-engine/sflow/progress.md`: `Task N: complete (commits <base7>..<head7>, review clean)`
 
 #### Context Recovery
 
 On every context resume:
-1. Read `.sflow/subagent-progress.md`
+1. Read `.flow-engine/sflow/subagent-progress.md`
 2. Compare the checkpoint against the first unchecked task in the plan and the current worktree:
    - **Checkpoint matches unchecked task** → resume from the exact recorded stage, preserving the implementation commit, RED/GREEN evidence, review stages already passed, unresolved feedback, and current review-fix round. **Never reset the round or repeat an already passed stage.**
    - **Checkpoint missing or does not match** → create a new checkpoint for the first unchecked task, begin with implementer dispatch
@@ -340,11 +340,11 @@ On every context resume:
 
 ### Progress Ledger
 
-Track high-level progress in `.sflow/progress.md`. At skill start, check for an existing ledger — tasks marked complete there are done, do not re-dispatch them. After each clean review, append one line to the ledger.
+Track high-level progress in `.flow-engine/sflow/progress.md`. At skill start, check for an existing ledger — tasks marked complete there are done, do not re-dispatch them. After each clean review, append one line to the ledger.
 
 The ledger survives context compaction. If `git clean -fdx` destroys it, recover from `git log`.
 
-After each batch completes and the progress ledger is updated, sync `.sflow/state.json`:
+After each batch completes and the progress ledger is updated, sync `.flow-engine/sflow/state.json`:
 
 1. Increment `batches_completed` counter
 2. Update `last_transition` timestamp
@@ -388,7 +388,7 @@ For small changes (≤ 3 tasks, no cross-module dependencies). Executes in the c
    - Verify the task output against its spec requirements (SHALL/MUST statements)
    - If any check fails → STOP, report the gap, ask user how to proceed
 7. **Commit**: Follow the task's commit step
-8. **Progress ledger**: Append task completion to `.sflow/progress.md`
+8. **Progress ledger**: Append task completion to `.flow-engine/sflow/progress.md`
 
 ### Inline → SDD Escalation
 
@@ -439,18 +439,18 @@ Do not report completion until:
 
 ## LESSONS Knowledge Base Check (Cross-Task Failure Prevention)
 
-> Inspired by flow-kit LESSONS.md (R1.8). Every task must check `.sflow/lessons.md` before starting implementation.
+> Inspired by flow-kit LESSONS.md (R1.8). Every task must check `.flow-engine/sflow/lessons.md` before starting implementation.
 
 ### Before Each Task
 
 Before dispatching or starting any task implementation:
 
-1. **Check if `.sflow/lessons.md` exists**. If not, create an empty skeleton.
+1. **Check if `.flow-engine/sflow/lessons.md` exists**. If not, create an empty skeleton.
 2. **Extract keywords** from the task:
    - File paths mentioned in `write_files` / `read_files`
    - Key nouns from `action` description
    - Programming languages / libraries involved
-3. **Grep `.sflow/lessons.md`** with these keywords
+3. **Grep `.flow-engine/sflow/lessons.md`** with these keywords
 4. **For each hit entry (L-NNN)**:
    - If the entry is `status: active` and matches your planned approach → **STOP**
    - Write to task plan: `"已查阅 L-NNN，本次方案与之的差异是 X"` or `"已查阅 L-NNN，本次确认仍适用，因此不重试该方案"`
@@ -461,8 +461,8 @@ Before dispatching or starting any task implementation:
 After bug-investigator completes diagnosis and before transitioning back to executing:
 
 1. If the root cause is non-trivial (>30 min debug time, or likely to recur)
-2. Use `.sflow-templates/LESSONS.md` as template
-3. Call the `addLesson` method on state-manager to append to `.sflow/lessons.md`
+2. Use `.flow-engine/sflow-templates/LESSONS.md` as template
+3. Call the `addLesson` method on state-manager to append to `.flow-engine/sflow/lessons.md`
 4. Include: tags, title, problem scenario, what was attempted, why it failed, recommended approach, keywords for future grep
 
 ---
@@ -483,7 +483,7 @@ Write a PROGRESS.md snapshot when ANY of these signals trigger:
 
 ### What to Include
 
-Write to `.sflow/progress.md` using the template at `.sflow-templates/PROGRESS.md`:
+Write to `.flow-engine/sflow/progress.md` using the template at `.flow-engine/sflow-templates/PROGRESS.md`:
 
 1. **Completed sub-steps**: what's already done
 2. **Current state**: exactly what's being worked on
@@ -495,7 +495,7 @@ Write to `.sflow/progress.md` using the template at `.sflow-templates/PROGRESS.m
 
 When resuming from a context break:
 
-1. **Read `.sflow/progress.md`** — do NOT trust conversation history
+1. **Read `.flow-engine/sflow/progress.md`** — do NOT trust conversation history
 2. **Read the EXCLUDED APPROACHES section** — this is the anti-repeat key
 3. **Check your planned next step** against the excluded list:
    - If your step matches an excluded approach → **STOP**
@@ -506,7 +506,7 @@ When resuming from a context break:
 ### On Task Completion
 
 After a task passes all reviews:
-1. Delete `.sflow/progress.md`
+1. Delete `.flow-engine/sflow/progress.md`
 2. Move task summary to `SUMMARY.md`
 
 ---
@@ -528,12 +528,12 @@ If **any** of these occur during a single task execution:
 When resuming from context compaction:
 
 1. **Do NOT continue the task as-is**
-2. **Read `.sflow/progress.md`** to understand where you stopped
+2. **Read `.flow-engine/sflow/progress.md`** to understand where you stopped
 3. **Split the current task in `tasks.md`** into ≥ 2 sub-tasks:
    - Use the original task ID with suffix: `<task-id>-1`, `<task-id>-2`, etc.
    - Each sub-task must be completable within a single context window
    - Preserve the original task's `read_files` and `write_files` boundaries
-4. **Update `.sflow/subagent-progress.md`** to reference the new sub-task
+4. **Update `.flow-engine/sflow/subagent-progress.md`** to reference the new sub-task
 5. **Resume from the first incomplete sub-task**
 
 ### Example Split
@@ -574,7 +574,7 @@ Each task in the execution contract MUST include two boundary fields:
 
 File boundaries are checked at the **task level**, not globally. The guard hook:
 
-1. Reads `.sflow/subagent-progress.md` to determine the **active task ID** (e.g., T03)
+1. Reads `.flow-engine/sflow/subagent-progress.md` to determine the **active task ID** (e.g., T03)
 2. Extracts that task's `write_files` from the execution contract
 3. Validates every file write against ONLY that task's boundary
 

@@ -115,7 +115,7 @@ const HSL_COLOR_REGEX = /hsl\s*\(/gi;
 **验证流程**：
 
 ```
-1. 读取 .sflow/ui-design.md 文件
+1. 读取 .flow-engine/sflow/ui-design.md 文件
 2. 解析 YAML frontmatter（colors 字段）
 3. 解析正文各章节
 4. 执行 6 类检查

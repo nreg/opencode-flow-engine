@@ -76,7 +76,7 @@ Before handing off to `spec-writer`, confirm with the user:
 
 ### 6. DP-1: Requirement Confirmation Gate
 
-After the user confirms the exploration summary, record the decision point in `.sflow/state.json`:
+After the user confirms the exploration summary, record the decision point in `.flow-engine/sflow/state.json`:
 
 ```json
 {

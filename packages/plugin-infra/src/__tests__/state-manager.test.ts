@@ -25,8 +25,8 @@ describe('State Manager — upgradeMode', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({ state: 'executing', mode: 'hotfix' }));
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({ state: 'executing', mode: 'hotfix' }));
     sm = createStateManager({ enabled: true });
   });
 
@@ -44,7 +44,7 @@ describe('State Manager — upgradeMode', () => {
   });
 
   it('should upgrade tweak to full', async () => {
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({ state: 'executing', mode: 'tweak' }));
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({ state: 'executing', mode: 'tweak' }));
     const result = await sm.upgradeMode(dir, 'full', 'Tweak requires cross-module coordination');
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
@@ -68,8 +68,8 @@ describe('State Manager — buildPause control', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({ state: 'executing', mode: 'full' }));
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({ state: 'executing', mode: 'full' }));
     sm = createStateManager({ enabled: true });
   });
 
@@ -174,9 +174,9 @@ describe('detectStateMismatch — contract_hash edge cases', () => {
     const contractContent = '# Contract\n\n## Intent Lock\nOriginal intent.';
     await writeFile(dir + '/execution-contract.md', contractContent);
     const hash = await simpleHash(contractContent);
-    await ensureDir(dir + '/.sflow');
+    await ensureDir(dir + '/.flow-engine/sflow');
     // Store a DIFFERENT hash
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'approved-for-build', mode: 'full', contract_hash: 'DIFFERENT_HASH_123',
     }));
     const result = await detectStateMismatch(dir, 'approved-for-build');
@@ -187,8 +187,8 @@ describe('detectStateMismatch — contract_hash edge cases', () => {
     const contractContent = '# Contract\n\n## Intent Lock\nStable intent.';
     await writeFile(dir + '/execution-contract.md', contractContent);
     const hash = await simpleHash(contractContent);
-    await ensureDir(dir + '/.sflow');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'approved-for-build', mode: 'full', contract_hash: hash,
     }));
     const result = await detectStateMismatch(dir, 'approved-for-build');

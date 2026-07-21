@@ -121,7 +121,7 @@ export function createSFlowTools(client: SFlowClient): Record<string, ToolDefini
     ...callFlowAgentTools,
 
     record_execution_plan: {
-      description: 'Record or revise an execution plan for the current change. Validates contract existence, checks workflow state, and writes .sflow/execution-plan.json.',
+      description: 'Record or revise an execution plan for the current change. Validates contract existence, checks workflow state, and writes .flow-engine/sflow/execution-plan.json.',
       args: {
         mode: z.enum(['inline', 'batch-inline', 'sdd']).describe('Execution mode: inline (1-2 tasks), batch-inline (3-5 tasks), or sdd (complex with dependencies)'),
         waves: z.array(z.object({
@@ -190,7 +190,7 @@ export function createSFlowTools(client: SFlowClient): Record<string, ToolDefini
     },
 
     show_execution_plan: {
-      description: 'Read and display the current execution plan from .sflow/execution-plan.json. Shows mode, waves, dependencies, review status, and plan hash.',
+      description: 'Read and display the current execution plan from .flow-engine/sflow/execution-plan.json. Shows mode, waves, dependencies, review status, and plan hash.',
       args: {},
       execute: async (_args: Record<string, never>, context) => {
         const changeDir = context.directory || '';
@@ -204,7 +204,7 @@ export function createSFlowTools(client: SFlowClient): Record<string, ToolDefini
           const waveStatuses: Array<{ id: string; tasks: number; strategy: string; depends_on: string[]; review: string }> = [];
           for (const wave of plan.waves) {
             let reviewStatus = 'no receipt';
-            const receiptPath = `${changeDir}/.sflow/reviews/${wave.id}.json`;
+            const receiptPath = `${changeDir}/.flow-engine/sflow/reviews/${wave.id}.json`;
             try {
               const receipt = await (await import('@opencode-flow-engine/shared')).readJsonFile<{ status?: string }>(receiptPath);
               if (receipt) {
@@ -250,7 +250,7 @@ export function createSFlowTools(client: SFlowClient): Record<string, ToolDefini
     },
 
     record_review_receipt: {
-      description: 'Record a review receipt for a wave. Validates wave existence in the execution plan and writes .sflow/reviews/<wave-id>.json.',
+      description: 'Record a review receipt for a wave. Validates wave existence in the execution plan and writes .flow-engine/sflow/reviews/<wave-id>.json.',
       args: {
         waveId: z.string().describe('The wave ID to record the receipt for (e.g. "W1")'),
         status: z.enum(['pass', 'fail']).describe('Review result: pass or fail'),

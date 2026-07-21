@@ -28,18 +28,18 @@ async function cleanupDir(dir: string): Promise<void> {
 }
 
 async function writeStateFile(dir: string, data: Record<string, unknown>): Promise<void> {
-  await ensureDir(dir + '/.sflow');
-  await writeFile(dir + '/.sflow/state.json', JSON.stringify(data, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow');
+  await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify(data, null, 2));
 }
 
 async function writeExecutionPlan(dir: string, plan: ExecutionPlan): Promise<void> {
-  await ensureDir(dir + '/.sflow');
-  await writeFile(dir + '/.sflow/execution-plan.json', JSON.stringify(plan, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow');
+  await writeFile(dir + '/.flow-engine/sflow/execution-plan.json', JSON.stringify(plan, null, 2));
 }
 
 async function writeReceipt(dir: string, waveId: string, receipt: ReviewReceipt): Promise<void> {
-  await ensureDir(dir + '/.sflow/reviews');
-  await writeFile(dir + '/.sflow/reviews/' + waveId + '.json', JSON.stringify(receipt, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow/reviews');
+  await writeFile(dir + '/.flow-engine/sflow/reviews/' + waveId + '.json', JSON.stringify(receipt, null, 2));
 }
 
 const samplePlan: ExecutionPlan = {
@@ -107,13 +107,13 @@ describe('checkReceiptIntegrity', () => {
     await writeExecutionPlan(dir, samplePlan);
 
     // Write a real receipt file elsewhere
-    await ensureDir(dir + '/.sflow/reviews');
+    await ensureDir(dir + '/.flow-engine/sflow/reviews');
     await ensureDir(dir + '/tmp');
     await writeFile(dir + '/tmp/real-receipt.json', JSON.stringify(validReceipt, null, 2));
 
     // Create a symlink pointing to the real receipt
     try {
-      await symlink(dir + '/tmp/real-receipt.json', dir + '/.sflow/reviews/W1.json');
+      await symlink(dir + '/tmp/real-receipt.json', dir + '/.flow-engine/sflow/reviews/W1.json');
     } catch {
       // Symlink creation may fail on Windows without admin privileges
       // Skip this test gracefully

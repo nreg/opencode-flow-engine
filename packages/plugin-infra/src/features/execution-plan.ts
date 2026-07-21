@@ -4,7 +4,7 @@
  * Provides functions for creating, reading, validating, revising,
  * and recommending execution plans for the SFlow workflow.
  *
- * Stored in .sflow/execution-plan.json
+ * Stored in .flow-engine/sflow/execution-plan.json
  */
 import type { ExecutionPlan, ExecutionMode, PlanSource, Wave, DP4Result, ReviewReceipt } from './execution-plan-types.js';
 import { ensureDir, readJsonFile, writeJsonFile, stateFileMutex } from '@opencode-flow-engine/shared';
@@ -12,8 +12,8 @@ import { EXECUTION_MODE_THRESHOLDS } from '@opencode-flow-engine/core';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const EXECUTION_PLAN_FILE = '.sflow/execution-plan.json';
-const STATE_FILE = '.sflow/state.json';
+const EXECUTION_PLAN_FILE = '.flow-engine/sflow/execution-plan.json';
+const STATE_FILE = '.flow-engine/sflow/state.json';
 
 /** Valid execution modes for validation */
 const VALID_MODES: ExecutionMode[] = ['inline', 'batch-inline', 'sdd'];
@@ -159,7 +159,7 @@ export interface CreateExecutionPlanParams {
 }
 
 /**
- * Create an execution plan and write it to .sflow/execution-plan.json.
+ * Create an execution plan and write it to .flow-engine/sflow/execution-plan.json.
  *
  * Steps:
  * 1. Validate plan structure (mode, duplicate tasks, circular deps)
@@ -203,7 +203,7 @@ export async function createExecutionPlan(
 
   // 5. Write the plan to disk
   const planPath = changeDir + '/' + EXECUTION_PLAN_FILE;
-  await ensureDir(changeDir + '/.sflow');
+  await ensureDir(changeDir + '/.flow-engine/sflow');
   await writeJsonFile(planPath, plan);
 
   // 6. Update state.json with execution_plan_hash
@@ -222,7 +222,7 @@ export async function createExecutionPlan(
 // ─── Task 2.2: readExecutionPlan ──────────────────────────────────────────────
 
 /**
- * Read and parse the execution plan from .sflow/execution-plan.json.
+ * Read and parse the execution plan from .flow-engine/sflow/execution-plan.json.
  * Returns null if the file does not exist.
  */
 export async function readExecutionPlan(changeDir: string): Promise<ExecutionPlan | null> {
@@ -430,13 +430,13 @@ export function recommendExecutionMode(tasksMdContent: string): DP4Result {
 
 // ─── Task 9.1: recordReviewReceipt ────────────────────────────────────────────
 
-const REVIEWS_DIR = '.sflow/reviews';
+const REVIEWS_DIR = '.flow-engine/sflow/reviews';
 
 /**
  * Record a review receipt for a wave.
  *
  * Validates that the waveId exists in the current execution plan,
- * then writes the receipt to .sflow/reviews/<wave-id>.json.
+ * then writes the receipt to .flow-engine/sflow/reviews/<wave-id>.json.
  * Overwrites any existing receipt for the same wave (re-review).
  *
  * @param changeDir - The project/change directory

@@ -49,7 +49,7 @@ references/design-matrix.md    — 5 维决策矩阵详细参数（用于 Step 4
 
 ### 预检复用
 
-进入 Step 3 前，先检查 `.sflow/CONTEXT.md` 是否存在 `## ui-visual-vocabulary` 段：
+进入 Step 3 前，先检查 `.flow-engine/sflow/CONTEXT.md` 是否存在 `## ui-visual-vocabulary` 段：
 - 如果存在且 `excavated_at` 在 90 天内 → **直接加载**，跳过 grep 挖掘，将缓存结果呈现给用户确认
 - 如果不存在或已过期 → 执行完整的 7 维挖掘
 
@@ -71,7 +71,7 @@ references/design-matrix.md    — 5 维决策矩阵详细参数（用于 Step 4
 
 ### 持久化到 CONTEXT.md（跨 change 复用）
 
-用户确认后，将挖掘结果写入 `.sflow/CONTEXT.md` 的 `## ui-visual-vocabulary` 段：
+用户确认后，将挖掘结果写入 `.flow-engine/sflow/CONTEXT.md` 的 `## ui-visual-vocabulary` 段：
 
 ```markdown
 ## ui-visual-vocabulary
@@ -147,7 +147,7 @@ references/design-matrix.md    — 5 维决策矩阵详细参数（用于 Step 4
 
 ## 6. 写 ui-design.md（Step 6）
 
-输出到 `.sflow/ui-design.md`，使用模板 `workflows/sflow/templates/UI-DESIGN.md`。
+输出到 `.flow-engine/sflow/ui-design.md`，使用模板 `workflows/sflow/templates/UI-DESIGN.md`。
 写完后调用 `validate_ui_design` 工具验证 V1-V7。
 
 ## 7. 反 AI-slop 自检（Step 7）

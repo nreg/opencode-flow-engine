@@ -6,7 +6,7 @@
  * Covers:
  *   - checkClosingGate: all receipts pass, fail receipt, missing receipt, skip without plan
  *   - Extended checkTaskCompletion: wave completion alongside task checkbox check
- *   - BUG-B: readStateFile throws on missing state.json with .sflow/ dir
+ *   - BUG-B: readStateFile throws on missing state.json with .flow-engine/sflow/ dir
  *   - checkSpecsMerged: blocks when spec_merged=false, allows when true, skips when no delta-specs
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
@@ -32,18 +32,18 @@ async function cleanupDir(dir: string): Promise<void> {
 }
 
 async function writeStateFile(dir: string, data: Record<string, unknown>): Promise<void> {
-  await ensureDir(dir + '/.sflow');
-  await writeFile(dir + '/.sflow/state.json', JSON.stringify(data, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow');
+  await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify(data, null, 2));
 }
 
 async function writeExecutionPlan(dir: string, plan: ExecutionPlan): Promise<void> {
-  await ensureDir(dir + '/.sflow');
-  await writeFile(dir + '/.sflow/execution-plan.json', JSON.stringify(plan, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow');
+  await writeFile(dir + '/.flow-engine/sflow/execution-plan.json', JSON.stringify(plan, null, 2));
 }
 
 async function writeReceipt(dir: string, waveId: string, receipt: ReviewReceipt): Promise<void> {
-  await ensureDir(dir + '/.sflow/reviews');
-  await writeFile(dir + '/.sflow/reviews/' + waveId + '.json', JSON.stringify(receipt, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow/reviews');
+  await writeFile(dir + '/.flow-engine/sflow/reviews/' + waveId + '.json', JSON.stringify(receipt, null, 2));
 }
 
 async function writeTasksMd(dir: string, content: string): Promise<void> {
@@ -216,9 +216,9 @@ describe('BUG-B: readStateFile ghost state', () => {
     await cleanupDir(dir);
   });
 
-  it('should throw when state.json is missing but .sflow/ directory exists', async () => {
-    // .sflow/ directory exists (indicating active workflow)
-    await ensureDir(dir + '/.sflow');
+  it('should throw when state.json is missing but .flow-engine/sflow/ directory exists', async () => {
+    // .flow-engine/sflow/ directory exists (indicating active workflow)
+    await ensureDir(dir + '/.flow-engine/sflow');
     // No state.json file
 
     const result = await wm.getState(dir);
@@ -227,8 +227,8 @@ describe('BUG-B: readStateFile ghost state', () => {
     expect(result.error || '').toMatch(/state\.json|missing|not found/i);
   });
 
-  it('should return default state when .sflow/ directory does not exist', async () => {
-    // No .sflow/ directory at all — backward compatible
+  it('should return default state when .flow-engine/sflow/ directory does not exist', async () => {
+    // No .flow-engine/sflow/ directory at all — backward compatible
 
     const result = await wm.getState(dir);
     // Should succeed with default state (backward compatible)

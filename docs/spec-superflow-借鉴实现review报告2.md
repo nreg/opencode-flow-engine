@@ -33,7 +33,7 @@ opencode-flow-engine 对 spec-superflow 提交点 `6951031e-362b238a` 的借鉴 
 | 陈旧检查点检测（contractHash 不匹配） | ✅ 完整 | `state-manager.ts` — `detectStaleCheckpoints` |
 | 检查点清理 | ✅ 完整 | `state-manager.ts` — `clearCheckpoint` |
 | 移交合约（Handoff） | ✅ **领先** | `state-manager.ts` — `HandoffFile` 含完整的 status 生命周期（created→finished→resolved）+ decision（accept/reject/defer）+ type 校验 |
-| SDD Overlay 目录 | ⚠️ 轻微差异 | sFlow 用 `.sflow/checkpoints/` + `.sflow/reviews/` + `.sflow/handoffs/`，spec-superflow 用专用 overlay 目录 |
+| SDD Overlay 目录 | ⚠️ 轻微差异 | sFlow 用 `.flow-engine/sflow/checkpoints/` + `.flow-engine/sflow/reviews/` + `.flow-engine/sflow/handoffs/`，spec-superflow 用专用 overlay 目录 |
 | 标记 stale 而非物理删除 | ✅ 完整 | `CheckpointFile` 新增 `status?: 'active' | 'stale'` 字段（默认 `'active'`，向后兼容）+ `clearCheckpoint()` 不再物理删除文件，改为写入 `status: 'stale'` + `readCheckpoint()` 新增可选参数 `includeStale`（默认 false），自动过滤 stale 记录 + 对不存在的 checkpoint 调用 `clearCheckpoint` 会创建一条 audit stub（不是静默无操作） |
 
 **领先说明**：sFlow 的 Handoff 系统有完整的 status 生命周期（created → finished → resolved）+ decision 机制（accept/reject/defer）+ 类型白名单校验（`HANDOFF_TYPES`），spec-superflow 没有同等级的能力。
@@ -64,7 +64,7 @@ opencode-flow-engine 对 spec-superflow 提交点 `6951031e-362b238a` 的借鉴 
 | 符号链接检测 | ✅ | `fs.realpathSync` 解析对比 |
 | 真实 Git commit 验证 | ✅ | `git rev-parse --verify` 验证 base/head |
 | 非 git repo 优雅跳过 | ✅ | `try/catch` 处理 |
-| 收据存储到物理目录 | ✅ | `.sflow/reviews/<wave-id>.json` |
+| 收据存储到物理目录 | ✅ | `.flow-engine/sflow/reviews/<wave-id>.json` |
 
 > **结论：P3 完全实现。spec-superflow 的 5 项校验全部迁移完成。**
 
@@ -105,7 +105,7 @@ code-reviewer agent 已经包含完整的 "Minimality Discipline (MANDATORY GATE
 | Bug | sFlow 修复 | 代码位置 |
 |-----|------------|----------|
 | BUG-A: executing→closing 不可达 | ✅ closing gate 检查 review 收据 + task 完成 | `guard.ts` — `checkClosingGate`, `checkTaskCompletion`, P22 in `transitionState` |
-| BUG-B: 幽灵状态 | ✅ `.sflow/`存在但 state.json 不存在时抛错 | `workflow-manager.ts:269-274` — GS-1 fix |
+| BUG-B: 幽灵状态 | ✅ `.flow-engine/sflow/`存在但 state.json 不存在时抛错 | `workflow-manager.ts:269-274` — GS-1 fix |
 | #28: closing 前需合并 specs | ✅ spec_merged flag + delta-specs 目录检查 | `guard.ts` — `checkSpecsMerged` |
 | #15: git 隔离仅为建议 | ✅ 强制阻断 main/master 分支 | `guard.ts` — `checkGitBranchIsolation` |
 | #26/#27.2: PATH 依赖 | ✅ skill 中无硬编码 PATH 依赖 | — |
@@ -161,7 +161,7 @@ code-reviewer agent 已经包含完整的 "Minimality Discipline (MANDATORY GATE
 |------|------|------|
 | `clearCheckpoint` 物理删除 vs 标记 stale | 应该改为标记 stale 状态 | 低 |
 | cli 模式 | spec-superflow 有 CLI 命令，sFlow 无 | 架构差异，非差距 |
-| Receipt 证据锚定到 overlay 目录 | sFlow 使用 `.sflow/reviews/` 而不是 overlay | 轻微 |
+| Receipt 证据锚定到 overlay 目录 | sFlow 使用 `.flow-engine/sflow/reviews/` 而不是 overlay | 轻微 |
 | Guard 覆盖率审计 | sFlow guard 覆盖全面但未做精确的覆盖率统计 | 低 |
 
 ---

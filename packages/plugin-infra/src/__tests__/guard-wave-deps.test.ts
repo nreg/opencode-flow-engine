@@ -29,8 +29,8 @@ async function cleanupDir(dir: string): Promise<void> {
 }
 
 async function writeStateFile(dir: string, data: Record<string, unknown>): Promise<void> {
-  await ensureDir(dir + '/.sflow');
-  await writeFile(dir + '/.sflow/state.json', JSON.stringify(data, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow');
+  await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify(data, null, 2));
 }
 
 async function writeFileContent(filePath: string, content: string): Promise<void> {
@@ -43,8 +43,8 @@ async function writeFileContent(filePath: string, content: string): Promise<void
 
 /** Write execution-plan.json directly to disk (for guard testing without going through createExecutionPlan) */
 async function writeExecutionPlan(dir: string, plan: ExecutionPlan): Promise<void> {
-  await ensureDir(dir + '/.sflow');
-  await writeFile(dir + '/.sflow/execution-plan.json', JSON.stringify(plan, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow');
+  await writeFile(dir + '/.flow-engine/sflow/execution-plan.json', JSON.stringify(plan, null, 2));
 }
 
 const validReceipt: ReviewReceipt = {
@@ -57,9 +57,9 @@ const validReceipt: ReviewReceipt = {
 
 /** Write receipts for all waves in the plan (so checkReceiptIntegrity passes) */
 async function writeReceiptsForPlan(dir: string, plan: ExecutionPlan): Promise<void> {
-  await ensureDir(dir + '/.sflow/reviews');
+  await ensureDir(dir + '/.flow-engine/sflow/reviews');
   for (const wave of plan.waves) {
-    await writeFile(dir + '/.sflow/reviews/' + wave.id + '.json', JSON.stringify(validReceipt, null, 2));
+    await writeFile(dir + '/.flow-engine/sflow/reviews/' + wave.id + '.json', JSON.stringify(validReceipt, null, 2));
   }
 }
 
@@ -177,7 +177,7 @@ describe('checkWaveDependencies', () => {
   });
 
   it('should skip for non-sflow workflow', async () => {
-    // No .sflow/ directory — no sflow workflow detected
+    // No .flow-engine/sflow/ directory — no sflow workflow detected
     await ensureDir(dir + '/.iflow');
 
     const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });

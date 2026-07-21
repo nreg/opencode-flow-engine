@@ -5,7 +5,7 @@ import { checkArtifactPreflight, findPreflightState } from '../features/artifact
 import { writeStateFile } from '../features/state-manager.js';
 import { recommendExecutionMode } from '../features/execution-plan.js';
 
-const STATE_FILE_PATH = '.sflow/state.json';
+const STATE_FILE_PATH = '.flow-engine/sflow/state.json';
 
 /**
  * Create the state transition hook

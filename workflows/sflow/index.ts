@@ -31,4 +31,4 @@ export const SFLOW_AGENT_NAMES = [
 ] as const;
 
 /** SFlow workflow directory name */
-export const SFLOW_DIR = '.sflow';
+export const SFLOW_DIR = '.flow-engine/sflow';

@@ -57,7 +57,7 @@ async function cleanupDir(dir: string): Promise<void> {
 
 /** Create a minimal state.json for testing */
 async function setupStateJson(dir: string, overrides?: Record<string, unknown>): Promise<void> {
-  await ensureDir(dir + '/.sflow');
+  await ensureDir(dir + '/.flow-engine/sflow');
   const state = {
     state: 'approved-for-build',
     mode: 'full',
@@ -70,7 +70,7 @@ async function setupStateJson(dir: string, overrides?: Record<string, unknown>):
     createdAt: new Date().toISOString(),
     ...overrides,
   };
-  await writeFile(dir + '/.sflow/state.json', JSON.stringify(state, null, 2));
+  await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify(state, null, 2));
 }
 
 const sampleWaves: Wave[] = [
@@ -164,7 +164,7 @@ describe('Task 10.2: detectArtifactExistence reports execution-plan.json', () =>
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
+    await ensureDir(dir + '/.flow-engine/sflow');
   });
 
   afterEach(async () => {
@@ -189,7 +189,7 @@ describe('Task 10.2: detectArtifactExistence reports execution-plan.json', () =>
       contract_hash: 'c',
       revision: 1,
     };
-    await writeFile(dir + '/.sflow/execution-plan.json', JSON.stringify(plan, null, 2));
+    await writeFile(dir + '/.flow-engine/sflow/execution-plan.json', JSON.stringify(plan, null, 2));
 
     const result = await detectArtifactExistence(dir);
     expect(result).toHaveProperty('executionPlan');
@@ -203,7 +203,7 @@ describe('Task 10.2: detectArtifactExistence reports execution-plan.json', () =>
     try {
       await cleanupDir(dir2);
       await ensureDir(dir2);
-      await ensureDir(dir2 + '/.sflow');
+      await ensureDir(dir2 + '/.flow-engine/sflow');
 
       const result = await detectArtifactExistence(dir2);
       // The result should have the executionPlan field
@@ -219,7 +219,7 @@ describe('Task 10.2: detectArtifactExistence reports execution-plan.json', () =>
     await writeFile(dir + '/design.md', '# Design');
     await writeFile(dir + '/tasks.md', '- [ ] Task 1');
     await writeFile(dir + '/execution-contract.md', '# Contract');
-    await writeFile(dir + '/.sflow/execution-plan.json', JSON.stringify({ mode: 'inline' }));
+    await writeFile(dir + '/.flow-engine/sflow/execution-plan.json', JSON.stringify({ mode: 'inline' }));
 
     const result = await detectArtifactExistence(dir);
     expect(result.proposal).toBe(true);
@@ -238,7 +238,7 @@ describe('Task 10.3: detectStateMismatch flags mismatch when plan exists but con
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
+    await ensureDir(dir + '/.flow-engine/sflow');
   });
 
   afterEach(async () => {
@@ -252,7 +252,7 @@ describe('Task 10.3: detectStateMismatch flags mismatch when plan exists but con
     const contractHash = await simpleHash(contractContent);
 
     // Create state.json in executing state
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
       contract_hash: contractHash,
@@ -260,7 +260,7 @@ describe('Task 10.3: detectStateMismatch flags mismatch when plan exists but con
     }));
 
     // Create execution-plan.json with a DIFFERENT contract_hash
-    await writeFile(dir + '/.sflow/execution-plan.json', JSON.stringify({
+    await writeFile(dir + '/.flow-engine/sflow/execution-plan.json', JSON.stringify({
       mode: 'sdd',
       source: 'default',
       rationale: 'Test',
@@ -281,7 +281,7 @@ describe('Task 10.3: detectStateMismatch flags mismatch when plan exists but con
     await writeFile(dir + '/execution-contract.md', contractContent);
     const contractHash = await simpleHash(contractContent);
 
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
       contract_hash: contractHash,
@@ -289,7 +289,7 @@ describe('Task 10.3: detectStateMismatch flags mismatch when plan exists but con
     }));
 
     // Create execution-plan.json with MATCHING contract_hash
-    await writeFile(dir + '/.sflow/execution-plan.json', JSON.stringify({
+    await writeFile(dir + '/.flow-engine/sflow/execution-plan.json', JSON.stringify({
       mode: 'sdd',
       source: 'default',
       rationale: 'Test',
@@ -310,14 +310,14 @@ describe('Task 10.3: detectStateMismatch flags mismatch when plan exists but con
     await writeFile(dir + '/execution-contract.md', contractContent);
     const contractHash = await simpleHash(contractContent);
 
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'debugging',
       mode: 'full',
       contract_hash: contractHash,
       contractApproved: true,
     }));
 
-    await writeFile(dir + '/.sflow/execution-plan.json', JSON.stringify({
+    await writeFile(dir + '/.flow-engine/sflow/execution-plan.json', JSON.stringify({
       mode: 'inline',
       source: 'default',
       rationale: 'Debug plan',
@@ -337,7 +337,7 @@ describe('Task 10.3: detectStateMismatch flags mismatch when plan exists but con
     await writeFile(dir + '/execution-contract.md', contractContent);
     const contractHash = await simpleHash(contractContent);
 
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
       contract_hash: contractHash,
@@ -354,14 +354,14 @@ describe('Task 10.3: detectStateMismatch flags mismatch when plan exists but con
     await writeFile(dir + '/execution-contract.md', contractContent);
     const contractHash = await simpleHash(contractContent);
 
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'bridging',
       mode: 'full',
       contract_hash: contractHash,
       contractApproved: false,
     }));
 
-    await writeFile(dir + '/.sflow/execution-plan.json', JSON.stringify({
+    await writeFile(dir + '/.flow-engine/sflow/execution-plan.json', JSON.stringify({
       mode: 'sdd',
       source: 'default',
       rationale: 'Test',

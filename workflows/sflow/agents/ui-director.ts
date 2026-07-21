@@ -59,7 +59,7 @@ Ask: Purpose / Tone / Constraints / Differentiation. Record as aesthetic brief.
 
 ### Step 3 — Brownfield Visual Alignment (existing projects only)
 
-**Pre-check**: If \`.sflow/CONTEXT.md\` exists and contains a \`ui-visual-vocabulary\` section:
+**Pre-check**: If \`.flow-engine/sflow/CONTEXT.md\` exists and contains a \`ui-visual-vocabulary\` section:
 - If \`excavated_at\` is within 90 days → load it, skip re-mining, present cached vocabulary to user for confirmation
 - If \`excavated_at\` is over 90 days → **remind user** the cache is stale, ask if they want to re-mine or use cached
 
@@ -77,7 +77,7 @@ Excavate 7 dimensions with grep/glob (only if no cached vocabulary exists):
 
 Output a Brownfield Visual Summary. **Must get user confirmation before Step 4.**
 
-**After user confirms**: Persist the brownfield summary into \`.sflow/CONTEXT.md\` under a \`## ui-visual-vocabulary\` section, so future changes can reuse it without re-mining. Format:
+**After user confirms**: Persist the brownfield summary into \`.flow-engine/sflow/CONTEXT.md\` under a \`## ui-visual-vocabulary\` section, so future changes can reuse it without re-mining. Format:
 \`\`\`
 ## ui-visual-vocabulary
 - excavated_at: <date>
@@ -109,7 +109,7 @@ Generate token overview showing how decisions apply to key pages. **Single messa
 
 ### Step 6 — Write ui-design.md
 
-Output to \`.sflow/ui-design.md\` using template at \`workflows/sflow/templates/UI-DESIGN.md\`.
+Output to \`.flow-engine/sflow/ui-design.md\` using template at \`workflows/sflow/templates/UI-DESIGN.md\`.
 
 **Mandatory**: Fill the \`### Component Visual Rules\` section (under \`## 3. Component Architecture\`) with concrete token references from Step 4 decisions. Must define visual rules for all 5 required component types: Button (all variants), Input/Form Field, Card, Navigation, Typography Hierarchy. Use the design tokens from §2 and interaction patterns from §4 as building blocks.
 

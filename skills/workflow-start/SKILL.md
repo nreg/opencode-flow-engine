@@ -72,7 +72,7 @@ On every context resume, do **NOT** trust conversation history. Always re-run fu
 
 ### State ↔ Artifact Consistency Check
 
-After reading `.sflow/state.json` and inspecting artifacts, check for mismatches:
+After reading `.flow-engine/sflow/state.json` and inspecting artifacts, check for mismatches:
 
 | State says | But artifacts show | Auto-repair action |
 |------------|-------------------|-------------------|
@@ -91,7 +91,7 @@ When a mismatch is detected:
 
 1. Output: `[SFLOW] Detected state mismatch: state=<current> but artifacts indicate <corrected>. Auto-repairing.`
 2. Call the `record_decision_point` tool to record the repair (dp_id: `dp-0`, metadata: `{"repair": "auto-transition", "from": "<current>", "to": "<corrected>"}`)
-3. Update `.sflow/state.json` with the corrected state via the state-transition hook
+3. Update `.flow-engine/sflow/state.json` with the corrected state via the state-transition hook
 4. Continue with normal routing using the **corrected** state
 5. If the repair transitions **backward** (e.g., `executing` → `bridging`), warn the user: "Scope change detected — artifacts no longer match implementation state. Routed back to `<state>`."
 
@@ -99,8 +99,8 @@ When a mismatch is detected:
 
 Treat state as stale and repair when:
 
-- `state: executing` but `.sflow/progress.md` shows all tasks complete → repair to `closing`
-- `state: approved-for-build` but `tasks.md` has unchecked tasks AND `.sflow/progress.md` shows active execution → repair to `executing`
+- `state: executing` but `.flow-engine/sflow/progress.md` shows all tasks complete → repair to `closing`
+- `state: approved-for-build` but `tasks.md` has unchecked tasks AND `.flow-engine/sflow/progress.md` shows active execution → repair to `executing`
 - `state: bridging` but `execution-contract.md` content hash differs from `contract_hash` in state.json → re-validate contract for staleness
 - `state: specifying` but `proposal.md` has been updated since `last_transition` timestamp → re-check artifact completeness
 - `state: executing` but worktree has no uncommitted changes and no progress entries for > 10 minutes → unclear state, prompt user
@@ -127,7 +127,7 @@ Do not block workflow progress on an available upgrade; simply inform the user.
 
 When resuming or continuing in a change directory that may have uncommitted work, follow the protocol at `skills/workflow-start/dirty-worktree.md`. This protocol defines how to detect, attribute, and handle uncommitted changes before advancing state or modifying code.
 
-**Key rule:** A dirty worktree is code evidence only — it does not automatically advance `.sflow/state.json` state. Attribution must happen first.
+**Key rule:** A dirty worktree is code evidence only — it does not automatically advance `.flow-engine/sflow/state.json` state. Attribution must happen first.
 
 ## DP-0: User Confirmation Gate (Design-Preparation)
 
@@ -138,13 +138,13 @@ Before routing to `spec-writer` for a new or incomplete change, confirm key deci
 Run DP-0 when **all** of the following are true:
 - The change folder does not exist, OR
 - Planning artifacts (`proposal.md`, `specs/`, `design.md`, `tasks.md`) are missing or empty, OR
-- `.sflow/state.json` does not contain `dp_0_confirmed: true`.
+- `.flow-engine/sflow/state.json` does not contain `dp_0_confirmed: true`.
 
 If `dp_0_confirmed` is `true`, skip this gate and proceed with normal state detection.
 
 ### Required Questions
 
-Ask the user at least these questions. Record the answers in `.sflow/state.json`.
+Ask the user at least these questions. Record the answers in `.flow-engine/sflow/state.json`.
 
 1. **Scope**: What is the change name and one-sentence intent?
 2. **Constraints**: Are there known constraints (naming style, compatibility policy, platforms affected)?
@@ -153,7 +153,7 @@ Ask the user at least these questions. Record the answers in `.sflow/state.json`
 
 ### Recording DP-0
 
-After the user confirms, update `.sflow/state.json`:
+After the user confirms, update `.flow-engine/sflow/state.json`:
 
 ```json
 {
@@ -167,7 +167,7 @@ Then proceed to normal state detection and routing.
 
 ### Config-Aware Routing
 
-Before routing, check project configuration in `.sflow/config.json` (if it exists):
+Before routing, check project configuration in `.flow-engine/sflow/config.json` (if it exists):
 - If `artifacts.order` is specified, follow it when checking artifact completeness
 - If `artifacts.skip` is specified, do not require those artifacts for state transitions
 
@@ -177,10 +177,10 @@ Before routing, determine the workflow mode.
 
 ### Auto-Detection
 
-If `.sflow/state.json` workflow is `auto`, `null`, or unset:
+If `.flow-engine/sflow/state.json` workflow is `auto`, `null`, or unset:
 
 1. Inspect `proposal.md` scope and `tasks.md` to infer `hotfix`, `tweak`, or `full`.
-2. Update `.sflow/state.json` with the inferred `workflow` value.
+2. Update `.flow-engine/sflow/state.json` with the inferred `workflow` value.
 3. Output the inferred mode and reason to the user.
 
 Inference rules:
@@ -207,7 +207,7 @@ After the mode is known, validate it against actual artifact content. Use the de
      - [ ] Fix scope confined to a single function or module
      - [ ] No cross-module coordination required
    - **All pass** → use hotfix fast-path routing
-   - **Any fail** → **upgrade to `full`**, update `.sflow/state.json`, output upgrade reason citing the specific failed criterion
+   - **Any fail** → **upgrade to `full`**, update `.flow-engine/sflow/state.json`, output upgrade reason citing the specific failed criterion
 3. If workflow is `tweak`:
    - Validate against tweak constraints:
      - [ ] 4 or fewer files changed
@@ -219,7 +219,7 @@ After the mode is known, validate it against actual artifact content. Use the de
      - [ ] No new capability required
      - [ ] No delta spec impact (existing specs not affected)
    - **All pass** → use tweak fast-path routing
-   - **Any fail** → **upgrade to `full`**, update `.sflow/state.json`, output upgrade reason citing the specific failed criterion
+   - **Any fail** → **upgrade to `full`**, update `.flow-engine/sflow/state.json`, output upgrade reason citing the specific failed criterion
 
 ### Upgrade Output Format
 

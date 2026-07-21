@@ -196,7 +196,7 @@ The minimal contract still requires explicit user approval (DP-3) before executi
 After `execution-contract.md` is written and validated:
 
 1. Use `artifact_inspector` to verify the contract's completeness and consistency
-2. Update `.sflow/state.json` with `artifacts_hash` and `contract_hash`
+2. Update `.flow-engine/sflow/state.json` with `artifacts_hash` and `contract_hash`
 3. The state file enables fast staleness detection in subsequent phases
 
 ## Output Standard

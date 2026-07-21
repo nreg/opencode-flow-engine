@@ -19,7 +19,7 @@ export function createContinuationHook(): HookHandler {
     execute: async (context: HookContext): Promise<HookResult> => {
       const { changeDir } = context;
 
-      const stateData = await readJsonFile<{ state?: string; mode?: string; build_pause?: string | null; isolation?: string; build_mode?: string }>(`${changeDir}/.sflow/state.json`);
+      const stateData = await readJsonFile<{ state?: string; mode?: string; build_pause?: string | null; isolation?: string; build_mode?: string }>(`${changeDir}/.flow-engine/sflow/state.json`);
 
       if (!stateData?.state) {
         return {
@@ -135,9 +135,9 @@ export function createContinuationHook(): HookHandler {
         };
       }
 
-      // Read auto_transition config from .sflow/config.json (change-level) or default to true
+      // Read auto_transition config from .flow-engine/sflow/config.json (change-level) or default to true
       let autoTransition = true;
-      const configPath = `${changeDir}/.sflow/config.json`;
+      const configPath = `${changeDir}/.flow-engine/sflow/config.json`;
       const configExists = await fileExists(configPath);
       if (configExists) {
         const config = await readJsonFile<{ auto_transition?: boolean }>(configPath);

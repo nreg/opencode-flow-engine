@@ -32,8 +32,8 @@ async function cleanupDir(dir: string): Promise<void> {
 // ─── CheckpointFile interface & constant ──────────────────────────────────
 
 describe('CheckpointFile interface and CHECKPOINT_DIR constant', () => {
-  it('should have CHECKPOINT_DIR set to .sflow/checkpoints', () => {
-    expect(CHECKPOINT_DIR).toBe('.sflow/checkpoints');
+  it('should have CHECKPOINT_DIR set to .flow-engine/sflow/checkpoints', () => {
+    expect(CHECKPOINT_DIR).toBe('.flow-engine/sflow/checkpoints');
   });
 
   it('should allow constructing a valid CheckpointFile with all fields', () => {
@@ -73,9 +73,9 @@ describe('saveCheckpoint', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
+    await ensureDir(dir + '/.flow-engine/sflow');
     // Set up state.json with activeWorkflow = 'sflow'
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
     }));
@@ -99,7 +99,7 @@ describe('saveCheckpoint', () => {
 
     await saveCheckpoint(dir, checkpoint);
 
-    const filePath = dir + '/.sflow/checkpoints/task-1.1.json';
+    const filePath = dir + '/.flow-engine/sflow/checkpoints/task-1.1.json';
     const content = await readFile(filePath, 'utf-8');
     const parsed = JSON.parse(content);
     expect(parsed.taskId).toBe('task-1.1');
@@ -120,7 +120,7 @@ describe('saveCheckpoint', () => {
 
     await saveCheckpoint(dir, checkpoint);
 
-    const filePath = dir + '/.sflow/checkpoints/task-1.2.json';
+    const filePath = dir + '/.flow-engine/sflow/checkpoints/task-1.2.json';
     const content = await readFile(filePath, 'utf-8');
     const parsed = JSON.parse(content);
     expect(parsed.taskId).toBe('task-1.2');
@@ -160,7 +160,7 @@ describe('saveCheckpoint', () => {
 
     await saveCheckpoint(dir, checkpoint);
 
-    const filePath = dir + '/.sflow/checkpoints/task-1.3.json';
+    const filePath = dir + '/.flow-engine/sflow/checkpoints/task-1.3.json';
     const content = await readFile(filePath, 'utf-8');
     expect(content).toBeTruthy();
   });
@@ -174,9 +174,9 @@ describe('readCheckpoint', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
-    await ensureDir(dir + '/.sflow/checkpoints');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await ensureDir(dir + '/.flow-engine/sflow/checkpoints');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
     }));
@@ -208,7 +208,7 @@ describe('readCheckpoint', () => {
   });
 
   it('should return null when checkpoints directory does not exist', async () => {
-    await rm(dir + '/.sflow/checkpoints', { recursive: true, force: true });
+    await rm(dir + '/.flow-engine/sflow/checkpoints', { recursive: true, force: true });
     const result = await readCheckpoint(dir, 'any-task');
     expect(result).toBeNull();
   });
@@ -222,9 +222,9 @@ describe('detectStaleCheckpoints', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
-    await ensureDir(dir + '/.sflow/checkpoints');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await ensureDir(dir + '/.flow-engine/sflow/checkpoints');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
     }));
@@ -319,8 +319,8 @@ describe('clearCheckpoint', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
     }));
@@ -345,7 +345,7 @@ describe('clearCheckpoint', () => {
     await clearCheckpoint(dir, 'task-1.1');
 
     // File still exists on disk
-    const filePath = dir + '/.sflow/checkpoints/task-1.1.json';
+    const filePath = dir + '/.flow-engine/sflow/checkpoints/task-1.1.json';
     const fileExists = await Bun.file(filePath).exists();
     expect(fileExists).toBe(true);
 
@@ -381,8 +381,8 @@ describe('Checkpoint integration: save → read → detect stale → clear', () 
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
     }));

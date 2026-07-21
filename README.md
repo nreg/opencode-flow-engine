@@ -113,7 +113,7 @@ On context restoration, sFlow detects artifact/state mismatches and auto-repairs
 |-----------|-------|-------|
 | Flow shape | Linear (terminates at closed/abandoned) | Cyclic (returns to discuss) |
 | Artifacts | proposal, specs, design, tasks, contract | CONTEXT, PLAN, SUMMARY, VERIFICATION, UAT |
-| State dir | `.sflow/` | `.iflow/` |
+| State dir | `.flow-engine/sflow/` | `.iflow/` |
 | Methodology | OpenSpec + Superpowers | GSD (Get Stuff Done) |
 | Verification | Contract-based validation | Adversarial verification |
 | Scope reduction | Guard hook enforced | Agent prompt declaration |
@@ -282,25 +282,25 @@ Each task declares `read_files` (reference boundary) and `write_files` (modifica
 ### Failure Lessons Registry
 
 ```
-.sflow/lessons.md  — Auto-written on debug exit, auto-scanned before each task
+.flow-engine/sflow/lessons.md  — Auto-written on debug exit, auto-scanned before each task
 ```
 
 ### Checkpoint & Handoff
 
 ```
-.sflow/subagent-progress.md   — Node state (implementing/review/done)
-.sflow/checkpoints/           — Structured checkpoints with commit evidence
-.sflow/handoffs/              — Cross-session handoff contracts
-.sflow/progress.md            — Batch completion progress
+.flow-engine/sflow/subagent-progress.md   — Node state (implementing/review/done)
+.flow-engine/sflow/checkpoints/           — Structured checkpoints with commit evidence
+.flow-engine/sflow/handoffs/              — Cross-session handoff contracts
+.flow-engine/sflow/progress.md            — Batch completion progress
 ```
 
 ### Execution Control Plane
 
-SDD-mode execution is orchestrated via `.sflow/execution-plan.json`:
+SDD-mode execution is orchestrated via `.flow-engine/sflow/execution-plan.json`:
 
 - **Wave scheduling**: Tasks grouped into waves with `serial`/`parallel` strategy and `depends_on` dependencies
 - **Wave dependency validation**: Guard hooks detect circular dependencies before execution
-- **Review receipts**: Persisted to `.sflow/reviews/<wave-id>.json` with commit range evidence
+- **Review receipts**: Persisted to `.flow-engine/sflow/reviews/<wave-id>.json` with commit range evidence
 - **Triple hash validation**: content_hash + artifacts_hash + contract_hash integrity check
 - **Closing gate**: All wave reviews must pass before entering closing state
 
@@ -405,7 +405,7 @@ sflow init --user
 }
 ```
 
-Configuration loading priority: project-level `.sflow/config.json` → user-level `~/.config/opencode/opencode-flow-engine.json`
+Configuration loading priority: project-level `.flow-engine/sflow/config.json` → user-level `~/.config/opencode/opencode-flow-engine.json`
 
 ---
 

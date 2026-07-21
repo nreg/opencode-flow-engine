@@ -37,6 +37,6 @@ Do not enter debug gate for:
 After debugging completes:
 1. Verify the fix with the original failing test
 2. Run the full relevant test suite
-3. Update .sflow/state.json back to `executing`
-4. Update .sflow/subagent-progress.md if applicable
+3. Update .flow-engine/sflow/state.json back to `executing`
+4. Update .flow-engine/sflow/subagent-progress.md if applicable
 5. Resume the execution workflow from the point of failure

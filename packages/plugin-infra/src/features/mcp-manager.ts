@@ -336,15 +336,15 @@ export function createMcpManager(): McpManager {
 }
 
 /**
- * Load project-level MCP configurations from .sflow/mcp.json
+ * Load project-level MCP configurations from .flow-engine/sflow/mcp.json
  * This is Tier 2 in the three-tier MCP system:
  * - Tier 1: Built-in (validation tools)
- * - Tier 2: Project-level (.sflow/mcp.json)
+ * - Tier 2: Project-level (.flow-engine/sflow/mcp.json)
  * - Tier 3: Skill-embedded (from SKILL.md frontmatter)
  */
 export async function loadProjectMcpConfig(projectDir?: string): Promise<Record<string, unknown>> {
   const dir = projectDir || process.cwd();
-  const configPath = join(dir, '.sflow', 'mcp.json');
+  const configPath = join(dir, '.flow-engine/sflow', 'mcp.json');
 
   try {
     const content = await readFile(configPath, 'utf-8');

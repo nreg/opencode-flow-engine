@@ -113,7 +113,7 @@ npm install -g opencode-flow-engine
 |------|-------|-------|
 | 流程形状 | 线性（终止于 closed/abandoned） | 循环（回到 discuss） |
 | 产物 | proposal, specs, design, tasks, contract | CONTEXT, PLAN, SUMMARY, VERIFICATION, UAT |
-| 状态目录 | `.sflow/` | `.iflow/` |
+| 状态目录 | `.flow-engine/sflow/` | `.iflow/` |
 | 方法论 | OpenSpec + Superpowers | GSD（Get Stuff Done） |
 | 验证方式 | 基于合约的校验 | 对抗性验证 |
 | 范围控制 | guard hook 强制 | agent prompt 声明 |
@@ -282,25 +282,25 @@ NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
 ### 失败经验记录
 
 ```
-.sflow/lessons.md  — 每次调试退出时自动写入，每个任务开始前自动扫描
+.flow-engine/sflow/lessons.md  — 每次调试退出时自动写入，每个任务开始前自动扫描
 ```
 
 ### 检查点与移交
 
 ```
-.sflow/subagent-progress.md   — 节点状态（implementing/review/done）
-.sflow/checkpoints/           — 结构化检查点，含提交证据
-.sflow/handoffs/              — 跨会话移交合约
-.sflow/progress.md            — 批次完成进度
+.flow-engine/sflow/subagent-progress.md   — 节点状态（implementing/review/done）
+.flow-engine/sflow/checkpoints/           — 结构化检查点，含提交证据
+.flow-engine/sflow/handoffs/              — 跨会话移交合约
+.flow-engine/sflow/progress.md            — 批次完成进度
 ```
 
 ### 执行控制平面
 
-SDD 模式通过 `.sflow/execution-plan.json` 编排：
+SDD 模式通过 `.flow-engine/sflow/execution-plan.json` 编排：
 
 - **波次调度**：任务按波次分组，支持 serial/parallel 策略和 depends_on 依赖
 - **波次依赖校验**：Guard 钩子在执行前检测循环依赖
-- **审查收据**：持久化到 `.sflow/reviews/<wave-id>.json`，含提交范围证据
+- **审查收据**：持久化到 `.flow-engine/sflow/reviews/<wave-id>.json`，含提交范围证据
 - **三重哈希校验**：content_hash + artifacts_hash + contract_hash 完整性检查
 - **关闭门禁**：所有波次审查必须通过才能进入关闭状态
 
@@ -405,7 +405,7 @@ sflow init --user
 }
 ```
 
-配置加载优先级：项目级 `.sflow/config.json` → 用户级 `~/.config/opencode/opencode-flow-engine.json`
+配置加载优先级：项目级 `.flow-engine/sflow/config.json` → 用户级 `~/.config/opencode/opencode-flow-engine.json`
 
 ---
 

@@ -138,12 +138,12 @@ validate_ui_design 工具 SHALL 注册到 BuiltinMcpRegistry，通过 createVali
 
 #### Scenario: Tool Execution with Valid File
 
-**Given:** 一个通过所有检查的 ui-design.md 文件位于 .sflow/ui-design.md
+**Given:** 一个通过所有检查的 ui-design.md 文件位于 .flow-engine/sflow/ui-design.md
 **When:** 执行 validate_ui_design 工具
 **Then:** 返回 { valid: true, summary: { errors: 0, warnings: 0, info: 0 } }
 
 #### Scenario: Tool Execution with Missing File
 
-**Given:** .sflow/ui-design.md 文件不存在
+**Given:** .flow-engine/sflow/ui-design.md 文件不存在
 **When:** 执行 validate_ui_design 工具
 **Then:** 返回 { valid: false, issues: [{ level: 'ERROR', path: 'file', message: 'UI design file not found: ...' }] }

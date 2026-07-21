@@ -20,7 +20,7 @@ export function createPreProcessHook(): HookHandler {
       const { changeDir, data } = context;
 
       const currentState = (data?.currentState as string) ??
-        (await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`))?.state;
+        (await readJsonFile<{ state?: string }>(`${changeDir}/.flow-engine/sflow/state.json`))?.state;
 
       if (!currentState) {
         return { success: true, data: { transformed: false } };
@@ -70,7 +70,7 @@ export function createPostProcessHook(): HookHandler {
 
       const detectedState = stateMatch[1];
       const currentState =
-        (await readJsonFile<{ state?: string }>(`${changeDir}/.sflow/state.json`))?.state;
+        (await readJsonFile<{ state?: string }>(`${changeDir}/.flow-engine/sflow/state.json`))?.state;
 
       if (detectedState !== currentState) {
         // Return signal only — let the caller handle the actual transition

@@ -24,7 +24,7 @@ import type { Wave } from "../features/execution-plan-types.js";
 async function detectActiveWorkflow(changeDir: string): Promise<'iflow' | 'sflow' | 'none'> {
   const iflowExists = await directoryExists(`${changeDir}/.iflow`);
   if (iflowExists) return 'iflow';
-  const sflowExists = await directoryExists(`${changeDir}/.sflow`);
+  const sflowExists = await directoryExists(`${changeDir}/.flow-engine/sflow`);
   if (sflowExists) return 'sflow';
   return 'none';
 }
@@ -45,7 +45,7 @@ const ARTIFACT_NAMES = new Set(['proposal.md', 'design.md', 'tasks.md', 'executi
 function isArtifactPath(filePath: string, changeDir: string): boolean {
   const normalized = filePath.replace(/\\/g, '/');
   const changeDirNorm = changeDir.replace(/\\/g, '/');
-  if (normalized.includes('.sflow/') || normalized.endsWith('.sflow')) return true;
+  if (normalized.includes('.flow-engine/sflow/') || normalized.endsWith('.flow-engine/sflow')) return true;
   const relative = normalized.startsWith(changeDirNorm)
     ? normalized.slice(changeDirNorm.length + 1)
     : normalized;
@@ -190,7 +190,7 @@ async function checkReceiptIntegrity(changeDir: string, activeWorkflow: 'iflow' 
   const REQUIRED_RECEIPT_FIELDS = ['status', 'base', 'head', 'report'] as const;
 
   for (const wave of waves) {
-    const receiptPath = `${changeDir}/.sflow/reviews/${wave.id}.json`;
+    const receiptPath = `${changeDir}/.flow-engine/sflow/reviews/${wave.id}.json`;
     const receiptExists = await fileExists(receiptPath);
 
     if (!receiptExists) {
@@ -326,7 +326,7 @@ async function checkReceiptIntegrity(changeDir: string, activeWorkflow: 'iflow' 
  * CG-1/CG-3/CG-4/CG-7: Check closing gate — all review receipts must have status=pass
  * and test results must be verified before transitioning to closing state.
  * - If no execution-plan.json exists → skip (backward compatible, CG-4)
- * - Read all review receipts from .sflow/reviews/
+ * - Read all review receipts from .flow-engine/sflow/reviews/
  * - Check that ALL receipts have status='pass'
  * - If verification-report.md exists, check test results for pass
  * - If any receipt has status='fail' or is missing → block transition to closing
@@ -347,7 +347,7 @@ async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow' | 'sf
   if (!waves || waves.length === 0) return { success: true };
 
   for (const wave of waves) {
-    const receiptPath = `${changeDir}/.sflow/reviews/${wave.id}.json`;
+    const receiptPath = `${changeDir}/.flow-engine/sflow/reviews/${wave.id}.json`;
     const receiptExists = await fileExists(receiptPath);
 
     if (!receiptExists) {
@@ -377,7 +377,7 @@ async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow' | 'sf
   }
 
   // CG-7: Check verification-report.md for test results if it exists
-  const verificationReportPath = `${changeDir}/.sflow/archive/*/verification-report.md`;
+  const verificationReportPath = `${changeDir}/.flow-engine/sflow/archive/*/verification-report.md`;
   // Also check the change archive directory for verification reports
   let testPassed = true;
   let testEvidenceFound = false;
@@ -458,7 +458,7 @@ async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow' | 'sf
 
 /**
  * CG-6: Check if specs have been merged before closing (Issue #28).
- * - Check if .sflow/state.json has spec_merged: true
+ * - Check if .flow-engine/sflow/state.json has spec_merged: true
  * - If delta-specs directory exists (specs/delta/) and spec_merged is not true → block closing
  * - If no delta-specs directory → skip (backward compatible)
  * Only applies for sflow workflow.
@@ -857,7 +857,7 @@ async function checkTaskCompletion(changeDir: string, activeWorkflow: 'iflow' | 
   if (plan && plan.waves && plan.waves.length > 0) {
     const wavesMissingReceipts: string[] = [];
     for (const wave of plan.waves) {
-      const receiptPath = `${changeDir}/.sflow/reviews/${wave.id}.json`;
+      const receiptPath = `${changeDir}/.flow-engine/sflow/reviews/${wave.id}.json`;
       const receiptExists = await fileExists(receiptPath);
       if (!receiptExists) {
         wavesMissingReceipts.push(wave.id);
@@ -882,7 +882,7 @@ async function checkTaskCompletion(changeDir: string, activeWorkflow: 'iflow' | 
 
 /**
  * PROGRESS.md Anti-Repeat Guard — blocks approaches already excluded in PROGRESS.md.
- * Reads .sflow/progress.md and checks if the current operation (inferred from tool/agent/filePath)
+ * Reads .flow-engine/sflow/progress.md and checks if the current operation (inferred from tool/agent/filePath)
  * matches any previously excluded approach.
  */
 async function checkProgressAntiRepeatGuard(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
@@ -908,7 +908,7 @@ async function checkProgressAntiRepeatGuard(changeDir: string, data?: Record<str
 
   // P34: Also read current task description from subagent-progress.md for better keyword inference
   let taskKeywords: string[] = [];
-  const sp = await readFile(changeDir + '/.sflow/subagent-progress.md').catch(() => null);
+  const sp = await readFile(changeDir + '/.flow-engine/sflow/subagent-progress.md').catch(() => null);
   if (sp) {
     const planMatch = sp.match(/\*\*Plan task\*\*:\s*(.+)/i);
     if (planMatch?.[1]) {
@@ -1060,8 +1060,8 @@ async function checkReadFilesBoundary(changeDir: string, data?: Record<string, u
   // Only apply in executing/debugging states where active task tracking exists
   if (currentState !== 'executing' && currentState !== 'debugging') return { success: true };
 
-  // Don't warn about reading artifacts or .sflow files
-  if (isArtifactPath(filePath, changeDir) || filePath.includes('.sflow/')) return { success: true };
+  // Don't warn about reading artifacts or .flow-engine/sflow files
+  if (isArtifactPath(filePath, changeDir) || filePath.includes('.flow-engine/sflow/')) return { success: true };
 
   // P39: Check whitelist first — config/infra files are always readable
   const relPathForWhitelist = filePath.replace(changeDir.replace(/\\/g, '/'), '').replace(/^[\/\\]/, '');
@@ -1119,7 +1119,7 @@ async function checkGitCommitBoundary(changeDir: string, data?: Record<string, u
 
   // Get staged files using git status
   //
-  // P17: changeDir may be under .sflow/changes/<id> (not the git root).
+  // P17: changeDir may be under .flow-engine/sflow/changes/<id> (not the git root).
   // Use `git rev-parse --show-toplevel` to find the real repo root,
   // then run `git diff --cached` from there.
   try {
@@ -1284,7 +1284,7 @@ async function checkLessonsGuard(changeDir: string, data?: Record<string, unknow
   const isDebuggingState = currentState === 'debugging';
 
   // Read subagent-progress.md once for keyword extraction
-  const sp = await readFile(changeDir + '/.sflow/subagent-progress.md').catch(() => null);
+  const sp = await readFile(changeDir + '/.flow-engine/sflow/subagent-progress.md').catch(() => null);
 
   // For build-executor: check stage in subagent-progress.md
   // For bug-investigator in debugging: skip stage check, just extract keywords

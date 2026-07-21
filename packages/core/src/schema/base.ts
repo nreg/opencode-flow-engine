@@ -101,7 +101,7 @@ export type WorkflowMode = 'full' | 'hotfix' | 'tweak';
 
 /**
  * A decision point record — captures a confirmed transition gate in the workflow.
- * DPs are persisted to .sflow/state.json for audit and cross-session recovery.
+ * DPs are persisted to .flow-engine/sflow/state.json for audit and cross-session recovery.
  */
 export interface DecisionPoint {
   /** Unique identifier: 'dp-0' through 'dp-5' */

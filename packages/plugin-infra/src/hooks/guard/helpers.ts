@@ -8,7 +8,7 @@ export const ARTIFACT_NAMES = new Set(['proposal.md', 'design.md', 'tasks.md', '
 export function isArtifactPath(filePath: string, changeDir: string): boolean {
   const normalized = filePath.replace(/\\/g, '/');
   const changeDirNorm = changeDir.replace(/\\/g, '/');
-  if (normalized.includes('.sflow/') || normalized.endsWith('.sflow')) return true;
+  if (normalized.includes('.flow-engine/sflow/') || normalized.endsWith('.flow-engine/sflow')) return true;
   const relative = normalized.startsWith(changeDirNorm)
     ? normalized.slice(changeDirNorm.length + 1)
     : normalized;

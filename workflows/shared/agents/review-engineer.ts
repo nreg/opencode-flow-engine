@@ -143,7 +143,7 @@ export const createReviewEngineerAgent: AgentFactory = (model: string, options?:
 
 ## 输出
 
-将审查报告写入 \`.sflow/review-report/REVIEW-<timestamp>.md\`，包含：
+将审查报告写入 \`.flow-engine/sflow/review-report/REVIEW-<timestamp>.md\`，包含：
 1. 审查范围声明
 2. 各轮次详细结果（含严重度标签 + 文件:行号引用）
 3. 总体判定：PASS / FAIL

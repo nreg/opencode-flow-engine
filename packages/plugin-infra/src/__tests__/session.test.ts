@@ -27,13 +27,13 @@ async function writeFileContent(filePath: string, content: string): Promise<void
 }
 
 async function writeStateFile(dir: string, data: Record<string, unknown>): Promise<void> {
-  await ensureDir(dir + '/.sflow');
-  await writeFile(dir + '/.sflow/state.json', JSON.stringify(data, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow');
+  await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify(data, null, 2));
 }
 
 async function writeBoulderFile(dir: string, data: Record<string, unknown>): Promise<void> {
-  await ensureDir(dir + '/.sflow');
-  await writeFile(dir + '/.sflow/boulder-state.json', JSON.stringify(data, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow');
+  await writeFile(dir + '/.flow-engine/sflow/boulder-state.json', JSON.stringify(data, null, 2));
 }
 
 describe('Session Start Hook — Boulder State Recovery', () => {
@@ -181,8 +181,8 @@ describe('detectStateMismatch (shared canonical function)', () => {
   });
 
   it('approved-for-build -> bridging when contract deleted', async () => {
-    await ensureDir(dir + '/.sflow');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({ state: 'approved-for-build', contract_hash: 'abc123' }));
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({ state: 'approved-for-build', contract_hash: 'abc123' }));
     const result = await detectStateMismatch(dir, 'approved-for-build');
     expect(result).toBe('bridging');
   });

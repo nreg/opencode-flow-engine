@@ -156,7 +156,7 @@ If PASS → proceed to final checks.
 
 Before final closure, use `artifact_inspector` to verify the change directory's planning artifacts for completeness and consistency.
 
-This generates a decision-point audit from `.sflow/state.json`. Include this report in the archive so the full decision history is preserved.
+This generates a decision-point audit from `.flow-engine/sflow/state.json`. Include this report in the archive so the full decision history is preserved.
 
 - If the audit report is missing, prompt the user to run `artifact_inspector` before DP-7 confirmation.
 - The audit is read-only and safe to run multiple times.
@@ -180,7 +180,7 @@ If implementation diverged from the contract, return to `bridging` before closur
 
 After verification completes:
 
-1. Update `.sflow/state.json` with `state: closing` and record the transition timestamp
+1. Update `.flow-engine/sflow/state.json` with `state: closing` and record the transition timestamp
 2. If delta specs were created, route to `spec-merger` before final archiving
 3. If no delta specs exist, the change is ready to archive
 
@@ -221,7 +221,7 @@ When workflow is `hotfix` or `tweak`, release-archivist performs lightweight ver
 
 ### Nomination Procedure
 
-1. **Scan `.sflow/progress.md`**
+1. **Scan `.flow-engine/sflow/progress.md`**
    - Read the `excludedApproaches` table
    - Each entry with `failCount >= 1` is a candidate
    - Call `state-manager.addLessonsFromProgress()` to batch-nominate
@@ -264,4 +264,4 @@ During closing, also do a lightweight LESSONS.md review:
 3. **Nominations use `state-manager.addLesson()`**
    - The addLesson method is available via the state-manager feature
    - If calling directly: `state-manager.addLesson(changeDir, lessonEntry)`
-   - It auto-numbers (L-NNN) and appends to `.sflow/lessons.md`
+   - It auto-numbers (L-NNN) and appends to `.flow-engine/sflow/lessons.md`

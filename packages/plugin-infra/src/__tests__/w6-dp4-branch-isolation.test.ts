@@ -30,13 +30,13 @@ async function cleanupDir(dir: string): Promise<void> {
 }
 
 async function writeStateJson(dir: string, data: Record<string, unknown>): Promise<void> {
-  await ensureDir(dir + '/.sflow');
-  await writeFile(dir + '/.sflow/state.json', JSON.stringify(data, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow');
+  await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify(data, null, 2));
 }
 
 async function readStateJson(dir: string): Promise<Record<string, unknown> | null> {
   try {
-    const content = await readFile(dir + '/.sflow/state.json', 'utf-8');
+    const content = await readFile(dir + '/.flow-engine/sflow/state.json', 'utf-8');
     return JSON.parse(content);
   } catch {
     return null;
@@ -57,7 +57,7 @@ describe('Task 7.1: DP-4 Recommendation in state-transition', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
+    await ensureDir(dir + '/.flow-engine/sflow');
     await ensureDir(dir + '/specs');
     hook = createStateTransitionHook();
   });
@@ -169,7 +169,7 @@ describe('Task 7.2: writeStateFile with dp_4_result', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
+    await ensureDir(dir + '/.flow-engine/sflow');
   });
 
   afterEach(async () => {
@@ -263,7 +263,7 @@ describe('Task 8.1: checkGitBranchIsolation guard', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
+    await ensureDir(dir + '/.flow-engine/sflow');
     guard = createGuardHook();
   });
 
@@ -360,8 +360,8 @@ describe('Task 8.1: checkGitBranchIsolation guard', () => {
     const path = require('path');
     const nonGitDir = path.join(os.tmpdir(), 'w6-non-git-' + Date.now());
     await ensureDir(nonGitDir);
-    await ensureDir(nonGitDir + '/.sflow');
-    await writeFile(nonGitDir + '/.sflow/state.json', JSON.stringify({ state: 'executing', mode: 'full' }));
+    await ensureDir(nonGitDir + '/.flow-engine/sflow');
+    await writeFile(nonGitDir + '/.flow-engine/sflow/state.json', JSON.stringify({ state: 'executing', mode: 'full' }));
 
     const result = await guard.execute({
       changeDir: nonGitDir,
@@ -381,8 +381,8 @@ describe('Task 8.1: checkGitBranchIsolation guard', () => {
     // Create .iflow directory to simulate iflow
     await ensureDir(dir + '/.iflow');
     await writeStateJson(dir, { state: 'executing', mode: 'full' });
-    // Remove .sflow to make it iflow-only
-    try { await rm(dir + '/.sflow', { recursive: true, force: true }); } catch {}
+    // Remove .flow-engine/sflow to make it iflow-only
+    try { await rm(dir + '/.flow-engine/sflow', { recursive: true, force: true }); } catch {}
     await ensureDir(dir + '/.iflow');
 
     const result = await guard.execute({
@@ -418,7 +418,7 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
+    await ensureDir(dir + '/.flow-engine/sflow');
     guard = createGuardHook();
   });
 
@@ -523,8 +523,8 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
     const os = require('os');
     const nonGitDir = require('path').join(os.tmpdir(), 'w6-non-git-' + Date.now());
     await ensureDir(nonGitDir);
-    await ensureDir(nonGitDir + '/.sflow');
-    await writeFile(nonGitDir + '/.sflow/state.json', JSON.stringify({ state: 'executing', mode: 'full' }));
+    await ensureDir(nonGitDir + '/.flow-engine/sflow');
+    await writeFile(nonGitDir + '/.flow-engine/sflow/state.json', JSON.stringify({ state: 'executing', mode: 'full' }));
 
     const result = await guard.execute({
       changeDir: nonGitDir,
@@ -554,7 +554,7 @@ describe('Integration: bridging→approved-for-build with DP-4 recommendation', 
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
+    await ensureDir(dir + '/.flow-engine/sflow');
     await ensureDir(dir + '/specs');
     hook = createStateTransitionHook();
   });

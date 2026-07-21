@@ -147,7 +147,7 @@ Semgrep / CodeQL / Bandit 选一。无 high；medium 有处理记录。
 
 ## 输出
 
-将测试报告写入 \`.sflow/test-report/TEST-<timestamp>.md\`，包含：
+将测试报告写入 \`.flow-engine/sflow/test-report/TEST-<timestamp>.md\`，包含：
 1. 测试范围声明
 2. 各轮次详细结果（含量化指标）
 3. 总体判定：PASS / FAIL（含失败项清单）

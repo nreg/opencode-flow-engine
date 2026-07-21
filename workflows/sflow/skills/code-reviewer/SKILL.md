@@ -315,7 +315,7 @@ No performative agreement. Technical rigor always.
 
 ## Part 3: UI Visual Review (for frontend projects)
 
-Run this additional review round when the change includes UI files (`.css`, `.tsx`, `.vue`, `.html`, `.svelte`) or when `.sflow/ui-design.md` exists.
+Run this additional review round when the change includes UI files (`.css`, `.tsx`, `.vue`, `.html`, `.svelte`) or when `.flow-engine/sflow/ui-design.md` exists.
 
 ### Design Token Consistency
 

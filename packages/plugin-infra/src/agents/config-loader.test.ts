@@ -18,18 +18,18 @@ import {
 import { createAgent, createAllAgents, clearConfigCache } from './agent-builder.js';
 
 const TEST_DIR = `${import.meta.dir}/../__test_cfg__`;
-const TEST_CONFIG = join(TEST_DIR, '.sflow', 'config.json');
+const TEST_CONFIG = join(TEST_DIR, '.flow-engine/sflow', 'config.json');
 
 function writeTestConfig(data: unknown) {
-  if (!existsSync(join(TEST_DIR, '.sflow'))) {
-    mkdirSync(join(TEST_DIR, '.sflow'), { recursive: true });
+  if (!existsSync(join(TEST_DIR, '.flow-engine/sflow'))) {
+    mkdirSync(join(TEST_DIR, '.flow-engine/sflow'), { recursive: true });
   }
   writeFileSync(TEST_CONFIG, JSON.stringify(data, null, 2));
 }
 
 function cleanTestDir() {
   try { unlinkSync(TEST_CONFIG); } catch {}
-  try { rmSync(join(TEST_DIR, '.sflow'), { recursive: true, force: true }); } catch {}
+  try { rmSync(join(TEST_DIR, '.flow-engine/sflow'), { recursive: true, force: true }); } catch {}
   try { rmSync(TEST_DIR, { recursive: true, force: true }); } catch {}
 }
 
@@ -65,8 +65,8 @@ describe('Config Loader', () => {
     });
 
     it('should return empty object on malformed JSON', async () => {
-      if (!existsSync(join(TEST_DIR, '.sflow'))) {
-        mkdirSync(join(TEST_DIR, '.sflow'), { recursive: true });
+      if (!existsSync(join(TEST_DIR, '.flow-engine/sflow'))) {
+        mkdirSync(join(TEST_DIR, '.flow-engine/sflow'), { recursive: true });
       }
       writeFileSync(TEST_CONFIG, 'not json');
       const config = await loadSFlowConfig(TEST_DIR);
@@ -218,7 +218,7 @@ describe('Config Loader', () => {
 });
 
 describe('Config File Integration with Agent Builder', () => {
-  const CWD_SFLOW = join(process.cwd(), '.sflow');
+  const CWD_SFLOW = join(process.cwd(), '.flow-engine/sflow');
   const CWD_CONFIG = join(CWD_SFLOW, 'config.json');
 
   function writeCwdConfig(data: unknown) {
@@ -230,7 +230,7 @@ describe('Config File Integration with Agent Builder', () => {
 
   function cleanCwdConfig() {
     try { unlinkSync(CWD_CONFIG); } catch {}
-    // Only remove .sflow if it's empty (i.e., only our test config file was in it)
+    // Only remove .flow-engine/sflow if it's empty (i.e., only our test config file was in it)
     try { rmSync(CWD_SFLOW, { recursive: true, force: true }); } catch {}
   }
 
@@ -243,7 +243,7 @@ describe('Config File Integration with Agent Builder', () => {
     clearConfigCache();
   });
 
-  it('should load config file and apply to agent when .sflow/config.json exists', async () => {
+  it('should load config file and apply to agent when .flow-engine/sflow/config.json exists', async () => {
     writeCwdConfig({
       agents: { sFlow: { model: 'claude-3-opus-20240229' } },
     });

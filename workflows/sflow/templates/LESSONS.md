@@ -1,6 +1,6 @@
 # LESSONS — 跨任务失败知识库
 
-> 项目级常驻文件，位置：`.sflow/lessons.md`
+> 项目级常驻文件，位置：`.flow-engine/sflow/lessons.md`
 > **每个新任务开工前必扫**（R1.8 等价）；任务完成后按「提名条件」决定是否新增。
 
 ---

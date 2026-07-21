@@ -109,7 +109,7 @@ spacing:
 1. 在 `packages/core/src/validation/validator.ts` 的 `Validator` 类中新增 `validateUiDesignContent(content: string): ValidationReport` 方法
 2. 在 `packages/core/src/index.ts` 中导出（通过 sharedValidator 已自动导出）
 3. 在 `packages/plugin-infra/src/features/builtin-mcp.ts` 的 `createValidatorTools()` 中新增 `validate_ui_design` 工具
-4. 工具参数：`ui_design_path`（可选，默认 `<dir>/.sflow/ui-design.md`）
+4. 工具参数：`ui_design_path`（可选，默认 `<dir>/.flow-engine/sflow/ui-design.md`）
 
 ### P2: ui-implementer Delivery Checklist
 
@@ -198,7 +198,7 @@ spacing:
 
 | Task | 文件 | 操作 | 验收标准 |
 |------|------|------|---------|
-| 2.1 | `packages/plugin-infra/src/features/builtin-mcp.ts` | MODIFY | `createValidatorTools()` 新增 `validate_ui_design` 工具；参数：`ui_design_path: z.string().optional()`；调用 `sharedValidator.validateUiDesignContent(content)`；默认路径 `<dir>/.sflow/ui-design.md` |
+| 2.1 | `packages/plugin-infra/src/features/builtin-mcp.ts` | MODIFY | `createValidatorTools()` 新增 `validate_ui_design` 工具；参数：`ui_design_path: z.string().optional()`；调用 `sharedValidator.validateUiDesignContent(content)`；默认路径 `<dir>/.flow-engine/sflow/ui-design.md` |
 | 2.2 | `packages/plugin-infra/src/features/builtin-mcp.test.ts` | MODIFY | 新增 validate_ui_design 工具测试：读取合格文件通过、读取不合格文件报告错误、文件不存在返回 file-not-found |
 | 2.3 | `workflows/sflow/agents/ui-implementer.ts` | MODIFY | instructions 在 "## Guardrails" 之前追加 "## Delivery Checklist (10-Item Pre-Commit)" 章节；包含 D1-D10 共 10 项自检清单表格；现有内容不变 |
 | 2.4 | `workflows/sflow/skills/ui-implementer/SKILL.md` | MODIFY | 在 "## 质量检查清单" 之后追加 "## 11. 提交前 10 项自检清单" 章节；包含 D1-D10 的详细检查规则、违规示例和替代方案；现有内容不变 |

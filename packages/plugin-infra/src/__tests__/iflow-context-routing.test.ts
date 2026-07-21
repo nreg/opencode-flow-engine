@@ -26,8 +26,8 @@ async function cleanupDir(dir: string): Promise<void> {
 }
 
 async function writeStateFile(dir: string, data: Record<string, unknown>): Promise<void> {
-  await ensureDir(dir + '/.sflow');
-  await writeFile(dir + '/.sflow/state.json', JSON.stringify(data, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow');
+  await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify(data, null, 2));
 }
 
 async function writeIFlowState(dir: string, state: string): Promise<void> {

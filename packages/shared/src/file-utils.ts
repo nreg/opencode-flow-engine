@@ -35,7 +35,7 @@ export class Mutex {
   }
 }
 
-/** Global mutex for .sflow/state.json */
+/** Global mutex for .flow-engine/sflow/state.json */
 export const stateFileMutex = new Mutex();
 
 import { checkFileExists as rtFileExists, readTextFile, writeTextFile } from './runtime.js';

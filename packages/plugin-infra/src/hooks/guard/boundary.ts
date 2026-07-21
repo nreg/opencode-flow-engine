@@ -205,7 +205,7 @@ export function matchesBoundary(filePath: string, patterns: string[]): boolean {
  * Get the active task ID from subagent-progress.md (with tasks.md fallback).
  */
 export async function getActiveTaskId(changeDir: string): Promise<string | null> {
-  const sp = await readFile(changeDir + '/.sflow/subagent-progress.md').catch(() => null);
+  const sp = await readFile(changeDir + '/.flow-engine/sflow/subagent-progress.md').catch(() => null);
   if (sp) {
     const planMatch = sp.match(/\*\*Plan task\*\*:\s*(T\d+)/i);
     if (planMatch?.[1]) return planMatch[1].toUpperCase();

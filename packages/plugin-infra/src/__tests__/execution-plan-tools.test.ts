@@ -27,8 +27,8 @@ async function cleanupDir(dir: string): Promise<void> {
 }
 
 async function writeStateFile(dir: string, data: Record<string, unknown>): Promise<void> {
-  await ensureDir(dir + '/.sflow');
-  await writeFile(dir + '/.sflow/state.json', JSON.stringify(data, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow');
+  await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify(data, null, 2));
 }
 
 async function writeContractFile(dir: string): Promise<void> {
@@ -75,7 +75,7 @@ describe('recordReviewReceipt', () => {
     await cleanupDir(dir);
   });
 
-  it('should write .sflow/reviews/W1.json with status/base/head/report/recorded_at', async () => {
+  it('should write .flow-engine/sflow/reviews/W1.json with status/base/head/report/recorded_at', async () => {
     const receipt: Omit<ReviewReceipt, 'recorded_at'> = {
       status: 'pass',
       base: 'abc1234',
@@ -85,7 +85,7 @@ describe('recordReviewReceipt', () => {
 
     await recordReviewReceipt(dir, 'W1', receipt);
 
-    const written = await readJsonFileContent(dir + '/.sflow/reviews/W1.json');
+    const written = await readJsonFileContent(dir + '/.flow-engine/sflow/reviews/W1.json');
     expect(written).not.toBeNull();
     expect(written!.status).toBe('pass');
     expect(written!.base).toBe('abc1234');
@@ -105,7 +105,7 @@ describe('recordReviewReceipt', () => {
 
     await recordReviewReceipt(dir, 'W1', receipt);
 
-    const written = await readJsonFileContent(dir + '/.sflow/reviews/W1.json');
+    const written = await readJsonFileContent(dir + '/.flow-engine/sflow/reviews/W1.json');
     expect(written).not.toBeNull();
     expect(written!.status).toBe('fail');
     expect(written!.report).toBe('2 tests failed');
@@ -128,7 +128,7 @@ describe('recordReviewReceipt', () => {
     await recordReviewReceipt(dir, 'W1', receipt1);
     await recordReviewReceipt(dir, 'W1', receipt2);
 
-    const written = await readJsonFileContent(dir + '/.sflow/reviews/W1.json');
+    const written = await readJsonFileContent(dir + '/.flow-engine/sflow/reviews/W1.json');
     expect(written).not.toBeNull();
     expect(written!.status).toBe('pass');
     expect(written!.head).toBe('ghi9012');
@@ -168,7 +168,7 @@ describe('recordReviewReceipt', () => {
     await cleanupDir(noPlanDir);
   });
 
-  it('should create .sflow/reviews/ directory if it does not exist', async () => {
+  it('should create .flow-engine/sflow/reviews/ directory if it does not exist', async () => {
     const receipt: Omit<ReviewReceipt, 'recorded_at'> = {
       status: 'pass',
       base: 'abc1234',
@@ -178,12 +178,12 @@ describe('recordReviewReceipt', () => {
 
     // The reviews dir should not exist yet
     const { access } = await import('fs/promises');
-    await expect(access(dir + '/.sflow/reviews')).rejects.toThrow();
+    await expect(access(dir + '/.flow-engine/sflow/reviews')).rejects.toThrow();
 
     await recordReviewReceipt(dir, 'W1', receipt);
 
     // Now it should exist and contain the file
-    const content = await readFile(dir + '/.sflow/reviews/W1.json', 'utf-8');
+    const content = await readFile(dir + '/.flow-engine/sflow/reviews/W1.json', 'utf-8');
     expect(content).toBeDefined();
   });
 
@@ -199,7 +199,7 @@ describe('recordReviewReceipt', () => {
     await recordReviewReceipt(dir, 'W1', receipt);
     const after = new Date();
 
-    const written = await readJsonFileContent(dir + '/.sflow/reviews/W1.json');
+    const written = await readJsonFileContent(dir + '/.flow-engine/sflow/reviews/W1.json');
     expect(written).not.toBeNull();
     const recordedAt = new Date(written!.recorded_at as string);
     expect(recordedAt.getTime()).toBeGreaterThanOrEqual(before.getTime() - 1000);
@@ -462,7 +462,7 @@ describe('record_review_receipt tool', () => {
     expect(schemaKeys).toContain('report');
   });
 
-  it('should write .sflow/reviews/W1.json with status/base/head/report/recordedAt', async () => {
+  it('should write .flow-engine/sflow/reviews/W1.json with status/base/head/report/recordedAt', async () => {
     const { createSFlowTools } = await import('../sflow-plugin-factory.js');
     const tools = createSFlowTools(mockClient as any);
 
@@ -502,7 +502,7 @@ describe('record_review_receipt tool', () => {
     expect(parsed.success).toBe(true);
 
     // Verify the receipt was written to disk
-    const written = await readJsonFileContent(receiptDir + '/.sflow/reviews/W1.json');
+    const written = await readJsonFileContent(receiptDir + '/.flow-engine/sflow/reviews/W1.json');
     expect(written).not.toBeNull();
     expect(written!.status).toBe('pass');
     expect(written!.base).toBe('abc1234');
@@ -616,7 +616,7 @@ describe('Integration: execution plan + review receipt flow', () => {
     expect(receiptParsed.success).toBe(true);
 
     // Step 3: Read the receipt from disk
-    const written = await readJsonFileContent(integrationDir + '/.sflow/reviews/W1.json');
+    const written = await readJsonFileContent(integrationDir + '/.flow-engine/sflow/reviews/W1.json');
     expect(written).not.toBeNull();
     expect(written!.status).toBe('pass');
     expect(written!.base).toBe('abc1234');

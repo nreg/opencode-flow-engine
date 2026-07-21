@@ -37,7 +37,7 @@ Walk down each branch of the design tree, resolving dependencies between decisio
 4. **Before asking**: check if the answer can be found by exploring code, config, or docs — if yes, look it up yourself
 5. Compare implementation approaches
 6. Recommend the best approach with reasoning
-7. Record decisions in '.sflow/state.json'
+7. Record decisions in '.flow-engine/sflow/state.json'
 8. Confirm shared understanding before moving to the next branch
 
 ## Output Format

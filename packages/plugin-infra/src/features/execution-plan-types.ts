@@ -38,7 +38,7 @@ export interface Wave {
 
 /**
  * Review receipt for a wave.
- * Stored in .sflow/reviews/<wave-id>.json
+ * Stored in .flow-engine/sflow/reviews/<wave-id>.json
  */
 export interface ReviewReceipt {
   /** Whether the review passed or failed */
@@ -70,7 +70,7 @@ export interface DP4Result {
 
 /**
  * Execution plan artifact.
- * Stored in .sflow/execution-plan.json
+ * Stored in .flow-engine/sflow/execution-plan.json
  */
 export interface ExecutionPlan {
   /** Execution mode (inline, batch-inline, or sdd) */

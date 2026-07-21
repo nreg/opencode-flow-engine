@@ -15,14 +15,14 @@ function tempDir(name: string): string {
 }
 
 async function readStateFile(changeDir: string): Promise<Record<string, unknown> | null> {
-  const file = Bun.file(`${changeDir}/.sflow/state.json`);
+  const file = Bun.file(`${changeDir}/.flow-engine/sflow/state.json`);
   if (!(await file.exists())) return null;
   const content = await file.text();
   return JSON.parse(content);
 }
 
 async function writeStateFile(changeDir: string, state: Record<string, unknown>): Promise<void> {
-  const dir = `${changeDir}/.sflow`;
+  const dir = `${changeDir}/.flow-engine/sflow`;
   await Bun.write(`${dir}/state.json`, JSON.stringify(state, null, 2));
 }
 
@@ -376,7 +376,7 @@ describe('Workflow State Machine — Hook Integration', () => {
 
   it('should handle fresh directory (no state file) via hook', async () => {
     // Remove state file
-    await cleanupDir(`${dir}/.sflow`).catch(() => {});
+    await cleanupDir(`${dir}/.flow-engine/sflow`).catch(() => {});
 
     const hook = createStateTransitionHook();
     const result = await hook.execute({

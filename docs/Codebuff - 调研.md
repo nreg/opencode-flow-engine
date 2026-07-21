@@ -62,7 +62,7 @@ CLI (index.tsx: TUI+React)
 | 架构 | 扁平 spawn，LLM 自主 | 严格状态机 6 阶段 |
 | Agent 定义 | TypeScript 对象 + 生成器 | `.md` 声明式配置 |
 | 质量门禁 | 隐式（LLM 自我修正） | 显式（DP-0~DP-5 + 验证器） |
-| 状态管理 | 运行时 AgentState 对象 | 文件系统 `.sflow/` 制品 |
+| 状态管理 | 运行时 AgentState 对象 | 文件系统 `.flow-engine/sflow/` 制品 |
 | 用户确认 | `ask_user` 工具（LLM 自决） | 决策点强制确认 |
 | UI/SDK | React + OpenTUI + 完整 SDK | 纯 CLI |
 | 并行性 | 一次 spawn 多个 agent 并行 | 固定 subagent 串行 |
@@ -477,7 +477,7 @@ yield {
 | **Agent 定义** | 声明式 TypeScript 对象 + 生成器函数 | .md 文件，声明式配置             |
 | **执行控制**   | LLM 驱动 + handleSteps 生成器       | 编排者（sFlow）驱动，严格阶段    |
 | **子 Agent**   | 动态 spawn，可并行，可嵌套          | 固定 subagent 角色，按阶段调用   |
-| **状态管理**   | 运行时 AgentState 对象              | 文件系统 .sflow/ 目录制品        |
+| **状态管理**   | 运行时 AgentState 对象              | 文件系统 .flow-engine/sflow/ 目录制品        |
 | **质量门禁**   | 隐式（LLM 自我修正）                | 显式（DP-0~DP-5 决策点，验证器） |
 | **上下文管理** | context-pruner agent + token 计数   | 合约驱动的上下文管理             |
 | **模型路由**   | OpenRouter 50+ 模型，provider 回退  | 固定模型配置                     |
@@ -497,7 +497,7 @@ yield {
 
 **iFlow/SFlow 独特优势**：
 1. **严格质量门禁**：每个阶段有验证器，决策点需要用户确认
-2. **可追溯性**：.sflow/ 制品文件记录完整决策链
+2. **可追溯性**：.flow-engine/sflow/ 制品文件记录完整决策链
 3. **确定性流程**：状态机确保不会跳过关键步骤
 4. **合约驱动**：执行合约明确任务范围、测试计划和验收标准
 5. **代码审查**：内置 code-reviewer 和 release-archivist 阶段
@@ -676,7 +676,7 @@ Agent 定义文件通过 `loadLocalAgents` 函数加载（`sdk/src/agents/load-a
 │                      │ 一次 spawn 多个 agent 并行        │ 按阶段调用特定 subagent            │
 │                      │ 结果汇总回父 agent               │ 每个阶段有指定 subagent 类型       │
 │                      │                                │                                  │
-│  状态管理             │ 运行时内存: AgentState 对象      │ 文件系统: .sflow/ 目录制品         │
+│  状态管理             │ 运行时内存: AgentState 对象      │ 文件系统: .flow-engine/sflow/ 目录制品         │
 │                      │ messageHistory + agentContext    │ proposal.md, specs, contract      │
 │                      │ 持久化通过数据库/日志             │ 文件系统即状态                     │
 │                      │                                │                                  │
@@ -718,7 +718,7 @@ Agent 定义文件通过 `loadLocalAgents` 函数加载（`sdk/src/agents/load-a
 │                      │                                │ release-archivist 验证             │
 │                      │                                │                                  │
 │  知识管理             │ 知识文件 (knowledge.md)          │ CONTEXT.md 研究报告               │
-│                      │ AGENTS.md / CLAUDE.md            │ .sflow/ 制品文件                   │
+│                      │ AGENTS.md / CLAUDE.md            │ .flow-engine/sflow/ 制品文件                   │
 │                      │ Memento 风格笔记系统              │                                  │
 │                      │                                │                                  │
 │  可追溯性             │ 日志文件 + 数据库运行记录         │ 文件系统制品完整记录决策链           │

@@ -34,8 +34,8 @@ async function cleanupDir(dir: string): Promise<void> {
 // ─── HandoffFile, HandoffStatus, HandoffDecision types ────────────────────
 
 describe('HandoffFile interface and type definitions', () => {
-  it('should have HANDOFF_DIR set to .sflow/handoffs', () => {
-    expect(HANDOFF_DIR).toBe('.sflow/handoffs');
+  it('should have HANDOFF_DIR set to .flow-engine/sflow/handoffs', () => {
+    expect(HANDOFF_DIR).toBe('.flow-engine/sflow/handoffs');
   });
 
   it('should allow constructing a valid HandoffFile with all fields', () => {
@@ -102,8 +102,8 @@ describe('createHandoff', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
     }));
@@ -134,7 +134,7 @@ describe('createHandoff', () => {
     expect(handoff.output).toBeUndefined();
   });
 
-  it('should persist handoff to .sflow/handoffs/<id>.json', async () => {
+  it('should persist handoff to .flow-engine/sflow/handoffs/<id>.json', async () => {
     const handoff = await createHandoff(dir, {
       type: 'task-handoff',
       objective: 'Test persistence',
@@ -143,7 +143,7 @@ describe('createHandoff', () => {
       boundary: 'None',
     });
 
-    const filePath = dir + '/.sflow/handoffs/' + handoff.id + '.json';
+    const filePath = dir + '/.flow-engine/sflow/handoffs/' + handoff.id + '.json';
     const content = await readFile(filePath, 'utf-8');
     const parsed = JSON.parse(content);
     expect(parsed.id).toBe(handoff.id);
@@ -181,7 +181,7 @@ describe('createHandoff', () => {
       boundary: 'None',
     });
 
-    const filePath = dir + '/.sflow/handoffs/' + handoff.id + '.json';
+    const filePath = dir + '/.flow-engine/sflow/handoffs/' + handoff.id + '.json';
     const content = await readFile(filePath, 'utf-8');
     expect(content).toBeTruthy();
   });
@@ -233,8 +233,8 @@ describe('finishHandoff', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
     }));
@@ -326,8 +326,8 @@ describe('resolveHandoff', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
     }));
@@ -470,8 +470,8 @@ describe('readHandoff', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
     }));
@@ -503,7 +503,7 @@ describe('readHandoff', () => {
   });
 
   it('should return null when handoffs directory does not exist', async () => {
-    await rm(dir + '/.sflow', { recursive: true, force: true });
+    await rm(dir + '/.flow-engine/sflow', { recursive: true, force: true });
     const result = await readHandoff(dir, 'any-id');
     expect(result).toBeNull();
   });
@@ -517,8 +517,8 @@ describe('listHandoffs', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
     }));
@@ -556,7 +556,7 @@ describe('listHandoffs', () => {
   });
 
   it('should return empty array when handoffs directory does not exist', async () => {
-    await rm(dir + '/.sflow', { recursive: true, force: true });
+    await rm(dir + '/.flow-engine/sflow', { recursive: true, force: true });
     const handoffs = await listHandoffs(dir);
     expect(handoffs).toEqual([]);
   });
@@ -590,8 +590,8 @@ describe('Handoff integration: create → finish → resolve(accept) → read', 
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.sflow');
-    await writeFile(dir + '/.sflow/state.json', JSON.stringify({
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
       state: 'executing',
       mode: 'full',
     }));

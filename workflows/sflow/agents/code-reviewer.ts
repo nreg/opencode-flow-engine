@@ -67,7 +67,7 @@ Before approving any code change, verify ALL of the following:
 
 ## UI Visual Review (for frontend projects)
 
-Run this step when the change includes UI files (.css, .tsx, .vue, .html, .svelte) or when \`.sflow/ui-design.md\` exists.
+Run this step when the change includes UI files (.css, .tsx, .vue, .html, .svelte) or when \`.flow-engine/sflow/ui-design.md\` exists.
 
 ### 5.1 Design Token Consistency
 
@@ -115,7 +115,7 @@ Include UI review findings in the review output under a "UI Visual Review" secti
 
 read, bash (run tests), grep, lsp_diagnostics, lsp_goto_definition, lsp_find_references
 
-For UI Visual Review: read the \`.sflow/ui-design.md\` file (if exists) to compare design tokens against implementation.`,
+For UI Visual Review: read the \`.flow-engine/sflow/ui-design.md\` file (if exists) to compare design tokens against implementation.`,
       temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('code-reviewer'),
 });

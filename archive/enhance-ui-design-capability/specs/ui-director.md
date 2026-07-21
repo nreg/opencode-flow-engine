@@ -66,7 +66,7 @@ ui-director 代理的 instructions SHALL 包含完整的 7 步美学决策流程
 
 **Given:** v0 草稿已获用户确认
 **When:** 进入第 6 步写 ui-design.md
-**Then:** 代理 SHALL 将所有设计决策写入 .sflow/ui-design.md，包含 Visual Direction、Design Tokens（Color/Type/Spacing/Border Radius/Shadows）、Component Architecture、Anti-AI-Slop Checklist 等结构化章节
+**Then:** 代理 SHALL 将所有设计决策写入 .flow-engine/sflow/ui-design.md，包含 Visual Direction、Design Tokens（Color/Type/Spacing/Border Radius/Shadows）、Component Architecture、Anti-AI-Slop Checklist 等结构化章节
 
 #### Scenario: Anti-AI-Slop Self-Check
 

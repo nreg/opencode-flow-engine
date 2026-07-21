@@ -2,7 +2,7 @@ import type { FeatureConfig, FeatureResult } from "./types.js";
 import { createWorkflowManager } from "./workflow-manager.js";
 import { fileExists, readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, readFile, directoryExists, isContractStale as checkContractStale, writeFile, extractKeywords as jiebaExtractKeywords, calculateDynamicThreshold, calculateOverlapRatio, stateFileMutex, removeFile, listFiles } from "@opencode-flow-engine/shared";
 
-const BOULDER_STATE_FILE = ".sflow/boulder-state.json";
+const BOULDER_STATE_FILE = ".flow-engine/sflow/boulder-state.json";
 
 // ─── Checkpoint Types ──────────────────────────────────────────────────────
 
@@ -19,7 +19,7 @@ export interface CheckpointFile {
   status?: 'active' | 'stale';
 }
 
-export const CHECKPOINT_DIR = '.sflow/checkpoints';
+export const CHECKPOINT_DIR = '.flow-engine/sflow/checkpoints';
 
 // ─── Handoff Types ──────────────────────────────────────────────────────
 
@@ -42,13 +42,13 @@ export interface HandoffFile {
   resolvedAt?: string;
 }
 
-export const HANDOFF_DIR = '.sflow/handoffs';
+export const HANDOFF_DIR = '.flow-engine/sflow/handoffs';
 
 /** Allowed handoff types — validates against unexpected type values */
 export const HANDOFF_TYPES = new Set(['prototype', 'research', 'experiment', 'task-handoff', 'code-review', 'architecture']);
 
 export function getStateFilePath(workflowType: 'sflow' | 'iflow'): string {
-  return workflowType === 'iflow' ? '.iflow/state.json' : '.sflow/state.json';
+  return workflowType === 'iflow' ? '.iflow/state.json' : '.flow-engine/sflow/state.json';
 }
 
 type WorkflowManager = ReturnType<typeof createWorkflowManager>;
@@ -224,24 +224,24 @@ const LESSONS_MIN_MATCH_RATIO = 0.55; // P3: Increased from 0.4 to reduce false 
 
 /**
  * Derive the project root directory from a change directory path.
- * A change dir is typically under .sflow/changes/<change-id>.
+ * A change dir is typically under .flow-engine/sflow/changes/<change-id>.
  * The project root is the first ancestor that does NOT end with a change-like path.
  */
 export function findProjectRoot(changeDir: string): string {
   const normalized = changeDir.replace(/\\/g, '/');
-  // If under .sflow/changes/, the project root is 3 levels up from the change
-  const changesMarker = '/.sflow/changes/';
+  // If under .flow-engine/sflow/changes/, the project root is 3 levels up from the change
+  const changesMarker = '/.flow-engine/sflow/changes/';
   const idx = normalized.lastIndexOf(changesMarker);
   if (idx !== -1) {
     return normalized.slice(0, idx);
   }
-  // If changeDir itself contains .sflow/, it might be a project root
-  if (normalized.includes('/.sflow/')) {
-    // Walk up until we find the directory that contains .sflow
+  // If changeDir itself contains .flow-engine/sflow/, it might be a project root
+  if (normalized.includes('/.flow-engine/sflow/')) {
+    // Walk up until we find the directory that contains .flow-engine/sflow
     const parts = normalized.split('/');
     for (let i = parts.length; i > 0; i--) {
       const candidate = parts.slice(0, i).join('/');
-      if (candidate.endsWith('/.sflow')) return parts.slice(0, i - 1).join('/');
+      if (candidate.endsWith('/.flow-engine/sflow')) return parts.slice(0, i - 1).join('/');
     }
   }
   return changeDir;
@@ -311,8 +311,8 @@ async function searchLessonsInSingleFile(lessonsPath: string, keywords: string[]
 
 /**
  * Search lessons with project-level fallback.
- * 1. Searches change-level .sflow/lessons.md first
- * 2. Also searches project-level .sflow/lessons.md (for cross-change shared knowledge)
+ * 1. Searches change-level .flow-engine/sflow/lessons.md first
+ * 2. Also searches project-level .flow-engine/sflow/lessons.md (for cross-change shared knowledge)
  * Results from both levels are merged, deduplicated by entry ID.
  */
 export async function searchLessonsInFile(changeDir: string, keywords: string[]): Promise<LessonHit[]> {
@@ -320,7 +320,7 @@ export async function searchLessonsInFile(changeDir: string, keywords: string[])
   const seenIds = new Set<string>();
 
   // Level 1: change-level lessons
-  const changeHits = await searchLessonsInSingleFile(changeDir + '/.sflow/lessons.md', keywords);
+  const changeHits = await searchLessonsInSingleFile(changeDir + '/.flow-engine/sflow/lessons.md', keywords);
   for (const hit of changeHits) {
     if (hit.entry.id && !seenIds.has(hit.entry.id)) {
       seenIds.add(hit.entry.id);
@@ -331,7 +331,7 @@ export async function searchLessonsInFile(changeDir: string, keywords: string[])
   // Level 2: project-level lessons (cross-change shared)
   const projectRoot = findProjectRoot(changeDir);
   if (projectRoot !== changeDir) {
-    const projectHits = await searchLessonsInSingleFile(projectRoot + '/.sflow/lessons.md', keywords);
+    const projectHits = await searchLessonsInSingleFile(projectRoot + '/.flow-engine/sflow/lessons.md', keywords);
     for (const hit of projectHits) {
       if (hit.entry.id && !seenIds.has(hit.entry.id)) {
         seenIds.add(hit.entry.id);
@@ -344,7 +344,7 @@ export async function searchLessonsInFile(changeDir: string, keywords: string[])
 }
 
 export async function writeProgressFile(changeDir: string, data: ProgressData): Promise<void> {
-  const path = changeDir + '/.sflow/progress.md';
+  const path = changeDir + '/.flow-engine/sflow/progress.md';
   const lines: string[] = [];
   lines.push('# PROGRESS: ' + (data.taskId || 'Unknown'), '');
   if (data.changeId) lines.push('- **Change ID**: ' + data.changeId);
@@ -381,12 +381,12 @@ export async function writeProgressFile(changeDir: string, data: ProgressData): 
   lines.push('3. 如果不撞车，从「当前正在做」的下一步起步');
   lines.push('4. 完成本任务后，删除本 PROGRESS.md（产出迁移到 SUMMARY.md）');
   lines.push('', '> PROGRESS.md 是**临时**文件，任务完成后必须清理。');
-  await ensureDir(changeDir + '/.sflow');
+  await ensureDir(changeDir + '/.flow-engine/sflow');
   await writeFile(path, lines.join('\n'));
 }
 
 export async function readProgressFile(changeDir: string): Promise<ProgressData | null> {
-  const path = changeDir + '/.sflow/progress.md';
+  const path = changeDir + '/.flow-engine/sflow/progress.md';
   const content = await readFile(path);
   if (!content) return null;
   const data: ProgressData = {
@@ -582,7 +582,7 @@ export async function detectArtifactExistence(changeDir: string): Promise<{
     fileExists(changeDir + '/tasks.md'),
     fileExists(changeDir + '/execution-contract.md'),
     fileExists(changeDir + '/ui-design.md'),
-    fileExists(changeDir + '/.sflow/execution-plan.json'),
+    fileExists(changeDir + '/.flow-engine/sflow/execution-plan.json'),
   ]);
   const specsDirExists = await directoryExists(changeDir + '/specs');
   const specsFileCount = specsDirExists
@@ -611,7 +611,7 @@ export async function detectWorkflowState(
 ): Promise<WorkflowStateDetection> {
   const artifacts = artifactsOpt ?? await detectArtifactExistence(changeDir);
   const stateData = await readJsonFile<{ state?: string; mode?: string; contractApproved?: boolean }>(
-    changeDir + '/.sflow/state.json',
+    changeDir + '/.flow-engine/sflow/state.json',
   ).catch(() => null);
 
   const isApproved = (
@@ -667,7 +667,7 @@ export async function detectWorkflowState(
 
   // Contract staleness override — only applies to sFlow context
   if (artifacts.contract) {
-    const hasSFlowDir = await directoryExists(`${changeDir}/.sflow`);
+    const hasSFlowDir = await directoryExists(`${changeDir}/.flow-engine/sflow`);
     if (hasSFlowDir) {
       try {
         const stale = await checkContractStale(changeDir);
@@ -702,7 +702,7 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
   const inc = tc ? tc.split('\n').filter((l: string) => l.match(/^-\s*\[\s\]/)).length : 0;
   const allDone = tc ? tc.split('\n').filter((l: string) => l.match(/^-\s*\[.\]+\s/)).length > 0 && inc === 0 : false;
   if (hc && (currentState === 'approved-for-build' || currentState === 'executing')) {
-    const sd = await readJsonFile<Record<string, unknown>>(changeDir + '/.sflow/state.json');
+    const sd = await readJsonFile<Record<string, unknown>>(changeDir + '/.flow-engine/sflow/state.json');
     const sh = (sd?.contract_hash as string) || '';
     if (sh) {
       const cc = await readFile(changeDir + '/execution-contract.md');
@@ -712,7 +712,7 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
   }
   // Plan-contract hash mismatch: plan's contract_hash stale vs actual contract
   if (hep && (currentState === 'executing' || currentState === 'debugging')) {
-    const plan = await readJsonFile<Record<string, unknown>>(changeDir + '/.sflow/execution-plan.json');
+    const plan = await readJsonFile<Record<string, unknown>>(changeDir + '/.flow-engine/sflow/execution-plan.json');
     const planContractHash = (plan?.contract_hash as string) || '';
     if (planContractHash && hc) {
       const cc = await readFile(changeDir + '/execution-contract.md');
@@ -754,8 +754,8 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
 export async function writeStateFile(changeDir: string, newState: string, extra?: Record<string, unknown>): Promise<void> {
   const { ensureDir, readJsonFile, writeJsonFile, stateFileMutex } = await import('@opencode-flow-engine/shared');
   const now = new Date().toISOString();
-  const statePath = changeDir + '/.sflow/state.json';
-  await ensureDir(changeDir + '/.sflow');
+  const statePath = changeDir + '/.flow-engine/sflow/state.json';
+  await ensureDir(changeDir + '/.flow-engine/sflow');
   await stateFileMutex.runExclusive(async () => {
     const existing = await readJsonFile<Record<string, unknown>>(statePath);
     const state: Record<string, unknown> = existing ?? {
@@ -799,7 +799,7 @@ export async function writeStateFile(changeDir: string, newState: string, extra?
  * Deletes the progress file and optionally moves task summary to SUMMARY.md.
  */
 export async function clearProgressFile(changeDir: string): Promise<void> {
-  const progressPath = changeDir + '/.sflow/progress.md';
+  const progressPath = changeDir + '/.flow-engine/sflow/progress.md';
   try {
     const { unlink } = await import('node:fs/promises');
     await unlink(progressPath);
@@ -807,7 +807,7 @@ export async function clearProgressFile(changeDir: string): Promise<void> {
     // File doesn't exist, ignore
   }
   // Also clear subagent-progress.md to avoid stale state
-  const subagentProgressPath = changeDir + '/.sflow/subagent-progress.md';
+  const subagentProgressPath = changeDir + '/.flow-engine/sflow/subagent-progress.md';
   try {
     const { unlink } = await import('node:fs/promises');
     await unlink(subagentProgressPath);
@@ -1029,7 +1029,7 @@ export function createStateManager(
           boulderState.repairedAt = new Date().toISOString();
         }
 
-        const statePath = `${changeDir}/.sflow/state.json`;
+        const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
         await writeJsonFile(statePath, {
           ...boulderState,
           restoredAt: new Date().toISOString(),
@@ -1060,7 +1060,7 @@ export function createStateManager(
 
     async persistState(changeDir: string): Promise<FeatureResult> {
       try {
-        const statePath = `${changeDir}/.sflow/state.json`;
+        const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
         const stateExists = await fileExists(statePath);
         if (!stateExists) {
           return { success: true, data: { persisted: false, reason: "No workflow state to persist" } };
@@ -1157,7 +1157,7 @@ export function createStateManager(
 
     async upgradeMode(changeDir: string, newMode: string, reason: string): Promise<FeatureResult> {
       try {
-        const statePath = `${changeDir}/.sflow/state.json`;
+        const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
         const state = await readJsonFile<Record<string, unknown>>(statePath);
         if (!state) {
           return { success: false, error: "State file not found" };
@@ -1194,7 +1194,7 @@ export function createStateManager(
 
     async setBuildPause(changeDir: string, pauseType: string): Promise<FeatureResult> {
       try {
-        const statePath = `${changeDir}/.sflow/state.json`;
+        const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
         const state = await readJsonFile<Record<string, unknown>>(statePath);
         if (!state) {
           return { success: false, error: "State file not found" };
@@ -1214,7 +1214,7 @@ export function createStateManager(
 
     async clearBuildPause(changeDir: string): Promise<FeatureResult> {
       try {
-        const statePath = `${changeDir}/.sflow/state.json`;
+        const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
         const state = await readJsonFile<Record<string, unknown>>(statePath);
         if (!state) {
           return { success: false, error: "State file not found" };
@@ -1245,7 +1245,7 @@ export function createStateManager(
 
     async addLesson(changeDir: string, entry: LessonEntry): Promise<FeatureResult> {
       try {
-        const lessonsPath = changeDir + '/.sflow/lessons.md';
+        const lessonsPath = changeDir + '/.flow-engine/sflow/lessons.md';
         const existing = await readFile(lessonsPath);
         const entries = existing ? parseLessonsMd(existing) : [];
         const nextIndex = entries.length + 1;
@@ -1287,7 +1287,7 @@ export function createStateManager(
         const formatted = '\n\n' + formatLessonEntry(nextIndex, { ...entry, firstSeen: entry.firstSeen || new Date().toISOString(), lastReviewed: new Date().toISOString() });
         if (!existing) {
           const header = '# LESSONS — 跨任务失败知识库\n\n';
-          await ensureDir(changeDir + '/.sflow');
+          await ensureDir(changeDir + '/.flow-engine/sflow');
           await writeFile(lessonsPath, header + formatted.trim());
         } else {
           await writeFile(lessonsPath, existing.replace(/\n*$/, '') + formatted);
@@ -1410,7 +1410,7 @@ export function createStateManager(
     async clearProgressSnapshot(changeDir: string): Promise<FeatureResult> {
       try {
         const { unlink } = await import('node:fs/promises');
-        await unlink(changeDir + '/.sflow/progress.md');
+        await unlink(changeDir + '/.flow-engine/sflow/progress.md');
         return { success: true, data: { cleared: true, timestamp: new Date().toISOString() } };
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
@@ -1438,7 +1438,7 @@ export function createStateManager(
       },
     ): Promise<FeatureResult> {
       try {
-        const progressPath = changeDir + '/.sflow/subagent-progress.md';
+        const progressPath = changeDir + '/.flow-engine/sflow/subagent-progress.md';
         const now = new Date().toISOString();
         const lines: string[] = [];
         lines.push('# Subagent Progress Checkpoint', '');
@@ -1459,7 +1459,7 @@ export function createStateManager(
           lines.push('- **Unresolved feedback**: ' + checkpoint.unresolvedFeedback.join('; '));
         }
         lines.push('', '_Updated: ' + now + '_');
-        await ensureDir(changeDir + '/.sflow');
+        await ensureDir(changeDir + '/.flow-engine/sflow');
         await writeFile(progressPath, lines.join('\n'));
         return { success: true, data: { written: true, stage: checkpoint.stage, timestamp: now } };
       } catch (error) {
@@ -1468,7 +1468,7 @@ export function createStateManager(
     },
 async isContractStale(changeDir: string): Promise<FeatureResult> {
       try {
-        const stateExists = await fileExists(`${changeDir}/.sflow/state.json`);
+        const stateExists = await fileExists(`${changeDir}/.flow-engine/sflow/state.json`);
         const contractPath = `${changeDir}/execution-contract.md`;
         const contractExists = await fileExists(contractPath);
 

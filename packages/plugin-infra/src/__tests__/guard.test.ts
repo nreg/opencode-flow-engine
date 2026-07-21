@@ -20,8 +20,8 @@ async function cleanupDir(dir: string): Promise<void> {
 }
 
 async function writeStateFile(dir: string, data: Record<string, unknown>): Promise<void> {
-  await ensureDir(dir + '/.sflow');
-  await writeFile(dir + '/.sflow/state.json', JSON.stringify(data, null, 2));
+  await ensureDir(dir + '/.flow-engine/sflow');
+  await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify(data, null, 2));
 }
 
 async function writeFileContent(filePath: string, content: string): Promise<void> {
@@ -381,8 +381,8 @@ describe('Guard Hook — detectActiveWorkflow single-call optimization', () => {
     await cleanupDir(dir);
   });
 
-  it('should call directoryExists only 2 times (once for .iflow, once for .sflow) in SFlow mode', async () => {
-    // SFlow mode: .sflow/ exists, no .iflow/
+  it('should call directoryExists only 2 times (once for .iflow, once for .flow-engine/sflow) in SFlow mode', async () => {
+    // SFlow mode: .flow-engine/sflow/ exists, no .iflow/
     await writeStateFile(dir, { state: 'exploring', mode: 'full' });
 
     let directoryExistsCallCount = 0;
@@ -396,7 +396,7 @@ describe('Guard Hook — detectActiveWorkflow single-call optimization', () => {
       await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
 
       // After optimization: detectActiveWorkflow called once at entry,
-      // which calls directoryExists at most 2 times (.iflow + .sflow)
+      // which calls directoryExists at most 2 times (.iflow + .flow-engine/sflow)
       // + 1 call from checkSpecsMerged (specs/delta/ existence check)
       expect(directoryExistsCallCount).toBeLessThanOrEqual(3);
     } finally {

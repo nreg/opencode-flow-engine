@@ -10,7 +10,7 @@
 |------|-------------------------------------|---------|
 | 定位 | OpenCode 插件，嵌入 AI 编码工具 | 独立的通用工作流系统，跨平台 |
 | 架构形态 | OpenCode Plugin (hooks + tools + agents) | CLI + Python 脚本 + Node.js Core SDK |
-| 状态管理 | 文件状态机（`.sflow/state.json` / `.iflow/state.json`） | 文件状态机（`.trellis/tasks/<task>/task.json`）+ 运行时面包屑 |
+| 状态管理 | 文件状态机（`.flow-engine/sflow/state.json` / `.iflow/state.json`） | 文件状态机（`.trellis/tasks/<task>/task.json`）+ 运行时面包屑 |
 | 工作流模式 | 线性（SFlow 9 态）/ 循环（IFlow 6 态） | 3 阶段线性（Plan → Execute → Finish） |
 | 子代理机制 | OpenCode 子会话（`call_flow_agent`） | 通道（Channel）事件系统 + 工作线程 |
 | 核心 SDK | 自定义 TypeScript 包 | `@mindfoldhq/trellis-core` (TypeScript) |
@@ -97,7 +97,7 @@
 
 **Trellis 做法**：`workflow.md` 中嵌入 `[workflow-state:planning]` / `[workflow-state:in_progress]` 标记块，Hook 脚本自动解析并注入到每轮对话的头部。每次状态变更时自动更新。
 
-**sFlow 做法**：状态存储在 `.sflow/state.json` / `.iflow/state.json` 中，agent 通过 `workflow_router` / `iflow_router` 工具检测。
+**sFlow 做法**：状态存储在 `.flow-engine/sflow/state.json` / `.iflow/state.json` 中，agent 通过 `workflow_router` / `iflow_router` 工具检测。
 
 **借鉴价值：中。** Trellis 的方式更"人机可读"，直接在 `workflow.md` 中可见，但 sFlow 的 JSON 方式更程序化。可以借鉴将状态标记嵌入到 agent system prompt 中，让 agent 始终知道当前状态（sFlow 已经在做，但可更系统化）。
 
@@ -166,7 +166,7 @@
 | 优先级 | 借鉴点 | 建议实现方式 |
 |--------|--------|-------------|
 | P0 | Channel 事件系统 | 为子代理通信引入结构化事件类型 + 收件箱/投递模式 + 进度/中断信号 |
-| P1 | Spec 分层系统 | 建立 `.sflow/spec/<package>/<layer>/` 目录结构，动态注入到子代理 |
+| P1 | Spec 分层系统 | 建立 `.flow-engine/sflow/spec/<package>/<layer>/` 目录结构，动态注入到子代理 |
 | P1 | Research 证据要求 | 强化 researcher 的"必须拉取源码"规则 + 逐字引用模板 + 自检清单 |
 | P2 | 统一任务记录 | 引入结构化任务记录（类似 Trellis 的 24 字段 `task.json`） |
 | P2 | JSONL 上下文注入 | 面包屑状态标记：使用 `implement.jsonl` / `check.jsonl` 文件管理子代理上下文 |
@@ -230,7 +230,7 @@ after_archive → 自动生成周报条目："本周完成：xxx"
 忽略继续？（可能掩盖问题）
 记录警告，让用户决定？（最佳路径，但需要额外交互）
 2. 安全风险
-用户配置的脚本可以执行任意命令。如果 .sflow/config.json 被提交到仓库，恶意 PR 可以在 CI 中执行恶意代码。需要脚本白名单或确认执行的机制。
+用户配置的脚本可以执行任意命令。如果 .flow-engine/sflow/config.json 被提交到仓库，恶意 PR 可以在 CI 中执行恶意代码。需要脚本白名单或确认执行的机制。
 3. 跨平台兼容
 Windows 用户配置了 bash script.sh，macOS 用户配置了 pwsh script.ps1，sFlow 需要知道运行平台。当前 sFlow 没有平台检测机制。
 4. 调试困难

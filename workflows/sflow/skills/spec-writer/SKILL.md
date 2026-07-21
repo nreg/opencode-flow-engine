@@ -22,7 +22,7 @@ Invoke this skill when the user says things like:
 
 Before generating or revising artifacts, read:
 
-- `.sflow/state.json` — especially `dp_0_decisions`, `dp_0_confirmed`, and `isFrontend`
+- `.flow-engine/sflow/state.json` — especially `dp_0_decisions`, `dp_0_confirmed`, and `isFrontend`
 - Any existing planning artifacts in the change folder
 
 If `dp_0_confirmed` is not `true` for a new/incomplete change, stop and route back to `workflow-start` to complete DP-0.
@@ -33,7 +33,7 @@ Before generating artifacts, detect if this change involves frontend/UI work:
 
 ### Step 0: Check Frontend Flag
 
-Read `isFrontend` from `.sflow/state.json`. If `true`, this change will require:
+Read `isFrontend` from `.flow-engine/sflow/state.json`. If `true`, this change will require:
 1. All standard artifacts (proposal, specs, design, tasks)
 2. **Plus**: `ui-design.md` — UI aesthetics direction + design tokens
 
@@ -45,7 +45,7 @@ If `isFrontend` is not yet set in state.json, detect from:
 2. **Package.json**: Check for frontend dependencies (react, vue, angular, svelte, next, nuxt)
 3. **Directory structure**: Check for `src/components/`, `src/pages/`, `.css` files
 
-If detected as frontend, update `.sflow/state.json` to set `isFrontend: true`.
+If detected as frontend, update `.flow-engine/sflow/state.json` to set `isFrontend: true`.
 
 ### Step 0.2: Frontend-Specific Workflow Path
 
@@ -62,7 +62,7 @@ proposal.md → specs/ → ui-design.md → design.md → tasks.md
 >
 > **差异理由**：UI aesthetics 决策（color system, typography, spacing）往往决定了 component tree 的形状和 data flow 的设计。对于设计驱动的项目（landing page、consumer app），视觉调性是北极星，架构服务于视觉。对于工程驱动的项目（admin panel、dashboard），可以考虑跳过 ui-design 阶段或手动调整顺序。
 >
-> **如果需要 flow-kit 原始顺序**：在 `.sflow/config.json` 中设置 `"artifacts.order": ["proposal", "specs", "design", "ui-design", "tasks"]`。
+> **如果需要 flow-kit 原始顺序**：在 `.flow-engine/sflow/config.json` 中设置 `"artifacts.order": ["proposal", "specs", "design", "ui-design", "tasks"]`。
 >
 > **P23: ui-design ↔ design 冲突回退协议**
 >
@@ -74,7 +74,7 @@ proposal.md → specs/ → ui-design.md → design.md → tasks.md
 > 1. 在 design.md 中记录冲突：`UI-Design Conflict: token <X> does not support required architecture pattern <Y>`
 > 2. **回退修改 ui-design.md**：更新设计 token 或组件架构以适应架构需求
 > 3. 修改后再次验证 design.md 引用的一致性
-> 4. 如果冲突无法解决（如整体风格方向不适配），在 `.sflow/config.json` 中设置 `"artifacts.order": ["proposal", "specs", "design", "ui-design", "tasks"]` 切换到 flow-kit 顺序
+> 4. 如果冲突无法解决（如整体风格方向不适配），在 `.flow-engine/sflow/config.json` 中设置 `"artifacts.order": ["proposal", "specs", "design", "ui-design", "tasks"]` 切换到 flow-kit 顺序
 >
 > **禁止**：生成不一致的 design.md（设计中引用不存在的 token）。冲突必须解决后再继续生成 tasks.md。
 
@@ -93,7 +93,7 @@ Create or refine:
 
 ### Config Check
 
-Before generating artifacts, check the project configuration in `.sflow/config.json` (if it exists):
+Before generating artifacts, check the project configuration in `.flow-engine/sflow/config.json` (if it exists):
 - Generate artifacts in the configured order (default: proposal → specs → [ui-design] → design → tasks)
 - Skip any artifacts listed in the `artifacts.skip` configuration
 
@@ -109,7 +109,7 @@ Use OpenSpec-style artifact roles:
 
 ### Honor DP-0 Decisions
 
-- Read `dp_0_decisions` from `.sflow/state.json` before writing.
+- Read `dp_0_decisions` from `.flow-engine/sflow/state.json` before writing.
 - Respect confirmed constraints (e.g., naming style, scope inclusions, communication preference).
 - Do not silently expand scope beyond what was confirmed in DP-0.
 - If you encounter an unconfirmed decision, pause artifact generation and ask the user.
@@ -318,7 +318,7 @@ Before handing off to `contract-builder`, present a summary of all artifacts to 
 
 2. **Ask the user** if anything needs adjustment before the contract is generated.
 
-3. **Record DP-2** after user approval in `.sflow/state.json`:
+3. **Record DP-2** after user approval in `.flow-engine/sflow/state.json`:
 
 ```json
 {
@@ -383,14 +383,14 @@ Before generating ui-design.md, verify:
 4. Record DP-2-ui after user approval
 
 5. Transition to bridging: After ui-design.md is approved, run the state transition:
-   - Update .sflow/state.json: set state to ui-design
+   - Update .flow-engine/sflow/state.json: set state to ui-design
    - The Artifact Preflight Gate will verify all prerequisites
    - Route to contract-builder for execution contract generation
 
 ### What If UI Design Is Not Needed
 
 If the frontend change has no UI impact (e.g., API integration, utility function, config change):
-- Set .sflow/state.json state explicitly to skip ui-design
+- Set .flow-engine/sflow/state.json state explicitly to skip ui-design
 - Route directly to bridging
 - The Artifact Preflight Gate will respect this override
 
@@ -402,7 +402,7 @@ Do not start implementation after writing planning artifacts.
 
 Once the artifacts are stable, validated, and DP-2 is recorded, hand off to `contract-builder`.
 
-**For frontend projects**: After ui-design.md is approved, set `.sflow/state.json` state to `ui-design` if specs are done but design/tasks are not yet started. This will cause the Artifact Preflight Gate to route through the ui-design state properly.
+**For frontend projects**: After ui-design.md is approved, set `.flow-engine/sflow/state.json` state to `ui-design` if specs are done but design/tasks are not yet started. This will cause the Artifact Preflight Gate to route through the ui-design state properly.
 
 ## Output Standard
 

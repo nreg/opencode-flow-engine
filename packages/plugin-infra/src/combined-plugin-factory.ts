@@ -65,7 +65,7 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
       if (lower === 'sflow' || lower.startsWith('sflow-')) return 'sFlow';
       // Fallback: check directory
       if (changeDir.includes('.iflow')) return 'iFlow';
-      if (changeDir.includes('.sflow')) return 'sFlow';
+      if (changeDir.includes('.flow-engine/sflow')) return 'sFlow';
       return 'WF';
     },
     workflowName: 'workflow',
@@ -73,7 +73,7 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
       const changeDir = (context.directory as string) || '';
 
       // Detect workflow context
-      const isSFlowContext = await directoryExists(`${changeDir}/.sflow`);
+      const isSFlowContext = await directoryExists(`${changeDir}/.flow-engine/sflow`);
       const isIFlowContext = await directoryExists(`${changeDir}/.iflow`);
 
       let callerWorkflow: 'iflow' | 'sflow' | 'unknown' = 'unknown';

@@ -59,7 +59,7 @@ None of these failures are caused by the 6 commits in this workflow.
 
 ## 5. Artifact Inspector Results
 
-No .iflow/ or .sflow/ workflow artifacts exist in this project (the project IS the flow engine itself). Verification was performed via direct code inspection and git history analysis.
+No .iflow/ or .flow-engine/sflow/ workflow artifacts exist in this project (the project IS the flow engine itself). Verification was performed via direct code inspection and git history analysis.
 
 ---
 

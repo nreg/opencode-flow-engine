@@ -148,7 +148,7 @@ Fix any errors before proceeding.
 6. Fix errors if any
 7. **P18**: After all artifacts generated, scan for LESSONS.md nomination opportunities:
    - Check if any design decisions involved significant dead-ends or debugging (> 30 min)
-   - If yes, nominate new lesson entry to .sflow/lessons.md
+   - If yes, nominate new lesson entry to .flow-engine/sflow/lessons.md
 
 ## Report Back — ⚠️ CRITICAL
 

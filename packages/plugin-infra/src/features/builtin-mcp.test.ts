@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 const TEST_DIR = join(import.meta.dirname, '__test_mcp_tmp__');
-const SFLOW_DIR = join(TEST_DIR, '.sflow');
+const SFLOW_DIR = join(TEST_DIR, '.flow-engine/sflow');
 const SPECS_DIR = join(SFLOW_DIR, 'specs');
 const DELTA_DIR = join(SFLOW_DIR, 'delta-specs');
 

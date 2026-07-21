@@ -18,7 +18,7 @@
 
 对于 iFlow 不适用的守卫（`presetUpgrade`, `contractStaleness`, `taskCompletion`, `debuggingState`），改为检查特定文件/状态的存在性：
 
-- `checkPresetUpgrade` → 检查 `.sflow/state.json` 中是否有 `mode` 字段
+- `checkPresetUpgrade` → 检查 `.flow-engine/sflow/state.json` 中是否有 `mode` 字段
 - `checkContractStalenessGuard` → 检查 `execution-contract.md` 是否存在
 - `checkTaskCompletion` → 检查 `PLAN.md` 是否存在
-- `checkDebuggingState` → 检查 `.sflow/state.json` 中 state 是否为 `debugging`
+- `checkDebuggingState` → 检查 `.flow-engine/sflow/state.json` 中 state 是否为 `debugging`

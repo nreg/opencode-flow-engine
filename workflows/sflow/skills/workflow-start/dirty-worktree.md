@@ -23,7 +23,7 @@ When needed, inspect `git diff`, `git diff --cached`, and newly created file con
 
 - The user may not say which files they changed. If the worktree is dirty, including new files shown as `??` in Git status, assume changes may come from the user or mixed sources.
 - **Build artifact exclusion**: `??` files matching `.gitignore` patterns (e.g., `node_modules/`, `dist/`, `__pycache__/`, `*.o`, `target/`, `build/`) are automatically skipped during attribution and not treated as user changes.
-- A dirty worktree is code evidence only. It does not automatically advance `.sflow/state.json` `state` or check off `tasks.md`; sflow state may advance only after attribution, verification, required artifact synchronization, and the relevant guard check.
+- A dirty worktree is code evidence only. It does not automatically advance `.flow-engine/sflow/state.json` `state` or check off `tasks.md`; sflow state may advance only after attribution, verification, required artifact synchronization, and the relevant guard check.
 
 ## 3. Attribution
 

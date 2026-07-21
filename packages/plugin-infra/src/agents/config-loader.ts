@@ -1,5 +1,5 @@
 /**
- * Config Loader - Load agent configuration from .sflow/config.json
+ * Config Loader - Load agent configuration from .flow-engine/sflow/config.json
  */
 import { access, readFile } from 'fs/promises';
 import { join } from 'path';
@@ -39,11 +39,11 @@ export interface SFlowConfig {
 export const USER_CONFIG_FILE = join(homedir(), '.config', 'opencode', 'opencode-flow-engine.json');
 
 /**
- * Load sflow config from a specific directory's .sflow/config.json
+ * Load sflow config from a specific directory's .flow-engine/sflow/config.json
  */
 export async function loadSFlowConfig(projectDir?: string): Promise<SFlowConfig> {
   const dir = projectDir || process.cwd();
-  const configPath = join(dir, '.sflow', 'config.json');
+  const configPath = join(dir, '.flow-engine/sflow', 'config.json');
 
   try {
     await access(configPath);
@@ -85,7 +85,7 @@ export async function loadUserSFlowConfig(configPath?: string): Promise<SFlowCon
 
 /**
  * Load cascading config: user-level (~/.config/opencode/opencode-flow-engine.json) as base,
- * project-level (.sflow/config.json) as higher-priority override.
+ * project-level (.flow-engine/sflow/config.json) as higher-priority override.
  */
 export async function loadCascadedSFlowConfig(projectDir?: string): Promise<SFlowConfig> {
   const user = await loadUserSFlowConfig();

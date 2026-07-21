@@ -225,7 +225,7 @@ abandoned ← 终止状态                     7-integration ← 集成+归档
 | 执行模式 | 3 种：inline / batch-inline / SDD（子代理驱动） | 1 种：每任务 fresh context |
 | 模式选择 | 自动推荐（任务数+依赖+风险）+ 用户覆盖 | 无自动选择，计划由人决定 |
 | 波次 (Wave) | 正式执行计划结构，含 wave 依赖图 + 拓扑排序 | TASK.md 中有波次划分图，但无正式执行计划 |
-| Review 收据 | `record_review_receipt` 工具持久化到 `.sflow/reviews/` | 无收据机制，review 结果在 REVIEW.md 中 |
+| Review 收据 | `record_review_receipt` 工具持久化到 `.flow-engine/sflow/reviews/` | 无收据机制，review 结果在 REVIEW.md 中 |
 | 预设升级 | hotfix/tweak 执行中超阈值自动升级到 full | 无预设模式概念 |
 
 ### 5. 门禁系统

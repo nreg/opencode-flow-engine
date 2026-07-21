@@ -34,7 +34,7 @@ async function cleanupDir(dir: string): Promise<void> {
 
 /** Create a minimal state.json for testing */
 async function setupStateJson(dir: string, overrides?: Record<string, unknown>): Promise<void> {
-  await ensureDir(dir + '/.sflow');
+  await ensureDir(dir + '/.flow-engine/sflow');
   const state = {
     state: 'approved-for-build',
     mode: 'full',
@@ -47,7 +47,7 @@ async function setupStateJson(dir: string, overrides?: Record<string, unknown>):
     createdAt: new Date().toISOString(),
     ...overrides,
   };
-  await writeFile(dir + '/.sflow/state.json', JSON.stringify(state, null, 2));
+  await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify(state, null, 2));
 }
 
 /** Sample waves for testing */
@@ -75,7 +75,7 @@ describe('createExecutionPlan', () => {
     await cleanupDir(dir);
   });
 
-  it('should create .sflow/execution-plan.json with all required fields', async () => {
+  it('should create .flow-engine/sflow/execution-plan.json with all required fields', async () => {
     const plan = await createExecutionPlan(dir, {
       mode: 'sdd',
       source: 'default',
@@ -94,7 +94,7 @@ describe('createExecutionPlan', () => {
     expect(plan.revision).toBe(1);
   });
 
-  it('should write the plan to .sflow/execution-plan.json on disk', async () => {
+  it('should write the plan to .flow-engine/sflow/execution-plan.json on disk', async () => {
     await createExecutionPlan(dir, {
       mode: 'inline',
       source: 'default',
@@ -102,7 +102,7 @@ describe('createExecutionPlan', () => {
       waves: inlineWaves,
     });
 
-    const content = await readFile(dir + '/.sflow/execution-plan.json', 'utf-8');
+    const content = await readFile(dir + '/.flow-engine/sflow/execution-plan.json', 'utf-8');
     const parsed = JSON.parse(content);
     expect(parsed.mode).toBe('inline');
     expect(parsed.revision).toBe(1);
@@ -141,7 +141,7 @@ describe('createExecutionPlan', () => {
       waves: inlineWaves,
     });
 
-    const stateContent = await readFile(dir + '/.sflow/state.json', 'utf-8');
+    const stateContent = await readFile(dir + '/.flow-engine/sflow/state.json', 'utf-8');
     const state = JSON.parse(stateContent);
     expect(state.execution_plan_hash).toBe(plan.hash);
   });

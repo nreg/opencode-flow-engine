@@ -7,7 +7,7 @@ import { isValidTransition } from '@opencode-flow-engine/core';
 import { readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, stateFileMutex, fileExists, directoryExists, readFile, listFiles } from '@opencode-flow-engine/shared';
 import { detectStateMismatch } from './state-manager.js';
 
-const SFLOW_DIR = '.sflow';
+const SFLOW_DIR = '.flow-engine/sflow';
 const STATE_FILE = `${SFLOW_DIR}/state.json`;
 const ARCHIVE_DIR = `${SFLOW_DIR}/archive`;
 
@@ -17,7 +17,7 @@ const ARCHIVE_DIR = `${SFLOW_DIR}/archive`;
  */
 export async function detectFrontend(changeDir: string): Promise<boolean> {
   // 1. Check state.json cache first
-  const state = await readJsonFile<{ isFrontend?: boolean }>(`${changeDir}/.sflow/state.json`).catch(() => null);
+  const state = await readJsonFile<{ isFrontend?: boolean }>(`${changeDir}/.flow-engine/sflow/state.json`).catch(() => null);
   if (state?.isFrontend !== undefined) return state.isFrontend;
 
   // 2. Fallback: heuristic detection from package.json (works even before state.json is initialized)
@@ -279,12 +279,12 @@ async function readStateFile(changeDir: string): Promise<{
 
   if (state) return state;
 
-  // BUG-B fix (GS-1): When state.json does not exist AND .sflow/ directory exists
+  // BUG-B fix (GS-1): When state.json does not exist AND .flow-engine/sflow/ directory exists
   // (indicating an active workflow), throw an error instead of returning silent defaults.
-  // If .sflow/ doesn't exist (no workflow started), still return defaults for backward compat.
+  // If .flow-engine/sflow/ doesn't exist (no workflow started), still return defaults for backward compat.
   const sflowDirExists = await directoryExists(`${changeDir}/${SFLOW_DIR}`);
   if (sflowDirExists) {
-    throw new Error(`[SFLOW] state.json not found at ${statePath}, but .sflow/ directory exists. This indicates an active workflow with a missing state file. Use startWorkflow() to initialize or restore from boulder-state.json.`);
+    throw new Error(`[SFLOW] state.json not found at ${statePath}, but .flow-engine/sflow/ directory exists. This indicates an active workflow with a missing state file. Use startWorkflow() to initialize or restore from boulder-state.json.`);
   }
 
   return {

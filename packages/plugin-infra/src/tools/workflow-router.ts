@@ -237,24 +237,24 @@ function matchIntent(input: string): { agent: string; action: string; descriptio
 }
 
 /**
- * Read the current workflow state from .sflow/state.json
+ * Read the current workflow state from .flow-engine/sflow/state.json
  */
 async function readWorkflowState(changeDir: string): Promise<{ state: string; mode: string } | null> {
-  const sd = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/.sflow/state.json`);
+  const sd = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/.flow-engine/sflow/state.json`);
   if (!sd?.state) return null;
   return { state: sd.state, mode: sd.mode || 'full' };
 }
 
 /**
- * Auto-discover the active change directory by scanning .sflow/changes/.
+ * Auto-discover the active change directory by scanning .flow-engine/sflow/changes/.
  * Returns the first change directory found, or the given directory if nothing found.
  */
 async function findActiveChangeDir(changeDir: string, fsDirectory: string): Promise<string> {
   // If an explicit changeDir was provided, use it directly
   if (changeDir) return changeDir;
 
-  // Scan .sflow/changes/ for active change directories
-  const changesRoot = fsDirectory + '/.sflow/changes';
+  // Scan .flow-engine/sflow/changes/ for active change directories
+  const changesRoot = fsDirectory + '/.flow-engine/sflow/changes';
   const changesDir = await directoryExists(changesRoot).catch(() => false);
   if (changesDir) {
     const { readdir } = await import('node:fs/promises');
@@ -262,7 +262,7 @@ async function findActiveChangeDir(changeDir: string, fsDirectory: string): Prom
     // Filter to directories that contain a state.json or proposal.md
     for (const entry of entries) {
       const candidate = changesRoot + '/' + entry;
-      const hasState = await fileExists(candidate + '/.sflow/state.json').catch(() => false);
+      const hasState = await fileExists(candidate + '/.flow-engine/sflow/state.json').catch(() => false);
       const hasProposal = await fileExists(candidate + '/proposal.md').catch(() => false);
       if (hasState || hasProposal) {
         return candidate;
@@ -271,7 +271,7 @@ async function findActiveChangeDir(changeDir: string, fsDirectory: string): Prom
   }
 
   // Fallback: check if fsDirectory itself is a change dir
-  const selfHasState = await fileExists(fsDirectory + '/.sflow/state.json').catch(() => false);
+  const selfHasState = await fileExists(fsDirectory + '/.flow-engine/sflow/state.json').catch(() => false);
   if (selfHasState) return fsDirectory;
 
   return changeDir || fsDirectory;

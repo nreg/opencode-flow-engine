@@ -54,7 +54,7 @@ async function initCommand(args) {
   const homedir = (await import('os')).homedir();
 
   if (isUser) {
-    const userDir = join(homedir, '.sflow');
+    const userDir = join(homedir, '.flow-engine/sflow');
     if (!existsSync(userDir)) {
       mkdirSync(userDir, { recursive: true });
       console.log(`Created user config directory: ${userDir}`);
@@ -62,7 +62,7 @@ async function initCommand(args) {
     const userConfigPath = join(userDir, 'config.json');
     if (!existsSync(userConfigPath)) {
       writeFileSync(userConfigPath, JSON.stringify(configTemplate(), null, 2));
-      console.log('Created user-level config file: ~/.sflow/config.json');
+      console.log('Created user-level config file: ~/.flow-engine/sflow/config.json');
     }
     console.log('sflow user config initialized successfully!');
     return;
@@ -72,9 +72,9 @@ async function initCommand(args) {
   
   // Create directory structure
   const dirs = [
-    '.sflow',
-    '.sflow/changes',
-    '.sflow/archive',
+    '.flow-engine/sflow',
+    '.flow-engine/sflow/changes',
+    '.flow-engine/sflow/archive',
   ];
   
   for (const dir of dirs) {
@@ -86,19 +86,19 @@ async function initCommand(args) {
   }
   
   // Create project-level config file
-  const configPath = join(projectDir, '.sflow/config.json');
+  const configPath = join(projectDir, '.flow-engine/sflow/config.json');
   if (!existsSync(configPath)) {
     writeFileSync(configPath, JSON.stringify(configTemplate(), null, 2));
-    console.log('Created config file: .sflow/config.json');
+    console.log('Created config file: .flow-engine/sflow/config.json');
   }
 
   // Also ensure user-level config exists
-  const userDir = join(homedir, '.sflow');
+  const userDir = join(homedir, '.flow-engine/sflow');
   const userConfigPath = join(userDir, 'config.json');
   if (!existsSync(userConfigPath)) {
     mkdirSync(userDir, { recursive: true });
     writeFileSync(userConfigPath, JSON.stringify(configTemplate(), null, 2));
-    console.log('Also created user-level config: ~/.sflow/config.json');
+    console.log('Also created user-level config: ~/.flow-engine/sflow/config.json');
   }
 
   console.log('sflow initialized successfully!');
@@ -222,10 +222,10 @@ function configTemplate() {
  */
 async function statusCommand(args) {
   const projectDir = args[0] || process.cwd();
-  const statePath = join(projectDir, '.sflow', 'state.json');
-  const changesDir = join(projectDir, '.sflow', 'changes');
+  const statePath = join(projectDir, '.flow-engine/sflow', 'state.json');
+  const changesDir = join(projectDir, '.flow-engine/sflow', 'changes');
   
-  if (!existsSync(join(projectDir, '.sflow'))) {
+  if (!existsSync(join(projectDir, '.flow-engine/sflow'))) {
     console.log('sflow not initialized. Run "sflow init" first.');
     return;
   }
@@ -253,7 +253,7 @@ async function statusCommand(args) {
       console.log('  (state.json exists but is invalid JSON)');
     }
   } else {
-    console.log('  No state file found (.sflow/state.json).');
+    console.log('  No state file found (.flow-engine/sflow/state.json).');
   }
   
   if (existsSync(changesDir)) {
@@ -406,7 +406,7 @@ Usage:
 
 Commands:
   init [dir]              Initialize sflow in a project
-  init --user             Initialize user-level config (~/.sflow/config.json)
+  init --user             Initialize user-level config (~/.flow-engine/sflow/config.json)
   status [dir]            Show workflow status
   validate <change-dir>   Validate artifacts
   help                    Show this help message

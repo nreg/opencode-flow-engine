@@ -1,7 +1,7 @@
 /**
  * IFlow-specific guard implementations.
  * These guards apply the same concepts as SFlow guards but read from .iflow/ artifacts
- * instead of .sflow/ artifacts.
+ * instead of .flow-engine/sflow/ artifacts.
  */
 
 import type { HookResult } from "../types.js";
@@ -157,7 +157,7 @@ export async function checkIFlowLessonsGuard(changeDir: string, data?: Record<st
 
   const iflowLessonsPath = `${iflowDir}/lessons.md`;
   const hasIFlowLessons = await fileExists(iflowLessonsPath);
-  const hasSflowLessons = await fileExists(`${changeDir}/.sflow/lessons.md`);
+  const hasSflowLessons = await fileExists(`${changeDir}/.flow-engine/sflow/lessons.md`);
 
   if (!hasIFlowLessons && !hasSflowLessons) return { success: true };
 

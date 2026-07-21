@@ -7,10 +7,10 @@
 | 维度 | spec-superflow | sFlow | 说明 |
 |------|----------------|-------|------|
 | Agent 模型 | Skill 注入（SKILL.md → AI context） | OpenCode Agent 工厂（独立 agent，独立 prompt + 工具集） | sFlow 的基础设施更强：per-agent 模型配置、fallback 链、工具隔离 |
-| 状态文件 | `.spec-superflow.yaml`（YAML，纯文本） | `.sflow/state.json`（JSON，结构化） | 功能等价。sFlow 的 JSON 支持嵌套（decisionPoints 数组） |
+| 状态文件 | `.spec-superflow.yaml`（YAML，纯文本） | `.flow-engine/sflow/state.json`（JSON，结构化） | 功能等价。sFlow 的 JSON 支持嵌套（decisionPoints 数组） |
 | 执行控制 | CLI 命令（`ssf execution plan/show/review`） | Agent + Hook 自动执行（无 CLI） | 架构差异，非功能差距 |
 | Guard 机制 | `script/guard/guard.mjs` 独立脚本 | `hooks/guard.ts` 自动 hook | sFlow 更集成（每次 transition 自动检查） |
-| 覆盖目录 | `.superpowers/sdd/` | `.sflow/checkpoints/` + `.sflow/reviews/` | sFlow 扁平化，spec-superflow 分层 |
+| 覆盖目录 | `.superpowers/sdd/` | `.flow-engine/sflow/checkpoints/` + `.flow-engine/sflow/reviews/` | sFlow 扁平化，spec-superflow 分层 |
 | 平台适配 | 9 平台独立安装脚本 | 纯 OpenCode 插件 | sFlow 只适配 OpenCode（但更深） |
 | 依赖 | 0 运行时依赖 | OpenCode SDK + 内部 3 个 package | sFlow 多了 package 层 |
 
