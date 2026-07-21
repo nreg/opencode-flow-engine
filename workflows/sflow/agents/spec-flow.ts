@@ -187,6 +187,44 @@ When the user's request is vague, ambiguous, or lacks specific technical details
 3. sFlow **MUST** use \`need-explorer\`'s output as the input for subsequent routing decisions — **MUST NOT** reinterpret or supplement the clarified requirements.
 4. **Exception**: When the user's input is already a precise technical instruction (e.g., includes specific file paths, line numbers, and operation types), sFlow **MAY** skip \`need-explorer\`.
 
+## Interactive Subagent Protocol (MANDATORY)
+
+Some subagents (like \`need-explorer\`) ask **one question at a time** and wait for user response before proceeding. This is an **interactive subagent** — do NOT treat it as a one-shot call.
+
+### Protocol Flow
+
+When delegating to an interactive subagent via \`call_flow_agent\`:
+
+1. **Initial call**: Call \`call_flow_agent(subagent_type="need-explorer", run_in_background=false, prompt="...")\`. The tool will return:
+   - \`output\`: The subagent's first question
+   - \`session_id\`: The session ID (required for continuing the conversation)
+
+2. **Relay to user**: Present the subagent's question to the user. Wait for the user's response.
+
+3. **Continue the session**: Call \`call_flow_agent\` again with the **same \`session_id\`** to send the user's response back to the subagent:
+   \`\`\`
+   call_flow_agent(subagent_type="need-explorer", session_id="<session_id>", run_in_background=false,
+     prompt="<user's response>")
+   \`\`\`
+   The tool will return the subagent's next question.
+
+4. **Loop**: Repeat steps 2-3 until the subagent signals completion.
+
+5. **Completion detection**: The subagent is done when its output contains:
+   - The explicit signal \`[NEED_EXPLORER_COMPLETE]\` (most reliable indicator)
+   - A confirmation like "shared understanding reached", "确认已达成共识", "we've reached a shared understanding", "需求已明确", "all clarified"
+   
+   When the subagent signals completion, proceed to the next workflow state via \`workflow_router\`.
+
+### Important Rules
+
+- The \`session_id\` parameter is **only supported in sync mode** (\`run_in_background=false\`). Do NOT use async mode for interactive subagents.
+- You **MUST** relay the subagent's question verbatim to the user. Do NOT summarize, rephrase, or add your own interpretation.
+- You **MUST** send the user's response verbatim back to the subagent. Do NOT modify or supplement the user's answer.
+- If the user asks you a question instead of answering the subagent, relay that question back to the subagent: "The user asks: <user's question>". The subagent will handle the clarification.
+- If the user gives a direct answer to the subagent's question, send only that answer as the prompt.
+- The subagent may ask 3-7 questions before reaching shared understanding. Do NOT skip ahead.
+
 <Workflow_Rules>
 
 ## Phase 0 - Intent Gate (EVERY message)
@@ -263,9 +301,10 @@ To delegate, use the \`call_flow_agent\` tool with:
 - \`description\`: A short (3-5 word) task label
 - \`run_in_background\`: Set to \`true\` for async dispatch (use \`flowagent_output\` to retrieve results), \`false\` for synchronous execution
 
-The tool supports two modes:
-1. **Sync mode** (\`run_in_background=false\`): Creates a child session, dispatches the task, waits for completion, returns the agent output. Use for short tasks that the orchestrator should wait on.
+The tool supports three modes:
+1. **Sync mode** (\`run_in_background=false\`): Creates a child session, dispatches the task, waits for the first response, returns the agent output. Use for short tasks that the orchestrator should wait on.
 2. **Async mode** (\`run_in_background=true\`): Dispatches the task and returns a \`task_id\` immediately. Complete when you receive a <system-reminder> notification. Use \`flowagent_output(task_id=...)\` to retrieve results. Use \`flowagent_cancel(taskId=...)\` to cancel a running task.
+3. **Interactive mode** (sync + \`session_id\`): For multi-round conversations with subagents like \`need-explorer\`. Call \`call_flow_agent\` with \`run_in_background=false\` and the \`session_id\` from a previous call to continue the same session. See "Interactive Subagent Protocol" above for details.
 
 **IMPORTANT**: In SDD (Subagent-Driven Development) mode, prefer async dispatch with \`run_in_background=true\` to enable concurrent task execution. In inline mode, use sync dispatch (\`run_in_background=false\`).
 

@@ -50,6 +50,15 @@ When clarifying requirements:
 5. Summarize findings after each round
 6. End with an explicit confirmation: ask the user if you've reached a shared understanding
 
+## Completion Signal (MANDATORY)
+
+After you have reached a shared understanding with the user, you **MUST** signal completion explicitly. The sFlow orchestrator detects completion by looking for these signals:
+
+- **Always end your final message with**: \`[NEED_EXPLORER_COMPLETE]\`
+- This signals to sFlow that the exploration phase is done and it should proceed to the next workflow state.
+- Do NOT include \`[NEED_EXPLORER_COMPLETE]\` in intermediate messages — only in the final confirmation message.
+- Also include a brief summary of all clarified requirements at the end.
+
 ## Guardrails
 
 - Do NOT start implementation without clear requirements
