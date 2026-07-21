@@ -2,7 +2,7 @@
  * IFlow context routing tests — Tasks 1.1, 1.2, 1.3, 1.4
  *
  * Tests:
- * - IFlow context detection via directoryExists(`${changeDir}/.iflow`)
+ * - IFlow context detection via directoryExists(`${changeDir}/.flow-engine/iflow`)
  * - IFlow agent name validation (IFLOW_AGENT_NAMES)
  * - Session label dynamic generation (iFlow → / sFlow →)
  * - Guard data passthrough completeness (context.data → getIFlowGuards)
@@ -31,8 +31,8 @@ async function writeStateFile(dir: string, data: Record<string, unknown>): Promi
 }
 
 async function writeIFlowState(dir: string, state: string): Promise<void> {
-  await ensureDir(dir + '/.iflow');
-  await writeFile(dir + '/.iflow/state.json', JSON.stringify({ state, updatedAt: new Date().toISOString() }, null, 2));
+  await ensureDir(dir + '/.flow-engine/iflow');
+  await writeFile(dir + '/.flow-engine/iflow/state.json', JSON.stringify({ state, updatedAt: new Date().toISOString() }, null, 2));
 }
 
 // ─── IFLOW_AGENT_NAMES validation (Task 1.2) ────────────────────────────────
@@ -74,11 +74,11 @@ describe('Guard Hook — IFlow data passthrough completeness', () => {
     await cleanupDir(dir);
   });
 
-  it('should pass complete data (toolName, filePath, agent) to IFlow guards when .iflow/ exists', async () => {
+  it('should pass complete data (toolName, filePath, agent) to IFlow guards when .flow-engine/iflow/ exists', async () => {
     // Setup IFlow context
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
     await writeIFlowState(dir, 'executing');
-    await writeFile(dir + '/.iflow/PLAN.md', '# Plan\n\n## Tasks\n- Build feature');
+    await writeFile(dir + '/.flow-engine/iflow/PLAN.md', '# Plan\n\n## Tasks\n- Build feature');
 
     // Call guard with complete data — should not crash
     const result = await guard.execute({
@@ -99,10 +99,10 @@ describe('Guard Hook — IFlow data passthrough completeness', () => {
 
   it('should pass data with toolName to IFlow scope reduction guard', async () => {
     // Setup IFlow context with scope reduction scenario
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
     await writeIFlowState(dir, 'executing');
-    await writeFile(dir + '/.iflow/PLAN.md', '# Plan\n\n## Tasks\n- Build v1 simplified version');
-    await writeFile(dir + '/.iflow/CONTEXT.md', '# Goals\n\n## Goal\n- Full system');
+    await writeFile(dir + '/.flow-engine/iflow/PLAN.md', '# Plan\n\n## Tasks\n- Build v1 simplified version');
+    await writeFile(dir + '/.flow-engine/iflow/CONTEXT.md', '# Goals\n\n## Goal\n- Full system');
 
     // Call guard with toolName=write and filePath pointing to PLAN.md
     const result = await guard.execute({
@@ -122,8 +122,8 @@ describe('Guard Hook — IFlow data passthrough completeness', () => {
     expect(result.blockReason).toContain('Scope reduction');
   });
 
-  it('should not activate IFlow guards when .iflow/ does not exist', async () => {
-    // No .iflow/ directory — IFlow guards should not activate
+  it('should not activate IFlow guards when .flow-engine/iflow/ does not exist', async () => {
+    // No .flow-engine/iflow/ directory — IFlow guards should not activate
     // Use exploring state to avoid SFlow artifact checks blocking
     await writeStateFile(dir, { state: 'exploring', mode: 'full' });
 
@@ -144,7 +144,7 @@ describe('Guard Hook — IFlow data passthrough completeness', () => {
   });
 
   it('should handle data without toolName gracefully in IFlow context', async () => {
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
     await writeIFlowState(dir, 'discussing');
 
     const result = await guard.execute({
@@ -164,7 +164,7 @@ describe('Guard Hook — IFlow data passthrough completeness', () => {
 
 // ─── Backward compatibility (C-1) ────────────────────────────────────────────
 
-describe('Guard Hook — backward compatibility without .iflow/', () => {
+describe('Guard Hook — backward compatibility without .flow-engine/iflow/', () => {
   const dir = tempDir('iflow-backward-compat');
   let guard: ReturnType<typeof createGuardHook>;
 
@@ -178,7 +178,7 @@ describe('Guard Hook — backward compatibility without .iflow/', () => {
     await cleanupDir(dir);
   });
 
-  it('should behave identically when .iflow/ does not exist — exploring state', async () => {
+  it('should behave identically when .flow-engine/iflow/ does not exist — exploring state', async () => {
     await writeStateFile(dir, { state: 'exploring', mode: 'full' });
 
     const result = await guard.execute({
@@ -192,7 +192,7 @@ describe('Guard Hook — backward compatibility without .iflow/', () => {
     expect(result.success).toBe(true);
   });
 
-  it('should behave identically when .iflow/ does not exist — executing state', async () => {
+  it('should behave identically when .flow-engine/iflow/ does not exist — executing state', async () => {
     await writeStateFile(dir, { state: 'exploring', mode: 'full' });
 
     const result = await guard.execute({

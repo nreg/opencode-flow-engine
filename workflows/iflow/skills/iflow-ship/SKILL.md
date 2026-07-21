@@ -15,7 +15,7 @@ Invoke this skill when IFlow is in the **shipping** state. The goal is to ship t
 
 ## Entry Conditions
 
-- `.iflow/VERIFICATION.md` exists with status `"passed"` or `"human_needed"` (user confirmed)
+- `.flow-engine/iflow/VERIFICATION.md` exists with status `"passed"` or `"human_needed"` (user confirmed)
 - State is `"shipping"`
 - All code changes are committed
 - Working tree is clean (no uncommitted changes)
@@ -23,7 +23,7 @@ Invoke this skill when IFlow is in the **shipping** state. The goal is to ship t
 ## Exit Conditions
 
 - PR created with auto-generated body
-- UAT.md generated in `.iflow/`
+- UAT.md generated in `.flow-engine/iflow/`
 - Branch pushed to remote
 - Return to **discussing** state for next iteration
 
@@ -86,7 +86,7 @@ If `gh` CLI unavailable: push branch manually, provide PR body template for user
 
 After creating PR:
 1. Report: PR URL, branch name, commit count
-2. Update `.iflow/STATE.md` with shipping status
+2. Update `.flow-engine/iflow/STATE.md` with shipping status
 3. Offer user options: Review PR / Request Review / Merge when ready / **Continue iteration**
 
 ## Preflight Failure Handling
@@ -122,7 +122,7 @@ Next steps:
 ### Transition
 Return to **discussing** state by updating state.json:
 ```bash
-# Update .iflow/STATE.md
+# Update .flow-engine/iflow/STATE.md
 Last Activity: YYYY-MM-DD
 Status: Phase N shipped — PR #NNN
 ```

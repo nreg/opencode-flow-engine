@@ -20,13 +20,13 @@ async function cleanupDir(dir: string): Promise<void> {
 }
 
 async function writeIFlowState(dir: string, state: string): Promise<void> {
-  await ensureDir(dir + '/.iflow');
-  await writeFile(dir + '/.iflow/state.json', JSON.stringify({ state, updatedAt: new Date().toISOString() }, null, 2));
+  await ensureDir(dir + '/.flow-engine/iflow');
+  await writeFile(dir + '/.flow-engine/iflow/state.json', JSON.stringify({ state, updatedAt: new Date().toISOString() }, null, 2));
 }
 
 async function writeIFlowArtifact(dir: string, name: string, content: string): Promise<void> {
-  await ensureDir(dir + '/.iflow');
-  await writeFile(dir + '/.iflow/' + name, content);
+  await ensureDir(dir + '/.flow-engine/iflow');
+  await writeFile(dir + '/.flow-engine/iflow/' + name, content);
 }
 
 // ─── iflowDirectoryExists ────────────────────────────────────────────────────
@@ -43,13 +43,13 @@ describe('iflowDirectoryExists', () => {
     await cleanupDir(dir);
   });
 
-  it('should return true when .iflow/ directory exists', async () => {
-    await ensureDir(dir + '/.iflow');
+  it('should return true when .flow-engine/iflow/ directory exists', async () => {
+    await ensureDir(dir + '/.flow-engine/iflow');
     const result = await iflowDirectoryExists(dir);
     expect(result).toBe(true);
   });
 
-  it('should return false when .iflow/ directory does not exist', async () => {
+  it('should return false when .flow-engine/iflow/ directory does not exist', async () => {
     const result = await iflowDirectoryExists(dir);
     expect(result).toBe(false);
   });
@@ -63,7 +63,7 @@ describe('checkIFlowGuards — data missing warning behavior', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
   });
 
   afterEach(async () => {
@@ -126,7 +126,7 @@ describe('checkIFlowGuards — scope reduction guard', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
   });
 
   afterEach(async () => {
@@ -173,7 +173,7 @@ describe('checkIFlowGuards — artifact completeness guard', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
   });
 
   afterEach(async () => {
@@ -209,7 +209,7 @@ describe('checkIFlowGuards — cyclic transition guard', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
   });
 
   afterEach(async () => {
@@ -278,7 +278,7 @@ describe('checkIFlowGuards — Nyquist Rule Guard', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
   });
 
   afterEach(async () => {
@@ -356,7 +356,7 @@ describe('checkIFlowGuards — deviation compliance content validation', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
   });
 
   afterEach(async () => {
@@ -487,7 +487,7 @@ describe('checkIFlowGuards — scope reduction guard (additional coverage)', () 
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
   });
 
   afterEach(async () => {
@@ -549,7 +549,7 @@ describe('checkIFlowGuards — cyclic transition guard (additional coverage)', (
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
   });
 
   afterEach(async () => {
@@ -654,7 +654,7 @@ describe('checkIFlowGuards — artifact completeness guard (additional coverage)
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
   });
 
   afterEach(async () => {

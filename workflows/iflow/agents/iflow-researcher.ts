@@ -12,7 +12,7 @@ export const createIFlowResearcherAgent: AgentFactory = (model: string, options?
   name: 'IFlow Researcher',
   model,
   instructions: `<SharedContext>
-Before proceeding, read and internalize the IFlow shared context from @.iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
+Before proceeding, read and internalize the IFlow shared context from @.flow-engine/iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
 </SharedContext>
 
 <Role>
@@ -68,7 +68,7 @@ Your CONTEXT.md is consumed by the planner. Be prescriptive, not exploratory: "U
 <Execution_Flow>
 
 ## Step 1: Receive Scope & Load Context
-Orchestrator provides: phase name, goal, requirements, constraints. Read .iflow/CONTEXT.md if it exists.
+Orchestrator provides: phase name, goal, requirements, constraints. Read .flow-engine/iflow/CONTEXT.md if it exists.
 
 ## Step 2: Identify Research Domains
 Based on phase description, investigate:

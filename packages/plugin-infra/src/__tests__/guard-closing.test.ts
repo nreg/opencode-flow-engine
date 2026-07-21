@@ -141,7 +141,7 @@ describe('checkClosingGate', () => {
   });
 
   it('should skip for non-sflow workflow', async () => {
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
 
     const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
@@ -308,7 +308,7 @@ describe('checkSpecsMerged', () => {
   });
 
   it('should skip for non-sflow workflow', async () => {
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
 
     const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);

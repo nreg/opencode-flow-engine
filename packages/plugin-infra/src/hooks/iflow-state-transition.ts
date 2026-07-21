@@ -7,7 +7,7 @@
  *
  * This hook ensures:
  * - Invalid transitions are blocked (e.g., executing → shipping without verifying)
- * - State is written to .iflow/state.json with previousState tracking
+ * - State is written to .flow-engine/iflow/state.json with previousState tracking
  * - Transition history is preserved for debugging
  */
 
@@ -72,8 +72,8 @@ export function createIFlowStateTransitionHook(): HookHandler {
         }
 
         // Write the state
-        await ensureDir(`${changeDir}/.iflow`);
-        await writeJsonFile(`${changeDir}/.iflow/state.json`, {
+        await ensureDir(`${changeDir}/.flow-engine/iflow`);
+        await writeJsonFile(`${changeDir}/.flow-engine/iflow/state.json`, {
           state: newState,
           previousState: currentState || undefined,
           updatedAt: new Date().toISOString(),
@@ -94,11 +94,11 @@ export function createIFlowStateTransitionHook(): HookHandler {
 }
 
 /**
- * Read the current IFlow state from .iflow/state.json
+ * Read the current IFlow state from .flow-engine/iflow/state.json
  */
 async function getCurrentIFlowState(changeDir: string): Promise<string | null> {
   try {
-    const state = await readJsonFile<{ state?: string }>(`${changeDir}/.iflow/state.json`);
+    const state = await readJsonFile<{ state?: string }>(`${changeDir}/.flow-engine/iflow/state.json`);
     return state?.state || null;
   } catch {
     return null;

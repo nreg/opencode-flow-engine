@@ -22,4 +22,4 @@ export const IFLOW_AGENT_NAMES = [
 ] as const;
 
 /** IFlow workflow directory name */
-export const IFLOW_DIR = '.iflow';
+export const IFLOW_DIR = '.flow-engine/iflow';

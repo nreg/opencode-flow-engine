@@ -61,7 +61,7 @@ function createIFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
 
   return {
     iflow_router: {
-      description: 'Detect current IFlow state from .iflow/ directory artifacts and route to the appropriate agent. Supports IFlow-specific intent patterns.',
+      description: 'Detect current IFlow state from .flow-engine/iflow/ directory artifacts and route to the appropriate agent. Supports IFlow-specific intent patterns.',
       args: {
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
@@ -319,7 +319,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
 
             } else {
               try {
-                await ensureDir(`${workDir}/.iflow`);
+                await ensureDir(`${workDir}/.flow-engine/iflow`);
                 await writeJsonFile(`${workDir}/${getStateFilePath('iflow')}`, {
                   state: newState,
                   updatedAt: new Date().toISOString(),

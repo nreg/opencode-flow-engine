@@ -112,17 +112,17 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
   let guard: ReturnType<typeof createGuardHook>;
 
   async function writeIFlowDir(d: string): Promise<void> {
-    await ensureDir(d + '/.iflow');
+    await ensureDir(d + '/.flow-engine/iflow');
   }
 
   async function writeIFlowState(d: string, state: string): Promise<void> {
-    await ensureDir(d + '/.iflow');
-    await writeFile(d + '/.iflow/state.json', JSON.stringify({ state, updatedAt: new Date().toISOString() }, null, 2));
+    await ensureDir(d + '/.flow-engine/iflow');
+    await writeFile(d + '/.flow-engine/iflow/state.json', JSON.stringify({ state, updatedAt: new Date().toISOString() }, null, 2));
   }
 
   async function writeIFlowArtifact(d: string, name: string, content: string): Promise<void> {
-    await ensureDir(d + '/.iflow');
-    await writeFile(d + '/.iflow/' + name, content);
+    await ensureDir(d + '/.flow-engine/iflow');
+    await writeFile(d + '/.flow-engine/iflow/' + name, content);
   }
 
   beforeEach(async () => {
@@ -314,7 +314,7 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
     expect(result.success).toBe(true);
   });
 
-  it('should maintain backward compatibility — SFlow still works without .iflow/', async () => {
+  it('should maintain backward compatibility — SFlow still works without .flow-engine/iflow/', async () => {
     await writeStateFile(dir, { state: 'exploring', mode: 'full' });
 
     const result = await guard.execute({
@@ -381,8 +381,8 @@ describe('Guard Hook — detectActiveWorkflow single-call optimization', () => {
     await cleanupDir(dir);
   });
 
-  it('should call directoryExists only 2 times (once for .iflow, once for .flow-engine/sflow) in SFlow mode', async () => {
-    // SFlow mode: .flow-engine/sflow/ exists, no .iflow/
+  it('should call directoryExists only 2 times (once for .flow-engine/iflow, once for .flow-engine/sflow) in SFlow mode', async () => {
+    // SFlow mode: .flow-engine/sflow/ exists, no .flow-engine/iflow/
     await writeStateFile(dir, { state: 'exploring', mode: 'full' });
 
     let directoryExistsCallCount = 0;
@@ -396,7 +396,7 @@ describe('Guard Hook — detectActiveWorkflow single-call optimization', () => {
       await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
 
       // After optimization: detectActiveWorkflow called once at entry,
-      // which calls directoryExists at most 2 times (.iflow + .flow-engine/sflow)
+      // which calls directoryExists at most 2 times (.flow-engine/iflow + .flow-engine/sflow)
       // + 1 call from checkSpecsMerged (specs/delta/ existence check)
       expect(directoryExistsCallCount).toBeLessThanOrEqual(3);
     } finally {
@@ -404,8 +404,8 @@ describe('Guard Hook — detectActiveWorkflow single-call optimization', () => {
     }
   });
 
-  it('should call directoryExists only 1 time in IFlow mode (.iflow/ exists, short-circuit)', async () => {
-    await ensureDir(dir + '/.iflow');
+  it('should call directoryExists only 1 time in IFlow mode (.flow-engine/iflow/ exists, short-circuit)', async () => {
+    await ensureDir(dir + '/.flow-engine/iflow');
 
     let directoryExistsCallCount = 0;
     const originalDirectoryExists = shared.directoryExists;
@@ -417,7 +417,7 @@ describe('Guard Hook — detectActiveWorkflow single-call optimization', () => {
     try {
       await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
 
-      // IFlow short-circuit: detectActiveWorkflow uses 1 call for .iflow/,
+      // IFlow short-circuit: detectActiveWorkflow uses 1 call for .flow-engine/iflow/,
       // plus additional calls from selective guards (e.g., checkIFlowArtifactAndPhaseConsistency)
       expect(directoryExistsCallCount).toBeLessThanOrEqual(4);
     } finally {
@@ -440,7 +440,7 @@ describe('Guard Hook — detectActiveWorkflow single-call optimization', () => {
   });
 
   it('should maintain IFlow selective guard behavior after optimization', async () => {
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
 
     const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);

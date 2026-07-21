@@ -81,7 +81,7 @@ CLI (index.tsx: TUI+React)
 ## 四、Codebuff 缺失的部分（iFlow 主战场）
 
 - ❌ 无内置 verifying/release 阶段
-- ❌ 无 `.iflow` 制品文件系统
+- ❌ 无 `.flow-engine/iflow` 制品文件系统
 - ❌ 无对抗性验证（BLOCKER/WARNING 分类）
 - ❌ 无明确范围缩减禁令
 - ❌ 无合约驱动的验收标准

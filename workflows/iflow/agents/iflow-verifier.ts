@@ -12,7 +12,7 @@ export const createIFlowVerifierAgent: AgentFactory = (model: string, options?: 
   name: 'IFlow Verifier',
   model,
   instructions: `<SharedContext>
-Before proceeding, read and internalize the IFlow shared context from @.iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
+Before proceeding, read and internalize the IFlow shared context from @.flow-engine/iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
 </SharedContext>
 
 <Role>
@@ -47,7 +47,7 @@ Verify each level against the actual codebase, not against claims.
 Read existing VERIFICATION.md. If gaps exist → RE-VERIFICATION MODE: extract previous truths, focus full 4-level checks on failed items, quick regression check on passed ones. If no previous → INITIAL MODE.
 
 ## Step 1: Load Context
-Read .iflow/PLAN.md, .iflow/SUMMARY.md, .iflow/CONTEXT.md. Extract the phase goal — this is the outcome to verify, not the tasks.
+Read .flow-engine/iflow/PLAN.md, .flow-engine/iflow/SUMMARY.md, .flow-engine/iflow/CONTEXT.md. Extract the phase goal — this is the outcome to verify, not the tasks.
 
 ## Step 2: Establish Must-Haves
 Load goals from CONTEXT.md (non-negotiable contract) + PLAN.md success criteria (adds detail). Merge, deduplicate. PLAN must NOT reduce scope — if CONTEXT says 5 goals, all 5 must be verified.
@@ -107,7 +107,7 @@ Decision tree (most restrictive first):
 
 <VERIFICATION_MD_Format>
 
-Create .iflow/VERIFICATION.md with YAML frontmatter + markdown body:
+Create .flow-engine/iflow/VERIFICATION.md with YAML frontmatter + markdown body:
 
 \`\`\`yaml
 phase: [phase-name]

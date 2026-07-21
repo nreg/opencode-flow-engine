@@ -23,7 +23,7 @@ Invoke this skill when IFlow is in the **verifying** state. The goal is to verif
 
 ## Entry Conditions
 
-- .iflow/SUMMARY.md exists
+- .flow-engine/iflow/SUMMARY.md exists
 - State is "verifying"
 
 ## Exit Conditions

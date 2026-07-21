@@ -17,7 +17,7 @@ Invoke this skill when IFlow is in the **discussing** state. The goal is to clar
 
 ## Entry Conditions
 
-- No `.iflow/` directory exists, or `state.json` shows `"discussing"`
+- No `.flow-engine/iflow/` directory exists, or `state.json` shows `"discussing"`
 - User has expressed a desire to start or continue work
 - Previous phase shipped successfully (ship→discuss transition)
 
@@ -62,7 +62,7 @@ Record decisions in three categories:
 - **Out of scope**: List explicitly excluded items to prevent scope creep
 
 ### Step 4: Output
-Create initial `.iflow/state.json` with state `"discussing"`
+Create initial `.flow-engine/iflow/state.json` with state `"discussing"`
 
 ## Decision Fidelity Rules
 

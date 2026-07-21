@@ -12,7 +12,7 @@ export const createIFlowShipperAgent: AgentFactory = (model: string, options?: {
   name: 'IFlow Shipper',
   model,
   instructions: `<SharedContext>
-Before proceeding, read and internalize the IFlow shared context from @.iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
+Before proceeding, read and internalize the IFlow shared context from @.flow-engine/iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
 </SharedContext>
 
 <Role>
@@ -87,7 +87,7 @@ Generate PR body with these sections:
 ## After Shipping
 
 1. Report PR URL and branch name to user
-2. Update .iflow/STATE.md with shipping status
+2. Update .flow-engine/iflow/STATE.md with shipping status
 3. Offer continuation paths: Review PR, Request Review, Merge when ready, Continue iteration
 
 **Shipped report format:**

@@ -113,7 +113,7 @@ npm install -g opencode-flow-engine
 |------|-------|-------|
 | 流程形状 | 线性（终止于 closed/abandoned） | 循环（回到 discuss） |
 | 产物 | proposal, specs, design, tasks, contract | CONTEXT, PLAN, SUMMARY, VERIFICATION, UAT |
-| 状态目录 | `.flow-engine/sflow/` | `.iflow/` |
+| 状态目录 | `.flow-engine/sflow/` | `.flow-engine/iflow/` |
 | 方法论 | OpenSpec + Superpowers | GSD（Get Stuff Done） |
 | 验证方式 | 基于合约的校验 | 对抗性验证 |
 | 范围控制 | guard hook 强制 | agent prompt 声明 |

@@ -1,6 +1,6 @@
 /**
  * IFlow Router tool - State detection and routing for IFlow workflow
- * Detects IFlow state from .iflow/ directory artifacts
+ * Detects IFlow state from .flow-engine/iflow/ directory artifacts
  */
 
 import type { ToolDefinition, ToolContext, ToolResult } from "./types.js";
@@ -83,10 +83,10 @@ const IFLOW_INTENT_PATTERNS: Array<{
 ];
 
 /**
- * Detect IFlow state from .iflow/ directory artifacts
+ * Detect IFlow state from .flow-engine/iflow/ directory artifacts
  */
 async function detectIFlowState(changeDir: string): Promise<IFlowStateResult> {
-  const iflowDir = `${changeDir}/.iflow`;
+  const iflowDir = `${changeDir}/.flow-engine/iflow`;
   const dirExists = await directoryExists(iflowDir);
 
   let result: IFlowStateResult;
@@ -98,7 +98,7 @@ async function detectIFlowState(changeDir: string): Promise<IFlowStateResult> {
       state: 'discussing',
       iteration: 0,
       artifacts: {},
-      reasons: ['No .iflow/ directory found — starting fresh'],
+      reasons: ['No .flow-engine/iflow/ directory found — starting fresh'],
     };
   } else {
     // Check for state file with previous state tracking
@@ -169,7 +169,7 @@ async function detectIFlowState(changeDir: string): Promise<IFlowStateResult> {
 }
 
 /**
- * Persist detected state to .iflow/ artifacts (state.json + STATE.md)
+ * Persist detected state to .flow-engine/iflow/ artifacts (state.json + STATE.md)
  */
 async function persistIFlowState(
   iflowDir: string,
@@ -246,7 +246,7 @@ async function manageExecutingMarker(
 }
 
 /**
- * Read IFlow artifacts from the .iflow/ directory
+ * Read IFlow artifacts from the .flow-engine/iflow/ directory
  */
 async function readArtifacts(iflowDir: string): Promise<IFlowArtifacts> {
   const [hasContext, hasPlan, hasSummary, hasUat, hasExecuting] = await Promise.all([
@@ -281,7 +281,7 @@ function getArtifactReason(artifacts: IFlowArtifacts): string {
   if (artifacts.EXECUTING) return 'EXECUTING marker found — in execution phase';
   if (artifacts.PLAN) return 'PLAN.md found — ready to execute';
   if (artifacts.CONTEXT) return 'CONTEXT.md found — ready to plan';
-  return '.iflow/ directory exists but no artifacts found — start discussing';
+  return '.flow-engine/iflow/ directory exists but no artifacts found — start discussing';
 }
 
 /**
@@ -303,7 +303,7 @@ function matchIFlowIntent(input: string): { state: IFlowState; description: stri
 export function createIFlowRouterTool(): ToolDefinition {
   return {
     name: "iflow_router",
-    description: "Detect current IFlow state from .iflow/ directory artifacts and route to the appropriate agent. Supports IFlow-specific intent patterns.",
+    description: "Detect current IFlow state from .flow-engine/iflow/ directory artifacts and route to the appropriate agent. Supports IFlow-specific intent patterns.",
     parameters: {
       changeDir: {
         type: "string",

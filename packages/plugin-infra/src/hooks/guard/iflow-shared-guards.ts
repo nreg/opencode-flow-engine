@@ -1,6 +1,6 @@
 /**
  * IFlow-specific guard implementations.
- * These guards apply the same concepts as SFlow guards but read from .iflow/ artifacts
+ * These guards apply the same concepts as SFlow guards but read from .flow-engine/iflow/ artifacts
  * instead of .flow-engine/sflow/ artifacts.
  */
 
@@ -38,16 +38,16 @@ function isSourceCodePath(filePath: string): boolean {
 
 function isIFlowArtifactPath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/');
-  return normalized.includes('.iflow/') || normalized.endsWith('.iflow');
+  return normalized.includes('.flow-engine/iflow/') || normalized.endsWith('.flow-engine/iflow');
 }
 
 /**
  * IFlow artifact + phase consistency guard.
- * Checks that required .iflow/ artifacts exist for the current state
+ * Checks that required .flow-engine/iflow/ artifacts exist for the current state
  * and that state transitions follow the cyclic model.
  */
 export async function checkIFlowArtifactAndPhaseConsistency(changeDir: string): Promise<HookResult> {
-  const iflowDir = `${changeDir}/.iflow`;
+  const iflowDir = `${changeDir}/.flow-engine/iflow`;
   const iflowExists = await directoryExists(iflowDir);
   if (!iflowExists) return { success: true };
 
@@ -92,7 +92,7 @@ export async function checkIFlowFileWriteGuard(changeDir: string, data?: Record<
   const filePath = (data.filePath as string) || '';
   if (!filePath) return { success: true };
 
-  const iflowDir = `${changeDir}/.iflow`;
+  const iflowDir = `${changeDir}/.flow-engine/iflow`;
   const stateData = await readJsonFile<{ state?: string }>(`${iflowDir}/state.json`);
   if (!stateData?.state) return { success: true };
 
@@ -121,7 +121,7 @@ export async function checkIFlowFileWriteGuard(changeDir: string, data?: Record<
 
 /**
  * IFlow LESSONS guard.
- * Reads from .iflow/ directory for LESSONS.md knowledge base.
+ * Reads from .flow-engine/iflow/ directory for LESSONS.md knowledge base.
  * Warns when starting a task that matches an active lesson entry.
  */
 export async function checkIFlowLessonsGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
@@ -132,7 +132,7 @@ export async function checkIFlowLessonsGuard(changeDir: string, data?: Record<st
   const isDebuggingAgent = agent.includes('bug-investigator');
   if (!isBuildExecutor && !isDebuggingAgent) return { success: true };
 
-  const iflowDir = `${changeDir}/.iflow`;
+  const iflowDir = `${changeDir}/.flow-engine/iflow`;
   const stateData = await readJsonFile<{ state?: string }>(`${iflowDir}/state.json`);
   const currentState = stateData?.state || '';
 
@@ -176,12 +176,12 @@ export async function checkIFlowLessonsGuard(changeDir: string, data?: Record<st
 
 /**
  * IFlow Progress Anti-Repeat guard.
- * Reads from .iflow/progress.md for excluded approaches.
+ * Reads from .flow-engine/iflow/progress.md for excluded approaches.
  */
 export async function checkIFlowProgressAntiRepeatGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
   if (!data) return { success: true };
 
-  const iflowProgressPath = `${changeDir}/.iflow/progress.md`;
+  const iflowProgressPath = `${changeDir}/.flow-engine/iflow/progress.md`;
   const hasIFlowProgress = await fileExists(iflowProgressPath);
 
   if (hasIFlowProgress) {
@@ -249,7 +249,7 @@ export async function checkIFlowOmoUsageGuard(changeDir: string, data?: Record<s
   const toolName = (data.toolName as string) || '';
   if (toolName !== 'read' && toolName !== 'grep') return { success: true };
 
-  const iflowDir = `${changeDir}/.iflow`;
+  const iflowDir = `${changeDir}/.flow-engine/iflow`;
   const stateData = await readJsonFile<{ state?: string }>(`${iflowDir}/state.json`);
   const currentState = stateData?.state || '';
   if (currentState !== 'researching') return { success: true };

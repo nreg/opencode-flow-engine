@@ -243,7 +243,7 @@ describe('Hook Composer', () => {
     it('should block invalid iflow_state_transition', async () => {
       composer.initialize();
       const tmpDir = mkdtempSync(join(tmpdir(), 'iflow-hook-invalid-'));
-      const iflowStateDir = join(tmpDir, '.iflow');
+      const iflowStateDir = join(tmpDir, '.flow-engine/iflow');
       const { mkdirSync, writeFileSync } = await import('fs');
       mkdirSync(iflowStateDir, { recursive: true });
       writeFileSync(join(iflowStateDir, 'state.json'), JSON.stringify({ state: 'discussing' }));

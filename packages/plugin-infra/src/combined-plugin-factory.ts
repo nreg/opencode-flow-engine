@@ -64,7 +64,7 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
       if (lower === 'iflow' || lower.startsWith('iflow-')) return 'iFlow';
       if (lower === 'sflow' || lower.startsWith('sflow-')) return 'sFlow';
       // Fallback: check directory
-      if (changeDir.includes('.iflow')) return 'iFlow';
+      if (changeDir.includes('.flow-engine/iflow')) return 'iFlow';
       if (changeDir.includes('.flow-engine/sflow')) return 'sFlow';
       return 'WF';
     },
@@ -74,7 +74,7 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
 
       // Detect workflow context
       const isSFlowContext = await directoryExists(`${changeDir}/.flow-engine/sflow`);
-      const isIFlowContext = await directoryExists(`${changeDir}/.iflow`);
+      const isIFlowContext = await directoryExists(`${changeDir}/.flow-engine/iflow`);
 
       let callerWorkflow: 'iflow' | 'sflow' | 'unknown' = 'unknown';
       if (isIFlowContext && !isSFlowContext) {
@@ -130,7 +130,7 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
     },
 
     iflow_router: {
-      description: 'Detect current IFlow state from .iflow/ directory artifacts and route to the appropriate agent. Supports IFlow-specific intent patterns.',
+      description: 'Detect current IFlow state from .flow-engine/iflow/ directory artifacts and route to the appropriate agent. Supports IFlow-specific intent patterns.',
       args: {
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
@@ -406,7 +406,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
 
           } else {
             try {
-              await ensureDir(`${workDir}/.iflow`);
+              await ensureDir(`${workDir}/.flow-engine/iflow`);
               await writeJsonFile(`${workDir}/${getStateFilePath('iflow')}`, {
                 state: newState,
                 updatedAt: new Date().toISOString(),

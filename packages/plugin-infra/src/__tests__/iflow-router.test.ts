@@ -15,21 +15,21 @@ async function cleanupDir(dir: string): Promise<void> {
 }
 
 async function writeIFlowState(dir: string, data: Record<string, unknown>): Promise<void> {
-  await ensureDir(dir + '/.iflow');
-  await writeFile(dir + '/.iflow/state.json', JSON.stringify(data, null, 2));
+  await ensureDir(dir + '/.flow-engine/iflow');
+  await writeFile(dir + '/.flow-engine/iflow/state.json', JSON.stringify(data, null, 2));
 }
 
 async function writeIFlowArtifact(dir: string, name: string, content: string): Promise<void> {
-  await ensureDir(dir + '/.iflow');
-  await writeFile(dir + '/.iflow/' + name, content);
+  await ensureDir(dir + '/.flow-engine/iflow');
+  await writeFile(dir + '/.flow-engine/iflow/' + name, content);
 }
 
 async function removeIFlowState(dir: string): Promise<void> {
-  try { await unlink(dir + '/.iflow/state.json'); } catch {}
+  try { await unlink(dir + '/.flow-engine/iflow/state.json'); } catch {}
 }
 
 async function removeIFlowArtifact(dir: string, name: string): Promise<void> {
-  try { await unlink(dir + '/.iflow/' + name); } catch {}
+  try { await unlink(dir + '/.flow-engine/iflow/' + name); } catch {}
 }
 
 async function fileExistsAt(path: string): Promise<boolean> {
@@ -42,7 +42,7 @@ describe('IFlow Router — EXECUTING marker fallback detection', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
   });
 
   afterEach(async () => {
@@ -114,7 +114,7 @@ describe('IFlow Router — EXECUTING marker fallback detection', () => {
     expect(data.data.state).toBe('executing');
 
     const { readJsonFile } = await import('@opencode-flow-engine/shared');
-    const restored = await readJsonFile<{ state?: string }>(dir + '/.iflow/state.json');
+    const restored = await readJsonFile<{ state?: string }>(dir + '/.flow-engine/iflow/state.json');
     expect(restored?.state).toBe('executing');
   });
 
@@ -188,7 +188,7 @@ describe('IFlow Router — determineArtifactState', () => {
   });
 
   it('should detect "discussing" when no artifacts exist', async () => {
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
 
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
@@ -203,7 +203,7 @@ describe('IFlow Router — determineArtifactState', () => {
   });
 
   it('should detect "researching" when only CONTEXT.md exists', async () => {
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
     await writeIFlowArtifact(dir, 'CONTEXT.md', '# Context');
 
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
@@ -219,7 +219,7 @@ describe('IFlow Router — determineArtifactState', () => {
   });
 
   it('should detect "planning" when only PLAN.md exists', async () => {
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
     await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
 
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
@@ -235,7 +235,7 @@ describe('IFlow Router — determineArtifactState', () => {
   });
 
   it('should detect "executing" when EXECUTING marker exists', async () => {
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
     await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
     await writeIFlowArtifact(dir, 'EXECUTING', JSON.stringify({
       enteredAt: '2025-01-01T00:00:00Z',
@@ -256,7 +256,7 @@ describe('IFlow Router — determineArtifactState', () => {
   });
 
   it('should detect "verifying" when SUMMARY.md exists', async () => {
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
     await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
     await writeIFlowArtifact(dir, 'SUMMARY.md', '# Summary');
 
@@ -273,7 +273,7 @@ describe('IFlow Router — determineArtifactState', () => {
   });
 
   it('should detect "shipping" when UAT.md exists', async () => {
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
     await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
     await writeIFlowArtifact(dir, 'SUMMARY.md', '# Summary');
     await writeIFlowArtifact(dir, 'UAT.md', '# UAT');
@@ -291,7 +291,7 @@ describe('IFlow Router — determineArtifactState', () => {
   });
 
   it('should use most advanced artifact (UAT > SUMMARY > EXECUTING > PLAN > CONTEXT)', async () => {
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
     await writeIFlowArtifact(dir, 'CONTEXT.md', '# Context');
     await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
     await writeIFlowArtifact(dir, 'SUMMARY.md', '# Summary');
@@ -318,7 +318,7 @@ describe('IFlow Router — matchIFlowIntent', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
   });
 
   afterEach(async () => {
@@ -469,12 +469,12 @@ describe('IFlow Router — EXECUTING file lifecycle', () => {
   });
 
   it('should create EXECUTING marker when state is executing and marker does not exist', async () => {
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
     await writeIFlowState(dir, { state: 'executing', iteration: 1 });
     await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
     await writeIFlowArtifact(dir, 'SUMMARY.md', '# Summary');
 
-    const existsBefore = await fileExistsAt(dir + '/.iflow/EXECUTING');
+    const existsBefore = await fileExistsAt(dir + '/.flow-engine/iflow/EXECUTING');
     expect(existsBefore).toBe(false);
 
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
@@ -484,12 +484,12 @@ describe('IFlow Router — EXECUTING file lifecycle', () => {
       { directory: dir } as any,
     );
 
-    const existsAfter = await fileExistsAt(dir + '/.iflow/EXECUTING');
+    const existsAfter = await fileExistsAt(dir + '/.flow-engine/iflow/EXECUTING');
     expect(existsAfter).toBe(true);
   });
 
   it('should remove EXECUTING marker when leaving executing state via artifact detection', async () => {
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
     await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
     await writeIFlowArtifact(dir, 'SUMMARY.md', '# Summary');
     await writeIFlowArtifact(dir, 'EXECUTING', JSON.stringify({
@@ -498,7 +498,7 @@ describe('IFlow Router — EXECUTING file lifecycle', () => {
       iteration: 1,
     }));
 
-    const existsBefore = await fileExistsAt(dir + '/.iflow/EXECUTING');
+    const existsBefore = await fileExistsAt(dir + '/.flow-engine/iflow/EXECUTING');
     expect(existsBefore).toBe(true);
 
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
@@ -508,12 +508,12 @@ describe('IFlow Router — EXECUTING file lifecycle', () => {
       { directory: dir } as any,
     );
 
-    const existsAfter = await fileExistsAt(dir + '/.iflow/EXECUTING');
+    const existsAfter = await fileExistsAt(dir + '/.flow-engine/iflow/EXECUTING');
     expect(existsAfter).toBe(false);
   });
 });
 
-// ─── IFlow Router — fresh start (no .iflow/ directory) ────────────────────────
+// ─── IFlow Router — fresh start (no .flow-engine/iflow/ directory) ────────────────────────
 
 describe('IFlow Router — fresh start', () => {
   const dir = tempDir('iflow-router-fresh');
@@ -527,7 +527,7 @@ describe('IFlow Router — fresh start', () => {
     await cleanupDir(dir);
   });
 
-  it('should return "discussing" state when no .iflow/ directory exists', async () => {
+  it('should return "discussing" state when no .flow-engine/iflow/ directory exists', async () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
@@ -543,7 +543,7 @@ describe('IFlow Router — fresh start', () => {
     expect(data.data.reasons[0]).toContain('starting fresh');
   });
 
-  it('should create .iflow/ directory and state.json on fresh start', async () => {
+  it('should create .flow-engine/iflow/ directory and state.json on fresh start', async () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     await tool.execute(
@@ -552,7 +552,7 @@ describe('IFlow Router — fresh start', () => {
     );
 
     const { readJsonFile } = await import('@opencode-flow-engine/shared');
-    const state = await readJsonFile<{ state?: string }>(dir + '/.iflow/state.json');
+    const state = await readJsonFile<{ state?: string }>(dir + '/.flow-engine/iflow/state.json');
     expect(state?.state).toBe('discussing');
   });
 });
@@ -565,7 +565,7 @@ describe('IFlow Router — rollback detection', () => {
   beforeEach(async () => {
     await cleanupDir(dir);
     await ensureDir(dir);
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
   });
 
   afterEach(async () => {

@@ -12,7 +12,7 @@ export const createIFlowPlanExecutorAgent: AgentFactory = (model: string, option
   name: 'IFlow Plan-Executor',
   model,
   instructions: `<SharedContext>
-Before proceeding, read and internalize the IFlow shared context from @.iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
+Before proceeding, read and internalize the IFlow shared context from @.flow-engine/iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
 </SharedContext>
 
 <Role>

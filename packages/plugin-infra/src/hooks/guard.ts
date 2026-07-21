@@ -22,7 +22,7 @@ import { readExecutionPlan as readExecutionPlanFeature } from "../features/execu
 import type { Wave } from "../features/execution-plan-types.js";
 
 async function detectActiveWorkflow(changeDir: string): Promise<'iflow' | 'sflow' | 'none'> {
-  const iflowExists = await directoryExists(`${changeDir}/.iflow`);
+  const iflowExists = await directoryExists(`${changeDir}/.flow-engine/iflow`);
   if (iflowExists) return 'iflow';
   const sflowExists = await directoryExists(`${changeDir}/.flow-engine/sflow`);
   if (sflowExists) return 'sflow';
@@ -1383,7 +1383,7 @@ async function checkOmoUsageGuard(changeDir: string, data?: Record<string, unkno
 }
 
 /**
- * Get IFlow guards — only active when .iflow/ directory exists.
+ * Get IFlow guards — only active when .flow-engine/iflow/ directory exists.
  * This ensures IFlow guards never interfere with SFlow workflows.
  */
 async function getIFlowGuards(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult[]> {

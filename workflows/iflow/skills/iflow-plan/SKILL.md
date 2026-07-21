@@ -17,7 +17,7 @@ Invoke this skill when IFlow is in the **planning** state. The goal is to genera
 
 ## Entry Conditions
 
-- `.iflow/CONTEXT.md` exists with goals, constraints, decisions
+- `.flow-engine/iflow/CONTEXT.md` exists with goals, constraints, decisions
 - State is `"planning"` or can transition to planning
 - Research findings are available (or explicitly not needed for Level 0 tasks)
 
@@ -33,8 +33,8 @@ Invoke this skill when IFlow is in the **planning** state. The goal is to genera
 
 ### Step 1: Read Context
 Load and parse:
-- `.iflow/CONTEXT.md` — goals, constraints, locked decisions (D-IDs)
-- `.iflow/IFLOW-CONTEXT.md` — shared IFlow state machine, core principles
+- `.flow-engine/iflow/CONTEXT.md` — goals, constraints, locked decisions (D-IDs)
+- `.flow-engine/iflow/IFLOW-CONTEXT.md` — shared IFlow state machine, core principles
 
 ### Step 2: Multi-Source Coverage Audit
 Audit all 4 source types BEFORE writing tasks:

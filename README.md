@@ -113,7 +113,7 @@ On context restoration, sFlow detects artifact/state mismatches and auto-repairs
 |-----------|-------|-------|
 | Flow shape | Linear (terminates at closed/abandoned) | Cyclic (returns to discuss) |
 | Artifacts | proposal, specs, design, tasks, contract | CONTEXT, PLAN, SUMMARY, VERIFICATION, UAT |
-| State dir | `.flow-engine/sflow/` | `.iflow/` |
+| State dir | `.flow-engine/sflow/` | `.flow-engine/iflow/` |
 | Methodology | OpenSpec + Superpowers | GSD (Get Stuff Done) |
 | Verification | Contract-based validation | Adversarial verification |
 | Scope reduction | Guard hook enforced | Agent prompt declaration |

@@ -12,7 +12,7 @@ export const createIFlowAgent: AgentFactory = (model: string, options?: { temper
   name: 'IFlow',
   model,
   instructions: `<SharedContext>
-Before proceeding, read and internalize the IFlow shared context from @.iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
+Before proceeding, read and internalize the IFlow shared context from @.flow-engine/iflow/IFLOW-CONTEXT.md. This file contains the IFlow state machine, agent mapping, and core principles that all IFlow agents share. When executing, reference the state machine for transition decisions and the agent mapping for delegation targets.
 </SharedContext>
 
 <Role>
@@ -42,7 +42,7 @@ You are "IFlow" — Iterative Workflow Agent from OpenCode Plugin.
 - Be concise and professional. Use short paragraphs, bullet points, structured formatting.
 - Never use tools to communicate with the user. All communication goes through your text output.
 - Use emojis sparingly and only when they add clarity.
-- Keep file creation to the minimum necessary for the workflow (.iflow/ artifacts).
+- Keep file creation to the minimum necessary for the workflow (.flow-engine/iflow/ artifacts).
 </Role>
 
 <Workflow>
@@ -154,7 +154,7 @@ When the user's request is vague, ambiguous, or lacks specific technical details
 
 ## State Detection
 
-Before routing, inspect the project's .iflow/ directory for artifacts (ordered by priority, highest first):
+Before routing, inspect the project's .flow-engine/iflow/ directory for artifacts (ordered by priority, highest first):
 1. UAT.md exists → shipping
 2. SUMMARY.md exists → verifying
 3. EXECUTING marker found → executing
@@ -196,7 +196,7 @@ Always start your response with:
 - Use bullet points for lists; group related items; keep each bullet concise (1-2 lines max).
 - Use **bold** for short section headers (1-3 words).
 - Use backticks for file paths, tool names, and inline code.
-- Use workspace-relative paths: \`.iflow/CONTEXT.md\`, \`.iflow/PLAN.md\`.
+- Use workspace-relative paths: \`.flow-engine/iflow/CONTEXT.md\`, \`.flow-engine/iflow/PLAN.md\`.
 - Tone: Collaborative, concise, factual. Present tense, active voice.
 - No nesting: Avoid nested bullet lists.
 - Keep it simple: For simple confirmations, skip heavy formatting.`,

@@ -10,7 +10,7 @@
 |------|-------------------------------------|---------|
 | 定位 | OpenCode 插件，嵌入 AI 编码工具 | 独立的通用工作流系统，跨平台 |
 | 架构形态 | OpenCode Plugin (hooks + tools + agents) | CLI + Python 脚本 + Node.js Core SDK |
-| 状态管理 | 文件状态机（`.flow-engine/sflow/state.json` / `.iflow/state.json`） | 文件状态机（`.trellis/tasks/<task>/task.json`）+ 运行时面包屑 |
+| 状态管理 | 文件状态机（`.flow-engine/sflow/state.json` / `.flow-engine/iflow/state.json`） | 文件状态机（`.trellis/tasks/<task>/task.json`）+ 运行时面包屑 |
 | 工作流模式 | 线性（SFlow 9 态）/ 循环（IFlow 6 态） | 3 阶段线性（Plan → Execute → Finish） |
 | 子代理机制 | OpenCode 子会话（`call_flow_agent`） | 通道（Channel）事件系统 + 工作线程 |
 | 核心 SDK | 自定义 TypeScript 包 | `@mindfoldhq/trellis-core` (TypeScript) |
@@ -97,7 +97,7 @@
 
 **Trellis 做法**：`workflow.md` 中嵌入 `[workflow-state:planning]` / `[workflow-state:in_progress]` 标记块，Hook 脚本自动解析并注入到每轮对话的头部。每次状态变更时自动更新。
 
-**sFlow 做法**：状态存储在 `.flow-engine/sflow/state.json` / `.iflow/state.json` 中，agent 通过 `workflow_router` / `iflow_router` 工具检测。
+**sFlow 做法**：状态存储在 `.flow-engine/sflow/state.json` / `.flow-engine/iflow/state.json` 中，agent 通过 `workflow_router` / `iflow_router` 工具检测。
 
 **借鉴价值：中。** Trellis 的方式更"人机可读"，直接在 `workflow.md` 中可见，但 sFlow 的 JSON 方式更程序化。可以借鉴将状态标记嵌入到 agent system prompt 中，让 agent 始终知道当前状态（sFlow 已经在做，但可更系统化）。
 

@@ -19,11 +19,11 @@ Invoke this skill when IFlow is in the **discussing** state. The goal is to clar
 1. **Clarify Requirements**: Ask questions to surface hidden requirements, constraints, and edge cases
 2. **Capture Decisions**: Record locked decisions (D-01, D-02, etc.) and deferred ideas
 3. **Define Scope**: Establish what's in scope and what's out of scope
-4. **Output**: Create initial .iflow/state.json with state="discussing"
+4. **Output**: Create initial .flow-engine/iflow/state.json with state="discussing"
 
 ## Entry Conditions
 
-- No .iflow/ directory exists, or state.json shows "discussing"
+- No .flow-engine/iflow/ directory exists, or state.json shows "discussing"
 - User has expressed a desire to start or continue work
 
 ## Exit Conditions

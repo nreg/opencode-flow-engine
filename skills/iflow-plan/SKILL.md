@@ -22,7 +22,7 @@ Invoke this skill when IFlow is in the **planning** state. The goal is to genera
 
 ## Entry Conditions
 
-- .iflow/CONTEXT.md exists
+- .flow-engine/iflow/CONTEXT.md exists
 - State is "planning" or can transition to planning
 
 ## Exit Conditions

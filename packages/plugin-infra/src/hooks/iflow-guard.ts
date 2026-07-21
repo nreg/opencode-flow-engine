@@ -1,8 +1,8 @@
 /**
  * IFlow Guard Rules - Scope reduction, deviation compliance, artifact completeness, cyclic transitions
- * These guards are only active when .iflow/ directory exists.
+ * These guards are only active when .flow-engine/iflow/ directory exists.
  * Each guard returns a HookResult, and they are integrated into the main guard.ts
- * via conditional check for .iflow/ directory existence.
+ * via conditional check for .flow-engine/iflow/ directory existence.
  */
 
 import type { HookResult } from "./types.js";
@@ -36,10 +36,10 @@ const REQUIRED_ARTIFACTS: Record<IFlowState, string[]> = {
 };
 
 /**
- * Check if .iflow/ directory exists
+ * Check if .flow-engine/iflow/ directory exists
  */
 export async function iflowDirectoryExists(changeDir: string): Promise<boolean> {
-  return directoryExists(`${changeDir}/.iflow`);
+  return directoryExists(`${changeDir}/.flow-engine/iflow`);
 }
 
 /**
@@ -100,11 +100,11 @@ async function checkScopeReductionGuard(changeDir: string, data?: Record<string,
   if (!filePath.includes('PLAN.md')) return { success: true };
 
   // Read current PLAN.md if it exists
-  const planContent = await readFile(`${changeDir}/.iflow/PLAN.md`);
+  const planContent = await readFile(`${changeDir}/.flow-engine/iflow/PLAN.md`);
   if (!planContent) return { success: true };
 
   // Read CONTEXT.md for original requirements
-  const contextContent = await readFile(`${changeDir}/.iflow/CONTEXT.md`);
+  const contextContent = await readFile(`${changeDir}/.flow-engine/iflow/CONTEXT.md`);
   if (!contextContent) return { success: true };
 
   // Check for scope reduction language patterns
@@ -181,15 +181,15 @@ async function checkScopeReductionGuard(changeDir: string, data?: Record<string,
 
 /**
  * Artifact Completeness Guard
- * Blocks state transitions when required .iflow/ artifacts are missing.
- * When targetState is not provided, auto-detects from .iflow/state.json (for tool-level guard calls).
+ * Blocks state transitions when required .flow-engine/iflow/ artifacts are missing.
+ * When targetState is not provided, auto-detects from .flow-engine/iflow/state.json (for tool-level guard calls).
  */
 async function checkArtifactCompletenessGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
   let targetState = data?.targetState as string | undefined;
 
   // Auto-detect state from state.json when no targetState provided
   if (!targetState) {
-    const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.iflow/state.json`);
+    const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.flow-engine/iflow/state.json`);
     targetState = stateData?.state;
   }
 
@@ -201,7 +201,7 @@ async function checkArtifactCompletenessGuard(changeDir: string, data?: Record<s
 
   const missing: string[] = [];
   for (const artifact of required) {
-    const exists = await fileExists(`${changeDir}/.iflow/${artifact}`);
+    const exists = await fileExists(`${changeDir}/.flow-engine/iflow/${artifact}`);
     if (!exists) missing.push(artifact);
   }
 
@@ -324,10 +324,10 @@ function extractTaskDescriptions(planContent: string): string[] {
 
 /**
  * Nyquist Rule Guard — 每个 PLAN.md 中的任务必须有 `<automated>` 验证命令。
- * 读取 .iflow/PLAN.md，检查每个任务的 Verification 字段是否包含自动化验证命令。
+ * 读取 .flow-engine/iflow/PLAN.md，检查每个任务的 Verification 字段是否包含自动化验证命令。
  */
 async function checkNyquistRuleGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
-  const planContent = await readFile(`${changeDir}/.iflow/PLAN.md`);
+  const planContent = await readFile(`${changeDir}/.flow-engine/iflow/PLAN.md`);
   if (!planContent) return { success: true };
 
   const warnings: string[] = [];
@@ -389,10 +389,10 @@ async function checkNyquistRuleGuard(changeDir: string, data?: Record<string, un
 
 /**
  * Deviation Compliance Guard — 检查 executor 的 SUMMARY.md 是否记录了偏差处理。
- * 读取 .iflow/SUMMARY.md，检查是否有 `## Deviations` 段落且标注了 Rule 编号。
+ * 读取 .flow-engine/iflow/SUMMARY.md，检查是否有 `## Deviations` 段落且标注了 Rule 编号。
  */
 async function checkDeviationComplianceGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
-  const summaryContent = await readFile(`${changeDir}/.iflow/SUMMARY.md`);
+  const summaryContent = await readFile(`${changeDir}/.flow-engine/iflow/SUMMARY.md`);
   if (!summaryContent) return { success: true };
 
   const hasDeviationsSection = /^##\s+Deviations/m.test(summaryContent);

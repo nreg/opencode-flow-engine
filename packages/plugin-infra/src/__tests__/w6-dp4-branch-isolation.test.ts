@@ -378,12 +378,12 @@ describe('Task 8.1: checkGitBranchIsolation guard', () => {
   });
 
   it('should not apply for iflow workflow', async () => {
-    // Create .iflow directory to simulate iflow
-    await ensureDir(dir + '/.iflow');
+    // Create .flow-engine/iflow directory to simulate iflow
+    await ensureDir(dir + '/.flow-engine/iflow');
     await writeStateJson(dir, { state: 'executing', mode: 'full' });
     // Remove .flow-engine/sflow to make it iflow-only
     try { await rm(dir + '/.flow-engine/sflow', { recursive: true, force: true }); } catch {}
-    await ensureDir(dir + '/.iflow');
+    await ensureDir(dir + '/.flow-engine/iflow');
 
     const result = await guard.execute({
       changeDir: dir,

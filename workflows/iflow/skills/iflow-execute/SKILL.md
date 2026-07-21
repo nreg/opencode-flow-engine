@@ -15,7 +15,7 @@ Invoke this skill when IFlow is in the **executing** state. The goal is to execu
 
 ## Entry Conditions
 
-- `.iflow/PLAN.md` exists and is validated
+- `.flow-engine/iflow/PLAN.md` exists and is validated
 - State is `"executing"`
 - PLAN.md passes Nyquist Rule (every task has `<automated>` verification)
 
@@ -29,7 +29,7 @@ Invoke this skill when IFlow is in the **executing** state. The goal is to execu
 ## Process
 
 ### Step 1: Load and Validate Plan
-1. Read `.iflow/PLAN.md` — parse frontmatter + task list
+1. Read `.flow-engine/iflow/PLAN.md` — parse frontmatter + task list
 2. **Pre-execution complexity check**: For each task, validate its Complexity/Score field
 3. Load project context: read `./AGENTS.md` if exists for project-specific rules
 

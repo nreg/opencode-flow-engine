@@ -29,7 +29,7 @@ Invoke this skill when IFlow is in the **executing** state. The goal is to execu
 
 ## Entry Conditions
 
-- .iflow/PLAN.md exists
+- .flow-engine/iflow/PLAN.md exists
 - State is "executing"
 
 ## Exit Conditions

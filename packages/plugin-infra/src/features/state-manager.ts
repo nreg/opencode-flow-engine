@@ -48,7 +48,7 @@ export const HANDOFF_DIR = '.flow-engine/sflow/handoffs';
 export const HANDOFF_TYPES = new Set(['prototype', 'research', 'experiment', 'task-handoff', 'code-review', 'architecture']);
 
 export function getStateFilePath(workflowType: 'sflow' | 'iflow'): string {
-  return workflowType === 'iflow' ? '.iflow/state.json' : '.flow-engine/sflow/state.json';
+  return workflowType === 'iflow' ? '.flow-engine/iflow/state.json' : '.flow-engine/sflow/state.json';
 }
 
 type WorkflowManager = ReturnType<typeof createWorkflowManager>;

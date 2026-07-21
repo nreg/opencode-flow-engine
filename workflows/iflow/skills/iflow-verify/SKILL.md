@@ -27,7 +27,7 @@ Invoke this skill when IFlow is in the **verifying** state. The goal is to verif
 
 ## Entry Conditions
 
-- `.iflow/PLAN.md` and `.iflow/SUMMARY.md` exist
+- `.flow-engine/iflow/PLAN.md` and `.flow-engine/iflow/SUMMARY.md` exist
 - State is `"verifying"`
 - Previous state was `"executing"` (or re-verification after gaps_found)
 
@@ -41,7 +41,7 @@ Invoke this skill when IFlow is in the **verifying** state. The goal is to verif
 ## Process
 
 ### Step 0: Check for Previous Verification
-Read `.iflow/VERIFICATION.md` if exists. If re-verifying, focus on previously failed items (quick regression check on passed items).
+Read `.flow-engine/iflow/VERIFICATION.md` if exists. If re-verifying, focus on previously failed items (quick regression check on passed items).
 
 ### Step 1: Establish Must-Haves
 Derive from:
