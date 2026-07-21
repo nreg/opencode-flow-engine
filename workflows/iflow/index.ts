@@ -18,7 +18,6 @@ export const IFLOW_AGENT_NAMES = [
   'iflow-verifier',
   'iflow-researcher',
   'iflow-shipper',
-  'ui-implementer',
 ] as const;
 
 /** IFlow workflow directory name */

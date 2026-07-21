@@ -266,6 +266,32 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     bash: true,
     skill: false,
   },
+
+  // ── Shared Agents (cross-workflow, standalone) ──
+
+  /** Test Engineer - comprehensive quality testing, write reports + run tests */
+  'test-engineer': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: false,
+    bash: true,
+    skill: false,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true,
+  },
+
+  /** Review Engineer - comprehensive code review, write reports + run analysis */
+  'review-engineer': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: false,
+    bash: true,
+    skill: false,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true,
+  },
 };
 
 /**

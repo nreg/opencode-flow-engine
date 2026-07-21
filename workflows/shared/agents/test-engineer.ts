@@ -147,11 +147,13 @@ Semgrep / CodeQL / Bandit 选一。无 high；medium 有处理记录。
 
 ## 输出
 
-将测试报告写入 \`.flow-engine/sflow/test-report/TEST-<timestamp>.md\`，包含：
+将测试报告写入 \`.flow-engine/test-report/TEST-<timestamp>.md\`，包含：
 1. 测试范围声明
 2. 各轮次详细结果（含量化指标）
 3. 总体判定：PASS / FAIL（含失败项清单）
 4. 修复建议清单（如有失败项）
+
+**写报告前必须先确保目录存在**：使用 \`mkdir -p .flow-engine/test-report\` 或 \`ensureDir\` 创建目录，再写入文件。
 
 ## 约束
 - 性能/安全/兼容轮次的"通过/失败"必须基于**可量化指标**或**工具输出**，禁止"看起来没问题"

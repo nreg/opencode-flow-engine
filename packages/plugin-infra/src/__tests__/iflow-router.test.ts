@@ -626,3 +626,129 @@ describe('IFlow Router — rollback detection', () => {
     expect(data.data.reasons.every((r: string) => !r.includes('Rollback'))).toBe(true);
   });
 });
+
+// ─── IFlow Router — Phase 0 Horizontal Command Detection ────────────────────
+
+describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
+  const dir = tempDir('iflow-router-horizontal');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should detect "全面test" as horizontal command', async () => {
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    const result = await tool.execute(
+      { changeDir: dir, intent: '全面test' },
+      { directory: dir } as any,
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    expect(data.data.isHorizontalCommand).toBe(true);
+    expect(data.data.skill).toBe('test-engineer');
+    expect(data.data.state).toBeNull();
+    expect(data.data.stateGuardBlocked).toBe(false);
+  });
+
+  it('should detect "全面review" as horizontal command', async () => {
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    const result = await tool.execute(
+      { changeDir: dir, intent: '全面review' },
+      { directory: dir } as any,
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    expect(data.data.isHorizontalCommand).toBe(true);
+    expect(data.data.skill).toBe('review-engineer');
+    expect(data.data.state).toBeNull();
+    expect(data.data.stateGuardBlocked).toBe(false);
+  });
+
+  it('should detect "comprehensive test" as horizontal command', async () => {
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    const result = await tool.execute(
+      { changeDir: dir, intent: 'comprehensive test' },
+      { directory: dir } as any,
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    expect(data.data.isHorizontalCommand).toBe(true);
+    expect(data.data.skill).toBe('test-engineer');
+  });
+
+  it('should detect "只测性能" as partial test horizontal command', async () => {
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    const result = await tool.execute(
+      { changeDir: dir, intent: '只测性能' },
+      { directory: dir } as any,
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    expect(data.data.isHorizontalCommand).toBe(true);
+    expect(data.data.skill).toBe('test-engineer');
+    expect(data.data.action).toBe('partial-test');
+  });
+
+  it('should detect "只看代码质量" as partial review horizontal command', async () => {
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    const result = await tool.execute(
+      { changeDir: dir, intent: '只看代码质量' },
+      { directory: dir } as any,
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    expect(data.data.isHorizontalCommand).toBe(true);
+    expect(data.data.skill).toBe('review-engineer');
+    expect(data.data.action).toBe('partial-review');
+  });
+
+  it('should bypass state guard even when in a non-discussing state', async () => {
+    await ensureDir(dir + '/.flow-engine/iflow');
+    await writeFile(dir + '/.flow-engine/iflow/CONTEXT.md', '# Context');
+
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    const result = await tool.execute(
+      { changeDir: dir, intent: '全面test' },
+      { directory: dir } as any,
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    expect(data.data.isHorizontalCommand).toBe(true);
+    // Horizontal command should bypass state — state should be null
+    expect(data.data.state).toBeNull();
+    expect(data.data.skill).toBe('test-engineer');
+  });
+
+  it('should route normally when no horizontal command matches', async () => {
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    const result = await tool.execute(
+      { changeDir: dir, intent: '开始一个新功能' },
+      { directory: dir } as any,
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    // Should not be horizontal command
+    expect(data.data.isHorizontalCommand).toBeUndefined();
+    // Should have a valid state
+    expect(data.data.state).toBeDefined();
+  });
+});

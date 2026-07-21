@@ -16,4 +16,4 @@ export { createUiImplementerAgent } from './agents/ui-implementer.js';
 /** SFlow agent names for registration */
 export declare const SFLOW_AGENT_NAMES: readonly ["sFlow", "need-explorer", "spec-writer", "contract-builder", "build-executor", "bug-investigator", "code-reviewer", "release-archivist", "spec-merger", "ui-director", "ui-implementer"];
 /** SFlow workflow directory name */
-export declare const SFLOW_DIR = ".sflow";
+export declare const SFLOW_DIR = ".flow-engine/sflow";

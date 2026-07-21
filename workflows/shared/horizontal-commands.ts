@@ -5,6 +5,10 @@
  * They are detected at Phase 0 (before state routing) and bypass state guards.
  * Both workflow_router and iflow_router import from this single source of truth.
  *
+ * SYNC: 主智能体 Phase 0 Intent Gate 表格必须与此文件同步。见：
+ *   - workflows/iflow/agents/iflow.ts (Horizontal Commands 表格)
+ *   - workflows/sflow/agents/spec-flow.ts (Phase 0 Intent Gate 表格)
+ *
  * Inspired by flow-kit's lateral command system (L-/M-/I-/A- series).
  */
 
@@ -30,11 +34,11 @@ export const HORIZONTAL_COMMANDS: HorizontalCommandEntry[] = [
     tokens: ['全面test', '全面测试', 'full test', '完整测试', '全线测试', '彻底测试', '测试所有', 'comprehensive test', '5轮测试'],
   },
   {
-    pattern: /只测性能|只测安全|只测兼容|只跑.*test|只跑.*测试|partial.*test/i,
+    pattern: /只测性能|只测安全|只测兼容|只测功能|只测可观测|只跑R1|只跑R2|只跑R3|只跑R4|只跑R5|只跑.*test|只跑.*测试|partial.*test/i,
     agent: 'test-engineer',
     action: 'partial-test',
-    description: '部分测试',
-    tokens: ['只测', '部分测试', 'partial test'],
+    description: '部分测试（指定轮次）',
+    tokens: ['只测', '只跑R', '部分测试', 'partial test'],
   },
 
   // --- review-engineer (全面审查) ---
@@ -46,11 +50,11 @@ export const HORIZONTAL_COMMANDS: HorizontalCommandEntry[] = [
     tokens: ['全面review', '全面审查', 'full review', '完整审查', '彻底审查', '代码审计', 'code audit', 'comprehensive review', '3轮审查'],
   },
   {
-    pattern: /只看代码|只看UI|只看视觉|只看.*质量|只看.*合规|partial.*review/i,
+    pattern: /只看代码质量|只看代码|只看UI|只看视觉|只看合规|只看R1|只看R2|只看R3|只看R4|只看.*质量|只看.*合规|partial.*review/i,
     agent: 'review-engineer',
     action: 'partial-review',
-    description: '部分审查',
-    tokens: ['只看', '部分审查', 'partial review'],
+    description: '部分审查（指定轮次）',
+    tokens: ['只看', '只看R', '部分审查', 'partial review'],
   },
 ];
 

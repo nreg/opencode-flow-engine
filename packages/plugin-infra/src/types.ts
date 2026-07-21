@@ -49,6 +49,8 @@ export const IFLOW_STATES = new Set([
 export const AGENT_COLORS: Record<string, string> = {
   sFlow: '#f8cd93',
   iFlow: '#FFB6C1',
+  'test-engineer': '#7CB342',
+  'review-engineer': '#42A5F5',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

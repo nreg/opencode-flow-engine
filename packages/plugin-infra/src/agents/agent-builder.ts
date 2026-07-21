@@ -143,6 +143,9 @@ export const AGENT_PROFILES: AGENT_PROFILES_TYPE = {
   'spec-merger': 'standard',
   'ui-director': 'strong',
   'ui-implementer': 'standard',
+  // Shared (cross-workflow)
+  'test-engineer': 'review',
+  'review-engineer': 'review',
 };
 
 /**

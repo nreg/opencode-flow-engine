@@ -193,6 +193,22 @@ function configTemplate() {
         temperature: 0.6,
         fallbackModels: ['your-provider/mimo-v2.5', 'your-provider/glm-5.1'],
       },
+      'ui-implementer': {
+        model: 'your-provider/glm-5.1',
+        temperature: 0.6,
+        fallbackModels: ['your-provider/deepseek-v4-flash', 'your-provider/kimi-k2.6'],
+      },
+      // Shared agents (cross-workflow, standalone)
+      'test-engineer': {
+        model: 'your-provider/glm-5.2',
+        temperature: 0.6,
+        fallbackModels: ['your-provider/glm-5.1', 'your-provider/deepseek-v4-flash'],
+      },
+      'review-engineer': {
+        model: 'your-provider/glm-5.2',
+        temperature: 0.6,
+        fallbackModels: ['your-provider/glm-5.1', 'your-provider/deepseek-v4-flash'],
+      },
     },
     features: {
       workflow_manager: true,

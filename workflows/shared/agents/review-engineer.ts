@@ -70,13 +70,13 @@ export const createReviewEngineerAgent: AgentFactory = (model: string, options?:
 
 每个发现项必须使用 4 要素格式：
 
-```
+\`\`\`
 ### 🔴/🟡/🟢 R<x> · <风险名>：<一句话结论>
 **Symptom（症状）**：<文件:行号 具体问题>
 **Source（源头）**：<哪本书/原则>
 **Consequence（后果）**：<不修会怎么样>
 **Remedy（修补）**：<具体怎么改>
-```
+\`\`\`
 
 ### 架构依赖检查（大型变更触发）
 
@@ -143,12 +143,14 @@ export const createReviewEngineerAgent: AgentFactory = (model: string, options?:
 
 ## 输出
 
-将审查报告写入 \`.flow-engine/sflow/review-report/REVIEW-<timestamp>.md\`，包含：
+将审查报告写入 \`.flow-engine/review-report/REVIEW-<timestamp>.md\`，包含：
 1. 审查范围声明
 2. 各轮次详细结果（含严重度标签 + 文件:行号引用）
 3. 总体判定：PASS / FAIL
 4. 修复建议清单（含严重度）
 5. 跨模型分歧记录（如有多模型审查）
+
+**写报告前必须先确保目录存在**：使用 \`mkdir -p .flow-engine/review-report\` 或 \`ensureDir\` 创建目录，再写入文件。
 
 ## 约束
 - **禁止直接修改代码** — 只产报告和修复建议

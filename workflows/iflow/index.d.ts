@@ -11,4 +11,4 @@ export { createIFlowShipperAgent } from './agents/iflow-shipper.js';
 /** IFlow agent names for registration */
 export declare const IFLOW_AGENT_NAMES: readonly ["iFlow", "iflow-discuss-planner", "iflow-plan-executor", "iflow-verifier", "iflow-researcher", "iflow-shipper"];
 /** IFlow workflow directory name */
-export declare const IFLOW_DIR = ".iflow";
+export declare const IFLOW_DIR = ".flow-engine/iflow";

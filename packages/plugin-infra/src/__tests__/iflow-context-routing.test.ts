@@ -48,7 +48,7 @@ describe('IFLOW_AGENT_NAMES — agent name validation', () => {
   });
 
   it('should have the correct number of agent names', () => {
-    expect(IFLOW_AGENT_NAMES.length).toBe(7);
+    expect(IFLOW_AGENT_NAMES.length).toBe(6);
   });
 
   it('should not contain SFlow agent names', () => {

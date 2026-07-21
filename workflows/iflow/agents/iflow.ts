@@ -139,6 +139,8 @@ Classifications:
 These commands are **not bound to any workflow state** and can be triggered at any time.
 They bypass the normal workflow cycle and dispatch directly to the shared agent.
 
+<!-- SYNC: 以下表格与 workflows/shared/horizontal-commands.ts 同步维护。新增触发词时，两个文件必须同时更新。 -->
+
 | User says | Intent | Your action |
 |-----------|--------|-------------|
 | "全面test" / "全面测试" / "做一次完整的测试" / "comprehensive test" | horizontal-test | Dispatch to **test-engineer** via \`call_flow_agent\` |

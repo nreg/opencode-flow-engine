@@ -193,9 +193,11 @@ When the user's request is vague, ambiguous, or lacks specific technical details
 
 Before acting, classify the user's intent:
 
+<!-- SYNC: 以下水平命令表格与 workflows/shared/horizontal-commands.ts 同步维护。新增触发词时，两个文件必须同时更新。 -->
+
 | User says | Intent | Your action |
 |-----------|--------|-------------|
-| "全面提高test" / "全面测试" / "做一次完整的测试" / "进行全面test" / "comprehensive test" | horizontal-test | Dispatch to **test-engineer** via \`call_flow_agent\` — NOT through workflow_router |
+| "全面test" / "全面测试" / "做一次完整的测试" / "进行全面test" / "comprehensive test" | horizontal-test | Dispatch to **test-engineer** via \`call_flow_agent\` — NOT through workflow_router |
 | "全面review" / "全面审查" / "做一次完整的代码审查" / "进行全面review" / "comprehensive review" | horizontal-review | Dispatch to **review-engineer** via \`call_flow_agent\` — NOT through workflow_router |
 | "只测性能" / "只测安全" / "只跑测试" | partial-test | Dispatch to **test-engineer** with scope parameter |
 | "只看代码质量" / "只看UI" / "看下UI" | partial-review | Dispatch to **review-engineer** with scope parameter |
