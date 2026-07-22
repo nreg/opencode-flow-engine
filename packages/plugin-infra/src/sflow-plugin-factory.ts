@@ -27,6 +27,7 @@ import { createSkillLoader } from './features/skill-loader.js';
 import type { HookContext } from './hooks/types.js';
 import { ensureDir, writeJsonFile } from '@opencode-flow-engine/shared';
 import { getStateFilePath } from './features/state-manager.js';
+import { createCompactionContext } from '../../../workflows/shared/compaction-context.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
 import { setHasOmoPlugin, setHasAgnesProvider } from './agents/agent-tools.js';
@@ -600,6 +601,21 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           // TaskTracker: 记录子 agent 调用结束
           if (taskTracker && taskTracker.afterHook) {
             await taskTracker.afterHook(input, output);
+          }
+        },
+
+        "experimental.session.compacting": async (input, output) => {
+          try {
+            const stateFile = `${workDir}/${getStateFilePath('sflow')}`;
+            const { readJsonFile } = await import('../../helpers/index.js');
+            const state = await readJsonFile(stateFile) as Record<string, unknown> | null;
+            if (!state || !state.state) return;
+            const context = createCompactionContext('sFlow', state as never);
+            if (context) {
+              output.context.push(context);
+            }
+          } catch {
+            // 静默降级：如果状态文件读取失败，不阻塞 compaction
           }
         },
 

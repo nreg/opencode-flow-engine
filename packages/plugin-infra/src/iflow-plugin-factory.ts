@@ -31,6 +31,7 @@ import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
 import { createTaskTracker } from './features/task-tracker.js';
 import { recoverIFlowState } from '../../../workflows/iflow/iflow-state-manager.js';
 import { registerFlowCommands } from '../../../workflows/shared/slash-commands.js';
+import { createCompactionContext } from '../../../workflows/shared/compaction-context.js';
 
 // ─── Background task registry (per-factory instance) ──────────────────────────
 
@@ -355,6 +356,26 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
         if (taskTracker && taskTracker.afterHook) {
           await taskTracker.afterHook(input, output);
         }
+      },
+
+      "experimental.session.compacting": async (input, output) => {
+        try {
+          const stateFile = `${workDir}/${getStateFilePath('iflow')}`;
+          const { readJsonFile } = await import('../../helpers/index.js');
+          const state = await readJsonFile(stateFile) as Record<string, unknown> | null;
+          if (!state || !state.state) return;
+          const context = createCompactionContext('iFlow', state as never);
+          if (context) {
+            output.context.push(context);
+          }
+        } catch {
+          // 静默降级：如果状态文件读取失败，不阻塞 compaction
+        }
+      },
+
+      "experimental.compaction.autocontinue": async (input, output) => {
+        // IFlow: 默认允许自动继续
+        output.enabled = true;
       },
     };
   };

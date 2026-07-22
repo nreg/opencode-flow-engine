@@ -29,3 +29,7 @@ export {
   matchHorizontalCommand,
 } from './horizontal-commands.js';
 export type { HorizontalCommandEntry } from './horizontal-commands.js';
+
+/** Compaction context — preserves workflow state across session compaction */
+export { createCompactionContext } from './compaction-context.js';
+export type { CompactionState, TaskProgress } from './compaction-context.js';
