@@ -149,6 +149,8 @@ They bypass the normal workflow cycle and dispatch directly to the shared agent.
 |-----------|--------|-------------|
 | "全面test" / "全面测试" / "做一次完整的测试" / "comprehensive test" | horizontal-test | Dispatch to **test-engineer** via \`call_flow_agent\` |
 | "全面review" / "全面审查" / "做一次完整的代码审查" / "comprehensive review" | horizontal-review | Dispatch to **review-engineer** via \`call_flow_agent\` |
+| "/flow-test" | horizontal-test | Dispatch to **test-engineer** via \`call_flow_agent\` |
+| "/flow-review" | horizontal-review | Dispatch to **review-engineer** via \`call_flow_agent\` |
 | "只测性能" / "只测安全" / "只跑测试" | partial-test | Dispatch to **test-engineer** with scope parameter |
 | "只看代码质量" / "只看UI" / "看下UI" | partial-review | Dispatch to **review-engineer** with scope parameter |
 

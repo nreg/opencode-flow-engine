@@ -30,6 +30,7 @@ import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
 import { createTaskTracker } from './features/task-tracker.js';
 import { recoverIFlowState } from '../../../workflows/iflow/iflow-state-manager.js';
+import { registerFlowCommands } from '../../../workflows/shared/slash-commands.js';
 
 // ─── Background task registry (per-factory instance) ──────────────────────────
 
@@ -145,6 +146,9 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
 
       // config hook: register IFlow agents only, MCP servers, detect plugins
       config: async (cfg) => {
+        // 注册 slash 命令
+        registerFlowCommands(cfg);
+
         const hasOmo = detectOmoPlugin(cfg.plugin);
         setHasOmoPlugin(hasOmo);
 

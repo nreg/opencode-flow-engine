@@ -36,6 +36,7 @@ import { pollSessionCompletion } from './helpers/polling.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SFLOW_AGENT_NAMES } from '../../../workflows/sflow/index.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
+import { registerFlowCommands } from '../../../workflows/shared/slash-commands.js';
 import { createAgnesTools } from './agnes-tools.js';
 import { getCurrentWorkflowState, executeContractValidator, executeArtifactInspector } from './sflow-tool-helpers.js';
 import { createExecutionPlan, reviseExecutionPlan, readExecutionPlan, recordReviewReceipt } from './features/execution-plan.js';
@@ -366,6 +367,9 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
         },
 
         config: async (cfg) => {
+          // 注册 slash 命令
+          registerFlowCommands(cfg);
+
           const hasOmo = detectOmoPlugin(cfg.plugin);
           setHasOmoPlugin(hasOmo);
 
