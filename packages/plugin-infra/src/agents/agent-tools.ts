@@ -292,6 +292,32 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     lsp_goto_definition: true,
     lsp_find_references: true,
   },
+
+  // ── Horizontal Commands (cross-workflow, standalone) ──
+
+  /** Flow Intel - 入场扫描，生成 CONTEXT.md */
+  'flow-intel': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: false,
+    bash: true,
+    skill: false,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true,
+  },
+
+  /** Flow Architect - 架构文档，生成 ARCHITECTURE.md */
+  'flow-architect': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: true,
+    bash: true,
+    skill: false,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true,
+  },
 };
 
 /**

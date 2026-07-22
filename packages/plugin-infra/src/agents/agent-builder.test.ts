@@ -117,7 +117,7 @@ describe('Agent Builder', () => {
     it('should create all agents', async () => {
       const agents = await createAllAgents();
       expect(agents).toBeDefined();
-      expect(Object.keys(agents)).toHaveLength(19);
+      expect(Object.keys(agents)).toHaveLength(21);
     });
 
     it('should have all required agents', async () => {
@@ -143,6 +143,9 @@ describe('Agent Builder', () => {
       // Shared agents (cross-workflow)
       expect(agents['test-engineer']).toBeDefined();
       expect(agents['review-engineer']).toBeDefined();
+      // Horizontal commands (cross-workflow)
+      expect(agents['flow-intel']).toBeDefined();
+      expect(agents['flow-architect']).toBeDefined();
     });
 
     it('should use specified model for all agents', async () => {
@@ -197,7 +200,10 @@ describe('Agent Builder', () => {
       // Shared agents (cross-workflow)
       expect(names).toContain('test-engineer');
       expect(names).toContain('review-engineer');
-      expect(names).toHaveLength(19);
+      // Horizontal commands (cross-workflow)
+      expect(names).toContain('flow-intel');
+      expect(names).toContain('flow-architect');
+      expect(names).toHaveLength(21);
     });
   });
 
@@ -234,7 +240,7 @@ describe('Agent Builder', () => {
   describe('getSubagentAgents', () => {
     it('should return all subagents', () => {
       const subagents = getSubagentAgents();
-      expect(subagents).toHaveLength(17);
+      expect(subagents).toHaveLength(19);
       expect(subagents).toContain('need-explorer');
       expect(subagents).toContain('spec-writer');
       expect(subagents).toContain('contract-builder');
@@ -254,6 +260,9 @@ describe('Agent Builder', () => {
       // Shared subagents
       expect(subagents).toContain('test-engineer');
       expect(subagents).toContain('review-engineer');
+      // Horizontal command subagents
+      expect(subagents).toContain('flow-intel');
+      expect(subagents).toContain('flow-architect');
       expect(subagents).not.toContain('sFlow');
       expect(subagents).not.toContain('iFlow');
     });
@@ -287,7 +296,7 @@ describe('Agent Builder', () => {
   describe('getAllDefaultModels', () => {
     it('should return models for all agents', () => {
       const models = getAllDefaultModels();
-      expect(Object.keys(models)).toHaveLength(19);
+      expect(Object.keys(models)).toHaveLength(21);
       expect(models.sFlow).toBe('deepseek-v4-flash');
       expect(models['need-explorer']).toBe('kimi-k2.6');
       expect(models['spec-writer']).toBe('glm-5.1');

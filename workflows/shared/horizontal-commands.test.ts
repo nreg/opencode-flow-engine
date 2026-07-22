@@ -12,7 +12,7 @@ import { HORIZONTAL_COMMANDS, matchHorizontalCommand } from './horizontal-comman
 
 describe('HORIZONTAL_COMMANDS', () => {
   it('should define at least 4 commands (full + partial for test and review)', () => {
-    expect(HORIZONTAL_COMMANDS.length).toBeGreaterThanOrEqual(4);
+    expect(HORIZONTAL_COMMANDS.length).toBeGreaterThanOrEqual(5);
   });
 
   it('should have unique action values for each command', () => {
@@ -24,6 +24,7 @@ describe('HORIZONTAL_COMMANDS', () => {
     const agents = new Set(HORIZONTAL_COMMANDS.map(c => c.agent));
     expect(agents.has('test-engineer')).toBe(true);
     expect(agents.has('review-engineer')).toBe(true);
+    expect(agents.has('flow-architect')).toBe(true);
   });
 });
 
@@ -186,4 +187,27 @@ describe('matchHorizontalCommand — Edge Cases', () => {
     expect(reviewResult).not.toBeNull();
     expect(reviewResult!.agent).toBe('review-engineer');
   });
+});
+
+describe('matchHorizontalCommand — Flow Architect', () => {
+  const testCases = [
+    { input: '建立架构', expected: 'flow-architect' },
+    { input: '写架构文档', expected: 'flow-architect' },
+    { input: '架构文档', expected: 'flow-architect' },
+    { input: 'ARCHITECTURE', expected: 'flow-architect' },
+    { input: '建立ARCHITECTURE', expected: 'flow-architect' },
+    { input: '重构架构', expected: 'flow-architect' },
+    { input: '架构重构', expected: 'flow-architect' },
+    { input: 'architecture doc', expected: 'flow-architect' },
+    { input: 'write architecture', expected: 'flow-architect' },
+  ];
+
+  for (const { input, expected } of testCases) {
+    it(`should match "${input}" → ${expected}`, () => {
+      const result = matchHorizontalCommand(input);
+      expect(result).not.toBeNull();
+      expect(result!.agent).toBe(expected);
+      expect(result!.action).toBe('create-architecture');
+    });
+  }
 });

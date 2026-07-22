@@ -30,6 +30,8 @@ import {
 import {
   createTestEngineerAgent,
   createReviewEngineerAgent,
+  createFlowArchitectAgent,
+  createFlowIntelAgent,
 } from '../../../../workflows/shared/index.js';
 import {
   loadCascadedSFlowConfig,
@@ -64,6 +66,9 @@ const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
   // Shared (cross-workflow, standalone)
   'test-engineer': 'subagent',
   'review-engineer': 'subagent',
+  // Horizontal commands (cross-workflow, standalone)
+  'flow-intel': 'subagent',
+  'flow-architect': 'subagent',
 };
 
 /**
@@ -93,6 +98,9 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
   // Shared
   'test-engineer': 'deepseek-v4-flash',
   'review-engineer': 'deepseek-v4-flash',
+  // Horizontal commands
+  'flow-intel': 'glm-5.1',
+  'flow-architect': 'glm-5.1',
 };
 
 /**
@@ -122,6 +130,9 @@ const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
   // Shared
   'test-engineer': ['glm-5.1', 'kimi-k2.6'],
   'review-engineer': ['glm-5.1', 'kimi-k2.6'],
+  // Horizontal commands
+  'flow-intel': ['kimi-k2.6', 'deepseek-v4-flash'],
+  'flow-architect': ['kimi-k2.6', 'deepseek-v4-flash'],
 };
 
 /**
@@ -146,6 +157,9 @@ export const AGENT_PROFILES: AGENT_PROFILES_TYPE = {
   // Shared (cross-workflow)
   'test-engineer': 'review',
   'review-engineer': 'review',
+  // Horizontal commands
+  'flow-intel': 'standard',
+  'flow-architect': 'strong',
 };
 
 /**
@@ -174,6 +188,9 @@ const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
   // Shared (cross-workflow, standalone)
   'test-engineer': createTestEngineerAgent,
   'review-engineer': createReviewEngineerAgent,
+  // Horizontal commands (cross-workflow, standalone)
+  'flow-intel': createFlowIntelAgent,
+  'flow-architect': createFlowArchitectAgent,
 };
 
 /**

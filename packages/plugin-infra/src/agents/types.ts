@@ -42,7 +42,10 @@ export type BuiltinAgentName =
   | 'iflow-shipper'           // Ship/release (subagent)
   // Shared agents (cross-workflow, standalone, not bound to any workflow state)
   | 'test-engineer'       // Independent comprehensive testing (subagent)
-  | 'review-engineer';     // Independent comprehensive review (subagent)
+  | 'review-engineer'     // Independent comprehensive review (subagent)
+  // Horizontal commands (cross-workflow, standalone)
+  | 'flow-intel'          // I-intel-scan: 入场扫描，生成 CONTEXT.md (subagent)
+  | 'flow-architect';     // A-architect: 架构文档，生成 ARCHITECTURE.md (subagent)
 
 /**
  * Agent override configuration

@@ -12,6 +12,8 @@ import type { Config } from '@opencode-ai/plugin';
  */
 export const FLOW_TEST_COMMAND = 'flow-test';
 export const FLOW_REVIEW_COMMAND = 'flow-review';
+export const FLOW_INTEL_COMMAND = 'flow-intel';
+export const FLOW_ARCHITECT_COMMAND = 'flow-architect';
 
 /**
  * /flow-test 命令模板
@@ -47,6 +49,40 @@ Use call_flow_agent to handle this command:
 }
 
 /**
+ * /flow-intel 命令模板
+ * 入场扫描命令，扫描代码库生成项目级 CONTEXT.md
+ */
+function flowIntelCommandTemplate(): string {
+  return `"/flow-intel" command was invoked.
+
+<flow_command_arguments>
+$ARGUMENTS
+</flow_command_arguments>
+
+This is the entry scan command for new projects.
+Use call_flow_agent to handle this command:
+- If no arguments, run a full intel scan: call call_flow_agent with subagent_type="flow-intel" and prompt="对当前项目进行完整的入场扫描（I-intel-scan）。探测既有文档 → 元信息 6 项 → 生成 CONTEXT.md → 更新 STATE。"
+- Report the scan result summary back to the user.`;
+}
+
+/**
+ * /flow-architect 命令模板
+ * 架构文档命令，建立或重构项目级架构文档
+ */
+function flowArchitectCommandTemplate(): string {
+  return `"/flow-architect" command was invoked.
+
+<flow_command_arguments>
+$ARGUMENTS
+</flow_command_arguments>
+
+This is the architecture documentation command.
+Use call_flow_agent to handle this command:
+- If no arguments, run a full architecture review: call call_flow_agent with subagent_type="flow-architect" and prompt="对当前项目进行完整的架构梳理（A-architect）。判定模式 → 系统概览 → 模块清单 + 依赖规则 → ADR 列表 → 跨模块契约 → 扩展点 → 写入 + 备份。"
+- Report the architecture result summary back to the user.`;
+}
+
+/**
  * 注册 slash 命令到 plugin config
  * 借鉴 goal-plugin 的 registerDesktopCommand 模式
  */
@@ -66,6 +102,22 @@ export function registerFlowCommands(config: Config): void {
     config.command[FLOW_REVIEW_COMMAND] = {
       description: '全面审查（3 轮审查：Spec 合规/代码质量/UI 视觉）',
       template: flowReviewCommandTemplate(),
+    };
+  }
+
+  // 注册 /flow-intel
+  if (!config.command[FLOW_INTEL_COMMAND]) {
+    config.command[FLOW_INTEL_COMMAND] = {
+      description: '入场扫描：扫描代码库生成项目级 CONTEXT.md',
+      template: flowIntelCommandTemplate(),
+    };
+  }
+
+  // 注册 /flow-architect
+  if (!config.command[FLOW_ARCHITECT_COMMAND]) {
+    config.command[FLOW_ARCHITECT_COMMAND] = {
+      description: '架构文档：建立或重构项目级架构文档（ARCHITECTURE.md）',
+      template: flowArchitectCommandTemplate(),
     };
   }
 }

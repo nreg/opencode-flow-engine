@@ -56,6 +56,15 @@ export const HORIZONTAL_COMMANDS: HorizontalCommandEntry[] = [
     description: '部分审查（指定轮次）',
     tokens: ['只看', '只看R', '部分审查', 'partial review'],
   },
+
+  // --- flow-architect (架构文档) ---
+  {
+    pattern: /建立.*架构|写.*架构文档|架构.*文档|ARCHITECTURE|建立.*ARCHITECTURE|重构.*架构|架构.*重构|architecture.*doc|write.*architecture/i,
+    agent: 'flow-architect',
+    action: 'create-architecture',
+    description: '建立或重构项目架构文档（ARCHITECTURE.md）',
+    tokens: ['建立架构', '架构文档', 'ARCHITECTURE', '重构架构', 'architecture doc'],
+  },
 ];
 
 /**
