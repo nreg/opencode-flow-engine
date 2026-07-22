@@ -31,6 +31,7 @@ import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.j
 import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
 import { setHasOmoPlugin, setHasAgnesProvider } from './agents/agent-tools.js';
 import { markOmoUsed, resetOmoTracking } from './hooks/guard.js';
+import { createTaskTracker } from './features/task-tracker.js';
 import { pollSessionCompletion } from './helpers/polling.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SFLOW_AGENT_NAMES } from '../../../workflows/sflow/index.js';
@@ -316,6 +317,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
       const hookComposer = createHookComposer();
       const skillLoader = await createSkillLoader();
       const mcpManager = createMcpManager();
+      const taskTracker = createTaskTracker(undefined, '.flow-engine/sflow/subagent-tracker.json');
 
       // Build tool definitions using @opencode-ai/plugin format
       const tools = createSFlowTools(sflowClient);
@@ -331,6 +333,10 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
             } catch (err) {
               console.warn(`[sFlow] Failed to stop MCP server ${server.name}: `, err);
             }
+          }
+          // TaskTracker dispose
+          if (taskTracker && taskTracker.dispose) {
+            await taskTracker.dispose();
           }
         },
 
@@ -490,6 +496,10 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
               return;
             }
           }
+          // TaskTracker: 记录子 agent 调用开始
+          if (taskTracker && taskTracker.beforeHook) {
+            await taskTracker.beforeHook(input);
+          }
         },
 
         "tool.execute.after": async (input, output) => {
@@ -582,6 +592,10 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
                 }
               }
             }
+          }
+          // TaskTracker: 记录子 agent 调用结束
+          if (taskTracker && taskTracker.afterHook) {
+            await taskTracker.afterHook(input, output);
           }
         },
 

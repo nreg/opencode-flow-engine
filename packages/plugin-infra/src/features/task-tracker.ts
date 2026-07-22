@@ -6,6 +6,7 @@
  * 追踪数据持久化到 .flow-engine/iflow/subagent-tracker.json
  */
 
+import { dirname } from 'path';
 import {
   stateFileMutex,
   ensureDir,
@@ -16,7 +17,6 @@ import {
 
 // ─── 常量 ──────────────────────────────────────────────────────────────────
 
-const TRACKER_FILE = '.flow-engine/iflow/subagent-tracker.json';
 const MAX_SUMMARY_LENGTH = 200;
 const TARGET_TOOL = 'call_flow_agent';
 
@@ -65,6 +65,7 @@ export interface TaskTrackerInstance {
   ) => Promise<void>;
   getTrackerData: (sessionId: string) => Promise<TrackerRecord[]>;
   clearTracker: () => Promise<void>;
+  dispose?: () => Promise<void>;
 }
 
 // ─── 内部辅助函数 ──────────────────────────────────────────────────────────
@@ -123,24 +124,6 @@ function makePendingKey(sessionID: string, tool: string, seq: number): string {
   return sessionID + '::' + tool + '::' + seq;
 }
 
-// ─── 持久化文件操作 ────────────────────────────────────────────────────────
-
-interface TrackerFileData {
-  records: TrackerRecord[];
-}
-
-async function readTrackerFile(): Promise<TrackerFileData> {
-  const exists = await fileExists(TRACKER_FILE);
-  if (!exists) return { records: [] };
-  const data = await readJsonFile<TrackerFileData>(TRACKER_FILE);
-  return data ?? { records: [] };
-}
-
-async function writeTrackerFile(data: TrackerFileData): Promise<void> {
-  await ensureDir('.flow-engine/iflow');
-  await writeJsonFile(TRACKER_FILE, data);
-}
-
 // ─── 创建 TaskTracker 实例 ─────────────────────────────────────────────────
 
 /**
@@ -151,8 +134,28 @@ async function writeTrackerFile(data: TrackerFileData): Promise<void> {
  */
 export function createTaskTracker(
   config?: { enabled?: boolean },
+  trackerFilePath?: string,
 ): TaskTrackerInstance {
   const enabled = config?.enabled !== false;
+  const trackerFile = trackerFilePath ?? '.flow-engine/iflow/subagent-tracker.json';
+
+  // ─── 闭包：持久化文件操作 ──────────────────────────────────────────────
+
+  interface TrackerFileData {
+    records: TrackerRecord[];
+  }
+
+  async function readTrackerFile(): Promise<TrackerFileData> {
+    const exists = await fileExists(trackerFile);
+    if (!exists) return { records: [] };
+    const data = await readJsonFile<TrackerFileData>(trackerFile);
+    return data ?? { records: [] };
+  }
+
+  async function writeTrackerFile(data: TrackerFileData): Promise<void> {
+    await ensureDir(dirname(trackerFile));
+    await writeJsonFile(trackerFile, data);
+  }
 
   // 内存中的 pending 记录：key = sessionID::tool::seq, value = beforeRecord
   const pendingMap = new Map<string, TrackerBeforeRecord>();
@@ -285,5 +288,9 @@ export function createTaskTracker(
     afterHook,
     getTrackerData,
     clearTracker,
+    dispose: async () => {
+      pendingMap.clear();
+      seqCounter.clear();
+    },
   };
 }

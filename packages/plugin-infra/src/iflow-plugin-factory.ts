@@ -89,7 +89,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
     const hookComposer = createHookComposer();
     const skillLoader = await createSkillLoader();
     const mcpManager = createMcpManager();
-    const taskTracker = createTaskTracker();
+    const taskTracker = createTaskTracker(undefined, '.flow-engine/iflow/subagent-tracker.json');
 
     // Build IFlow tool definitions
     const tools = createIFlowTools(sflowClient);
