@@ -64,3 +64,15 @@ export {
   HANDOFF_DIR,
   HANDOFF_TYPES,
 } from './state-manager.js';
+
+export {
+  createTaskTracker,
+} from './task-tracker.js';
+
+export type {
+  TrackerBeforeRecord,
+  TrackerAfterRecord,
+  TrackerRecord,
+  TrackerData,
+  TaskTrackerInstance,
+} from './task-tracker.js';

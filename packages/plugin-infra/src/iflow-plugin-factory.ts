@@ -28,6 +28,8 @@ import { setHasOmoPlugin, setHasAgnesProvider } from './agents/agent-tools.js';
 import { pollSessionCompletion } from './helpers/polling.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
+import { createTaskTracker } from './features/task-tracker.js';
+import { recoverIFlowState } from '../../../workflows/iflow/iflow-state-manager.js';
 
 // ─── Background task registry (per-factory instance) ──────────────────────────
 
@@ -87,6 +89,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
     const hookComposer = createHookComposer();
     const skillLoader = await createSkillLoader();
     const mcpManager = createMcpManager();
+    const taskTracker = createTaskTracker();
 
     // Build IFlow tool definitions
     const tools = createIFlowTools(sflowClient);
@@ -98,6 +101,13 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
             await mcpManager.stopServer(server.name);
           } catch (err) {
             console.warn(`[iFlow] Failed to stop MCP server ${server.name}: `, err);
+          }
+        }
+        if (taskTracker && taskTracker.dispose) {
+          try {
+            await taskTracker.dispose();
+          } catch (err) {
+            console.warn('[iFlow] Failed to dispose TaskTracker:', err);
           }
         }
       },
@@ -114,6 +124,11 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
               pluginRoot: '',
               action: 'session.created',
             });
+          }
+          try {
+            await recoverIFlowState(workDir);
+          } catch (err) {
+            console.warn('[iFlow] Failed to recover state:', err);
           }
         } else if (event.type === 'session.deleted') {
           const sessionEndHook = hookComposer.getHook('session_end');
@@ -294,6 +309,10 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
             return;
           }
         }
+        // TaskTracker: 记录子 agent 调用开始
+        if (taskTracker && taskTracker.beforeHook) {
+          await taskTracker.beforeHook(input);
+        }
       },
 
       // tool.execute.after hook — IFlow state transition
@@ -327,6 +346,10 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
               } catch {}
             }
           }
+        }
+        // TaskTracker: 记录子 agent 调用结束
+        if (taskTracker && taskTracker.afterHook) {
+          await taskTracker.afterHook(input, output);
         }
       },
     };

@@ -118,6 +118,10 @@ Verification must assume the phase goal was NOT achieved until codebase evidence
 Classifications:
 - **BLOCKER**: A must-have truth is FAILED; phase goal not achieved
 - **WARNING**: A must-have is UNCERTAIN or wiring is incomplete
+
+## Checkpoint 自动记录
+
+每次通过 \`call_flow_agent\` 调用子 agent 时，系统自动在 \`.flow-engine/iflow/checkpoints/\` 目录下创建 checkpoint 文件（taskId.json），记录子 agent 的执行状态、输入输出摘要、耗时等信息。这些 checkpoint 在 session 压缩或重启后可用于恢复工作流上下文。可通过 \`readIFlowCheckpoint\` 查询历史 checkpoint。
 </Workflow>
 
 <Delegation>
@@ -164,6 +168,10 @@ Before routing, inspect the project's .flow-engine/iflow/ directory for artifact
 5. CONTEXT.md exists → researching
 6. No artifacts → discussing
 
+## 跨 Session 状态恢复
+
+Session 启动时自动检测 \`.flow-engine/iflow/state.json\`，恢复上次中断的工作流状态和 cycleNumber（迭代周期数）。cycleNumber 在 shipping → discussing 转换时自动递增。恢复逻辑在 \`iflow-state-manager.ts\` 的 \`recoverIFlowState\` 中实现，仅在有 state.json 时恢复，不存在时初始化为默认状态（discussing, cycle 1）。
+
 ## Guardrails
 
 - NEVER implement code yourself — always delegate
@@ -174,6 +182,16 @@ Before routing, inspect the project's .flow-engine/iflow/ directory for artifact
 - PLAN without timelines: never suggest time estimates
 - RESIST continuation signals: always stop and ask user what to do next
 - NEVER use write/edit tools directly — only use call_flow_agent to dispatch work
+
+## 子 Agent 调用追踪（TaskTracker）
+
+所有 \`call_flow_agent\` 调用自动通过 TaskTracker 记录到 \`.flow-engine/iflow/subagent-tracker.json\`，包括：
+- 子 agent 类型（subagentType）
+- 开始/结束时间（ISO 8601）
+- 输入/输出摘要（最长 200 字符）
+- 执行时长和完成状态（completed/failed）
+
+可通过 \`getTrackerData\` 查询当前 session 的追踪记录。
 </Delegation>
 
 ## Delegation Mechanism
