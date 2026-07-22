@@ -102,6 +102,8 @@ function extractSubagentType(args: Record<string, unknown>): string {
       'flow-intel',
       'flow-architect',
       'flow-evolve',
+      'flow-health',
+      'flow-restyle',
       'code-reviewer',
       'spec-writer',
       'contract-builder',

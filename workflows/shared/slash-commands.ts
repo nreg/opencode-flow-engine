@@ -15,6 +15,8 @@ export const FLOW_REVIEW_COMMAND = 'flow-review';
 export const FLOW_INTEL_COMMAND = 'flow-intel';
 export const FLOW_ARCHITECT_COMMAND = 'flow-architect';
 export const FLOW_EVOLVE_COMMAND = 'flow-evolve';
+export const FLOW_HEALTH_COMMAND = 'flow-health';
+export const FLOW_RESTYLE_COMMAND = 'flow-restyle';
 
 /**
  * /flow-test 命令模板
@@ -101,6 +103,40 @@ Use call_flow_agent to handle this command:
 }
 
 /**
+ * /flow-health 命令模板
+ * 健康巡检命令，代码库健康检查 + 技术债扫描
+ */
+function flowHealthCommandTemplate(): string {
+  return `"/flow-health" command was invoked.
+
+<flow_command_arguments>
+$ARGUMENTS
+</flow_command_arguments>
+
+This is the codebase health check command.
+Use call_flow_agent to handle this command:
+- If no arguments, run a full health check: call call_flow_agent with subagent_type="flow-health" and prompt="对当前项目进行完整的健康巡检（M-health）。选模式 → 冗余巡检 → AI 自评 6+6 维 → 输出健康报告 → 反哺工件。"
+- Report the health check result summary back to the user.`;
+}
+
+/**
+ * /flow-restyle 命令模板
+ * 一键换调性命令，保留功能不变只换视觉风格（仅前端项目）
+ */
+function flowRestyleCommandTemplate(): string {
+  return `"/flow-restyle" command was invoked.
+
+<flow_command_arguments>
+$ARGUMENTS
+</flow_command_arguments>
+
+This is the visual restyle command - only available for frontend projects.
+Use call_flow_agent to handle this command:
+- If no arguments, run a full restyle: call call_flow_agent with subagent_type="flow-restyle" and prompt="对当前项目进行一键换调性（L-restyle）。识别调性 v1 → 切换确认 → 影响面扫描 → 写 UI-DESIGN v2 → 拆任务 → 风险通告。"
+- Report the restyle result summary back to the user.`;
+}
+
+/**
  * 注册 slash 命令到 plugin config
  * 借鉴 goal-plugin 的 registerDesktopCommand 模式
  */
@@ -144,6 +180,22 @@ export function registerFlowCommands(config: Config): void {
     config.command[FLOW_EVOLVE_COMMAND] = {
       description: '架构增量同步：从归档 change 中同步架构沉淀到 CONTEXT.md',
       template: flowEvolveCommandTemplate(),
+    };
+  }
+
+  // 注册 /flow-health
+  if (!config.command[FLOW_HEALTH_COMMAND]) {
+    config.command[FLOW_HEALTH_COMMAND] = {
+      description: '健康巡检：代码库健康检查，产出健康报告 + 技术债扫描',
+      template: flowHealthCommandTemplate(),
+    };
+  }
+
+  // 注册 /flow-restyle
+  if (!config.command[FLOW_RESTYLE_COMMAND]) {
+    config.command[FLOW_RESTYLE_COMMAND] = {
+      description: '一键换调性：保留功能不变，只换视觉风格（仅前端项目）',
+      template: flowRestyleCommandTemplate(),
     };
   }
 }

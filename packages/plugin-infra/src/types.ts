@@ -54,6 +54,8 @@ export const AGENT_COLORS: Record<string, string> = {
   'flow-intel': '#AB47BC',
   'flow-architect': '#FF7043',
   'flow-evolve': '#26A69A',
+  'flow-health': '#EF5350',
+  'flow-restyle': '#7E57C2',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

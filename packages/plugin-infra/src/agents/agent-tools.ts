@@ -330,6 +330,30 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     lsp_goto_definition: true,
     lsp_find_references: true,
   },
+
+  /** Flow Health - 健康巡检，冗余检测 + AI 自评 + 反哺工件 */
+  'flow-health': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: false,
+    bash: true,
+    skill: false,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true,
+  },
+
+  /** Flow Restyle - 一键换调性，换视觉风格 */
+  'flow-restyle': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: true,
+    bash: true,
+    skill: false,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true,
+  },
 };
 
 /**

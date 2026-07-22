@@ -33,6 +33,8 @@ import {
   createFlowArchitectAgent,
   createFlowEvolveAgent,
   createFlowIntelAgent,
+  createFlowHealthAgent,
+  createFlowRestyleAgent,
 } from '../../../../workflows/shared/index.js';
 import {
   loadCascadedSFlowConfig,
@@ -71,6 +73,8 @@ const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
   'flow-intel': 'subagent',
   'flow-architect': 'subagent',
   'flow-evolve': 'subagent',
+  'flow-health': 'subagent',
+  'flow-restyle': 'subagent',
 };
 
 /**
@@ -104,6 +108,8 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
   'flow-intel': 'glm-5.1',
   'flow-architect': 'glm-5.1',
   'flow-evolve': 'glm-5.1',
+  'flow-health': 'glm-5.1',
+  'flow-restyle': 'glm-5.1',
 };
 
 /**
@@ -137,6 +143,8 @@ const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
   'flow-intel': ['kimi-k2.6', 'deepseek-v4-flash'],
   'flow-architect': ['kimi-k2.6', 'deepseek-v4-flash'],
   'flow-evolve': ['kimi-k2.6', 'deepseek-v4-flash'],
+  'flow-health': ['kimi-k2.6', 'deepseek-v4-flash'],
+  'flow-restyle': ['kimi-k2.6', 'deepseek-v4-flash'],
 };
 
 /**
@@ -165,6 +173,8 @@ export const AGENT_PROFILES: AGENT_PROFILES_TYPE = {
   'flow-intel': 'standard',
   'flow-architect': 'strong',
   'flow-evolve': 'standard',
+  'flow-health': 'review',
+  'flow-restyle': 'strong',
 };
 
 /**
@@ -197,6 +207,8 @@ const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
   'flow-intel': createFlowIntelAgent,
   'flow-architect': createFlowArchitectAgent,
   'flow-evolve': createFlowEvolveAgent,
+  'flow-health': createFlowHealthAgent,
+  'flow-restyle': createFlowRestyleAgent,
 };
 
 /**

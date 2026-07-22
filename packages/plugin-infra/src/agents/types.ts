@@ -46,7 +46,9 @@ export type BuiltinAgentName =
   // Horizontal commands (cross-workflow, standalone)
   | 'flow-intel'          // I-intel-scan: 入场扫描，生成 CONTEXT.md (subagent)
   | 'flow-evolve'         // A-evolve: 架构增量同步，patch CONTEXT.md + ARCHITECTURE.md (subagent)
-  | 'flow-architect';     // A-architect: 架构文档，生成 ARCHITECTURE.md (subagent)
+  | 'flow-architect'      // A-architect: 架构文档，生成 ARCHITECTURE.md (subagent)
+  | 'flow-health'         // M-health: 健康巡检，生成健康报告 + 技术债扫描 (subagent)
+  | 'flow-restyle';       // L-restyle: 一键换调性，换视觉风格 (subagent)
 
 /**
  * Agent override configuration

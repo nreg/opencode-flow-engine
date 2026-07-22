@@ -74,6 +74,24 @@ export const HORIZONTAL_COMMANDS: HorizontalCommandEntry[] = [
     description: '建立或重构项目架构文档（ARCHITECTURE.md）',
     tokens: ['建立架构', '架构文档', 'ARCHITECTURE', '重构架构', 'architecture doc'],
   },
+
+  // --- flow-health (健康巡检) ---
+  {
+    pattern: /健康.*巡检|健康.*检查|health.*check|代码.*健康|项目.*健康|巡检.*代码|代码.*体检|codebase.*health|health.*inspection/i,
+    agent: 'flow-health',
+    action: 'health-check',
+    description: '健康巡检：冗余检测 + AI 自评 6+6 维 + 反哺工件',
+    tokens: ['健康巡检', '健康检查', 'health check', '代码健康', '项目健康', '代码体检', 'codebase health'],
+  },
+
+  // --- flow-restyle (一键换调性) ---
+  {
+    pattern: /换调性|改风格|换风格|restyle|重做视觉|换皮|redesign|重新设计.*视觉/i,
+    agent: 'flow-restyle',
+    action: 'restyle',
+    description: '一键换调性：保留功能不变，只换视觉风格（仅前端项目）',
+    tokens: ['换调性', '改风格', 'restyle', '换皮', 'redesign'],
+  },
 ];
 
 /**

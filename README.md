@@ -50,6 +50,18 @@ Then start a conversation:
 "start an iteration"  → iFlow (cyclic, rapid iteration)
 ```
 
+Or use slash commands for cross-workflow actions:
+
+```
+/flow-test           → Run comprehensive testing (5-tier)
+/flow-review         → Run comprehensive review (3-round)
+/flow-intel          → Entry scan, generate CONTEXT.md
+/flow-architect      → Create or refactor ARCHITECTURE.md
+/flow-evolve         → Sync architecture decisions
+/flow-health         → Codebase health check
+/flow-restyle        → One-click visual restyle (frontend only)
+```
+
 ---
 
 ## Workflow Selection
@@ -149,12 +161,17 @@ On context restoration, sFlow detects artifact/state mismatches and auto-repairs
 | **iflow-researcher** | Subagent | Technical research: discovery levels, tool priority chain, confidence markers |
 | **iflow-shipper** | Subagent | PR creation, UAT.md generation, branch lifecycle management |
 
-### Shared Cross-Workflow Agents (2)
+### Shared Cross-Workflow Agents (7)
 
 | Agent | Mode | Description |
 |-------|------|-------------|
-| **test-engineer** | Subagent | **Independent comprehensive testing**: 5-tier test pyramid (functional, performance, security, compatibility, observability). Triggered by user commands like "全面test" / "comprehensive test". Not bound to any workflow state. |
-| **review-engineer** | Subagent | **Independent comprehensive review**: 3-round review (spec compliance, code quality, UI visual). Triggered by user commands like "全面review" / "comprehensive review". Not bound to any workflow state. |
+| **test-engineer** | Subagent | **Independent comprehensive testing**: 5-tier test pyramid (functional, performance, security, compatibility, observability). Triggered by `/flow-test` or "全面test" / "comprehensive test". Not bound to any workflow state. |
+| **review-engineer** | Subagent | **Independent comprehensive review**: 3-round review (spec compliance, code quality, UI visual). Triggered by `/flow-review` or "全面review" / "comprehensive review". Not bound to any workflow state. |
+| **flow-intel** | Subagent | **Entry scan**: Scans codebase to generate project-level CONTEXT.md (architecture, conventions, abstractions). Triggered by `/flow-intel`. |
+| **flow-architect** | Subagent | **Architecture documentation**: Creates or refactors ARCHITECTURE.md (module map, dependency rules, ADR). Triggered by `/flow-architect`. |
+| **flow-evolve** | Subagent | **Architecture evolution**: Syncs architecture decisions from archived changes into CONTEXT.md. Triggered by `/flow-evolve`. |
+| **flow-health** | Subagent | **Codebase health check**: 6+6 dimension risk assessment, redundancy scan, health report generation. Triggered by `/flow-health`. |
+| **flow-restyle** | Subagent | **One-click visual restyle**: Preserves functionality, changes only visual style. Frontend projects only. Triggered by `/flow-restyle`. |
 
 ### Routing Principles
 

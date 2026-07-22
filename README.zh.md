@@ -50,6 +50,18 @@ npm install -g opencode-flow-engine
 "开始一个迭代"    → iFlow（循环、快速迭代）
 ```
 
+或使用 slash 命令执行跨工作流操作：
+
+```
+/flow-test           → 全面测试（5 轮测试金字塔）
+/flow-review         → 全面审查（3 轮审查）
+/flow-intel          → 入场扫描，生成 CONTEXT.md
+/flow-architect      → 创建或重构架构文档 ARCHITECTURE.md
+/flow-evolve         → 架构增量同步
+/flow-health         → 代码库健康巡检
+/flow-restyle        → 一键换调性（仅前端项目）
+```
+
 ---
 
 ## 工作流选择
@@ -149,12 +161,17 @@ npm install -g opencode-flow-engine
 | **iflow-researcher** | 子智能体 | 技术研究：发现等级、工具优先级链、置信度标记 |
 | **iflow-shipper** | 子智能体 | PR 创建、UAT.md 生成、分支生命周期管理 |
 
-### 跨工作流共享智能体（2 个）
+### 跨工作流共享智能体（7 个）
 
 | 智能体 | 模式 | 说明 |
 |--------|------|------|
-| **test-engineer** | 子智能体 | **独立全面测试**：5 轮测试金字塔（功能、性能、安全、兼容、可观测性）。用户通过"全面test"/"全面测试"触发，独立于任何工作流状态。 |
-| **review-engineer** | 子智能体 | **独立全面审查**：3 轮审查（Spec 合规、代码质量、UI 视觉）。用户通过"全面review"/"全面审查"触发，独立于任何工作流状态。 |
+| **test-engineer** | 子智能体 | **独立全面测试**：5 轮测试金字塔（功能、性能、安全、兼容、可观测性）。通过 `/flow-test` 或"全面test"/"全面测试"触发，独立于任何工作流状态。 |
+| **review-engineer** | 子智能体 | **独立全面审查**：3 轮审查（Spec 合规、代码质量、UI 视觉）。通过 `/flow-review` 或"全面review"/"全面审查"触发，独立于任何工作流状态。 |
+| **flow-intel** | 子智能体 | **入场扫描**：扫描代码库生成项目级 CONTEXT.md（架构、约定、抽象层）。通过 `/flow-intel` 触发。 |
+| **flow-architect** | 子智能体 | **架构文档**：创建或重构 ARCHITECTURE.md（模块图、依赖规则、ADR）。通过 `/flow-architect` 触发。 |
+| **flow-evolve** | 子智能体 | **架构增量同步**：从归档 change 中同步架构沉淀到 CONTEXT.md。通过 `/flow-evolve` 触发。 |
+| **flow-health** | 子智能体 | **健康巡检**：6+6 维风险评估、冗余扫描、健康报告生成。通过 `/flow-health` 触发。 |
+| **flow-restyle** | 子智能体 | **一键换调性**：保留功能不变，只换视觉风格。仅前端项目。通过 `/flow-restyle` 触发。 |
 
 ### 路由原则
 
