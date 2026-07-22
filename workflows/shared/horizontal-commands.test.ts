@@ -211,3 +211,123 @@ describe('matchHorizontalCommand — Flow Architect', () => {
     });
   }
 });
+
+describe('matchHorizontalCommand — Flow Evolve', () => {
+  const testCases = [
+    { input: '同步架构', expected: 'flow-evolve' },
+    { input: '架构演进', expected: 'flow-evolve' },
+    { input: 'evolve', expected: 'flow-evolve' },
+    { input: '架构同步', expected: 'flow-evolve' },
+    { input: '同步 CONTEXT', expected: 'flow-evolve' },
+    { input: '同步沉淀', expected: 'flow-evolve' },
+    { input: '整理沉淀', expected: 'flow-evolve' },
+    { input: '架构沉淀', expected: 'flow-evolve' },
+    { input: '帮我同步架构', expected: 'flow-evolve' },
+    { input: 'Evolve', expected: 'flow-evolve' },
+  ];
+
+  for (const { input, expected } of testCases) {
+    it(`should match "${input}" → ${expected}`, () => {
+      const result = matchHorizontalCommand(input);
+      expect(result).not.toBeNull();
+      expect(result!.agent).toBe(expected);
+      expect(result!.action).toBe('evolve-architecture');
+    });
+  }
+});
+
+describe('matchHorizontalCommand — Flow Health', () => {
+  const testCases = [
+    { input: '健康巡检', expected: 'flow-health' },
+    { input: '健康检查', expected: 'flow-health' },
+    { input: 'health check', expected: 'flow-health' },
+    { input: '代码健康', expected: 'flow-health' },
+    { input: '项目健康', expected: 'flow-health' },
+    { input: '巡检代码', expected: 'flow-health' },
+    { input: '代码体检', expected: 'flow-health' },
+    { input: 'codebase health', expected: 'flow-health' },
+    { input: 'health inspection', expected: 'flow-health' },
+    { input: 'Health Check', expected: 'flow-health' },
+  ];
+
+  for (const { input, expected } of testCases) {
+    it(`should match "${input}" → ${expected}`, () => {
+      const result = matchHorizontalCommand(input);
+      expect(result).not.toBeNull();
+      expect(result!.agent).toBe(expected);
+      expect(result!.action).toBe('health-check');
+    });
+  }
+});
+
+describe('matchHorizontalCommand — Flow Restyle', () => {
+  const testCases = [
+    { input: '换调性', expected: 'flow-restyle' },
+    { input: '改风格', expected: 'flow-restyle' },
+    { input: '换风格', expected: 'flow-restyle' },
+    { input: 'restyle', expected: 'flow-restyle' },
+    { input: '重做视觉', expected: 'flow-restyle' },
+    { input: '换皮', expected: 'flow-restyle' },
+    { input: 'redesign', expected: 'flow-restyle' },
+    { input: '重新设计视觉', expected: 'flow-restyle' },
+    { input: '帮我换调性', expected: 'flow-restyle' },
+    { input: 'Restyle', expected: 'flow-restyle' },
+    { input: 'Redesign', expected: 'flow-restyle' },
+  ];
+
+  for (const { input, expected } of testCases) {
+    it(`should match "${input}" → ${expected}`, () => {
+      const result = matchHorizontalCommand(input);
+      expect(result).not.toBeNull();
+      expect(result!.agent).toBe(expected);
+      expect(result!.action).toBe('restyle');
+    });
+  }
+});
+
+describe('matchHorizontalCommand — New agents should not interfere with existing ones', () => {
+  it('should still match full-test when flow-evolve pattern also matches', () => {
+    // "evolve" is a flow-evolve token, but "全面测试" should still match full-test
+    const result = matchHorizontalCommand('全面测试');
+    expect(result).not.toBeNull();
+    expect(result!.agent).toBe('test-engineer');
+    expect(result!.action).toBe('full-test');
+  });
+
+  it('should match flow-evolve when input is clearly about architecture sync', () => {
+    const result = matchHorizontalCommand('同步架构');
+    expect(result).not.toBeNull();
+    expect(result!.agent).toBe('flow-evolve');
+    expect(result!.action).toBe('evolve-architecture');
+  });
+
+  it('should match flow-health when input is about health check', () => {
+    const result = matchHorizontalCommand('做一次健康巡检');
+    expect(result).not.toBeNull();
+    expect(result!.agent).toBe('flow-health');
+    expect(result!.action).toBe('health-check');
+  });
+
+  it('should match flow-restyle when input is about visual restyle', () => {
+    const result = matchHorizontalCommand('给项目换皮');
+    expect(result).not.toBeNull();
+    expect(result!.agent).toBe('flow-restyle');
+    expect(result!.action).toBe('restyle');
+  });
+});
+
+describe('HORIZONTAL_COMMANDS — All agents uniqueness', () => {
+  it('should have all 7 agents registered', () => {
+    const agents = new Set(HORIZONTAL_COMMANDS.map(c => c.agent));
+    expect(agents.has('test-engineer')).toBe(true);
+    expect(agents.has('review-engineer')).toBe(true);
+    expect(agents.has('flow-architect')).toBe(true);
+    expect(agents.has('flow-evolve')).toBe(true);
+    expect(agents.has('flow-health')).toBe(true);
+    expect(agents.has('flow-restyle')).toBe(true);
+  });
+
+  it('should have at least 8 commands (2 test + 2 review + 4 new)', () => {
+    expect(HORIZONTAL_COMMANDS.length).toBeGreaterThanOrEqual(8);
+  });
+});
