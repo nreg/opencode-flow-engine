@@ -57,6 +57,15 @@ export const HORIZONTAL_COMMANDS: HorizontalCommandEntry[] = [
     tokens: ['只看', '只看R', '部分审查', 'partial review'],
   },
 
+  // --- flow-evolve (架构增量同步) ---
+  {
+    pattern: /同步.*架构|架构.*演进|evolve|架构.*同步|同步.*CONTEXT|同步.*沉淀|整理.*沉淀|架构.*沉淀/i,
+    agent: 'flow-evolve',
+    action: 'evolve-architecture',
+    description: '架构增量同步：从归档 change 中同步架构沉淀到 CONTEXT.md',
+    tokens: ['同步架构', '架构演进', 'evolve', '同步 CONTEXT', '整理沉淀'],
+  },
+
   // --- flow-architect (架构文档) ---
   {
     pattern: /建立.*架构|写.*架构文档|架构.*文档|ARCHITECTURE|建立.*ARCHITECTURE|重构.*架构|架构.*重构|architecture.*doc|write.*architecture/i,

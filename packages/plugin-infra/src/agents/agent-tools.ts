@@ -318,6 +318,18 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     lsp_goto_definition: true,
     lsp_find_references: true,
   },
+
+  /** Flow Evolve - 架构增量同步，patch CONTEXT.md + ARCHITECTURE.md */
+  'flow-evolve': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: true,
+    bash: true,
+    skill: false,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true,
+  },
 };
 
 /**

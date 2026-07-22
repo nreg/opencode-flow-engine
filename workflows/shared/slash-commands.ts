@@ -14,6 +14,7 @@ export const FLOW_TEST_COMMAND = 'flow-test';
 export const FLOW_REVIEW_COMMAND = 'flow-review';
 export const FLOW_INTEL_COMMAND = 'flow-intel';
 export const FLOW_ARCHITECT_COMMAND = 'flow-architect';
+export const FLOW_EVOLVE_COMMAND = 'flow-evolve';
 
 /**
  * /flow-test 命令模板
@@ -83,6 +84,23 @@ Use call_flow_agent to handle this command:
 }
 
 /**
+ * /flow-evolve 命令模板
+ * 架构增量同步命令，从归档 change 中同步架构沉淀到 CONTEXT.md
+ */
+function flowEvolveCommandTemplate(): string {
+  return `"/flow-evolve" command was invoked.
+
+<flow_command_arguments>
+$ARGUMENTS
+</flow_command_arguments>
+
+This is the architecture evolution command - syncs architecture decisions from archived changes.
+Use call_flow_agent to handle this command:
+- If no arguments, run a full architecture evolution: call call_flow_agent with subagent_type="flow-evolve" and prompt="对当前项目进行架构增量同步（A-evolve）。确定扫描范围 → 抽取 § 9 → 聚合分类 5 类 → 逐项 review → 生成 patch → 写入 → 报告。"
+- Report the evolution result summary back to the user.`;
+}
+
+/**
  * 注册 slash 命令到 plugin config
  * 借鉴 goal-plugin 的 registerDesktopCommand 模式
  */
@@ -118,6 +136,14 @@ export function registerFlowCommands(config: Config): void {
     config.command[FLOW_ARCHITECT_COMMAND] = {
       description: '架构文档：建立或重构项目级架构文档（ARCHITECTURE.md）',
       template: flowArchitectCommandTemplate(),
+    };
+  }
+
+  // 注册 /flow-evolve
+  if (!config.command[FLOW_EVOLVE_COMMAND]) {
+    config.command[FLOW_EVOLVE_COMMAND] = {
+      description: '架构增量同步：从归档 change 中同步架构沉淀到 CONTEXT.md',
+      template: flowEvolveCommandTemplate(),
     };
   }
 }

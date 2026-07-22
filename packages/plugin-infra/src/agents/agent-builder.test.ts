@@ -117,7 +117,7 @@ describe('Agent Builder', () => {
     it('should create all agents', async () => {
       const agents = await createAllAgents();
       expect(agents).toBeDefined();
-      expect(Object.keys(agents)).toHaveLength(21);
+      expect(Object.keys(agents)).toHaveLength(22);
     });
 
     it('should have all required agents', async () => {
@@ -203,7 +203,7 @@ describe('Agent Builder', () => {
       // Horizontal commands (cross-workflow)
       expect(names).toContain('flow-intel');
       expect(names).toContain('flow-architect');
-      expect(names).toHaveLength(21);
+      expect(names).toHaveLength(22);
     });
   });
 
@@ -240,7 +240,7 @@ describe('Agent Builder', () => {
   describe('getSubagentAgents', () => {
     it('should return all subagents', () => {
       const subagents = getSubagentAgents();
-      expect(subagents).toHaveLength(19);
+      expect(subagents).toHaveLength(20);
       expect(subagents).toContain('need-explorer');
       expect(subagents).toContain('spec-writer');
       expect(subagents).toContain('contract-builder');
@@ -296,7 +296,7 @@ describe('Agent Builder', () => {
   describe('getAllDefaultModels', () => {
     it('should return models for all agents', () => {
       const models = getAllDefaultModels();
-      expect(Object.keys(models)).toHaveLength(21);
+      expect(Object.keys(models)).toHaveLength(22);
       expect(models.sFlow).toBe('deepseek-v4-flash');
       expect(models['need-explorer']).toBe('kimi-k2.6');
       expect(models['spec-writer']).toBe('glm-5.1');

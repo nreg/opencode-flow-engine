@@ -31,6 +31,7 @@ import {
   createTestEngineerAgent,
   createReviewEngineerAgent,
   createFlowArchitectAgent,
+  createFlowEvolveAgent,
   createFlowIntelAgent,
 } from '../../../../workflows/shared/index.js';
 import {
@@ -69,6 +70,7 @@ const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
   // Horizontal commands (cross-workflow, standalone)
   'flow-intel': 'subagent',
   'flow-architect': 'subagent',
+  'flow-evolve': 'subagent',
 };
 
 /**
@@ -101,6 +103,7 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
   // Horizontal commands
   'flow-intel': 'glm-5.1',
   'flow-architect': 'glm-5.1',
+  'flow-evolve': 'glm-5.1',
 };
 
 /**
@@ -133,6 +136,7 @@ const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
   // Horizontal commands
   'flow-intel': ['kimi-k2.6', 'deepseek-v4-flash'],
   'flow-architect': ['kimi-k2.6', 'deepseek-v4-flash'],
+  'flow-evolve': ['kimi-k2.6', 'deepseek-v4-flash'],
 };
 
 /**
@@ -160,6 +164,7 @@ export const AGENT_PROFILES: AGENT_PROFILES_TYPE = {
   // Horizontal commands
   'flow-intel': 'standard',
   'flow-architect': 'strong',
+  'flow-evolve': 'standard',
 };
 
 /**
@@ -191,6 +196,7 @@ const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
   // Horizontal commands (cross-workflow, standalone)
   'flow-intel': createFlowIntelAgent,
   'flow-architect': createFlowArchitectAgent,
+  'flow-evolve': createFlowEvolveAgent,
 };
 
 /**

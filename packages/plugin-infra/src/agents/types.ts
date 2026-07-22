@@ -45,6 +45,7 @@ export type BuiltinAgentName =
   | 'review-engineer'     // Independent comprehensive review (subagent)
   // Horizontal commands (cross-workflow, standalone)
   | 'flow-intel'          // I-intel-scan: 入场扫描，生成 CONTEXT.md (subagent)
+  | 'flow-evolve'         // A-evolve: 架构增量同步，patch CONTEXT.md + ARCHITECTURE.md (subagent)
   | 'flow-architect';     // A-architect: 架构文档，生成 ARCHITECTURE.md (subagent)
 
 /**
