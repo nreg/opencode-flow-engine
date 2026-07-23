@@ -47,7 +47,7 @@ export function createCompactionContext(
     lines.push('');
   }
 
-  const dps = ['dp0', 'dp1', 'dp2', 'dp3', 'dp4', 'dp5'] as const;
+  const dps = Object.keys(state).filter(key => key.startsWith('dp') && key.length >= 3).sort();
   const hasDp = dps.some(dp => state[dp as keyof CompactionState]);
   if (hasDp) {
     lines.push('Decision Points:');

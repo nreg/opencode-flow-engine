@@ -49,6 +49,8 @@ export const createFlowHealthAgent: AgentFactory = (model: string, options?: { t
 
 ## 步骤 2：冗余巡检（必跑）
 
+**在执行任何工具之前，先调用 check_tool_available 检测 jscpd/knip/depcheck/ts-prune 可用性。** 根据检测结果决定使用工具还是回退方案。
+
 ### 2.1 字面重复块 — jscpd
 
 使用 bash 执行：
@@ -196,6 +198,15 @@ mkdir -p .flow-engine/sflow/health
 
 - 未用依赖: <列表>
 - 缺失依赖: <列表>
+
+### 1.4 工具可用性
+
+| 工具 | 状态 | 备注 |
+|------|------|------|
+| jscpd | ✅ 可用 / ❌ 不可用 | <错误信息，如不可用> |
+| knip | ✅ 可用 / ❌ 不可用 | <错误信息，如不可用> |
+| ts-prune | ✅ 可用 / ❌ 不可用 | <错误信息，如不可用> |
+| depcheck | ✅ 可用 / ❌ 不可用 | <错误信息，如不可用> |
 
 ---
 

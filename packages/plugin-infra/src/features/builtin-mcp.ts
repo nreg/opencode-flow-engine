@@ -177,11 +177,12 @@ export function createValidatorTools(): Record<string, ToolDefinition> {
     },
 
     detect_sync_conflicts: {
-      description: 'Detect sync conflicts across multiple delta specs (requirements modified by multiple changes). Pass delta spec paths as JSON array.',
+      description: 'Detect sync conflicts across multiple delta specs (requirements modified by multiple changes). Pass delta spec paths as JSON array. Optionally provide context_path for structured conflict detection against CONTEXT.md abstractions.',
       args: {
         delta_specs_json: z.string().describe('JSON array of { changeName: string, deltaSpecPath: string } objects'),
+        context_path: z.string().optional().describe('Path to CONTEXT.md for structured conflict detection'),
       },
-      execute: async (args: { delta_specs_json: string }, context: ToolContext) => {
+      execute: async (args: { delta_specs_json: string; context_path?: string }, context: ToolContext) => {
         let entries: Array<{ changeName: string; deltaSpecPath: string }>;
         try {
           entries = JSON.parse(args.delta_specs_json);
@@ -197,6 +198,47 @@ export function createValidatorTools(): Record<string, ToolDefinition> {
           }
         }
         const report = sharedValidator.detectSyncConflicts(resolved);
+
+        // Extended report: when context_path is provided, extract existing abstraction index
+        // from CONTEXT.md and cross-reference with delta specs for structured conflict detection
+        if (args.context_path) {
+          const contextFilePath = resolvePath(context, args.context_path);
+          const contextContent = await readFileContent(contextFilePath);
+          if (contextContent !== null) {
+            // Extract "既有抽象层" section from CONTEXT.md
+            // Matches headings like "## 5. 既有抽象层", "## 既有抽象层", "## 5."
+            const abstractionSectionMatch = contextContent.match(/^#{1,3}\s+(?:\d+\.\s*)?既有抽象层.*\n([\s\S]*?)(?=\n#{1,3}\s|$)/m);
+            const existingAbstractions = abstractionSectionMatch ? abstractionSectionMatch[1].trim() : '';
+
+            if (existingAbstractions) {
+              const abstractionLines = existingAbstractions.split('\n').filter(line => line.trim().length > 0);
+              const contextConflicts: Array<{ abstraction: string; conflictingChanges: string[] }> = [];
+
+              for (const line of abstractionLines) {
+                const conflictingChanges: string[] = [];
+                for (const entry of resolved) {
+                  // Check if the delta spec mentions or modifies this abstraction
+                  const deltaContent = entry.content.toLowerCase();
+                  const abstractionName = line.replace(/^[-*]\s*/, '').split(/[—\-:]/)[0].trim().toLowerCase();
+                  if (abstractionName && deltaContent.includes(abstractionName)) {
+                    conflictingChanges.push(entry.changeName);
+                  }
+                }
+                if (conflictingChanges.length > 0) {
+                  contextConflicts.push({
+                    abstraction: line.trim(),
+                    conflictingChanges,
+                  });
+                }
+              }
+
+              (report as Record<string, unknown>)['contextConflicts'] = contextConflicts;
+              (report as Record<string, unknown>)['contextPath'] = contextFilePath;
+              (report as Record<string, unknown>)['abstractionsChecked'] = abstractionLines.length;
+            }
+          }
+        }
+
         return { title: 'Sync Conflict Detection', output: JSON.stringify(report, null, 2) };
       },
     },

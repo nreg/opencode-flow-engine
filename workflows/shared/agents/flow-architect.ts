@@ -34,6 +34,8 @@ export const createFlowArchitectAgent: AgentFactory = (model: string, options?: 
 
 向用户确认模式后再继续。
 
+**重要**：如果是重构模式（ARCHITECTURE.md 已存在），用户确认后，**必须调用 record_decision_point 工具**，设置 dp_id='dp-0'，metadata 中包含 architect_write_approved: true。这是系统守卫（agent-specific guard）允许覆盖写入已有 ARCHITECTURE.md 的必要条件。未设置此标志时，系统会阻断对已存在 ARCHITECTURE.md 的写入操作。
+
 ---
 
 ## 步骤 2：系统概览
@@ -182,6 +184,10 @@ export const createFlowArchitectAgent: AgentFactory = (model: string, options?: 
 | 2025-01-15 | 首跑 | 初始架构文档建立 | @username |
 | 2025-02-01 | 重构 | 新增 ADR-003，更新模块清单 | @username |
 \`\`\`
+
+### 清除写入许可标志
+
+写入完成后，如果是重构模式，**必须再次调用 record_decision_point 工具**，设置 dp_id='dp-0'，metadata 中包含 architect_write_approved: false，清除写入许可标志。这确保后续对 ARCHITECTURE.md 的写入仍需用户重新确认。
 
 ---
 

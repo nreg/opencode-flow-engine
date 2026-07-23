@@ -30,8 +30,11 @@ import { getStateFilePath } from './features/state-manager.js';
 import { createCompactionContext } from '../../../workflows/shared/compaction-context.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
+import { createCheckToolAvailableTool } from './features/tool-availability.js';
 import { setHasOmoPlugin, setHasAgnesProvider } from './agents/agent-tools.js';
 import { markOmoUsed, resetOmoTracking } from './hooks/guard.js';
+import { createAgentSpecificGuards } from './hooks/guard/agent-guards.js';
+import { clearFrontendCache } from './features/frontend-detector.js';
 import { createTaskTracker } from './features/task-tracker.js';
 import { pollSessionCompletion } from './helpers/polling.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
@@ -51,28 +54,10 @@ let backgroundTaskCounter = { value: 0 };
 
 const AGENT_MODEL_MAP: AgentModelMap = {};
 
-// ─── SFlow tool definitions ──────────────────────────────────────────────────
+// ─── SFlow tool sub-factories ──────────────────────────────────────────────
 
-export function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
-  const callFlowAgentTools = createCallFlowAgentTools({
-    client,
-    backgroundTaskRegistry,
-    backgroundTaskCounter,
-    agentModelMap: AGENT_MODEL_MAP,
-    sessionLabelPrefix: 'sFlow',
-    workflowName: 'SFlow',
-    validateAgent: (subagentType) => {
-      const sharedNames = SHARED_AGENT_NAMES as readonly string[];
-      if (sharedNames.includes(subagentType as string)) return null;
-      const validSFlowAgents = SFLOW_AGENT_NAMES as readonly string[];
-      if (!validSFlowAgents.includes(subagentType as string)) {
-        return `无效的 SFlow agent: "${subagentType}"。可用的 SFlow agent: ${validSFlowAgents.join(', ')}，共享 agent: ${sharedNames.join(', ')}`;
-      }
-      return null;
-    },
-  });
-
-  const tools: Record<string, ToolDefinition> = {
+function createWorkflowRouterTools(client: SFlowClient): Record<string, ToolDefinition> {
+  return {
     workflow_router: {
       description: 'Detect current workflow state and route to the appropriate agent. Supports GO.md-style intent matching.',
       args: {
@@ -92,7 +77,11 @@ export function createSFlowTools(client: SFlowClient): Record<string, ToolDefini
         return createIFlowRouterTool().execute({ ...args, changeDir: context.directory || '' }, context);
       },
     },
+  };
+}
 
+function createContractTools(): Record<string, ToolDefinition> {
+  return {
     contract_validator: {
       description: 'Validate execution contract for correctness and completeness',
       args: {
@@ -120,9 +109,11 @@ export function createSFlowTools(client: SFlowClient): Record<string, ToolDefini
         return { title: 'Artifact Inspector', output: JSON.stringify(result, null, 2) };
       },
     },
+  };
+}
 
-    ...callFlowAgentTools,
-
+function createExecutionPlanTools(): Record<string, ToolDefinition> {
+  return {
     record_execution_plan: {
       description: 'Record or revise an execution plan for the current change. Validates contract existence, checks workflow state, and writes .flow-engine/sflow/execution-plan.json.',
       args: {
@@ -293,9 +284,40 @@ export function createSFlowTools(client: SFlowClient): Record<string, ToolDefini
       },
     },
   };
+}
+
+// ─── SFlow tool definitions ──────────────────────────────────────────────────
+
+export function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
+  const callFlowAgentTools = createCallFlowAgentTools({
+    client,
+    backgroundTaskRegistry,
+    backgroundTaskCounter,
+    agentModelMap: AGENT_MODEL_MAP,
+    sessionLabelPrefix: 'sFlow',
+    workflowName: 'SFlow',
+    validateAgent: (subagentType) => {
+      const sharedNames = SHARED_AGENT_NAMES as readonly string[];
+      if (sharedNames.includes(subagentType as string)) return null;
+      const validSFlowAgents = SFLOW_AGENT_NAMES as readonly string[];
+      if (!validSFlowAgents.includes(subagentType as string)) {
+        return `无效的 SFlow agent: "${subagentType}"。可用的 SFlow agent: ${validSFlowAgents.join(', ')}，共享 agent: ${sharedNames.join(', ')}`;
+      }
+      return null;
+    },
+  });
+
+  const tools: Record<string, ToolDefinition> = {
+    ...createWorkflowRouterTools(client),
+    ...createContractTools(),
+    ...createExecutionPlanTools(),
+    ...callFlowAgentTools,
+  };
 
   const agnesTools = createAgnesTools();
   Object.assign(tools, agnesTools);
+
+  tools['check_tool_available'] = createCheckToolAvailableTool();
 
   return tools;
 }
@@ -340,6 +362,8 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           if (taskTracker && taskTracker.dispose) {
             await taskTracker.dispose();
           }
+          // Clear frontend detection cache on session end
+          clearFrontendCache();
         },
 
         event: async (input) => {
@@ -480,6 +504,21 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
               ?? '') as string
             : '';
           const guardHook = hookComposer.getHook('guard');
+          // Agent-specific guard chain — executed before generic guards
+          // (more precise blocking conditions take priority)
+          const agentGuardResult = await createAgentSpecificGuards(workDir, {
+            toolName: lowerTool,
+            agent: (input as Record<string, unknown>).agent,
+            filePath,
+          });
+          if (agentGuardResult && agentGuardResult.block) {
+            output.args = {
+              ...(output.args ?? {}),
+              _sflow_guard_blocked: true,
+              _sflow_guard_reason: agentGuardResult.blockReason ?? 'Agent guard condition not met',
+            };
+            return;
+          }
           if (guardHook) {
             const guardResult = await guardHook.execute({
               changeDir: workDir,
@@ -528,9 +567,21 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           }
 
           const outputStr = output.output ?? '';
-          const stateMatch = outputStr.match(/"state"\s*:\s*"(\w[\w-]*)"/);
-          if (stateMatch) {
-            const newState = stateMatch[1];
+          // 优先使用 JSON.parse 提取顶层 state 字段
+          let newState: string | undefined;
+          try {
+            const parsed = JSON.parse(outputStr);
+            if (parsed && typeof parsed === 'object' && 'state' in parsed && typeof parsed.state === 'string') {
+              newState = parsed.state;
+            }
+          } catch {
+            // JSON.parse 失败，回退到增强正则（要求 state 位于顶层 JSON 开头）
+            const stateMatch = outputStr.match(/\{\s*"state"\s*:\s*"(\w[\w-]*)"/);
+            if (stateMatch) {
+              newState = stateMatch[1];
+            }
+          }
+          if (newState) {
             const isIFlowTool = toolName === 'iflow_router';
             const isIFlowState = newState && IFLOW_STATES.has(newState);
             if (isIFlowTool || (isIFlowState && !SFLOW_TOOLS.has(toolName))) {

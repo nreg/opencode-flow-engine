@@ -52,6 +52,7 @@ export const createFlowIntelAgent: AgentFactory = (model: string, options?: { te
 - **必须等用户确认才能开始扫描**
 - 输出提示：\`未检测到项目 AI 文档。即将对代码库进行全面扫描以生成 CONTEXT.md，这可能需要几分钟。是否继续？\`
 - 等待用户明确回复"是"/"继续"/"ok"后才开始
+- **用户确认后，调用 record_decision_point 工具**，设置 dp_id='dp-0'，metadata 中包含 intel_scan_confirmed: true，确保 state.json 中写入 intel_scan_confirmed 标志。这是系统守卫（agent-specific guard）解除阻断的必要条件。
 - **禁止盲飞** — 不得在用户未确认的情况下自动开始扫描
 
 ---

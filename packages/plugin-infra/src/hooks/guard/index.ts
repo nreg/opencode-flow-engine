@@ -13,3 +13,8 @@ export {
   checkIFlowProgressAntiRepeatGuard, checkIFlowArtifactAndPhaseConsistency,
   checkIFlowOmoUsageGuard, markIFlowOmoUsed, resetIFlowOmoTracking,
 } from './iflow-shared-guards.js';
+export {
+  checkFlowIntelScanGuard, checkFlowArchitectWriteGuard,
+  checkFlowRestyleFrontendGuard, createAgentSpecificGuards,
+} from './agent-guards.js';
+export type { AgentGuardResult } from './agent-guards.js';

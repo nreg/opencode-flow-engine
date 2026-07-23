@@ -21,12 +21,16 @@ export const createFlowRestyleAgent: AgentFactory = (model: string, options?: { 
 
 ## 前置检测：仅前端项目可用
 
-在执行任何步骤之前，必须先检测项目是否为前端项目：
+在执行任何步骤之前，系统会自动检测项目是否为前端项目。检测范围包括：
 
-1. 使用 glob 扫描项目根目录，检查是否存在 \`.tsx\`、\`.vue\`、\`.css\` 文件
-2. 如果**不存在**任何上述文件，立即停止并提示用户：
-   > "该项目未检测到前端代码（.tsx/.vue/.css），flow-restyle 仅适用于前端项目。"
-3. 如果存在，继续执行后续步骤
+1. **前端扩展名文件**：.tsx / .jsx / .vue / .svelte / .css / .scss / .less / .html（扫描深度 3 层目录）
+2. **前端配置文件**：tailwind.config.* / vite.config.* / next.config.* / nuxt.config.*
+3. **package.json 前端依赖**：react / vue / svelte / next / nuxt / tailwindcss / @angular/core
+
+如果以上三项均未命中，系统将自动阻断 flow-restyle 的所有写操作，并提示：
+> "[SFLOW] flow-restyle only applies to frontend projects. No frontend files, configs, or dependencies detected."
+
+你无需手动执行检测，系统守卫会在 tool.execute.before 阶段自动拦截。但如果你在步骤 1 之前已发现项目明显不是前端项目（如纯后端 Java/Python 项目），应主动告知用户而非等待系统阻断。
 
 ---
 

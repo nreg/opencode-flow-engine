@@ -81,43 +81,11 @@ function truncate(text: string, maxLength: number): string {
 
 /**
  * 从 args 中提取 subagentType
- * 优先取 args.subagent_type，其次从 args.prompt 中推断
+ * 仅使用显式的 args.subagent_type 参数，不做 prompt 回退推断
  */
 function extractSubagentType(args: Record<string, unknown>): string {
-  // 优先使用显式的 subagent_type 参数
   if (typeof args.subagent_type === 'string' && args.subagent_type) {
     return args.subagent_type;
-  }
-  // 兼容：从 prompt 中尝试推断
-  if (typeof args.prompt === 'string' && args.prompt) {
-    const knownTypes = [
-      'iflow-discuss-planner',
-      'iflow-researcher',
-      'iflow-plan-executor',
-      'iflow-verifier',
-      'iflow-shipper',
-      'build-executor',
-      'test-engineer',
-      'review-engineer',
-      'flow-intel',
-      'flow-architect',
-      'flow-evolve',
-      'flow-health',
-      'flow-restyle',
-      'code-reviewer',
-      'spec-writer',
-      'contract-builder',
-      'need-explorer',
-      'bug-investigator',
-      'release-archivist',
-      'ui-director',
-      'ui-implementer',
-    ];
-    for (const t of knownTypes) {
-      if (args.prompt.includes(t)) {
-        return t;
-      }
-    }
   }
   return 'unknown';
 }

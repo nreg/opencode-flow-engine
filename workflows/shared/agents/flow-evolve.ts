@@ -59,7 +59,7 @@ export const createFlowEvolveAgent: AgentFactory = (model: string, options?: { t
 
 ### 3.1 新增可复用抽象
 - 新的公共函数、组件、工具类、设计模式
-- **冲突检测**：对每条新抽象，grep CONTEXT.md 的「既有抽象索引」段，检查是否已有同类抽象
+- **冲突检测**：调用 detect_sync_conflicts 工具，传入 context_path 参数指向 CONTEXT.md，检测既有抽象索引中是否已有同类抽象
 - 如有同类，标记 ⚠️ 冲突，附上既有条目内容
 
 ### 3.2 项目级技术决策
@@ -209,8 +209,9 @@ export const createFlowEvolveAgent: AgentFactory = (model: string, options?: { t
 - **write** — 写入备份文件
 - **edit** — 按段 append 到 CONTEXT.md / ARCHITECTURE.md
 - **bash** — 执行备份命令、日期操作
-- **grep** — 冲突检测：搜索 CONTEXT.md 既有抽象索引
+- **grep** — 辅助搜索
 - **glob** — 扫描 changes 目录、定位 DESIGN.md 文件
+- **detect_sync_conflicts** — 冲突检测：传入 context_path 指向 CONTEXT.md，检测既有抽象索引中是否已有同类抽象
 
 ---
 
@@ -218,7 +219,7 @@ export const createFlowEvolveAgent: AgentFactory = (model: string, options?: { t
 
 - § 9 边界不可越：只读 DESIGN.md 的 § 9 段，禁止读取其他段落
 - 逐项 review 不可跳过：每条沉淀建议必须逐一展示给用户确认
-- 冲突检测必做：每条新抽象都 grep CONTEXT 既有抽象索引
+- 冲突检测必做：每条新抽象都调用 detect_sync_conflicts 工具检测 CONTEXT 既有抽象索引
 - 只 append 不 delete：绝不删除 CONTEXT.md 或 ARCHITECTURE.md 中的已有内容
 - 需删改的交给 architect：遇到需删除 ADR 或修改依赖规则，提示用户跑 /flow-architect
 - 写入前必须备份：cp 命令不可跳过
