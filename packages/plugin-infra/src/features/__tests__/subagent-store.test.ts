@@ -178,6 +178,51 @@ describe('SubagentStore', () => {
       expect(index[0].updated_at).toBeTruthy();
     });
 
+    it('should support custom status option', async () => {
+      await store.createAgent(makeCreateParams());
+      await store.updateOutput('agent_001', 'Error occurred', { status: 'error' });
+
+      const metaPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/meta.json');
+      const meta = JSON.parse(await readFile(metaPath, 'utf-8'));
+
+      expect(meta.status).toBe('error');
+      // error 状态时 completed_at 应为 null
+      expect(meta.completed_at).toBeNull();
+    });
+
+    it('should default status to completed when no options provided', async () => {
+      await store.createAgent(makeCreateParams());
+      await store.updateOutput('agent_001', 'Build completed');
+
+      const metaPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/meta.json');
+      const meta = JSON.parse(await readFile(metaPath, 'utf-8'));
+
+      expect(meta.status).toBe('completed');
+      expect(meta.completed_at).toBeTruthy();
+    });
+
+    it('should set completed_at when status is completed via options', async () => {
+      await store.createAgent(makeCreateParams());
+      await store.updateOutput('agent_001', 'Done', { status: 'completed' });
+
+      const metaPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/meta.json');
+      const meta = JSON.parse(await readFile(metaPath, 'utf-8'));
+
+      expect(meta.status).toBe('completed');
+      expect(meta.completed_at).toBeTruthy();
+    });
+
+    it('should update index.json with custom status', async () => {
+      await store.createAgent(makeCreateParams());
+      await store.updateOutput('agent_001', 'Error occurred', { status: 'error' });
+
+      const indexPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/index.json');
+      const index = JSON.parse(await readFile(indexPath, 'utf-8'));
+
+      expect(index[0].status).toBe('error');
+      expect(index[0].completed_at).toBeNull();
+    });
+
     it('should throw error for non-existent agent', async () => {
       await expect(store.updateOutput('agent_999', 'output')).rejects.toThrow(
         'Agent agent_999 not found in subagent-store',
@@ -318,6 +363,56 @@ describe('SubagentStore', () => {
       const completed = await store.listAgents({ status: 'completed' });
       expect(completed).toEqual([]);
     });
+
+    it('should return index data without reading meta when detailed=false', async () => {
+      await store.createAgent(makeCreateParams({ agent_id: 'agent_001', session_id: 'sess_abc' }));
+
+      // detailed=false 时应从 index 条目直接构造，不读 meta.json
+      const agents = await store.listAgents({ detailed: false });
+
+      expect(agents.length).toBe(1);
+      expect(agents[0].agent_id).toBe('agent_001');
+      expect(agents[0].subagent_type).toBe('build-executor');
+      expect(agents[0].session_id).toBe('sess_abc');
+      expect(agents[0].status).toBe('running');
+      expect(agents[0].completed_at).toBeNull();
+    });
+
+    it('should read meta when detailed=true (default)', async () => {
+      await store.createAgent(makeCreateParams({ agent_id: 'agent_001', session_id: 'sess_abc' }));
+      await store.updateOutput('agent_001', 'Done');
+
+      // detailed=true（默认）应读取完整 meta
+      const agentsDefault = await store.listAgents();
+      expect(agentsDefault.length).toBe(1);
+      expect(agentsDefault[0].status).toBe('completed');
+      expect(agentsDefault[0].completed_at).toBeTruthy();
+
+      const agentsDetailed = await store.listAgents({ detailed: true });
+      expect(agentsDetailed.length).toBe(1);
+      expect(agentsDetailed[0].status).toBe('completed');
+      expect(agentsDetailed[0].completed_at).toBeTruthy();
+    });
+
+    it('should combine status filter with detailed=false', async () => {
+      await store.createAgent(makeCreateParams({ agent_id: 'agent_001' }));
+      await store.createAgent(makeCreateParams({ agent_id: 'agent_002' }));
+      await store.updateOutput('agent_001', 'Done');
+
+      const running = await store.listAgents({ status: 'running', detailed: false });
+      expect(running.length).toBe(1);
+      expect(running[0].agent_id).toBe('agent_002');
+    });
+
+    it('should include session_id and completed_at in index.json entry', async () => {
+      await store.createAgent(makeCreateParams({ agent_id: 'agent_001', session_id: 'sess_xyz' }));
+
+      const indexPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/index.json');
+      const index = JSON.parse(await readFile(indexPath, 'utf-8'));
+
+      expect(index[0].session_id).toBe('sess_xyz');
+      expect(index[0].completed_at).toBeNull();
+    });
   });
 
   // ─── resumeAgent ────────────────────────────────────────────────────────
@@ -339,8 +434,8 @@ describe('SubagentStore', () => {
 
       const result = await store.resumeAgent('agent_001', '继续完成剩余任务');
 
-      // output 为空时：原始 prompt + 用户 prompt（不附加摘要分隔符）
-      expect(result.prompt).toBe('Build the feature继续完成剩余任务');
+      // output 为空时：原始 prompt + 用户 prompt（用换行分隔符连接）
+      expect(result.prompt).toBe('Build the feature\n\n继续完成剩余任务');
       expect(result.prompt).not.toContain('--- 之前的工作摘要 ---');
     });
 

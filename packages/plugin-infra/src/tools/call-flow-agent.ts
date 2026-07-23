@@ -193,8 +193,9 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
               session_id: sessionID,
               prompt: prompt as string,
             });
-          } catch {
+          } catch (err) {
             // subagent-store 创建失败不阻塞 agent 执行
+            console.warn('[CallFlowAgent] 创建 agent store 失败:', err);
           }
         }
 
@@ -223,8 +224,9 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
                 event_type: 'started',
                 detail: `Background task ${taskId} started`,
               });
-            } catch {
+            } catch (err) {
               // 事件追加失败不阻塞
+              console.warn('[CallFlowAgent] 追加事件失败:', err);
             }
           }
 
@@ -269,6 +271,8 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
               sessionID,
             );
           },
+          undefined,
+          subagent_type as string, // 传入 agent 类型，豁免列表中的 agent 跳过重试
         );
         lastOutput = retryResult.output;
         const completionWarning = retryResult.warning;
@@ -299,8 +303,9 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
               : '(no output)',
             has_completion_signal: hasSignal,
           });
-        } catch {
+        } catch (err) {
           // 通知写入失败不阻塞 agent 结果返回
+          console.warn('[CallFlowAgent] 同步模式写入通知失败:', err);
         }
 
         // P1: 同步模式完成时更新 subagent-store
@@ -312,8 +317,9 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
               event_type: 'completed',
               detail: `Sync task ${syncTaskId} completed`,
             });
-          } catch {
+          } catch (err) {
             // subagent-store 更新失败不阻塞 agent 结果返回
+            console.warn('[CallFlowAgent] 同步模式更新 subagent-store 失败:', err);
           }
         }
 
@@ -321,6 +327,16 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
         const structuredOutput = output_mode === 'structured'
           ? extractJsonBlock(typeof lastOutput === 'string' ? lastOutput : '')
           : undefined;
+
+        // NH-3: structured 提取失败时传播 warning
+        const structuredWarning = output_mode === 'structured' && structuredOutput === null
+          ? 'structured output extraction failed, fallback to raw text'
+          : undefined;
+
+        // NH-3: 合并所有 warnings 为数组（避免字段覆盖）
+        const syncWarnings: string[] = [];
+        if (completionWarning) syncWarnings.push(completionWarning);
+        if (structuredWarning) syncWarnings.push(structuredWarning);
 
         return {
           title: sessionLabel,
@@ -331,7 +347,7 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
             task_id: syncTaskId,
             output: lastOutput,
             ...(structuredOutput !== undefined && { structured_output: structuredOutput }),
-            ...(completionWarning && { warning: completionWarning }),
+            ...(syncWarnings.length > 0 && { warnings: syncWarnings }),
           }, null, 2),
         };
       } catch (error) {
@@ -360,13 +376,17 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
         const output = await pollSessionCompletion(
           client as unknown as { session: import("../helpers/polling.js").SFlowClientSession },
           task.sessionID,
-          { maxWaitMs: 120000 },
         );
+
+        // P3: 异步模式仅检测完成状态用于通知，不重试（规格明确：异步模式不触发完成强制）
+        const asyncHasSignal = hasCompletionSignal(typeof output === 'string' ? output : '');
+        const finalOutput = typeof output === 'string' ? output : '(no output)';
+
         const now = Date.now();
         const updated: BackgroundTaskEntry = {
           ...task,
           status: 'completed',
-          result: output || '(no output)',
+          result: finalOutput,
           completedAt: now,
         };
         backgroundTaskRegistry.set(task_id, updated);
@@ -376,20 +396,17 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
         // P0: 异步模式完成时写入通知
         try {
           const nm = createNotificationManager({ changeDir: _context.directory || '' });
-          // P3: 异步模式不触发重试，但在通知中增加 has_completion_signal 字段
-          const asyncHasSignal = hasCompletionSignal(typeof output === 'string' ? output : '');
           await nm.writeNotification({
             type: 'async_completed',
             subagent: task.subagentType,
             task_id,
             session_id: task.sessionID,
-            summary: typeof output === 'string'
-              ? output.slice(0, 200)
-              : '(no output)',
+            summary: finalOutput.slice(0, 200),
             has_completion_signal: asyncHasSignal,
           });
-        } catch {
+        } catch (err) {
           // 通知写入失败不阻塞 agent 结果返回
+          console.warn('[CallFlowAgent] 异步模式写入通知失败:', err);
         }
 
         // P1: 异步模式完成时更新 subagent-store
@@ -399,15 +416,16 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
           const agents = await asyncStore.listAgents();
           const matchedAgent = agents.find(a => a.session_id === task.sessionID);
           if (matchedAgent) {
-            await asyncStore.updateOutput(matchedAgent.agent_id, typeof output === 'string' ? output : '');
+            await asyncStore.updateOutput(matchedAgent.agent_id, typeof finalOutput === 'string' ? finalOutput : '');
             await asyncStore.appendEvent(matchedAgent.agent_id, {
               timestamp: new Date().toISOString(),
               event_type: 'completed',
               detail: `Async task ${task_id} completed`,
             });
           }
-        } catch {
+        } catch (err) {
           // subagent-store 更新失败不阻塞 agent 结果返回
+          console.warn('[CallFlowAgent] 异步模式更新 subagent-store 失败:', err);
         }
 
         return updated;
@@ -419,6 +437,16 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
           ? extractJsonBlock(typeof task.result === 'string' ? task.result : '')
           : undefined;
 
+        // NH-3: structured 提取失败时传播 warning
+        const structuredWarning = task.output_mode === 'structured' && structuredOutput === null
+          ? 'structured output extraction failed, fallback to raw text'
+          : undefined;
+
+        // NH-3: 合并所有 warnings 为数组（避免字段覆盖）
+        const asyncWarnings: string[] = [];
+        if (task.warning) asyncWarnings.push(task.warning);
+        if (structuredWarning) asyncWarnings.push(structuredWarning);
+
         return {
           title: 'FlowAgent Output',
           output: JSON.stringify({
@@ -429,6 +457,7 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
             result: task.result,
             error: task.error,
             ...(structuredOutput !== undefined && { structured_output: structuredOutput }),
+            ...(asyncWarnings.length > 0 && { warnings: asyncWarnings }),
           }, null, 2),
         };
       };
@@ -477,8 +506,9 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
 
         try {
           await client.session.abort({ path: { id: task.sessionID } });
-        } catch {
+        } catch (err) {
           // session.abort may not be available; mark cancelled anyway
+          console.warn('[CallFlowAgent] 取消 session 失败:', err);
         }
 
         // Release concurrency slot

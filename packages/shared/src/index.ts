@@ -9,7 +9,7 @@ export type {
 } from './types.js';
 
 export { deepMerge } from './deep-merge.js';
-export { fileExists, readFile, writeFile, atomicWriteFile, listFiles, directoryExists, readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, removeFile, Mutex, stateFileMutex } from './file-utils.js';
+export { fileExists, readFile, writeFile, atomicWriteFile, listFiles, directoryExists, readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, removeFile, appendToFile, Mutex, stateFileMutex } from './file-utils.js';
 export { isContractStale, getContractStalenessReport } from './contract-staleness.js';
 export type { StalenessReport } from './contract-staleness.js';
 export { isBun, sleep, readTextFile, checkFileExists, writeTextFile, spawnProcess } from './runtime.js';

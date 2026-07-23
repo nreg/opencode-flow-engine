@@ -77,7 +77,12 @@ export interface NotificationManager {
  * 将通知内容格式化为 system prompt 片段
  */
 function formatNotification(entry: NotificationEntry): string {
-  return `[子 agent 通知] ${entry.subagent} (${entry.type}) 任务 ${entry.task_id} 已完成。摘要: ${entry.summary}`;
+  const completionInfo = entry.has_completion_signal === true
+    ? '（输出包含完成信号）'
+    : entry.has_completion_signal === false
+      ? '（输出可能不完整）'
+      : '';
+  return `[子 agent 通知] ${entry.subagent} (${entry.type}) 任务 ${entry.task_id} 已完成${completionInfo}。摘要: ${entry.summary}`;
 }
 
 /**
@@ -90,7 +95,8 @@ async function moveFile(src: string, dst: string): Promise<boolean> {
     await copyFile(src, dst);
     await unlink(src);
     return true;
-  } catch {
+  } catch (err) {
+    console.warn('[NotificationManager] 移动文件失败:', err);
     return false;
   }
 }
@@ -131,9 +137,7 @@ export function createNotificationManager(config: { changeDir: string }): Notifi
       await writeJsonFile(filePath, entry);
     } catch (err) {
       // 通知写入失败不阻塞 agent 结果返回
-      console.warn(
-        `[NotificationManager] 写入通知失败: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      console.warn('[NotificationManager] 写入通知失败:', err);
     }
   }
 
@@ -158,35 +162,37 @@ export function createNotificationManager(config: { changeDir: string }): Notifi
       const consumedFiles = await listFiles(consumedDir, '.json');
       const consumedSet = new Set(consumedFiles);
 
-      const results: ConsumedNotification[] = [];
+      // 去重：删除已存在于 consumed/ 中的根目录重复文件（并行）
+      const dedupTasks = files
+        .filter(fileName => consumedSet.has(fileName))
+        .map(fileName => removeFile(join(notificationsDir, fileName)).catch(err => console.warn('[NotificationManager] 删除重复通知失败:', err)));
+      await Promise.allSettled(dedupTasks);
 
-      for (const fileName of files) {
-        // 去重：如果 consumed/ 中已存在同名文件，跳过并删除根目录下的重复文件
-        if (consumedSet.has(fileName)) {
-          const rootFilePath = join(notificationsDir, fileName);
-          await removeFile(rootFilePath).catch(() => {});
-          continue;
-        }
+      // 并行读取并移动未消费的通知文件
+      const tasks = files
+        .filter(fileName => !consumedSet.has(fileName))
+        .map(async (fileName) => {
+          const filePath = join(notificationsDir, fileName);
+          const entry = await readJsonFile<NotificationEntry>(filePath);
+          if (!entry) return null;
 
-        const filePath = join(notificationsDir, fileName);
-        const entry = await readJsonFile<NotificationEntry>(filePath);
-        if (!entry) continue;
+          const destPath = join(consumedDir, fileName);
+          await moveFile(filePath, destPath);
 
-        results.push({
-          ...entry,
-          formatted: formatNotification(entry),
+          return { ...entry, formatted: formatNotification(entry) };
         });
 
-        // 移动到 consumed/
-        const destPath = join(consumedDir, fileName);
-        await moveFile(filePath, destPath);
+      const settled = await Promise.allSettled(tasks);
+      const results: ConsumedNotification[] = [];
+      for (const result of settled) {
+        if (result.status === 'fulfilled' && result.value !== null) {
+          results.push(result.value);
+        }
       }
 
       return results;
     } catch (err) {
-      console.warn(
-        `[NotificationManager] 消费通知失败: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      console.warn('[NotificationManager] 消费通知失败:', err);
       return [];
     }
   }
@@ -213,9 +219,7 @@ export function createNotificationManager(config: { changeDir: string }): Notifi
 
       return results;
     } catch (err) {
-      console.warn(
-        `[NotificationManager] 获取待处理通知失败: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      console.warn('[NotificationManager] 获取待处理通知失败:', err);
       return [];
     }
   }

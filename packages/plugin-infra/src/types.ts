@@ -23,6 +23,8 @@ export interface BackgroundTaskEntry {
   completedAt?: number;
   /** P2: output_mode passed from call_flow_agent, used by flowagent_output for structured extraction */
   output_mode?: 'last_message' | 'structured';
+  /** P3: warning message when completion enforcement retries are exhausted */
+  warning?: string;
 }
 
 export type BackgroundTaskRegistry = Map<string, BackgroundTaskEntry>;

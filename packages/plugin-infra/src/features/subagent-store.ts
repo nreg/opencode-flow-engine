@@ -28,6 +28,7 @@ import {
   readFile as sharedReadFile,
   fileExists,
   directoryExists,
+  appendToFile,
 } from '@opencode-flow-engine/shared';
 
 // ─── 常量 ──────────────────────────────────────────────────────────────────
@@ -94,9 +95,11 @@ export interface CreateAgentParams {
 export interface IndexEntry {
   agent_id: string;
   subagent_type: string;
+  session_id: string;
   status: AgentStatus;
   created_at: string;
   updated_at: string;
+  completed_at: string | null;
 }
 
 export interface ResumeResult {
@@ -109,14 +112,14 @@ export interface ResumeResult {
 export interface SubagentStore {
   /** 创建子 agent store（目录结构 + index.json 更新） */
   createAgent(params: CreateAgentParams): Promise<AgentMeta>;
-  /** 更新子 agent 输出 */
-  updateOutput(agentId: string, output: string): Promise<void>;
+  /** 更新子 agent 输出（可选指定 status，默认 completed） */
+  updateOutput(agentId: string, output: string, options?: { status?: AgentStatus }): Promise<void>;
   /** 追加事件到 events.log */
   appendEvent(agentId: string, event: AgentEvent): Promise<void>;
   /** 获取单个子 agent 完整数据 */
   getAgent(agentId: string): Promise<AgentData | null>;
-  /** 列出子 agent（可按 status 过滤） */
-  listAgents(filter?: { status?: AgentStatus }): Promise<AgentMeta[]>;
+  /** 列出子 agent（可按 status 过滤，detailed=false 时仅从 index 读取） */
+  listAgents(filter?: { status?: AgentStatus; detailed?: boolean }): Promise<AgentMeta[]>;
   /** 恢复子 agent 上下文，返回合成 prompt */
   resumeAgent(agentId: string, newPrompt: string): Promise<ResumeResult>;
 }
@@ -130,9 +133,11 @@ function metaToIndexEntry(meta: AgentMeta): IndexEntry {
   return {
     agent_id: meta.agent_id,
     subagent_type: meta.subagent_type,
+    session_id: meta.session_id,
     status: meta.status,
     created_at: meta.created_at,
     updated_at: meta.updated_at,
+    completed_at: meta.completed_at,
   };
 }
 
@@ -148,7 +153,8 @@ function parseEventsLog(content: string): AgentEvent[] {
     .map(line => {
       try {
         return JSON.parse(line) as AgentEvent;
-      } catch {
+      } catch (err) {
+        console.warn('[SubagentStore] 解析事件行失败:', err);
         return null;
       }
     })
@@ -239,7 +245,7 @@ export function createSubagentStore(config: { changeDir: string }): SubagentStor
    * 2. 更新 meta.json 的 status 和 completed_at
    * 3. 更新 index.json 中对应条目
    */
-  async function updateOutput(agentId: string, output: string): Promise<void> {
+  async function updateOutput(agentId: string, output: string, options?: { status?: AgentStatus }): Promise<void> {
     const dir = agentDir(agentId);
     const metaPath = join(dir, META_FILE);
 
@@ -259,11 +265,12 @@ export function createSubagentStore(config: { changeDir: string }): SubagentStor
     }
 
     const now = new Date().toISOString();
+    const status = options?.status ?? 'completed';
     const updatedMeta: AgentMeta = {
       ...meta,
       updated_at: now,
-      completed_at: now,
-      status: 'completed',
+      completed_at: status === 'completed' ? now : null,
+      status,
     };
     await writeJsonFile(metaPath, updatedMeta);
 
@@ -295,13 +302,9 @@ export function createSubagentStore(config: { changeDir: string }): SubagentStor
       throw new Error(`Agent ${agentId} not found in subagent-store`);
     }
 
-    // 1. 追加事件到 events.log
-    const existingContent = await sharedReadFile(eventsPath);
-    const newLine = JSON.stringify(event);
-    const updatedContent = existingContent
-      ? existingContent.trimEnd() + '\n' + newLine + '\n'
-      : newLine + '\n';
-    await sharedWriteFile(eventsPath, updatedContent);
+    // 1. 追加事件到 events.log（使用 appendFile，O(1) 写入）
+    const newLine = JSON.stringify(event) + '\n';
+    await appendToFile(eventsPath, newLine);
 
     // 2. 更新 meta.json 的 updated_at
     const meta = await readJsonFile<AgentMeta>(metaPath);
@@ -346,19 +349,35 @@ export function createSubagentStore(config: { changeDir: string }): SubagentStor
 
   /**
    * 列出子 agent（可按 status 过滤）
+   *
+   * - detailed !== false（默认）: 读取完整 meta（当前行为）
+   * - detailed === false（显式要求）: 从 index.json 条目直接构造 AgentMeta，不读取 meta.json
    */
-  async function listAgents(filter?: { status?: AgentStatus }): Promise<AgentMeta[]> {
+  async function listAgents(filter?: { status?: AgentStatus; detailed?: boolean }): Promise<AgentMeta[]> {
     const entries = await readIndex();
-
-    // index.json 只有摘要信息，需要读取完整 meta
     const results: AgentMeta[] = [];
+
     for (const entry of entries) {
       if (filter?.status && entry.status !== filter.status) continue;
 
-      const dir = agentDir(entry.agent_id);
-      const meta = await readJsonFile<AgentMeta>(join(dir, META_FILE));
-      if (meta) {
-        results.push(meta);
+      if (filter?.detailed === false) {
+        // 轻量模式：从 index 条目直接构造（不读 meta.json）
+        results.push({
+          agent_id: entry.agent_id,
+          subagent_type: entry.subagent_type,
+          session_id: entry.session_id ?? '',
+          created_at: entry.created_at,
+          updated_at: entry.updated_at,
+          completed_at: entry.completed_at ?? null,
+          status: entry.status,
+        });
+      } else {
+        // 详细模式：读取完整 meta（默认行为）
+        const dir = agentDir(entry.agent_id);
+        const meta = await readJsonFile<AgentMeta>(join(dir, META_FILE));
+        if (meta) {
+          results.push(meta);
+        }
       }
     }
 
@@ -394,7 +413,7 @@ export function createSubagentStore(config: { changeDir: string }): SubagentStor
     if (output.trim().length > 0) {
       composedPrompt = newPrompt + '\n\n--- 之前的工作摘要 ---\n' + output;
     } else {
-      composedPrompt = originalPrompt + newPrompt;
+      composedPrompt = originalPrompt + '\n\n' + newPrompt;
     }
 
     // 更新 meta.json 的 status 为 resumed

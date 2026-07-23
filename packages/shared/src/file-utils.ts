@@ -156,6 +156,20 @@ export async function ensureDir(dirPath: string): Promise<void> {
 }
 
 /**
+ * 追加内容到文件（使用 fs.promises.appendFile）
+ * 支持 Bun 和 Node.js 运行时
+ */
+export async function appendToFile(path: string, content: string): Promise<boolean> {
+  try {
+    const { appendFile } = await import('fs/promises');
+    await appendFile(path, content, 'utf-8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Remove a file (no-op if file does not exist)
  */
 export async function removeFile(path: string): Promise<boolean> {

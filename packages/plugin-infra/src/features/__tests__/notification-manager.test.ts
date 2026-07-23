@@ -278,5 +278,38 @@ describe('NotificationManager', () => {
       expect(c.summary).toBe('Verification passed');
       expect(c.completed_at).toBeTruthy();
     });
+
+    it('should include completion signal info when has_completion_signal=true', async () => {
+      await nm.writeNotification(makeWriteParams({
+        task_id: 'sf_310_1',
+        has_completion_signal: true,
+      }));
+
+      const consumed = await nm.consumeNotifications();
+      expect(consumed.length).toBe(1);
+      expect(consumed[0].formatted).toContain('输出包含完成信号');
+    });
+
+    it('should include incomplete warning when has_completion_signal=false', async () => {
+      await nm.writeNotification(makeWriteParams({
+        task_id: 'sf_320_1',
+        has_completion_signal: false,
+      }));
+
+      const consumed = await nm.consumeNotifications();
+      expect(consumed.length).toBe(1);
+      expect(consumed[0].formatted).toContain('输出可能不完整');
+    });
+
+    it('should not include completion signal info when has_completion_signal is undefined', async () => {
+      await nm.writeNotification(makeWriteParams({
+        task_id: 'sf_330_1',
+      }));
+
+      const consumed = await nm.consumeNotifications();
+      expect(consumed.length).toBe(1);
+      expect(consumed[0].formatted).not.toContain('输出包含完成信号');
+      expect(consumed[0].formatted).not.toContain('输出可能不完整');
+    });
   });
 });

@@ -34,7 +34,20 @@ export interface CompletionEnforcementConfig {
   retryDelays: number[];
   /** Warning message when max retries are exhausted */
   warningMessage: string;
+  /** Agent types exempt from completion enforcement (their output is never retried) */
+  agentExemptList?: string[];
 }
+
+/** Agents that are known to NOT output [TASK_COMPLETE] — their output is accepted as-is */
+export const DEFAULT_COMPLETION_EXEMPT_AGENTS: string[] = [
+  'build-executor',
+  'bug-investigator',
+  'code-reviewer',
+  'release-archivist',
+  'ui-implementer',
+  'test-engineer',
+  'review-engineer',
+];
 
 /** Result of the completion retry process */
 export interface CompletionRetryResult {
@@ -57,6 +70,7 @@ export const COMPLETION_ENFORCEMENT_CONFIG: CompletionEnforcementConfig = {
   maxRetries: 2,
   retryDelays: [1000, 2000], // 1s → 2s
   warningMessage: 'Subagent output may be incomplete - no completion signal detected after 3 attempts',
+  agentExemptList: DEFAULT_COMPLETION_EXEMPT_AGENTS,
 };
 
 /** System reminder message injected when subagent output lacks completion signal */
@@ -109,6 +123,7 @@ export function hasCompletionSignal(output: string): boolean {
  * Perform completion enforcement retry logic.
  *
  * If the initial output contains a completion signal, returns immediately.
+ * If the agent type is in the exempt list, returns immediately (agent known not to output TASK_COMPLETE).
  * Otherwise, injects a system reminder and re-polls up to maxRetries times
  * with increasing backoff delays.
  *
@@ -120,6 +135,7 @@ export function hasCompletionSignal(output: string): boolean {
  * @param injectReminder - Function to inject a system reminder into the session
  * @param pollOutput - Function to poll for the subagent's latest output
  * @param config - Optional override for completion enforcement config (for testing)
+ * @param agentType - Optional agent type; if in config.agentExemptList, skips retry
  * @returns CompletionRetryResult with final output and optional warning
  */
 export async function performCompletionRetry(
@@ -127,11 +143,17 @@ export async function performCompletionRetry(
   injectReminder: InjectReminderFn,
   pollOutput: PollOutputFn,
   config: CompletionEnforcementConfig = COMPLETION_ENFORCEMENT_CONFIG,
+  agentType?: string,
 ): Promise<CompletionRetryResult> {
   let currentOutput = initialOutput;
 
   // If already has completion signal, return immediately
   if (hasCompletionSignal(currentOutput)) {
+    return { output: currentOutput };
+  }
+
+  // If agent is exempt from completion enforcement, skip retry
+  if (agentType && config.agentExemptList?.includes(agentType)) {
     return { output: currentOutput };
   }
 

@@ -311,6 +311,46 @@ describe('performCompletionRetry', () => {
     expect(result.warning).toBe(COMPLETION_ENFORCEMENT_CONFIG.warningMessage);
     expect(injectCallCount).toBe(2);
   });
+
+  it('should skip retry for exempt agent (build-executor)', async () => {
+    let injectCallCount = 0;
+    const result = await performCompletionRetry(
+      '实现了功能 X，测试通过',
+      async () => { injectCallCount++; },
+      async () => '不应该被调用',
+      COMPLETION_ENFORCEMENT_CONFIG,
+      'build-executor',
+    );
+    // Exempt agent returns output as-is, no warning, no retry
+    expect(result.output).toBe('实现了功能 X，测试通过');
+    expect(result.warning).toBeUndefined();
+    expect(injectCallCount).toBe(0);
+  });
+
+  it('should skip retry for any agent in exempt list', async () => {
+    const result = await performCompletionRetry(
+      'code review 完成',
+      async () => { throw new Error('should not be called'); },
+      async () => { throw new Error('should not be called'); },
+      COMPLETION_ENFORCEMENT_CONFIG,
+      'code-reviewer',
+    );
+    expect(result.output).toBe('code review 完成');
+    expect(result.warning).toBeUndefined();
+  });
+
+  it('should still retry for non-exempt agent without completion signal', async () => {
+    let injectCallCount = 0;
+    const result = await performCompletionRetry(
+      '思考中...',
+      async () => { injectCallCount++; },
+      async () => '仍在思考...',
+      COMPLETION_ENFORCEMENT_CONFIG,
+      'spec-writer', // spec-writer IS expected to output [TASK_COMPLETE]
+    );
+    expect(result.warning).toBe(COMPLETION_ENFORCEMENT_CONFIG.warningMessage);
+    expect(injectCallCount).toBe(2);
+  });
 });
 
 // ─── P3-P2 Synergy: structured JSON as completion signal ────────────────────
