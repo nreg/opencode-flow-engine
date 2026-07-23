@@ -5,7 +5,7 @@
 import type { ToolDefinition, ToolContext, ToolResult } from "./types.js";
 import { fileExists, directoryExists, readJsonFile, isContractStale } from "@opencode-flow-engine/shared";
 import { detectFrontend } from "../features/workflow-manager.js";
-import { detectWorkflowState } from "../features/state-manager.js";
+import { detectWorkflowState, writeStateFile } from "../features/state-manager.js";
 
 /**
  * Shared agent names that are not bound to any workflow state.
@@ -306,6 +306,41 @@ export function createWorkflowRouterTool(): ToolDefinition {
       if (userIntent) {
         const hCmd = matchHorizontalCommand(userIntent);
         if (hCmd) {
+          // AFK special handling: write state instead of routing to subagent
+          if (hCmd.action === 'set-afk-on') {
+            // Parse tier parameter from user intent
+            const tierMatch = userIntent.match(/tier\s*([1-3])/i);
+            const afkTier = tierMatch?.[1] ? parseInt(tierMatch[1], 10) : 1;
+
+            // Read current state to preserve existing fields
+            const currentState = await readWorkflowState(changeDir);
+            await writeStateFile(changeDir, currentState?.state || 'exploring', {
+              afk: true,
+              afkTier,
+            });
+
+            return {
+              title: "Workflow Router",
+              output: JSON.stringify({
+                success: true,
+                data: {
+                  source: 'horizontal-command',
+                  action: 'set-afk-on',
+                  afkTier,
+                  description: `AFK 无人值守模式已激活（Tier ${afkTier}）`,
+                  isHorizontalCommand: true,
+                  stateGuardBlocked: false,
+                  reasons: [`AFK mode activated: "${userIntent}" → Tier ${afkTier}`],
+                  routingDeclaration: {
+                    loaded: [],
+                    notLoaded: ['AFK mode is a state flag, not a subagent dispatch'],
+                    nextAction: 'Continue normal workflow with AFK mode active',
+                  },
+                },
+              }),
+            };
+          }
+
           return {
             title: "Workflow Router",
             output: JSON.stringify({

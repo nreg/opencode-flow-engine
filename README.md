@@ -55,6 +55,7 @@ Or use slash commands for cross-workflow actions:
 ```
 /flow-test           → Run comprehensive testing (5-tier)
 /flow-review         → Run comprehensive review (3-round)
+/flow-afk            → Activate AFK unattended mode
 /flow-intel          → Entry scan, generate CONTEXT.md
 /flow-architect      → Create or refactor ARCHITECTURE.md
 /flow-evolve         → Sync architecture decisions
@@ -388,6 +389,16 @@ Detects incomplete subagent turns and automatically retries:
 - **Detection**: Checks for completion signals (`[TASK_COMPLETE]`, JSON code fence, bare JSON object); empty output treated as incomplete
 - **Reminder**: Injects `<system-reminder>` message into session when completion signal is missing
 - **Retry**: Synchronous mode only; max 2 retries (1s → 2s backoff); async mode logs completion status without retrying
+
+### AFK Unattended Mode (P3)
+
+AFK (Away From Keyboard) mode enables automated workflow execution without user intervention:
+
+- **Activation**: Triggered by natural language ("afk" / "AFK" / "无人值守") or `/flow-afk` command
+- **Tier 1** (default): Auto-replies to need-explorer questions using its recommended options + auto-approves contracts
+- **Tier 2/3**: Upgrade via "afk tier2/3" for expanded automation (ui-director decisions, full automation)
+- **Lifecycle**: Activated at workflow start, automatically deactivates on `closing`/`abandoned` — no manual exit needed
+- **Safety**: Falls back to user input when subagent output lacks structured recommendations; ignores non-AFK messages during automation
 
 ### Model Profiles
 

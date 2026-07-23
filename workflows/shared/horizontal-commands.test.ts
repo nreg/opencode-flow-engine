@@ -316,8 +316,40 @@ describe('matchHorizontalCommand — New agents should not interfere with existi
   });
 });
 
+describe('matchHorizontalCommand — AFK Mode', () => {
+  const testCases = [
+    // 中文触发词
+    { input: '开启afk模式', expected: 'sFlow', action: 'set-afk-on' },
+    // 英文触发词
+    { input: 'AFK', expected: 'sFlow', action: 'set-afk-on' },
+    // /flow-afk 命令
+    { input: '/flow-afk', expected: 'sFlow', action: 'set-afk-on' },
+    // 无人值守触发
+    { input: '进入无人值守模式', expected: 'sFlow', action: 'set-afk-on' },
+    // Tier 参数
+    { input: 'afk tier2', expected: 'sFlow', action: 'set-afk-on' },
+    { input: 'afk tier3', expected: 'sFlow', action: 'set-afk-on' },
+  ];
+
+  for (const { input, expected, action } of testCases) {
+    it(`should match "${input}" → ${expected} (${action})`, () => {
+      const result = matchHorizontalCommand(input);
+      expect(result).not.toBeNull();
+      expect(result!.agent).toBe(expected);
+      expect(result!.action).toBe(action);
+    });
+  }
+
+  it('should not interfere with existing commands — "全面测试" still matches test-engineer', () => {
+    const result = matchHorizontalCommand('全面测试');
+    expect(result).not.toBeNull();
+    expect(result!.agent).toBe('test-engineer');
+    expect(result!.action).toBe('full-test');
+  });
+});
+
 describe('HORIZONTAL_COMMANDS — All agents uniqueness', () => {
-  it('should have all 7 agents registered', () => {
+  it('should have all 8 agents registered', () => {
     const agents = new Set(HORIZONTAL_COMMANDS.map(c => c.agent));
     expect(agents.has('test-engineer')).toBe(true);
     expect(agents.has('review-engineer')).toBe(true);
@@ -325,9 +357,10 @@ describe('HORIZONTAL_COMMANDS — All agents uniqueness', () => {
     expect(agents.has('flow-evolve')).toBe(true);
     expect(agents.has('flow-health')).toBe(true);
     expect(agents.has('flow-restyle')).toBe(true);
+    expect(agents.has('sFlow')).toBe(true);
   });
 
-  it('should have at least 8 commands (2 test + 2 review + 4 new)', () => {
-    expect(HORIZONTAL_COMMANDS.length).toBeGreaterThanOrEqual(8);
+  it('should have at least 9 commands (2 test + 2 review + 4 new + 1 afk)', () => {
+    expect(HORIZONTAL_COMMANDS.length).toBeGreaterThanOrEqual(9);
   });
 });

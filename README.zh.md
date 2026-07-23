@@ -55,6 +55,7 @@ npm install -g opencode-flow-engine
 ```
 /flow-test           → 全面测试（5 轮测试金字塔）
 /flow-review         → 全面审查（3 轮审查）
+/flow-afk            → 开启 AFK 无人值守模式
 /flow-intel          → 入场扫描，生成 CONTEXT.md
 /flow-architect      → 创建或重构架构文档 ARCHITECTURE.md
 /flow-evolve         → 架构增量同步
@@ -388,6 +389,16 @@ SDD 模式通过 `.flow-engine/sflow/execution-plan.json` 编排：
 - **检测**：检查完成信号（`[TASK_COMPLETE]`、JSON code fence、裸 JSON 对象）；空输出视为未完成
 - **提醒**：缺少完成信号时在 session 中注入 `<system-reminder>` 消息
 - **重试**：仅同步模式；最多 2 次重试（1s → 2s 退避）；异步模式记录完成状态但不重试
+
+### AFK 无人值守模式 (P3)
+
+AFK (Away From Keyboard) 模式允许工作流自动推进，无需用户手动干预：
+
+- **激活**：通过自然语言（"afk"/"AFK"/"无人值守"）或 `/flow-afk` 命令触发
+- **Tier 1**（默认）：自动回复 need-explorer 的推荐选项 + 自动批准合约
+- **Tier 2/3**：通过 "afk tier2/3" 升级（涵盖 ui-director 自动决策、全自动化）
+- **生命周期**：工作流开始时激活，进入 `closing`/`abandoned` 状态自动关闭，无需手动退出
+- **安全兜底**：子智能体输出缺乏结构化推荐时自动暂停并通知用户；AFK 期间忽略非 AFK 消息
 
 ### 模型 Profile
 

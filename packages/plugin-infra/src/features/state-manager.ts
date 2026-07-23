@@ -761,6 +761,8 @@ export async function writeStateFile(changeDir: string, newState: string, extra?
     const state: Record<string, unknown> = existing ?? {
       state: 'exploring',
       mode: 'full',
+      afk: false,
+      afkTier: 0,
       artifacts_hash: '',
       contract_hash: '',
       batches_completed: 0,
@@ -771,7 +773,19 @@ export async function writeStateFile(changeDir: string, newState: string, extra?
     };
     state.state = newState;
     state.updatedAt = now;
+
+    // AFK: automatically deactivate on terminal states
+    if (newState === 'closing' || newState === 'abandoned') {
+      state.afk = false;
+      state.afkTier = 0;
+    }
+
     if (extra) Object.assign(state, extra);
+
+    // AFK consistency: afk=false → afkTier=0
+    if (state.afk === false && state.afkTier !== 0) {
+      state.afkTier = 0;
+    }
 
     // DP-4: append decision point entry when dp_4_result is provided
     if (extra && extra.dp_4_result && typeof extra.dp_4_result === 'object') {
@@ -1027,6 +1041,12 @@ export function createStateManager(
           boulderState.state = repairedState;
           boulderState.repairedFrom = currentState;
           boulderState.repairedAt = new Date().toISOString();
+        }
+
+        // AFK: force deactivate if restoring from terminal state
+        if (currentState === 'closing' || currentState === 'abandoned') {
+          boulderState.afk = false;
+          boulderState.afkTier = 0;
         }
 
         const statePath = `${changeDir}/.flow-engine/sflow/state.json`;

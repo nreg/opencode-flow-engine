@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
-import { createStateManager, detectStateMismatch, simpleHash } from '../features/state-manager.js';
+import { createStateManager, detectStateMismatch, simpleHash, writeStateFile } from '../features/state-manager.js';
 
 function tempDir(name: string): string {
   return join(import.meta.dir, '..', '__test_workdir__', name);
@@ -194,5 +194,147 @@ describe('detectStateMismatch — contract_hash edge cases', () => {
     const result = await detectStateMismatch(dir, 'approved-for-build');
     // Should not repair since hash matches or there's no mismatch
     expect(result).toBe('approved-for-build');
+  });
+});
+
+// ─── AFK Mode Tests (Task 2.1 + 2.2) ──────────────────────────────────────────
+
+describe('writeStateFile — AFK fields', () => {
+  const dir = tempDir('afk-write-state');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  async function readState(): Promise<Record<string, unknown>> {
+    const content = await import('fs/promises').then(m => m.readFile(dir + '/.flow-engine/sflow/state.json', 'utf-8'));
+    return JSON.parse(content);
+  }
+
+  it('should include afk=false and afkTier=0 in default state', async () => {
+    await writeStateFile(dir, 'exploring');
+    const state = await readState();
+    expect(state.afk).toBe(false);
+    expect(state.afkTier).toBe(0);
+  });
+
+  it('should write afk=true and afkTier=N via extra', async () => {
+    await writeStateFile(dir, 'executing', { afk: true, afkTier: 1 });
+    const state = await readState();
+    expect(state.afk).toBe(true);
+    expect(state.afkTier).toBe(1);
+  });
+
+  it('should auto-close AFK when entering closing state', async () => {
+    await writeStateFile(dir, 'executing', { afk: true, afkTier: 2 });
+    await writeStateFile(dir, 'closing');
+    const state = await readState();
+    expect(state.state).toBe('closing');
+    expect(state.afk).toBe(false);
+    expect(state.afkTier).toBe(0);
+  });
+
+  it('should auto-close AFK when entering abandoned state', async () => {
+    await writeStateFile(dir, 'executing', { afk: true, afkTier: 3 });
+    await writeStateFile(dir, 'abandoned');
+    const state = await readState();
+    expect(state.state).toBe('abandoned');
+    expect(state.afk).toBe(false);
+    expect(state.afkTier).toBe(0);
+  });
+
+  it('should NOT auto-close AFK on non-terminal states', async () => {
+    await writeStateFile(dir, 'executing', { afk: true, afkTier: 1 });
+    await writeStateFile(dir, 'debugging');
+    const state = await readState();
+    expect(state.state).toBe('debugging');
+    expect(state.afk).toBe(true);
+    expect(state.afkTier).toBe(1);
+  });
+
+  it('should enforce consistency: afk=false forces afkTier=0', async () => {
+    // Write with afk=false but afkTier=3 — should be corrected to afkTier=0
+    await writeStateFile(dir, 'executing', { afk: false, afkTier: 3 });
+    const state = await readState();
+    expect(state.afk).toBe(false);
+    expect(state.afkTier).toBe(0);
+  });
+
+  it('should preserve AFK state when writing non-terminal state update', async () => {
+    await writeStateFile(dir, 'executing', { afk: true, afkTier: 2 });
+    await writeStateFile(dir, 'debugging');
+    const state = await readState();
+    expect(state.afk).toBe(true);
+    expect(state.afkTier).toBe(2);
+  });
+});
+
+describe('restoreState — AFK force-close on terminal boulder-state', () => {
+  const dir = tempDir('afk-restore-state');
+  let sm: ReturnType<typeof createStateManager>;
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    sm = createStateManager({ enabled: true });
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should force-close AFK when restoring from closing boulder-state', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    // Write boulder-state with AFK active + closing state
+    await writeFile(dir + '/.flow-engine/sflow/boulder-state.json', JSON.stringify({
+      state: 'closing',
+      mode: 'full',
+      afk: true,
+      afkTier: 2,
+    }));
+    const result = await sm.restoreState(dir);
+    expect(result.success).toBe(true);
+    // Read the restored state.json
+    const content = await import('fs/promises').then(m => m.readFile(dir + '/.flow-engine/sflow/state.json', 'utf-8'));
+    const state = JSON.parse(content);
+    expect(state.afk).toBe(false);
+    expect(state.afkTier).toBe(0);
+  });
+
+  it('should force-close AFK when restoring from abandoned boulder-state', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/boulder-state.json', JSON.stringify({
+      state: 'abandoned',
+      mode: 'full',
+      afk: true,
+      afkTier: 3,
+    }));
+    const result = await sm.restoreState(dir);
+    expect(result.success).toBe(true);
+    const content = await import('fs/promises').then(m => m.readFile(dir + '/.flow-engine/sflow/state.json', 'utf-8'));
+    const state = JSON.parse(content);
+    expect(state.afk).toBe(false);
+    expect(state.afkTier).toBe(0);
+  });
+
+  it('should preserve AFK when restoring from non-terminal boulder-state', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/boulder-state.json', JSON.stringify({
+      state: 'executing',
+      mode: 'full',
+      afk: true,
+      afkTier: 1,
+    }));
+    const result = await sm.restoreState(dir);
+    expect(result.success).toBe(true);
+    const content = await import('fs/promises').then(m => m.readFile(dir + '/.flow-engine/sflow/state.json', 'utf-8'));
+    const state = JSON.parse(content);
+    expect(state.afk).toBe(true);
+    expect(state.afkTier).toBe(1);
   });
 });

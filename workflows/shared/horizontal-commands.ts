@@ -92,6 +92,15 @@ export const HORIZONTAL_COMMANDS: HorizontalCommandEntry[] = [
     description: '一键换调性：保留功能不变，只换视觉风格（仅前端项目）',
     tokens: ['换调性', '改风格', 'restyle', '换皮', 'redesign'],
   },
+
+  // --- flow-afk (AFK 无人值守模式) ---
+  {
+    pattern: /(?:开启|启动|进入)?\s*(?:afk|AFK|无人值守)\s*(?:模式)?(?:\s*tier\s*[1-3])?/,
+    agent: 'sFlow',
+    action: 'set-afk-on',
+    description: '进入 AFK 无人值守模式（Tier 1 默认，支持 tier2/tier3 显式升级）',
+    tokens: ['afk', 'AFK', '无人值守', '/flow-afk', '开启AFK', '进入无人值守模式'],
+  },
 ];
 
 /**
