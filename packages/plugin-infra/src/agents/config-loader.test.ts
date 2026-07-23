@@ -220,6 +220,8 @@ describe('Config Loader', () => {
 describe('Config File Integration with Agent Builder', () => {
   const CWD_SFLOW = join(process.cwd(), '.flow-engine/sflow');
   const CWD_CONFIG = join(CWD_SFLOW, 'config.json');
+  const USER_CONFIG_DIR = join(tmpdir(), `sflow-test-user-${Date.now()}`);
+  const USER_CONFIG_FILE = join(USER_CONFIG_DIR, 'opencode-flow-engine.json');
 
   function writeCwdConfig(data: unknown) {
     if (!existsSync(CWD_SFLOW)) {
@@ -232,15 +234,21 @@ describe('Config File Integration with Agent Builder', () => {
     try { unlinkSync(CWD_CONFIG); } catch {}
     // Only remove .flow-engine/sflow if it's empty (i.e., only our test config file was in it)
     try { rmSync(CWD_SFLOW, { recursive: true, force: true }); } catch {}
+    try { rmSync(USER_CONFIG_DIR, { recursive: true, force: true }); } catch {}
   }
 
   beforeEach(() => {
     cleanCwdConfig();
     clearConfigCache();
+    // Isolate from user-level config: point to a temp empty config
+    mkdirSync(USER_CONFIG_DIR, { recursive: true });
+    writeFileSync(USER_CONFIG_FILE, JSON.stringify({}, null, 2));
+    process.env.FLOW_ENGINE_USER_CONFIG_FILE = USER_CONFIG_FILE;
   });
   afterEach(() => {
     cleanCwdConfig();
     clearConfigCache();
+    delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
   });
 
   it('should load config file and apply to agent when .flow-engine/sflow/config.json exists', async () => {
@@ -296,6 +304,6 @@ describe('Config File Integration with Agent Builder', () => {
     const agents = await createAllAgents();
     expect(agents.sFlow.model).toBe('gpt-5');
     expect(agents['build-executor'].model).toBe('claude-4-opus');
-    expect(agents['code-reviewer'].model).toBe('glm-5.1');
+    expect(agents['code-reviewer'].model).toBe('provider/glm-5.1');
   });
 });

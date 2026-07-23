@@ -239,6 +239,10 @@ export async function createSkillLoader(skillsDir?: string): Promise<SkillLoader
 }
 
 function parseFrontmatter(content: string): SkillMetadata {
+  // Strip BOM if present
+  if (content.charCodeAt(0) === 0xFEFF) {
+    content = content.slice(1);
+  }
   const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!frontmatterMatch) {
     return { name: 'unknown', description: '' };

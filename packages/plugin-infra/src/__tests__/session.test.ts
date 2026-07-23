@@ -170,6 +170,7 @@ describe('detectStateMismatch (shared canonical function)', () => {
     await writeFile(dir + '/design.md', '# Design\n\n## Arch\nTest');
     await writeFile(dir + '/tasks.md', '- [ ] task one');
     await ensureDir(dir + '/specs');
+    await writeFile(dir + '/specs/spec1.md', '# Spec 1');
     const result = await detectStateMismatch(dir, 'specifying');
     expect(result).toBe('bridging');
   });

@@ -28,12 +28,12 @@ export async function pollSessionCompletion(
   sessionID: string,
   options: { maxWaitMs?: number; pollIntervalMs?: number; isNew?: boolean } = {},
 ): Promise<string | null> {
-  const MAX_WAIT = options.maxWaitMs ?? 30_000; // 30s default (was 300s)
-  const POLL_INTERVAL = options.pollIntervalMs ?? 500;
+  const MAX_WAIT = options.maxWaitMs ?? 10_000; // 10s default (was 20s)
+  const POLL_INTERVAL = options.pollIntervalMs ?? 200; // 200ms default (was 500ms)
   const startTime = Date.now();
   let consecutiveFailures = 0;
   const isNew = options.isNew ?? false;
-  const MAX_POLLS_FOR_NEW = 60;
+  const MAX_POLLS_FOR_NEW = 120; // 120 * 200ms = 24s max for new sessions
 
   // Capture the initial message count so we can distinguish
   // the user's prompt from the subagent's response.

@@ -15,6 +15,7 @@ export type SFlowClient = PluginInput['client'];
 
 export interface BackgroundTaskEntry {
   sessionID: string;
+  subagentType: string;
   status: 'running' | 'completed' | 'error';
   result?: string;
   error?: string;

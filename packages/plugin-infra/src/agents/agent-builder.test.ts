@@ -293,12 +293,12 @@ describe('Agent Builder', () => {
   describe('getDefaultModel', () => {
     it('should return default model for sFlow', () => {
       const model = getDefaultModel('sFlow');
-      expect(model).toBe('deepseek-v4-flash');
+      expect(model).toBe('provider/deepseek-v4-flash');
     });
 
     it('should return default model for other agents', () => {
       const model = getDefaultModel('need-explorer');
-      expect(model).toBe('kimi-k2.6');
+      expect(model).toBe('provider/kimi-k2.6');
     });
   });
 
@@ -306,16 +306,16 @@ describe('Agent Builder', () => {
     it('should return models for all agents', () => {
       const models = getAllDefaultModels();
       expect(Object.keys(models)).toHaveLength(24);
-      expect(models.sFlow).toBe('deepseek-v4-flash');
-      expect(models['need-explorer']).toBe('kimi-k2.6');
-      expect(models['spec-writer']).toBe('glm-5.1');
+      expect(models.sFlow).toBe('provider/deepseek-v4-flash');
+      expect(models['need-explorer']).toBe('provider/kimi-k2.6');
+      expect(models['spec-writer']).toBe('provider/glm-5.1');
       // IFlow models
-      expect(models.iFlow).toBe('deepseek-v4-flash');
-      expect(models['iflow-discuss-planner']).toBe('kimi-k2.6');
-      expect(models['iflow-plan-executor']).toBe('step-3.7-flash');
-      expect(models['iflow-verifier']).toBe('minimax-m2.7');
-      expect(models['iflow-researcher']).toBe('glm-5.1');
-      expect(models['iflow-shipper']).toBe('mimo-v2.5-pro');
+      expect(models.iFlow).toBe('provider/deepseek-v4-flash');
+      expect(models['iflow-discuss-planner']).toBe('provider/kimi-k2.6');
+      expect(models['iflow-plan-executor']).toBe('provider/step-3.7-flash');
+      expect(models['iflow-verifier']).toBe('provider/minimax-m2.7');
+      expect(models['iflow-researcher']).toBe('provider/glm-5.1');
+      expect(models['iflow-shipper']).toBe('provider/mimo-v2.5-pro');
     });
   });
 

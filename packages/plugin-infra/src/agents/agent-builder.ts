@@ -82,34 +82,34 @@ const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
  * 国产模型默认配置
  */
 const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
-  // SFlow
-  sFlow: 'deepseek-v4-flash',
-  'need-explorer': 'kimi-k2.6',
-  'spec-writer': 'glm-5.1',
-  'contract-builder': 'glm-5',
-  'build-executor': 'glm-5.1',
-  'bug-investigator': 'minimax-m2.7',
-  'code-reviewer': 'deepseek-v4-flash',
-  'release-archivist': 'mimo-v2.5-pro',
-  'spec-merger': 'mimo-v2.5',
-  'ui-director': 'glm-5.1',
-  'ui-implementer': 'glm-5.1',
+  // SFlow — all built-in models use provider/ prefix (actual user config overrides)
+  sFlow: 'provider/deepseek-v4-flash',
+  'need-explorer': 'provider/kimi-k2.6',
+  'spec-writer': 'provider/glm-5.1',
+  'contract-builder': 'provider/glm-5',
+  'build-executor': 'provider/glm-5.1',
+  'bug-investigator': 'provider/minimax-m2.7',
+  'code-reviewer': 'provider/deepseek-v4-flash',
+  'release-archivist': 'provider/mimo-v2.5-pro',
+  'spec-merger': 'provider/mimo-v2.5',
+  'ui-director': 'provider/glm-5.1',
+  'ui-implementer': 'provider/glm-5.1',
   // IFlow
-  iFlow: 'deepseek-v4-flash',
-  'iflow-discuss-planner': 'kimi-k2.6',
-  'iflow-plan-executor': 'step-3.7-flash',
-  'iflow-verifier': 'minimax-m2.7',
-  'iflow-researcher': 'glm-5.1',
-  'iflow-shipper': 'mimo-v2.5-pro',
+  iFlow: 'provider/deepseek-v4-flash',
+  'iflow-discuss-planner': 'provider/kimi-k2.6',
+  'iflow-plan-executor': 'provider/step-3.7-flash',
+  'iflow-verifier': 'provider/minimax-m2.7',
+  'iflow-researcher': 'provider/glm-5.1',
+  'iflow-shipper': 'provider/mimo-v2.5-pro',
   // Shared
-  'test-engineer': 'deepseek-v4-flash',
-  'review-engineer': 'deepseek-v4-flash',
+  'test-engineer': 'provider/deepseek-v4-flash',
+  'review-engineer': 'provider/deepseek-v4-flash',
   // Horizontal commands
-  'flow-intel': 'glm-5.1',
-  'flow-architect': 'glm-5.1',
-  'flow-evolve': 'glm-5.1',
-  'flow-health': 'glm-5.1',
-  'flow-restyle': 'glm-5.1',
+  'flow-intel': 'provider/glm-5.1',
+  'flow-architect': 'provider/glm-5.1',
+  'flow-evolve': 'provider/glm-5.1',
+  'flow-health': 'provider/glm-5.1',
+  'flow-restyle': 'provider/glm-5.1',
 };
 
 /**
@@ -117,34 +117,34 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
  * When the primary model is unavailable, try these in order
  */
 const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
-  // SFlow
-  sFlow: ['glm-5.1', 'kimi-k2.6'],
-  'need-explorer': ['glm-5.1', 'deepseek-v4-flash'],
-  'spec-writer': ['kimi-k2.6', 'deepseek-v4-flash'],
-  'contract-builder': ['glm-5.1', 'deepseek-v4-flash'],
-  'build-executor': ['glm-5', 'kimi-k2.6'],
-  'bug-investigator': ['deepseek-v4-flash', 'glm-5.1'],
-  'code-reviewer': ['glm-5.1', 'kimi-k2.6'],
-  'release-archivist': ['mimo-v2.5', 'glm-5.1'],
-  'spec-merger': ['mimo-v2.5-pro', 'glm-5.1'],
-  'ui-director': ['kimi-k2.6', 'deepseek-v4-flash'],
-  'ui-implementer': ['kimi-k2.6', 'deepseek-v4-flash'],
+  // SFlow — all built-in fallbacks use provider/ prefix
+  sFlow: ['provider/glm-5.1', 'provider/kimi-k2.6'],
+  'need-explorer': ['provider/glm-5.1', 'provider/deepseek-v4-flash'],
+  'spec-writer': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
+  'contract-builder': ['provider/glm-5.1', 'provider/deepseek-v4-flash'],
+  'build-executor': ['provider/glm-5', 'provider/kimi-k2.6'],
+  'bug-investigator': ['provider/deepseek-v4-flash', 'provider/glm-5.1'],
+  'code-reviewer': ['provider/glm-5.1', 'provider/kimi-k2.6'],
+  'release-archivist': ['provider/mimo-v2.5', 'provider/glm-5.1'],
+  'spec-merger': ['provider/mimo-v2.5-pro', 'provider/glm-5.1'],
+  'ui-director': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
+  'ui-implementer': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
   // IFlow
-  iFlow: ['glm-5.1', 'kimi-k2.6'],
-  'iflow-discuss-planner': ['glm-5.1', 'deepseek-v4-flash'],
-  'iflow-plan-executor': ['deepseek-v4-flash', 'glm-5.1'],
-  'iflow-verifier': ['deepseek-v4-flash', 'glm-5.1'],
-  'iflow-researcher': ['kimi-k2.6', 'deepseek-v4-flash'],
-  'iflow-shipper': ['mimo-v2.5', 'glm-5.1'],
+  iFlow: ['provider/glm-5.1', 'provider/kimi-k2.6'],
+  'iflow-discuss-planner': ['provider/glm-5.1', 'provider/deepseek-v4-flash'],
+  'iflow-plan-executor': ['provider/deepseek-v4-flash', 'provider/glm-5.1'],
+  'iflow-verifier': ['provider/deepseek-v4-flash', 'provider/glm-5.1'],
+  'iflow-researcher': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
+  'iflow-shipper': ['provider/mimo-v2.5', 'provider/glm-5.1'],
   // Shared
-  'test-engineer': ['glm-5.1', 'kimi-k2.6'],
-  'review-engineer': ['glm-5.1', 'kimi-k2.6'],
+  'test-engineer': ['provider/glm-5.1', 'provider/kimi-k2.6'],
+  'review-engineer': ['provider/glm-5.1', 'provider/kimi-k2.6'],
   // Horizontal commands
-  'flow-intel': ['kimi-k2.6', 'deepseek-v4-flash'],
-  'flow-architect': ['kimi-k2.6', 'deepseek-v4-flash'],
-  'flow-evolve': ['kimi-k2.6', 'deepseek-v4-flash'],
-  'flow-health': ['kimi-k2.6', 'deepseek-v4-flash'],
-  'flow-restyle': ['kimi-k2.6', 'deepseek-v4-flash'],
+  'flow-intel': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
+  'flow-architect': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
+  'flow-evolve': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
+  'flow-health': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
+  'flow-restyle': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
 };
 
 /**

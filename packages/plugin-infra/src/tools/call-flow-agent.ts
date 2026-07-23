@@ -12,6 +12,37 @@ import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentMod
 import { generateTaskId, formatToolError } from '../types.js';
 import { pollSessionCompletion } from '../helpers/polling.js';
 
+/** Maximum concurrent subagent sessions of the same type */
+const MAX_CONCURRENT_SUBAGENTS = 3;
+
+/** Tracks running subagent count per subagent type */
+const runningSubagentCounts = new Map<string, number>();
+
+/**
+ * Increment the running count for a subagent type.
+ * Returns true if the limit was not exceeded, false otherwise.
+ */
+function acquireSubagentSlot(subagentType: string): boolean {
+  const current = runningSubagentCounts.get(subagentType) ?? 0;
+  if (current >= MAX_CONCURRENT_SUBAGENTS) {
+    return false;
+  }
+  runningSubagentCounts.set(subagentType, current + 1);
+  return true;
+}
+
+/**
+ * Decrement the running count for a subagent type.
+ */
+function releaseSubagentSlot(subagentType: string): void {
+  const current = runningSubagentCounts.get(subagentType) ?? 0;
+  if (current <= 1) {
+    runningSubagentCounts.delete(subagentType);
+  } else {
+    runningSubagentCounts.set(subagentType, current - 1);
+  }
+}
+
 export interface CallFlowAgentOptions {
   /** SFlow client for session management */
   client: SFlowClient;
@@ -121,9 +152,17 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
         });
 
         if (run_in_background) {
+          // Check concurrency limit: max 3 parallel subagents of the same type
+          if (!acquireSubagentSlot(subagent_type as string)) {
+            return await formatToolError(
+              `Concurrency limit reached for subagent "${subagent_type}". Maximum ${MAX_CONCURRENT_SUBAGENTS} parallel instances allowed. Wait for a running task to complete before starting another.`,
+            );
+          }
+
           const taskId = generateTaskId(backgroundTaskCounter);
           backgroundTaskRegistry.set(taskId, {
             sessionID,
+            subagentType: subagent_type as string,
             status: 'running',
             createdAt: Date.now(),
           });
@@ -148,6 +187,7 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
         const syncTaskId = generateTaskId(backgroundTaskCounter);
         backgroundTaskRegistry.set(syncTaskId, {
           sessionID,
+          subagentType: subagent_type as string,
           status: 'completed',
           result: lastOutput,
           createdAt: Date.now(),
@@ -200,6 +240,8 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
           completedAt: now,
         };
         backgroundTaskRegistry.set(task_id, updated);
+        // Release concurrency slot when background task completes
+        releaseSubagentSlot(task.subagentType);
         return updated;
       };
 
@@ -263,6 +305,8 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
           // session.abort may not be available; mark cancelled anyway
         }
 
+        // Release concurrency slot
+        releaseSubagentSlot(task.subagentType);
         backgroundTaskRegistry.delete(taskId);
         return { title: 'FlowAgent Cancel', output: JSON.stringify({ success: true, message: `Task ${taskId} cancelled and removed` }, null, 2) };
       } catch (error) {

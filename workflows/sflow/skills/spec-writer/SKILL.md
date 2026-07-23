@@ -1,4 +1,4 @@
-﻿---
+---
 name: spec-writer
 description: Create or refine sflow planning artifacts. Invoke when the change is understood well enough to write proposal.md, specs/, design.md, and tasks.md. For frontend projects, also generates ui-design.md.
 ---
