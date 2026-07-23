@@ -29,6 +29,7 @@ import { directoryExists, ensureDir, writeJsonFile } from '@opencode-flow-engine
 import { getStateFilePath } from './features/state-manager.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
+import { registerFlowCommands } from '../../../workflows/shared/slash-commands.js';
 import { setHasOmoPlugin, setHasAgnesProvider } from './agents/agent-tools.js';
 import { markOmoUsed, resetOmoTracking } from './hooks/guard.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
@@ -267,6 +268,10 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
           AGENT_MODEL_MAP[name] = modelName;
         }
       }
+
+      // Register horizontal flow commands (test/review/intel/architect/evolve/health/restyle)
+      // These are independent of sFlow/iFlow workflow context
+      registerFlowCommands(cfg as any);
 
       if (!cfg.mcp) cfg.mcp = {};
       const skillsWithMcp = skillLoader.getSkillsWithMcp();
