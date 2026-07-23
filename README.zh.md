@@ -238,7 +238,7 @@ Step 7: 反 AI-slop 检查  → 8 类 42 条规则
 | 工具 | 说明 |
 |------|------|
 | `workflow_router` / `iflow_router` | 状态检测和子智能体路由 |
-| `call_flow_agent` | **核心**：向子智能体委派任务（同步/异步） |
+| `call_flow_agent` | **核心**：向子智能体委派任务（同步/异步）。支持 `output_mode`（last_message \| structured）JSON 提取和 `agent_id` resume 恢复 |
 | `flowagent_output` / `flowagent_cancel` | 异步任务管理 |
 | `contract_validator` / `artifact_inspector` | 产物校验 |
 | `record_decision_point` | 决策点记录（DP-0 至 DP-5） |
@@ -316,6 +316,8 @@ NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
 .flow-engine/sflow/checkpoints/           — 结构化检查点，含提交证据
 .flow-engine/sflow/handoffs/              — 跨会话移交合约
 .flow-engine/sflow/progress.md            — 批次完成进度
+.flow-engine/sflow/notifications/         — 子智能体完成通知 (P0)
+.flow-engine/sflow/subagent-store/        — 子智能体持久化上下文，支持 Resume (P1)
 ```
 
 ### 执行控制平面
@@ -353,6 +355,39 @@ SDD 模式通过 `.flow-engine/sflow/execution-plan.json` 编排：
 | `pre_process` | 消息处理前 | 注入上下文 |
 | `post_process` | 工具执行后 | 检测状态转换信号 |
 | `continuation` | 上下文压缩后 | 决定是否自动继续 |
+
+### 通知管理器 (P0)
+
+子智能体完成通知系统，消除 10+ 秒轮询延迟：
+
+- **写入**：子智能体完成 → `.flow-engine/sflow/notifications/<task-id>.json`（type、subagent、task_id、session_id、completed_at、summary）
+- **消费**：编排器启动时自动扫描未消费通知 → 注入 system prompt → 移动到 `consumed/`
+- **去重**：`consumed/` 目录文件级去重
+- **可靠性**：写入失败不阻塞 agent 结果返回（try-catch，仅 warn）
+
+### 子智能体持久化与 Resume (P1)
+
+长任务子智能体的全量上下文持久化，支持中断后恢复：
+
+- **存储**：`.flow-engine/sflow/subagent-store/<agent_id>/{meta.json, prompt.md, output.md, events.log}` + `index.json`
+- **Resume**：`call_flow_agent` 传入 `agent_id` → 从原始 prompt + 前次输出合成新 prompt → 创建新 session
+- **索引**：`index.json` 维护可搜索的 agent 注册表，支持按 status 过滤
+
+### 输出 Schema 结构化 (P2)
+
+从子智能体响应中提取结构化输出，减少编排器对 LLM 自由文本解析的依赖：
+
+- **模式**：`output_mode` 参数（`last_message` \| `structured`），默认保持向后兼容
+- **提取**：从 code fence 或裸 JSON 对象中提取 JSON block；提取失败时 `structured_output: null`
+- **Schema 提示**：按 agent 类型注入不同 schema hint（build-executor → `{files_changed, tests_passed, blockers}`，verifier → `{blockers, warnings, score}`）
+
+### 完成强制机制与系统提醒 (P3)
+
+检测子智能体是否提前结束 turn，自动重试：
+
+- **检测**：检查完成信号（`[TASK_COMPLETE]`、JSON code fence、裸 JSON 对象）；空输出视为未完成
+- **提醒**：缺少完成信号时在 session 中注入 `<system-reminder>` 消息
+- **重试**：仅同步模式；最多 2 次重试（1s → 2s 退避）；异步模式记录完成状态但不重试
 
 ### 模型 Profile
 
@@ -444,8 +479,10 @@ opencode-flow-engine/
 │   │       ├── agents/          # 构建器、类型、配置加载
 │   │       ├── hooks/           # 6 类生命周期钩子 + 守卫
 │   │       ├── tools/           # 工具定义和实现
-│   │       ├── features/        # 工作流管理器、状态管理器、MCP
-│   │       └── helpers/         # 辅助函数
+│   │       ├── features/        # 工作流管理器、状态管理器、MCP、
+│   │       │   │                # notification-manager、subagent-store
+│   │       └── helpers/         # 辅助函数、output-extractor、
+│   │                            # completion-detector、polling
 │   └── shared/                  # 共享工具函数
 ├── workflows/
 │   ├── sflow/                   # SFlow 工作流

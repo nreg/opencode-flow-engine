@@ -162,3 +162,151 @@ Agent(...) / Task(...) [subagent/task tool]
 grok-build 的 agent 工作流 = **"Agent 作为便携对象 + Markdown+frontmatter 定义 + MiniJinja 提示词组装 + 三种入口（TUI/Headless/ACP）共用同一运行时 + 系统化策略/沙箱/钩子/压缩/记忆"**。
 
 它和 iFlow/SFlow 最大的区别是：**grok-build 把 agent 当作类型系统里的一等公民来设计**，而 iFlow/SFlow 是在 OpenCode 宿主里做编排流水线。
+
+## 借鉴点
+
+可借鉴 grok-build 的 7 个方向：
+
+### 1. Agent 定义：从硬编码工厂函数 → Markdown+Frontmatter 文件
+
+**现状（opencode-flow-engine）**：
+每个 agent 是一个 TypeScript 工厂函数（`workflows/iflow/agents/iflow-discuss-planner.ts`），prompt 写在 .ts 里的字符串中，agent 名称/工具集/模型写在 `agent-builder.ts` 的 `AGENT_REGISTRY`/`DEFAULT_MODELS` 里。
+
+**可借鉴（grok-build 做法）**：
+Agent 定义是 `.grok/agents/*.md` 文件，YAML frontmatter 声明元数据，Markdown body 是 prompt。支持无代码新增 agent。
+
+**为什么值得改**：
+
+| 维度 | 现状（TS 硬编码） | 借鉴后（文件化） |
+|------|-------------------|-----------------|
+| 用户自定义 agent | 必须改源码/插件配置 | 只需在 `.flow-engine/agents/` 下放个 .md |
+| 团队共享 | 无法简单 git 分享一个单文件 | .md 文件天然可分享 |
+| 组合 prompt | 用 skillContent 手动拼接 | frontmatter 声明 skills: [xxx]，系统自动注入 |
+| 工具集 | 固定的 AGENT_TOOLS 枚举 | frontmatter 中 tools / disallowedTools 声明 |
+
+**升级路径**：仿 grok-build 的 `xai-grok-agent`，在 `packages/core/` 或 `packages/plugin-infra/src/agents/` 新增 `AgentDefinitionParser`，将 frontmatter 解析为现有的 `AgentConfig` 格式。工厂函数回归为"frontmatter 体的模板渲染器"。
+
+### 2. Prompt 组装系统：引入双模式（extend / full）和模板变量
+
+**现状**：每个 agent 的所有 prompt 是手写的完整字符串，`iflow-discuss-planner.ts` 里直接 `instructions: \`# Role\nYou are...\``。
+
+**可借鉴**：`promptMode: extend | full` + MiniJinja 模板变量
+
+**现状痛点**：
+- 所有 agent 的 tool calling convention、user_info、格式化规则在每个 .ts 里硬复制
+- 修改一个通用约定（比如"如何调用 search_replace"）要改 20+ 个文件
+- 没有 OS/Shell/工作目录等上下文变量注入
+
+**可借鉴模式**：
+
+| 层 | 内容 |
+|----|------|
+| 1. Base template (MiniJinja) | 工具调用格式、通用规则 |
+| 2. Agent-specific body | 各 agent 人设（附加/覆盖） |
+| 3. AGENTS.md section | 项目级规则文件发现 |
+| 4. Skills section | 技能注入 |
+
+**可加的模板变量**：
+- `${{ os_name }}` / `${{ shell_path }}` / `${{ working_directory }}` / `${{ current_date }}`
+- `${{ tools.read_file }}` / `${{ tools.search_replace }}`（toolNameOverrides 后仍正确）
+
+**升级路径**：在 `packages/plugin-infra/src/agents/` 新增 `prompt-assembler.ts`，参考 `xai-grok-agent/src/prompt/` 的 MiniJinja 渲染模式。`promptMode: extend` 的 agent 工厂函数只需返回"扩展段"内容，由 assembler 拼接。
+
+### 3. 完成强制机制（completionRequirement）
+
+**现状**：IFlow/SFlow 的状态流转依赖 guard hooks + subagent dp-* 记录。subagent 执行完不"汇报"时，没有回退机制。
+
+**可借鉴**：completionRequirement 字段 + 系统提醒注入
+
+```yaml
+completionRequirement:
+  tool: complete_task
+  reminder: >
+    You stopped without calling `complete_task`.
+    Please continue and call it when done.
+  recovery:
+    maxRetries: 3
+    baseDelayMs: 5000
+    maxDelayMs: 30000
+```
+
+**为什么需要**：当前 iFlow subagent 可能跑偏、提前结束而不触发 `call_flow_agent` 回传结果。有了 completionRequirement，系统会在 subagent 的下一轮自动注入 reminder，并带指数退避重试。
+
+**升级路径**：在 `call_flow_agent` 工具的后置处理中，检查该 agent 是否定义 completionRequirement；若检测到未执行指定工具就结束 turn，自动拼接 `<system-reminder>` 到下一轮系统提示。
+
+### 4. 工具级执行配置（per-tool retry + naming）
+
+**现状**：工具注册是固定的 `Record<string, ToolDefinition>`，没有 per-tool 的重试/超时/命名覆盖机制。
+
+**可借鉴**：`toolConfig.<tool>.retry` + `toolNameOverrides` + `paramNameOverrides`
+
+**实际场景**：
+- iflow-researcher 调 web_fetch 经常超时 → 给它配 `retry: { maxRetries: 3, baseDelayMs: 2000 }`
+- 用户统一把 `search_replace` 重命名为"编辑文件"（中文环境）
+- iflow-plan-executor 的 bash 命令需要 5 分钟超时，其他人用默认 120s
+
+**升级路径**：在 frontmatter 的 toolConfig 段添加解析，`packages/plugin-infra/src/tools/call-flow-agent.ts` 的 `validateAgent` 函数增加 per-agent tool override 入口，subagent session 创建时注入覆写。
+
+### 5. 细粒度子 Agent 阻断（Agent(type) 语法）
+
+**现状**：`call_flow_agent` 只做简单的 name validation。用户无法限制 iFlow 在特定阶段不能调用某些子 agent。
+
+**可借鉴**：`--disallowed-tools "Agent(explore)"` 语法
+
+```
+Agent            → 禁全部
+Agent(explore)   → 禁单个
+Agent(explore, plan) → 禁多个
+```
+
+**opencode-flow-engine 可用场景**：
+- 进入 executing 状态后禁止再调 iflow-researcher（不准回头调研）
+- verifying 阶段禁止调 iflow-discuss-planner（不准改需求）
+- 用户不想让计划执行器自动派 explore 子任务
+
+**升级路径**：在 `packages/plugin-infra/src/tools/call-flow-agent.ts` 的 `validateAgent` 中，增加对当前 workflow state + disallowed-subagents 配置的交叉检测。配置可放在 `.flow-engine/config.toml` 或 agent frontmatter 中。
+
+### 6. 跨会话记忆（cross-session memory）
+
+**现状**：opencode-flow-engine 的持久化只有 state.json（当前工作流状态），没有跨会话的"知识留存"——用户在不同 session 里告诉 agent 的信息，下次 session 不记得。
+
+**可借鉴**：grok-build 的 `xai-grok-memory` crate，支持：
+- `/memory workspace <text>` — 写入 memory
+- `/memory global <text>` — 全局记忆
+- `/flush` — 立即持久化
+- `--experimental-memory` — 开关
+
+**为什么对 iFlow 尤其重要**：
+- 用户在一个 cycle 里做了大量决策（如"这个模块名不要改"），下一个 cycle 又忘了
+- 跨 project 的通用约定（如"前端用 Tailwind，后端用 Prisma"）
+- research 阶段的发现可以持久化到 memory，下次 cycle 直接读
+
+**升级路径**：新增 `packages/plugin-infra/src/features/memory.ts`，参考 grok-build 的实现模式：
+- session_start hook 加载 memory 内容拼入 system prompt
+- `/memory` slash command 写入
+- memory 持久化到 `~/.flow-engine/memory/{workspace|global}.json`
+
+### 7. 系统提醒层 + 上下文压缩
+
+**现状**：opencode-flow-engine 只有基础的 `experimental.session.compacting`，把 state 拼成 compaction context。
+
+**可借鉴**：grok-build 的 SystemReminderLayer —— 一个专门的层，在每个 turn 的 system prompt 末尾注入 `<system-reminder>` 块，用于：
+- 提醒 agent 没有完成某任务
+- 注入进度/时间
+- 恢复打断的步骤
+
+**实际价值**：当前 iFlow 的 subagent 在 compaction 后经常"失忆"——忘了当前在做哪一步。SystemReminderLayer 是独立的策略化注入，与 compaction 分离，可以确保关键约束在每个 turn 可见。
+
+### 优先级建议
+
+| 优先级 | 方向 | 工作量估计 | 影响面 |
+|--------|------|-----------|--------|
+| P0 | Agent 定义文件化（#1） | 中 | 核心架构变更，影响 agent 注册全流程 |
+| P0 | Prompt 组装系统（#2） | 中 | 消除 20+ 文件的冗余，统一 prompt 管理 |
+| P1 | 完成强制机制（#3） | 小 | call_flow_agent + tool.execute.after 钩子 |
+| P1 | 跨会话记忆（#6） | 小 | 新增 feature 模块，不影响现有流程 |
+| P2 | 工具级执行配置（#4） | 中 | 需要 tool registry 扩展 |
+| P2 | 子 agent 阻断语法（#5） | 小 | 扩展 validateAgent + 配置解析 |
+| P2 | 系统提醒层（#7） | 中 | 需要独立于 compaction 的注入机制 |
+
+> *「小」= 1-2 个文件，纯新增不修改现有逻辑

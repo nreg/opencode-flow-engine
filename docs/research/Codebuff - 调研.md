@@ -743,3 +743,153 @@ Codebuff 采用**扁平化、可组合的 agent 架构**，核心设计理念是
 与 iFlow/SFlow 相比，codebuff 更灵活但缺乏结构化质量保证。iFlow 的严格状态机确保每个阶段都有验证和用户确认，而 codebuff 依赖 LLM 的自我修正能力。
 
 可以从 codebuff 借鉴的设计：**handleSteps 生成器**（程序化 + LLM 混合控制）、**并行子 agent 机制**、**MCP 工具集成**、**OpenRouter 多模型路由**。
+
+## 借鉴点
+
+7 个高价值可借鉴点，按优先级排序：
+
+### 1. 【P0】handleSteps 生成器 — 程序化控制流
+
+**现状**：flow-engine 的 agent 是纯声明式系统提示。sFlow/IFlow 编排器只能通过文本提示 LLM 做正确的事，无法精确控制执行顺序或条件分支。
+
+**Codebuff 做法**：AgentDefinition 有 handleSteps: GeneratorFunction，支持：
+
+```typescript
+handleSteps: function* ({ params }) {
+  const files = yield { toolName: 'read_files', input: { paths: ['config.json'] } }
+  if (files.includes('frontend')) {
+    yield { toolName: 'spawn_agents', input: { agents: [{ ... }] } }
+  }
+  yield 'STEP'        // 让 LLM 执行一步
+  yield 'STEP_ALL'    // 让 LLM 执行到 end_turn
+}
+```
+
+> CITED: agents/types/agent-definition.ts:220-268
+
+**借鉴价值**：
+- IFlow 场景：在 planning 阶段，先读 PLAN.md → 判断任务依赖 → 按 Wave 顺序 spawn executor
+- SFlow 场景：在 exploring 阶段，先检测代码库 → 有前端则 spawn ui-director，否则跳过
+- Bug 修复：executor 可 yield 特定修复步骤，而非依赖 LLM 自主决策
+
+**实现方案**：在 AgentConfig 之外增加 FlowAgentDefinition 包装器，添加 handleSteps 字段。在 orchestrator agent 的 prompt 中嵌入特殊指令，让 LLM 知晓可用步骤控制。
+
+### 2. 【P0】并行子 Agent — spawn_flow_agents
+
+**现状**：`call_flow_agent` 是 1:1 串行——一次调用 spawn 一个子 agent。虽然支持 `run_in_background=true`，但每次只能启动一个。
+
+> CITED: packages/plugin-infra/src/tools/call-flow-agent.ts:92-218
+
+**Codebuff 做法**：spawn_agents 接受 agent 数组，并行执行，结果汇总回父 agent：
+
+```typescript
+yield {
+  toolName: 'spawn_agents',
+  input: {
+    agents: [
+      { agent_type: 'researcher-web', prompt: '搜索最新文档' },
+      { agent_type: 'code-searcher', params: { pattern: 'Xxx' } },
+      { agent_type: 'basher', params: { command: 'npm test' } },
+    ],
+  },
+}
+```
+
+> CITED: agents/types/tools.ts:339-348
+
+**借鉴价值**：
+- IFlow researching 阶段：并行搜索网络 + 查阅文档 + 代码探索
+- IFlow verifying 阶段：并行运行测试 + 代码审查
+- SFlow exploring 阶段：并行代码分析 + 竞品调研
+
+**实现方案**：新增 `spawn_flow_agents` 工具，接受 `{ agents: Array<{subagent_type, prompt, params}> }`，内部为每个 agent 创建独立 session，通过 Promise.all 并行等待结果。
+
+### 3. 【P1】上下文修剪 agent（context-pruner）
+
+**现状**：flow-engine 没有任何上下文窗口管理机制。长时间编排会话中，对话历史会无限膨胀。
+
+**Codebuff 做法**：context-pruner 是一个专用 agent，在每一步之间运行，压缩对话历史：
+- 消息标签机制（userPrompt, agentStep, INSTRUCTIONS_PROMPT）
+- timeToLive 消息过期
+- expireMessages 根据标签清理
+- 付费模式用 Anthropic token-count API，免费模式用本地估算
+- 支持 `/compact` 手动命令
+
+> CITED: agents/context-pruner.ts, agents/types/agent-definition.ts
+
+**借鉴价值**：
+- 长 session 中保持上下文窗口效率
+- 自动清理过期消息，避免 token 浪费
+- 用户可感知的 `/compact` 命令
+
+**实现方案**：创建一个 context-pruner 共享 agent，在 `tool.execute.after` 钩子中每 N 步触发一次修剪。此外，在 IFlow 的 verifying→shipping 转换前自动清理。
+
+### 4. 【P1】自定义 Agent 热加载
+
+**现状**：flow-engine 的所有 agent 是硬编码在 AGENT_REGISTRY 中的。用户无法扩展。
+
+**Codebuff 做法**：从 `{cwd}/.agents/`、`{cwd}/../.agents/`、`{homedir}/.agents/` 通过 Bun 原生 import 动态加载 .ts 文件。
+
+> CITED: sdk/src/agents/load-agents.ts
+
+**借鉴价值**：
+- 用户可以在项目根目录放 `.flow-engine/agents/my-custom-agent.ts`，自动注册
+- 插件无需发版即可扩展 agent 集
+
+**实现方案**：在 config 钩子中，扫描 `.flow-engine/agents/` 目录，通过 Bun.file() 或动态 import 加载自定义 agent 定义，合并到 cfg.agent 注册表。
+
+### 5. 【P1】子 Agent 输出 Schema 结构化
+
+**现状**：子 agent 输出是自由文本，编排器需要靠 LLM 解析内容。
+
+**Codebuff 做法**：AgentDefinition 支持 outputSchema（JSON Schema）和 outputMode（last_message | all_messages | structured_output）。
+
+> CITED: agents/types/agent-definition.ts:21-269
+
+**借鉴价值**：
+- 研究 agent 返回结构化 JSON，编排器直接解析，减少 LLM 解析开销
+- 验证 agent 返回 `{ blockers: [], warnings: [], score: number }`，编排器可直接判断
+
+**实现方案**：在 `call_flow_agent` 的同步模式中，增加 outputMode 参数，支持 structured_output 模式。
+
+### 6. 【P2】OpenRouter 多模型路由
+
+**现状**：flow-engine 已有 `resolveModelWithFallback` 和 fallback 链机制，但模型定义是静态的 DEFAULT_MODELS 映射。
+
+> CITED: packages/plugin-infra/src/agents/agent-builder.ts:84-148
+
+**Codebuff 做法**：通过 OpenRouter 支持 50+ 模型，支持 provider 回退、价格排序、吞吐量/延迟排序、过滤。
+
+**借鉴价值**：
+- 当首选 provider 不可用时自动回退
+- 支持价格/质量权衡
+
+**实现方案**：flow-engine 已有基础（resolveModelWithFallback），只需：
+1. 在 config.example.json 中增加 modelProfiles 配置（支持 provider/ 前缀列表）
+2. 在 agent-builder.ts 中扩展 fallback 逻辑，支持从 OpenRouter 风格 provider 列表中选择
+
+### 7. 【P2】Agent 定义元数据丰富化
+
+**现状**：flow-engine 的 AgentConfig 只包含 `id, name, model, instructions, tools`。
+
+**Codebuff 做法**：AgentDefinition 包含更多元数据：
+- spawnableAgents：声明可派生的子 agent，便于编排器决策
+- includeMessageHistory：是否继承父 agent 对话历史
+- inheritParentSystemPrompt：是否继承父 agent 系统提示
+- mcpServers：声明自己的 MCP 依赖
+- spawnerPrompt：描述何时/为何使用此 agent
+- stepPrompt / instructionsPrompt：多级提示词注入
+
+**借鉴价值**：编排器可以基于 spawnableAgents 智能推荐下一步，基于 spawnerPrompt 决定何时使用该 agent。
+
+### 优先级总表
+
+| # | 借鉴点 | 优先级 | 工作量 | 影响范围 | 关键收益 |
+|---|--------|--------|--------|----------|----------|
+| 1 | handleSteps 生成器 | P0 | 大 | agent 运行时 | 精确控制流，减少 LLM 幻觉 |
+| 2 | 并行子 agent | P0 | 中 | call-flow-agent | 研究/验证阶段提速 2-3x |
+| 3 | context-pruner | P1 | 中 | 插件钩子 | 长 session 上下文效率 |
+| 4 | 自定义 agent 热加载 | P1 | 小 | config 钩子 | 用户可扩展性 |
+| 5 | 结构化输出 schema | P1 | 小 | call-flow-agent | 编排器解析精确度 |
+| 6 | OpenRouter 多模型路由 | P2 | 中 | agent-builder | 容错性提升 |
+| 7 | Agent 元数据丰富化 | P2 | 小 | 类型定义 | 编排器决策质量 |

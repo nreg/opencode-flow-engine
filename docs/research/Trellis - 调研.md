@@ -187,11 +187,13 @@
 | 调试回溯         | IFlow 没有 spec 概念，IFlow 的设计本身就不支持跨迭代的知识沉淀 - 这是它的设计取舍，不是遗漏<br />SFlow 已有实现，不需要借鉴 |
 | Spec分层系统     | Trellis 的动态 spec 系统（ spec 选择权 交给 agent）和 sFlow 的线性可控架构存在根本冲突 |
 | 父子任务树       | sFlow 的 按合约进行 wave 分发，会多次调用 build-executor，而不是让 build-executor 一次性加载所有任务<br />因此 sFlow 本身实现已经足够优秀<br />引入 父子任务树 会让 sFlow 的复杂度 从水平 变成 垂直树形，N+1 状态跟踪 和 依赖管理容易出错 |
-| 生命周期钩子     | 有借鉴意义，但ROI偏低，脚本执行失败可能卡住流程，调试困难    |
+| 生命周期钩子     | 有借鉴意义，暂不实现                                         |
 
-生命周期钩子：
+### 关于生命周期钩子
 
 Trellis 的 task.json 支持四个事件：
+
+```json
 {
   "hooks": {
     "after_create":  ["python3 scripts/notify-slack.py"],
@@ -200,38 +202,53 @@ Trellis 的 task.json 支持四个事件：
     "after_archive": ["python3 scripts/archive-report.py"]
   }
 }
-事件	触发时机	适合做什么
-after_create	任务目录创建后	创建关联分支、通知团队、初始化环境
-after_start	任务状态变为 in_progress	锁定分支、创建开发环境、注册 CI 流水线
-after_finish	任务完成（清除活跃指针）	清理临时文件、发送完成通知
-after_archive	任务归档到 archive/	生成报告、更新索引、发送周报汇总
+```
 
-引入好处：
+| 事件 | 触发时机 | 适合做什么 |
+|------|----------|-----------|
+| after_create | 任务目录创建后 | 创建关联分支、通知团队、初始化环境 |
+| after_start | 任务状态变为 in_progress | 锁定分支、创建开发环境、注册 CI 流水线 |
+| after_finish | 任务完成（清除活跃指针） | 清理临时文件、发送完成通知 |
+| after_archive | 任务归档到 archive/ | 生成报告、更新索引、发送周报汇总 |
 
-1. 自动创建分支 / 管理 Git
+#### 引入好处
+
+**1. 自动创建分支 / 管理 Git**
+
 当前 sFlow 中，iflow-shipper 负责创建 PR，但分支管理是写死在 agent prompt 里的。有了钩子：
-after_create → 自动创建 feature/xxx 分支
-after_start  → 保护分支（禁止直接 push）
-after_archive → 自动删除已合并的本地分支
-2. 自动通知
-after_create → 钉钉/飞书机器人："新任务开始：xxx"
-after_archive → 邮件/消息："任务已完成：xxx"
-3. 自动环境管理
-after_start  → 自动部署开发环境 / 初始化数据库
-after_finish → 自动销毁临时环境
-after_archive → 自动清理测试数据
-4. 自动生成报告
-after_archive → 自动生成周报条目："本周完成：xxx"
+- after_create → 自动创建 feature/xxx 分支
+- after_start → 保护分支（禁止直接 push）
+- after_archive → 自动删除已合并的本地分支
 
-弊端：
-1. 执行失败的处理策略
+**2. 自动通知**
+- after_create → 钉钉/飞书机器人："新任务开始：xxx"
+- after_archive → 邮件/消息："任务已完成：xxx"
+
+**3. 自动环境管理**
+- after_start → 自动部署开发环境 / 初始化数据库
+- after_finish → 自动销毁临时环境
+- after_archive → 自动清理测试数据
+
+**4. 自动生成报告**
+- after_archive → 自动生成周报条目："本周完成：xxx"
+
+#### 弊端
+
+**1. 执行失败的处理策略**
+
 钩子脚本失败怎么办？
-阻止状态转移？（太严格——可能卡住流程）
-忽略继续？（可能掩盖问题）
-记录警告，让用户决定？（最佳路径，但需要额外交互）
-2. 安全风险
-用户配置的脚本可以执行任意命令。如果 .flow-engine/sflow/config.json 被提交到仓库，恶意 PR 可以在 CI 中执行恶意代码。需要脚本白名单或确认执行的机制。
-3. 跨平台兼容
+- 阻止状态转移？（太严格——可能卡住流程）
+- 忽略继续？（可能掩盖问题）
+- 记录警告，让用户决定？（最佳路径，但需要额外交互）
+
+**2. 安全风险**
+
+用户配置的脚本可以执行任意命令。如果 `.flow-engine/sflow/config.json` 被提交到仓库，恶意 PR 可以在 CI 中执行恶意代码。需要脚本白名单或确认执行的机制。
+
+**3. 跨平台兼容**
+
 Windows 用户配置了 bash script.sh，macOS 用户配置了 pwsh script.ps1，sFlow 需要知道运行平台。当前 sFlow 没有平台检测机制。
-4. 调试困难
+
+**4. 调试困难**
+
 钩子脚本失败时，用户很难知道是脚本本身的问题，还是环境问题，还是 sFlow 传参的问题。需要有清晰的错误日志。

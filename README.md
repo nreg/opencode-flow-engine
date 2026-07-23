@@ -238,7 +238,7 @@ The `validate_ui_design` tool checks ui-design.md for 7 quality gates:
 | Tool | Description |
 |------|-------------|
 | `workflow_router` / `iflow_router` | State detection and subagent routing |
-| `call_flow_agent` | **Core**: delegates tasks to subagents (sync/async) |
+| `call_flow_agent` | **Core**: delegates tasks to subagents (sync/async). Supports `output_mode` (last_message \| structured) for JSON extraction and `agent_id` for resume from subagent store |
 | `flowagent_output` / `flowagent_cancel` | Async task management |
 | `contract_validator` / `artifact_inspector` | Artifact validation |
 | `record_decision_point` | Decision point recording (DP-0 to DP-5) |
@@ -316,6 +316,8 @@ Each task declares `read_files` (reference boundary) and `write_files` (modifica
 .flow-engine/sflow/checkpoints/           — Structured checkpoints with commit evidence
 .flow-engine/sflow/handoffs/              — Cross-session handoff contracts
 .flow-engine/sflow/progress.md            — Batch completion progress
+.flow-engine/sflow/notifications/         — Subagent completion notifications (P0)
+.flow-engine/sflow/subagent-store/        — Persisted subagent contexts for resume (P1)
 ```
 
 ### Execution Control Plane
@@ -353,6 +355,39 @@ SDD-mode execution is orchestrated via `.flow-engine/sflow/execution-plan.json`:
 | `pre_process` | Before message processing | Injects context |
 | `post_process` | After tool execution | Detects state transition signals |
 | `continuation` | After context compression | Decides auto-continue |
+
+### Notification Manager (P0)
+
+Subagent completion notifications via file system, eliminating 10+ second polling delay:
+
+- **Write**: subagent completes → `.flow-engine/sflow/notifications/<task-id>.json` (type, subagent, task_id, session_id, completed_at, summary)
+- **Consume**: orchestrator auto-scans pending notifications on startup → injects into system prompt → moves to `consumed/`
+- **Deduplication**: `consumed/` directory with file-level dedup
+- **Reliability**: write failure never blocks agent result return (try-catch, warn only)
+
+### Subagent Persistence & Resume (P1)
+
+Full context persistence for long-running subagents, enabling interrupted task recovery:
+
+- **Store**: `.flow-engine/sflow/subagent-store/<agent_id>/{meta.json, prompt.md, output.md, events.log}` + `index.json`
+- **Resume**: `call_flow_agent` with `agent_id` parameter → reconstructs prompt from original + previous output → creates new session
+- **Index**: `index.json` maintains searchable agent registry by status
+
+### Output Schema Structuring (P2)
+
+Structured output extraction from subagent responses, reducing orchestrator's dependency on LLM free-text parsing:
+
+- **Mode**: `output_mode` parameter (`last_message` \| `structured`), default preserves existing behavior
+- **Extraction**: JSON block extraction from code fences or bare JSON objects; fails gracefully with `structured_output: null`
+- **Schema Hints**: Agent-specific hints injected into prompt (build-executor → `{files_changed, tests_passed, blockers}`, verifier → `{blockers, warnings, score}`)
+
+### Completion Enforcement & System Reminder (P3)
+
+Detects incomplete subagent turns and automatically retries:
+
+- **Detection**: Checks for completion signals (`[TASK_COMPLETE]`, JSON code fence, bare JSON object); empty output treated as incomplete
+- **Reminder**: Injects `<system-reminder>` message into session when completion signal is missing
+- **Retry**: Synchronous mode only; max 2 retries (1s → 2s backoff); async mode logs completion status without retrying
 
 ### Model Profiles
 
@@ -444,8 +479,10 @@ opencode-flow-engine/
 │   │       ├── agents/          # Builders, types, config loading
 │   │       ├── hooks/           # 6 lifecycle hook types + guards
 │   │       ├── tools/           # Tool definitions and implementations
-│   │       ├── features/        # Workflow manager, state manager, MCP
-│   │       └── helpers/         # Utility functions
+│   │       ├── features/        # Workflow manager, state manager, MCP,
+│   │       │   │                # notification-manager, subagent-store
+│   │       └── helpers/         # Utility functions, output-extractor,
+│   │                            # completion-detector, polling
 │   └── shared/                  # Shared utilities
 ├── workflows/
 │   ├── sflow/                   # SFlow workflow
