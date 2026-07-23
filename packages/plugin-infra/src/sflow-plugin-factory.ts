@@ -36,6 +36,7 @@ import { markOmoUsed, resetOmoTracking } from './hooks/guard.js';
 import { createAgentSpecificGuards } from './hooks/guard/agent-guards.js';
 import { clearFrontendCache } from './features/frontend-detector.js';
 import { createTaskTracker } from './features/task-tracker.js';
+import { createNotificationManager } from './features/notification-manager.js';
 import { pollSessionCompletion } from './helpers/polling.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SFLOW_AGENT_NAMES } from '../../../workflows/sflow/index.js';
@@ -369,6 +370,18 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
         event: async (input) => {
           const event = input.event;
           if (event.type === 'session.created') {
+            // P0: 主 agent 启动时消费未读通知
+            try {
+              const nm = createNotificationManager({ changeDir: workDir });
+              const notifications = await nm.consumeNotifications();
+              if (notifications.length > 0) {
+                const notifSummary = notifications.map(n => n.formatted).join('\n');
+                console.log(`[sFlow] 消费 ${notifications.length} 条子 agent 通知:\n${notifSummary}`);
+              }
+            } catch {
+              // 通知消费失败不阻塞 session 初始化
+            }
+
             const sessionStartHook = hookComposer.getHook('session_start');
             if (sessionStartHook) {
               await sessionStartHook.execute({

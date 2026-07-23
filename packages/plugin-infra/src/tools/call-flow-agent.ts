@@ -11,6 +11,10 @@ import type { ToolDefinition } from './types.js';
 import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentModelMap } from '../types.js';
 import { generateTaskId, formatToolError } from '../types.js';
 import { pollSessionCompletion } from '../helpers/polling.js';
+import { createNotificationManager } from '../features/notification-manager.js';
+import { createSubagentStore } from '../features/subagent-store.js';
+import { extractJsonBlock, getSchemaHint } from '../helpers/output-extractor.js';
+import { hasCompletionSignal, performCompletionRetry, REMINDER_MESSAGE } from '../helpers/completion-detector.js';
 
 /** Maximum concurrent subagent sessions of the same type */
 const MAX_CONCURRENT_SUBAGENTS = 3;
@@ -88,10 +92,12 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
       subagent_type: z.string().describe(`The subagent to invoke (e.g. ${workflowName.toLowerCase()}-plan-executor, build-executor)`),
       run_in_background: z.boolean().describe('true=async (returns task_id for flowagent_output), false=sync (waits for completion)'),
       session_id: z.string().optional().describe('Existing session to continue (sync mode only)'),
+      agent_id: z.string().optional().describe('Resume a previous subagent by agent_id. When provided, context from the previous run is injected into the prompt.'),
+      output_mode: z.enum(['last_message', 'structured']).optional().describe('Output mode: last_message (default, return raw text) or structured (extract JSON block from output)'),
     },
     execute: async (args, context) => {
       const changeDir = context.directory || '';
-      const { subagent_type, prompt, run_in_background, session_id, description } = args;
+      const { subagent_type, prompt, run_in_background, session_id, description, agent_id, output_mode } = args;
 
       // Validate agent name
       const validationError = await validateAgent(subagent_type as string, context as Record<string, unknown>);
@@ -101,9 +107,26 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
 
       const sessionLabel = resolveSessionLabel(subagent_type as string, context as Record<string, unknown>);
 
+      // P1: subagent-store 实例
+      const store = createSubagentStore({ changeDir });
+
       try {
         let sessionID: string;
         let isNew = false;
+        let effectivePrompt = prompt as string;
+        let resolvedAgentId = agent_id as string | undefined;
+
+        // P1: Resume 模式 — 传入 agent_id 时从 subagent-store 恢复上下文
+        if (agent_id) {
+          try {
+            const resumeResult = await store.resumeAgent(agent_id as string, prompt as string);
+            effectivePrompt = resumeResult.prompt;
+            resolvedAgentId = agent_id as string;
+          } catch (resumeErr) {
+            const msg = resumeErr instanceof Error ? resumeErr.message : String(resumeErr);
+            return await formatToolError(msg);
+          }
+        }
 
         if (session_id) {
           if (run_in_background) {
@@ -137,6 +160,15 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
           isNew = true;
         }
 
+        // P2: structured 模式下注入 schema hint
+        let finalPrompt = effectivePrompt;
+        if (output_mode === 'structured') {
+          const hint = getSchemaHint(subagent_type as string);
+          if (hint) {
+            finalPrompt = effectivePrompt + '\n\n' + hint;
+          }
+        }
+
         await (client.session.prompt as (args: {
           path: { id: string };
           body: Record<string, unknown>;
@@ -144,12 +176,27 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
           path: { id: sessionID },
           body: {
             agent: subagent_type as string,
-            parts: [{ type: 'text', text: prompt as string }],
+            parts: [{ type: 'text', text: finalPrompt }],
           },
         }).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           throw new Error(`Failed to send prompt: ${msg}`);
         });
+
+        // P1: 首次调用（无 session_id）时创建 agent store 记录
+        if (isNew && !resolvedAgentId) {
+          resolvedAgentId = `agent_${Date.now()}_${subagent_type}`;
+          try {
+            await store.createAgent({
+              agent_id: resolvedAgentId,
+              subagent_type: subagent_type as string,
+              session_id: sessionID,
+              prompt: prompt as string,
+            });
+          } catch {
+            // subagent-store 创建失败不阻塞 agent 执行
+          }
+        }
 
         if (run_in_background) {
           // Check concurrency limit: max 3 parallel subagents of the same type
@@ -165,7 +212,22 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
             subagentType: subagent_type as string,
             status: 'running',
             createdAt: Date.now(),
+            output_mode: output_mode as 'last_message' | 'structured' | undefined,
           });
+
+          // P1: 追加 started 事件
+          if (resolvedAgentId) {
+            try {
+              await store.appendEvent(resolvedAgentId, {
+                timestamp: new Date().toISOString(),
+                event_type: 'started',
+                detail: `Background task ${taskId} started`,
+              });
+            } catch {
+              // 事件追加失败不阻塞
+            }
+          }
+
           return {
             title: sessionLabel,
             output: JSON.stringify({
@@ -179,10 +241,37 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
           };
         }
 
-        const lastOutput = await pollSessionCompletion(
+        let lastOutput = await pollSessionCompletion(
           client as unknown as { session: import("../helpers/polling.js").SFlowClientSession },
           sessionID,
         ) || '(no output)';
+
+        // P3: 同步模式完成检测与重试
+        const retryResult = await performCompletionRetry(
+          typeof lastOutput === 'string' ? lastOutput : '',
+          // injectReminder: 注入 system reminder 到 session
+          async () => {
+            await (client.session.prompt as (args: {
+              path: { id: string };
+              body: Record<string, unknown>;
+            }) => Promise<unknown>)({
+              path: { id: sessionID },
+              body: {
+                agent: subagent_type as string,
+                parts: REMINDER_MESSAGE.parts,
+              },
+            });
+          },
+          // pollOutput: 重新轮询子 agent 输出
+          async () => {
+            return await pollSessionCompletion(
+              client as unknown as { session: import("../helpers/polling.js").SFlowClientSession },
+              sessionID,
+            );
+          },
+        );
+        lastOutput = retryResult.output;
+        const completionWarning = retryResult.warning;
 
         const syncTaskId = generateTaskId(backgroundTaskCounter);
         backgroundTaskRegistry.set(syncTaskId, {
@@ -194,6 +283,45 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
           completedAt: Date.now(),
         });
 
+        // P3: 检测完成信号状态（用于通知）
+        const hasSignal = hasCompletionSignal(typeof lastOutput === 'string' ? lastOutput : '');
+
+        // P0: 同步模式完成时写入通知
+        try {
+          const nm = createNotificationManager({ changeDir });
+          await nm.writeNotification({
+            type: 'sync_completed',
+            subagent: subagent_type as string,
+            task_id: syncTaskId,
+            session_id: sessionID,
+            summary: typeof lastOutput === 'string'
+              ? lastOutput.slice(0, 200)
+              : '(no output)',
+            has_completion_signal: hasSignal,
+          });
+        } catch {
+          // 通知写入失败不阻塞 agent 结果返回
+        }
+
+        // P1: 同步模式完成时更新 subagent-store
+        if (resolvedAgentId) {
+          try {
+            await store.updateOutput(resolvedAgentId, typeof lastOutput === 'string' ? lastOutput : '');
+            await store.appendEvent(resolvedAgentId, {
+              timestamp: new Date().toISOString(),
+              event_type: 'completed',
+              detail: `Sync task ${syncTaskId} completed`,
+            });
+          } catch {
+            // subagent-store 更新失败不阻塞 agent 结果返回
+          }
+        }
+
+        // P2: structured 模式下提取 JSON block
+        const structuredOutput = output_mode === 'structured'
+          ? extractJsonBlock(typeof lastOutput === 'string' ? lastOutput : '')
+          : undefined;
+
         return {
           title: sessionLabel,
           output: JSON.stringify({
@@ -202,6 +330,8 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
             sessionID,
             task_id: syncTaskId,
             output: lastOutput,
+            ...(structuredOutput !== undefined && { structured_output: structuredOutput }),
+            ...(completionWarning && { warning: completionWarning }),
           }, null, 2),
         };
       } catch (error) {
@@ -242,20 +372,66 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
         backgroundTaskRegistry.set(task_id, updated);
         // Release concurrency slot when background task completes
         releaseSubagentSlot(task.subagentType);
+
+        // P0: 异步模式完成时写入通知
+        try {
+          const nm = createNotificationManager({ changeDir: _context.directory || '' });
+          // P3: 异步模式不触发重试，但在通知中增加 has_completion_signal 字段
+          const asyncHasSignal = hasCompletionSignal(typeof output === 'string' ? output : '');
+          await nm.writeNotification({
+            type: 'async_completed',
+            subagent: task.subagentType,
+            task_id,
+            session_id: task.sessionID,
+            summary: typeof output === 'string'
+              ? output.slice(0, 200)
+              : '(no output)',
+            has_completion_signal: asyncHasSignal,
+          });
+        } catch {
+          // 通知写入失败不阻塞 agent 结果返回
+        }
+
+        // P1: 异步模式完成时更新 subagent-store
+        try {
+          const asyncStore = createSubagentStore({ changeDir: _context.directory || '' });
+          // 查找该 session 对应的 agent
+          const agents = await asyncStore.listAgents();
+          const matchedAgent = agents.find(a => a.session_id === task.sessionID);
+          if (matchedAgent) {
+            await asyncStore.updateOutput(matchedAgent.agent_id, typeof output === 'string' ? output : '');
+            await asyncStore.appendEvent(matchedAgent.agent_id, {
+              timestamp: new Date().toISOString(),
+              event_type: 'completed',
+              detail: `Async task ${task_id} completed`,
+            });
+          }
+        } catch {
+          // subagent-store 更新失败不阻塞 agent 结果返回
+        }
+
         return updated;
       };
 
-      const buildResponse = (task: BackgroundTaskEntry) => ({
-        title: 'FlowAgent Output',
-        output: JSON.stringify({
-          success: task.status !== 'error',
-          task_id,
-          status: task.status,
-          session_id: task.sessionID,
-          result: task.result,
-          error: task.error,
-        }, null, 2),
-      });
+      const buildResponse = (task: BackgroundTaskEntry) => {
+        // P2: structured 模式下提取 JSON block
+        const structuredOutput = task.output_mode === 'structured'
+          ? extractJsonBlock(typeof task.result === 'string' ? task.result : '')
+          : undefined;
+
+        return {
+          title: 'FlowAgent Output',
+          output: JSON.stringify({
+            success: task.status !== 'error',
+            task_id,
+            status: task.status,
+            session_id: task.sessionID,
+            result: task.result,
+            error: task.error,
+            ...(structuredOutput !== undefined && { structured_output: structuredOutput }),
+          }, null, 2),
+        };
+      };
 
       try {
         const existingTask = backgroundTaskRegistry.get(task_id);

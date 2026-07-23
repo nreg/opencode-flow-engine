@@ -113,6 +113,50 @@ opencode-sflow/
 7. `closing` - 验证收口
 8. `abandoned` - 终止状态
 
+## 变更记录
+
+### v1.1.0 - Subagent Orchestration Enhancement (P0-P3) [2026-07-23]
+
+实现了子 agent 编排系统的 4 项核心增强，解决多 agent 协作的效率与可靠性问题。
+
+#### 新增功能
+
+| Priority | Feature | Description |
+|----------|---------|-------------|
+| P0 | Notification Manager | 消除主 agent 10+ 秒轮询延迟，通过文件通知机制实现子 agent 完成即时感知 |
+| P1 | Subagent Persistence & Resume | 长任务中断后可恢复上下文继续执行，避免从头重跑 |
+| P2 | Output Schema Structuring | 提供结构化输出提取机制，编排器无需依赖 LLM 解析自由文本 |
+| P3 | Completion Enforcement | 强制子 agent 提供完成信号，解决提前结束 turn 不返回结果的问题 |
+
+#### 新增文件
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `packages/plugin-infra/src/features/notification-manager.ts` | 228 | P0 通知管理模块 |
+| `packages/plugin-infra/src/features/subagent-store.ts` | 430 | P1 持久化与恢复模块 |
+| `packages/plugin-infra/src/helpers/output-extractor.ts` | 106 | P2 JSON 输出提取模块 |
+| `packages/plugin-infra/src/helpers/completion-detector.ts` | 168 | P3 完成信号检测模块 |
+| `packages/plugin-infra/src/features/__tests__/notification-manager.test.ts` | - | P0 单元测试 |
+| `packages/plugin-infra/src/features/__tests__/subagent-store.test.ts` | - | P1 单元测试 |
+| `packages/plugin-infra/src/helpers/__tests__/output-extractor.test.ts` | - | P2 单元测试 |
+| `packages/plugin-infra/src/helpers/__tests__/completion-detector.test.ts` | - | P3 单元测试 |
+
+#### 修改文件
+
+| File | Changes |
+|------|---------|
+| `packages/plugin-infra/src/tools/call-flow-agent.ts` | 集成 P0-P3 功能：通知写入、agent 持久化、output_mode 参数、完成强制重试 |
+| `packages/plugin-infra/src/features/index.ts` | 导出 notification-manager 和 subagent-store |
+| `packages/plugin-infra/src/sflow-plugin-factory.ts` | 初始化 hook 集成通知消费 |
+
+#### 验证结果
+
+- **测试**: 1014 通过 / 0 失败
+- **工件**: 所有 15 个 spec + design + tasks 验证通过
+- **状态**: ✅ 已归档
+
+---
+
 ## 下一步计划
 
 ### 1. 完善核心引擎

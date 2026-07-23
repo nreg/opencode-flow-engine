@@ -21,6 +21,8 @@ export interface BackgroundTaskEntry {
   error?: string;
   createdAt: number;
   completedAt?: number;
+  /** P2: output_mode passed from call_flow_agent, used by flowagent_output for structured extraction */
+  output_mode?: 'last_message' | 'structured';
 }
 
 export type BackgroundTaskRegistry = Map<string, BackgroundTaskEntry>;

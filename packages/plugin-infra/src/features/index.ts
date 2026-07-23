@@ -76,3 +76,30 @@ export type {
   TrackerData,
   TaskTrackerInstance,
 } from './task-tracker.js';
+
+export {
+  createNotificationManager,
+} from './notification-manager.js';
+
+export type {
+  NotificationType,
+  WriteNotificationParams,
+  NotificationEntry,
+  ConsumedNotification,
+  NotificationManager,
+} from './notification-manager.js';
+
+export {
+  createSubagentStore,
+} from './subagent-store.js';
+
+export type {
+  AgentStatus,
+  AgentMeta,
+  AgentEvent,
+  AgentData,
+  CreateAgentParams,
+  IndexEntry,
+  ResumeResult,
+  SubagentStore,
+} from './subagent-store.js';
