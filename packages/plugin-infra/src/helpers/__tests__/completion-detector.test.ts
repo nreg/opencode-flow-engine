@@ -231,10 +231,11 @@ describe('performCompletionRetry', () => {
       '我正在处理这个任务...',
       async () => { injectCallCount++; }, // injectFn
       async () => '我还在处理...', // pollFn - always returns incomplete
+      COMPLETION_ENFORCEMENT_CONFIG,
+      'spec-writer', // enabled agent — triggers retry
     );
     expect(result.output).toBe('我还在处理...');
     expect(result.warning).toBe(COMPLETION_ENFORCEMENT_CONFIG.warningMessage);
-    // Should have injected reminder 2 times (maxRetries)
     expect(injectCallCount).toBe(2);
   });
 
@@ -251,10 +252,11 @@ describe('performCompletionRetry', () => {
         }
         return 'should not reach here';
       },
+      COMPLETION_ENFORCEMENT_CONFIG,
+      'spec-writer',
     );
     expect(result.output).toBe('任务完成 [TASK_COMPLETE]');
     expect(result.warning).toBeUndefined();
-    // Should have injected once (first retry), then succeeded
     expect(injectCallCount).toBe(1);
     expect(pollCount).toBe(1);
   });
@@ -272,6 +274,8 @@ describe('performCompletionRetry', () => {
         }
         return 'still working...';
       },
+      COMPLETION_ENFORCEMENT_CONFIG,
+      'spec-writer',
     );
     expect(result.output).toBe('```json\n{"done": true}\n```');
     expect(result.warning).toBeUndefined();
@@ -285,19 +289,12 @@ describe('performCompletionRetry', () => {
       '',
       async () => { injectCallCount++; },
       async () => 'still empty',
+      COMPLETION_ENFORCEMENT_CONFIG,
+      'spec-writer',
     );
     expect(result.output).toBe('still empty');
     expect(result.warning).toBe(COMPLETION_ENFORCEMENT_CONFIG.warningMessage);
     expect(injectCallCount).toBe(2);
-  });
-
-  it('should use correct backoff delays (1s → 2s)', async () => {
-    const delays: number[] = [];
-    // We verify the config has the right delays
-    expect(COMPLETION_ENFORCEMENT_CONFIG.retryDelays[0]).toBe(1000);
-    expect(COMPLETION_ENFORCEMENT_CONFIG.retryDelays[1]).toBe(2000);
-    // The performCompletionRetry function reads from this config
-    // so it will use 1s then 2s delays
   });
 
   it('should handle pollFn returning null gracefully', async () => {
@@ -306,50 +303,53 @@ describe('performCompletionRetry', () => {
       'working...',
       async () => { injectCallCount++; },
       async () => null,
+      COMPLETION_ENFORCEMENT_CONFIG,
+      'spec-writer',
     );
-    // null poll result means output stays as initial
     expect(result.warning).toBe(COMPLETION_ENFORCEMENT_CONFIG.warningMessage);
     expect(injectCallCount).toBe(2);
   });
 
-  it('should skip retry for exempt agent (build-executor)', async () => {
+  it('should skip retry for agent NOT in enabled list (build-executor)', async () => {
     let injectCallCount = 0;
     const result = await performCompletionRetry(
       '实现了功能 X，测试通过',
       async () => { injectCallCount++; },
       async () => '不应该被调用',
       COMPLETION_ENFORCEMENT_CONFIG,
-      'build-executor',
+      'build-executor', // NOT in enabled list → skip retry
     );
-    // Exempt agent returns output as-is, no warning, no retry
     expect(result.output).toBe('实现了功能 X，测试通过');
     expect(result.warning).toBeUndefined();
     expect(injectCallCount).toBe(0);
   });
 
-  it('should skip retry for any agent in exempt list', async () => {
+  it('should skip retry when no agent type provided', async () => {
     const result = await performCompletionRetry(
-      'code review 完成',
+      'some random output',
       async () => { throw new Error('should not be called'); },
       async () => { throw new Error('should not be called'); },
-      COMPLETION_ENFORCEMENT_CONFIG,
-      'code-reviewer',
     );
-    expect(result.output).toBe('code review 完成');
+    expect(result.output).toBe('some random output');
     expect(result.warning).toBeUndefined();
   });
 
-  it('should still retry for non-exempt agent without completion signal', async () => {
+  it('should retry only for enabled agents (spec-writer, contract-builder)', async () => {
     let injectCallCount = 0;
     const result = await performCompletionRetry(
       '思考中...',
       async () => { injectCallCount++; },
       async () => '仍在思考...',
       COMPLETION_ENFORCEMENT_CONFIG,
-      'spec-writer', // spec-writer IS expected to output [TASK_COMPLETE]
+      'spec-writer', // spec-writer IS in the enabled list
     );
     expect(result.warning).toBe(COMPLETION_ENFORCEMENT_CONFIG.warningMessage);
     expect(injectCallCount).toBe(2);
+  });
+
+  it('should use correct backoff delays (1s → 2s)', async () => {
+    expect(COMPLETION_ENFORCEMENT_CONFIG.retryDelays[0]).toBe(1000);
+    expect(COMPLETION_ENFORCEMENT_CONFIG.retryDelays[1]).toBe(2000);
   });
 });
 

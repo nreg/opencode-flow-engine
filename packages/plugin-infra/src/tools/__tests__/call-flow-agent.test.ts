@@ -372,8 +372,8 @@ describe('NH-3: structured 提取失败 warning 传播', () => {
   });
 
   it('sync mode: completionWarning + structuredWarning 应合并为 warnings 数组', async () => {
-    // Use a non-exempt agent type so completion retry triggers and produces a warning
-    // 'verifier' is NOT in DEFAULT_COMPLETION_EXEMPT_AGENTS
+    // Use spec-writer (in enabled list) so P3 completion retry triggers
+    // and produces a warning alongside the structured extraction failure warning
     const client = createMockClient({
       pollOutputs: [
         'partial output without signal or json',
@@ -384,8 +384,7 @@ describe('NH-3: structured 提取失败 warning 传播', () => {
 
     const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
     const backgroundTaskCounter = { value: 0 };
-    // Use 'verifier' which is NOT in the exempt list
-    const agentModelMap: AgentModelMap = { 'verifier': 'test-model' };
+    const agentModelMap: AgentModelMap = { 'spec-writer': 'test-model' };
 
     const options = {
       client: client as unknown as import('../../types.js').SFlowClient,
@@ -402,7 +401,7 @@ describe('NH-3: structured 提取失败 warning 传播', () => {
     const result = await tools.call_flow_agent.execute({
       description: 'test task',
       prompt: 'Build the feature',
-      subagent_type: 'verifier',
+      subagent_type: 'spec-writer',
       run_in_background: false,
       output_mode: 'structured',
     }, { sessionID: 'parent-session', directory: '' });
