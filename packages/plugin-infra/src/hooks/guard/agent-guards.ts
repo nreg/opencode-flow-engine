@@ -244,14 +244,23 @@ export async function checkBreakingChangeGuard(
     }
   }
 
-  // 4. Write tool — check content for breaking patterns
-  // Write is generally not breaking (creating new files), but if overwriting
-  // an existing file with significantly different content, it could be.
-  // For now, write tool is considered non-breaking by default since it's
-  // typically used for new file creation. The edit tool handles modifications.
+  // 4. Write tool — check if overwriting an existing file
+  // New file creation is not breaking, but overwriting an existing file
+  // with different content could be a breaking change.
+  // Unlike edit, write has no oldString to diff — conservatively flag as breaking.
   if (toolName === 'write') {
-    // Write is not breaking by default — new file creation is allowed
-    return { success: true };
+    const writeFilePath = (data.filePath as string) || '';
+    const resolvedWritePath = writeFilePath.startsWith('/') || writeFilePath.includes(':')
+      ? writeFilePath
+      : path.join(changeDir, writeFilePath);
+    const targetExists = await fileExists(resolvedWritePath);
+    if (!targetExists) {
+      // New file creation — not breaking
+      return { success: true };
+    }
+    // Overwriting existing file — flag as potential breaking change
+    isBreaking = true;
+    breakingReason = 'Overwriting existing file with new content';
   }
 
   // If no breaking change detected, allow
