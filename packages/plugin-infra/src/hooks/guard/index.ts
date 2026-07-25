@@ -15,6 +15,11 @@ export {
 } from './iflow-shared-guards.js';
 export {
   checkFlowIntelScanGuard, checkFlowArchitectWriteGuard,
-  checkFlowRestyleFrontendGuard, createAgentSpecificGuards,
+  checkFlowRestyleFrontendGuard, checkBreakingChangeGuard,
+  createAgentSpecificGuards,
 } from './agent-guards.js';
 export type { AgentGuardResult } from './agent-guards.js';
+export {
+  checkSchemaMigrationGuard,
+  checkAbstractionGrepGuard,
+} from './feature-guards.js';

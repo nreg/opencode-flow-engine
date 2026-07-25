@@ -103,3 +103,47 @@ export type {
   ResumeResult,
   SubagentStore,
 } from './subagent-store.js';
+
+export {
+  DEFAULT_LINE_LIMIT,
+  REFERENCE_LINE_THRESHOLD,
+  ARTIFACT_FILE_PATTERNS,
+  truncateContent,
+  isArtifactFile,
+  classifyFile,
+  isWithinLimit,
+  applyTokenBudgetToContent,
+} from './token-budget-limiter.js';
+
+export type { FileTier } from './token-budget-limiter.js';
+
+// ─── Schema Migration Detector ────────────────────────────────────────────────
+
+export type {
+  SchemaChange,
+  FrameworkDetectionResult,
+  FrameworkDetector,
+} from './schema-migration-detector.js';
+
+export {
+  SCHEMA_FILE_PATTERNS,
+  FRAMEWORK_DETECTORS,
+  detectSchemaChanges,
+  generateMigrationFile,
+  checkMigrationFileExists,
+} from './schema-migration-detector.js';
+
+// ─── Abstraction Grep Tracker ─────────────────────────────────────────────────
+
+export type {
+  AbstractionCategoryDef,
+  AbstractionCategory,
+} from './abstraction-grep-tracker.js';
+
+export {
+  ABSTRACTION_PATTERNS,
+  ABSTRACTION_CATEGORIES,
+  detectNewAbstraction,
+  recordGrepResult,
+  hasGrepRecord,
+} from './abstraction-grep-tracker.js';

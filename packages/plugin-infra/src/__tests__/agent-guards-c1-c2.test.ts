@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdir, rm, writeFile, mkdirSync } from 'fs/promises';
 import { join } from 'path';
-import { checkFlowIntelScanGuard, checkFlowArchitectWriteGuard } from '../hooks/guard/agent-guards.js';
+import { checkFlowIntelScanGuard, checkFlowArchitectWriteGuard, checkBreakingChangeGuard } from '../hooks/guard/agent-guards.js';
 import { isFrontendProject, clearFrontendCache } from '../features/frontend-detector.js';
 
 function tempDir(name: string): string {
@@ -340,5 +340,162 @@ describe('I1: checkFlowArchitectWriteGuard — path prefix normalization', () =>
       filePath: 'ARCHITECTURE.md', // Relative path, file does not exist
     });
     expect(result.success).toBe(true);
+  });
+});
+
+// ─── F1: checkBreakingChangeGuard — WARN mode (not BLOCK) ──────────────────
+
+describe('F1: checkBreakingChangeGuard — WARN instead of BLOCK', () => {
+  const dir = tempDir('f1-breaking-warn');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  // F1.1: 破坏性变更未确认 → 返回 { success: true, warnings: [...] }
+  it('should return success with warnings when breaking change is NOT confirmed', async () => {
+    await writeStateFile(dir, { state: 'executing', mode: 'full' });
+    const oldString = Array.from({ length: 7 }, (_, i) => `line${i + 1}`).join('\n');
+    const result = await checkBreakingChangeGuard(dir, {
+      agent: 'build-executor',
+      toolName: 'edit',
+      filePath: 'src/utils.ts',
+      oldString,
+      newString: '',
+    });
+    expect(result.success).toBe(true);
+    expect(result.block).toBeFalsy();
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.length).toBeGreaterThan(0);
+  });
+
+  // F1.2: 破坏性变更已确认 → 返回 { success: true } 无 warnings
+  it('should return success without warnings when breaking_change_confirmed is in decisionPoints', async () => {
+    await writeStateFile(dir, {
+      state: 'executing',
+      mode: 'full',
+      decisionPoints: [
+        {
+          id: 'dp-3',
+          confirmedInState: 'executing',
+          targetState: 'executing',
+          timestamp: '2025-01-01T00:00:00Z',
+          metadata: 'breaking_change_confirmed',
+        },
+      ],
+    });
+    const oldString = Array.from({ length: 7 }, (_, i) => `line${i + 1}`).join('\n');
+    const result = await checkBreakingChangeGuard(dir, {
+      agent: 'build-executor',
+      toolName: 'edit',
+      filePath: 'src/utils.ts',
+      oldString,
+      newString: '',
+    });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+  });
+
+  // F1.3: warnings 内容包含 breakingReason
+  it('should include breakingReason in warnings message', async () => {
+    await writeStateFile(dir, { state: 'executing', mode: 'full' });
+    const result = await checkBreakingChangeGuard(dir, {
+      agent: 'build-executor',
+      toolName: 'delete',
+      filePath: 'src/old-module.ts',
+    });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeDefined();
+    // breakingReason for delete is "Deleting file"
+    expect(result.warnings![0]).toContain('Deleting file');
+    expect(result.warnings![0]).toContain('breaking_change_confirmed');
+  });
+
+  // F1.3b: warnings for export signature change includes breakingReason
+  it('should include export signature breakingReason in warnings', async () => {
+    await writeStateFile(dir, { state: 'executing', mode: 'full' });
+    const result = await checkBreakingChangeGuard(dir, {
+      agent: 'build-executor',
+      toolName: 'edit',
+      filePath: 'src/index.ts',
+      oldString: 'export function publicApi(name: string): void',
+      newString: 'export function publicApi(name: string, age: number): void',
+    });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings![0]).toContain('export');
+  });
+
+  // F1.4: 非 executing/debugging 状态 → 不生成 warning
+  it('should NOT generate warnings during exploring state', async () => {
+    await writeStateFile(dir, { state: 'exploring', mode: 'full' });
+    const oldString = Array.from({ length: 7 }, (_, i) => `line${i + 1}`).join('\n');
+    const result = await checkBreakingChangeGuard(dir, {
+      agent: 'build-executor',
+      toolName: 'edit',
+      filePath: 'src/utils.ts',
+      oldString,
+      newString: '',
+    });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+  });
+
+  it('should NOT generate warnings during specifying state', async () => {
+    await writeStateFile(dir, { state: 'specifying', mode: 'full' });
+    const oldString = Array.from({ length: 7 }, (_, i) => `line${i + 1}`).join('\n');
+    const result = await checkBreakingChangeGuard(dir, {
+      agent: 'build-executor',
+      toolName: 'edit',
+      filePath: 'src/utils.ts',
+      oldString,
+      newString: '',
+    });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+  });
+
+  it('should generate warnings during debugging state', async () => {
+    await writeStateFile(dir, { state: 'debugging', mode: 'full' });
+    const result = await checkBreakingChangeGuard(dir, {
+      agent: 'build-executor',
+      toolName: 'delete',
+      filePath: 'src/old-module.ts',
+    });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.length).toBeGreaterThan(0);
+  });
+
+  // F1.5: 无破坏性变更 → 返回 { success: true }
+  it('should return success without warnings for non-breaking operations', async () => {
+    await writeStateFile(dir, { state: 'executing', mode: 'full' });
+    const result = await checkBreakingChangeGuard(dir, {
+      agent: 'build-executor',
+      toolName: 'edit',
+      filePath: 'src/utils.ts',
+      oldString: 'line1\nline2\nline3',
+      newString: 'line1\nline2-modified\nline3',
+    });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+  });
+
+  // F1.6: write 工具不触发 warning
+  it('should NOT trigger warnings for write tool', async () => {
+    await writeStateFile(dir, { state: 'executing', mode: 'full' });
+    const result = await checkBreakingChangeGuard(dir, {
+      agent: 'build-executor',
+      toolName: 'write',
+      filePath: 'src/new-feature.ts',
+      content: 'export function newFeature() { return 1; }',
+    });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
   });
 });

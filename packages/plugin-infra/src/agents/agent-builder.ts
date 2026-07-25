@@ -531,3 +531,25 @@ export function getDefaultFallbacks(name: BuiltinAgentName): string[] {
 export function getAllDefaultFallbacks(): Record<BuiltinAgentName, string[]> {
   return { ...DEFAULT_FALLBACKS };
 }
+
+/**
+ * Get an alternative model for cross-model spot-check.
+ *
+ * Looks up the agent's fallback list in DEFAULT_FALLBACKS and returns the first
+ * model that differs from `currentModel`. Returns null when no alternative exists
+ * (unknown agent or all fallbacks match the current model).
+ *
+ * Primary use-case: review-engineer spot-check — run a second review pass on a
+ * different model to reduce single-model blind spots.
+ */
+export function getAlternativeModel(currentModel: string, agentName: string): string | null {
+  const fallbacks = DEFAULT_FALLBACKS[agentName as BuiltinAgentName];
+  if (!fallbacks) return null;
+
+  for (const fb of fallbacks) {
+    if (fb !== currentModel && isModelAvailable(fb)) {
+      return fb;
+    }
+  }
+  return null;
+}

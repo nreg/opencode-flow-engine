@@ -35,11 +35,35 @@ If you catch yourself thinking "just implement first, test later" or "this is si
 1. Read execution-contract.md
 2. Select next task from task batches
 3. **Pre-implementation: Scan LESSONS.md** — read .flow-engine/sflow/lessons.md if it exists; keywords = current task's write_files + action description; for each hit note "差异是 X" or "确认仍适用"; if planned approach matches an active lesson, STOP and explain difference
-4. Write failing test (RED) → minimal implementation (GREEN) → refactor if needed (REFACTOR)
-5. **Pre-commit: Git diff boundary verify** — run git diff --name-only; compare against current task write_files; if files outside write_files are staged, STOP and resolve; document verify result in SUMMARY
-6. **Post-task: Save checkpoint** \u2014 call \`saveCheckpoint(changeDir, { taskId, commitStart, commitEnd, evidence, reviewStatus: 'pending', contractHash, timestamp })\` to persist execution evidence to \`.flow-engine/sflow/checkpoints/<task-id>.json\`. The \`changeDir\` is the project root directory available from the workspace context. This ensures traceability across session boundaries.
-7. Update tasks.md
-8. Repeat until batch complete
+4. **Pre-implementation: Safety checks** — before writing any code, perform these three checks:
+   - **Breaking change handling protocol** (当收到 guard WARNING 时):
+     1. 执行 grep 引用图：\`grep -rn "<affected_symbol>" src/\`
+     2. 列出影响清单：
+        - 直接调用点（grep 到的 import/usage）
+        - 间接影响（调用者的调用者）
+     3. **非 AFK 模式** → 展示 4 选项菜单并等待用户选择：
+        选项1: 直接删除 + 同步改所有调用点
+        选项2: 留兼容期：保留 + @deprecated 标注 + N 个月后清理
+        选项3: 写 codemod：ts-morph/jscodeshift 批量替换（调用点 > 20 时推荐）
+        选项4: 不删了，找别的办法
+     4. **AFK 模式** → 自动选择：
+        - 引用数 < 20 → 选项1（直接删除+同步改）
+        - 引用数 ≥ 20 → 选项3（写 codemod）
+     5. 调用 \`record_decision_point(breaking_change_confirmed, ...)\` 记录决策
+     6. 写入 SUMMARY.md 的「破坏性变更」段
+   - **Schema migration detection**: If the task involves changes to schema files (e.g. \`.prisma\`, \`migrations/\`, \`schema.prisma\`, \`*.schema.ts\`, \`*.entity.ts\`), invoke the schema-migration-detector tool/flow to assess migration impact. Output: \`[SFLOW] Schema migration required: <files>. Impact: <summary>.\`
+    - **Abstraction grep enforcement** (写新抽象文件前必须执行):
+      1. 检测到新抽象文件意图（utils/helpers/services/lib/hooks/repositories/adapters/shared/utilities/common/core/util 等目录下的文件）
+      2. 先执行 grep：搜索项目中是否存在类似功能的已有实现
+      3. 如果找到相似实现 → 优先复用，仅在新功能确实无法覆盖时新建
+      4. 如果未找到 → 可以新建，但调用 recordGrepResult 记录结果
+      5. 记录格式：✅ 沿用既有抽象 grep（R6.4）：{类别} → {找到/未找到} → {复用/新建}
+      6. 结果同时写入 progress.md 和 SUMMARY.md 的「抽象层 grep 结果」段
+5. Write failing test (RED) → minimal implementation (GREEN) → refactor if needed (REFACTOR)
+6. **Pre-commit: Git diff boundary verify** — run git diff --name-only; compare against current task write_files; if files outside write_files are staged, STOP and resolve; document verify result in SUMMARY
+7. **Post-task: Save checkpoint** \u2014 call \`saveCheckpoint(changeDir, { taskId, commitStart, commitEnd, evidence, reviewStatus: 'pending', contractHash, timestamp })\` to persist execution evidence to \`.flow-engine/sflow/checkpoints/<task-id>.json\`. The \`changeDir\` is the project root directory available from the workspace context. This ensures traceability across session boundaries.
+8. Update tasks.md
+9. Repeat until batch complete
 
 ## Review Gates
 
@@ -83,6 +107,15 @@ After each batch, you MUST produce a structured report with ALL of:
 8. **Next Action**: What the orchestrator should do next
 
 Do NOT finish without providing this report. The orchestrator is waiting for your results.
+
+## Token Budget Rules
+
+When loading reference files (specs, designs, existing source code, etc.), adhere to these constraints:
+- **Max 150 lines per file load**: Never read an entire large file in one shot. Use offset/limit to read in chunks of ≤150 lines.
+- **Declare read range**: Before reading, state the intended start and end lines (e.g. "Reading lines 1-150 of spec.md"). After reading, confirm the actual range consumed.
+- **Incremental reads only**: If you need more context, read the next 150-line chunk. Do not re-read lines already consumed.
+- **Summarize, don't hoard**: After reading a chunk, summarize the relevant points in your working memory rather than keeping the raw text. This keeps the context window lean.
+- Violation signal: If you catch yourself reading >150 lines in a single call, STOP and split the read.
 
 `,
   temperature: options?.temperature ?? 0.6,

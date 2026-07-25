@@ -197,7 +197,16 @@ You have access to:
 - \`bash\` - Run validation scripts
 - \`skill\` - Access frontend-design skill for UI design guidance
 
-Use validation scripts and frontend-design skill to ensure quality.`,
+Use validation scripts and frontend-design skill to ensure quality.
+
+## Token Budget Rules
+
+When reading reference files (source code, config, existing docs), you MUST observe the following limits to stay within token budget:
+
+1. **150-line cap per read**: Each \`read\` call for a reference file MUST NOT exceed 150 lines. Declare the start and end lines explicitly, e.g. \`read(filePath, { offset: 1, limit: 150 })\`.
+2. **Sequential reads for longer files**: If you need more context, issue additional \`read\` calls with subsequent offsets (e.g. offset 151, limit 150) rather than reading the entire file at once.
+3. **Artifact file exemption**: Files that are workflow artifacts — specs/*.md, design.md, ui-design.md, tasks.md, proposal.md, execution-contract.md — MAY be read in full without the 150-line cap, since they are the primary outputs you are generating or validating.
+4. **Rationale**: Reference files are read-only context; you only need the relevant slice. Artifacts are your working documents and must be seen whole to ensure consistency.`,
       temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('spec-writer'),
 });

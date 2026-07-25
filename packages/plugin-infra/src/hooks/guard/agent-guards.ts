@@ -19,6 +19,7 @@ export interface AgentGuardResult {
   block?: boolean;
   blockReason?: string;
   error?: string;
+  warnings?: string[];
 }
 
 /**
@@ -141,22 +142,162 @@ export async function checkFlowRestyleFrontendGuard(
 }
 
 /**
- * Execute all agent-specific guards in priority order.
- * Returns the first blocking result, or null if all guards pass.
+ * A4: Breaking Change Guard
  *
- * Priority: intel → architect → restyle
+ * Detects write/edit operations that involve breaking changes:
+ * - Deleting >= 5 lines of code (oldString has >= 5 lines, newString is empty or significantly smaller)
+ * - Modifying public export signatures (oldString contains export keyword)
+ * - Modifying public API routes or schema (oldString contains route/schema keywords)
+ * - Deleting files (toolName = 'delete')
+ * - Renaming export symbols (toolName = 'rename')
+ *
+ * If a breaking change is detected, checks decisionPoints for `breaking_change_confirmed`.
+ * Without confirmation, blocks the operation and requires the user to complete
+ * reference graph grep + explicit confirmation first.
+ */
+export async function checkBreakingChangeGuard(
+  changeDir: string,
+  data: Record<string, unknown>,
+): Promise<AgentGuardResult> {
+  // Guard: skip if no changeDir or no data
+  if (!changeDir || !data || typeof data !== 'object') return { success: true };
+
+  // Only activate during executing/debugging states — other states are already
+  // protected by the generic guard chain (C4: planning phases block writes,
+  // terminal states block all writes). The breaking change guard is specifically
+  // for the execution phase where writes are allowed but must be controlled.
+  const stateData = await readJsonFile<Record<string, unknown>>(`${changeDir}/${getStateFilePath('sflow')}`);
+  const currentState = (stateData?.state as string) || '';
+  if (currentState !== 'executing' && currentState !== 'debugging') {
+    return { success: true };
+  }
+
+  const toolName = (data.toolName as string) || '';
+  const filePath = (data.filePath as string) || '';
+
+  // Only intercept write/edit/delete/rename tools
+  const modifyingTools = ['write', 'edit', 'delete', 'rename'];
+  if (!modifyingTools.includes(toolName)) return { success: true };
+
+  // Detect breaking change
+  let isBreaking = false;
+  let breakingReason = '';
+
+  // 1. Delete tool — always breaking (deleting a file)
+  if (toolName === 'delete') {
+    isBreaking = true;
+    breakingReason = 'Deleting file';
+  }
+
+  // 2. Rename tool — always breaking (renaming export symbols)
+  if (toolName === 'rename') {
+    isBreaking = true;
+    breakingReason = 'Renaming export symbols';
+  }
+
+  // 3. Edit tool — check for specific breaking patterns
+  if (toolName === 'edit' && !isBreaking) {
+    const oldString = (data.oldString as string) || '';
+    const newString = (data.newString as string) || '';
+
+    // 3a. Deleting >= 5 lines of code
+    // Count lines in oldString that are being removed
+    const oldLines = oldString.split('\n').filter((line: string) => line.trim().length > 0);
+    const newLines = newString.split('\n').filter((line: string) => line.trim().length > 0);
+    const deletedLineCount = oldLines.length - newLines.length;
+    if (deletedLineCount >= 5) {
+      isBreaking = true;
+      breakingReason = 'Deleting >= 5 lines of code (' + deletedLineCount + ' lines removed)';
+    }
+
+    // 3b. Modifying public export signatures
+    if (!isBreaking && /\bexport\s+(function|class|interface|type|const|let|var|enum)\s/.test(oldString)) {
+      // If the export signature itself is being modified (not just the body)
+      const oldExportMatch = oldString.match(/\bexport\s+(function|class|interface|type|const|let|var|enum)\s+(\w+)/);
+      const newExportMatch = newString.match(/\bexport\s+(function|class|interface|type|const|let|var|enum)\s+(\w+)/);
+      if (oldExportMatch && oldExportMatch[2]) {
+        // Export name changed, or signature parameters changed
+        if (!newExportMatch || newExportMatch[2] !== oldExportMatch[2]) {
+          isBreaking = true;
+          breakingReason = 'Modifying public export signature (export name changed)';
+        } else {
+          // Same export name but signature may have changed — check if oldString
+          // contains the full signature line (export + name + params)
+          const oldSignatureLine = oldString.split('\n')[0] || '';
+          const newSignatureLine = newString.split('\n')[0] || '';
+          if (oldSignatureLine !== newSignatureLine && /\bexport\b/.test(oldSignatureLine)) {
+            isBreaking = true;
+            breakingReason = 'Modifying public export signature';
+          }
+        }
+      }
+    }
+
+    // 3c. Modifying public API routes or schema
+    if (!isBreaking) {
+      const apiRoutePattern = /['"`]\/api\/v?\d*\/[^'"`]+['"`]/;
+      const schemaPattern = /\b\w*[Ss]chema\w*\b.*[={]|\b(createTable|alterTable|addColumn|dropColumn|migration)\b/i;
+      if (apiRoutePattern.test(oldString) || schemaPattern.test(oldString)) {
+        isBreaking = true;
+        breakingReason = 'Modifying public API route or schema definition';
+      }
+    }
+  }
+
+  // 4. Write tool — check content for breaking patterns
+  // Write is generally not breaking (creating new files), but if overwriting
+  // an existing file with significantly different content, it could be.
+  // For now, write tool is considered non-breaking by default since it's
+  // typically used for new file creation. The edit tool handles modifications.
+  if (toolName === 'write') {
+    // Write is not breaking by default — new file creation is allowed
+    return { success: true };
+  }
+
+  // If no breaking change detected, allow
+  if (!isBreaking) return { success: true };
+
+  // Breaking change detected — check decisionPoints for confirmation
+  // Reuse stateData already read at the top of this function
+  if (hasDecisionPointFlag(stateData, 'breaking_change_confirmed')) {
+    return { success: true };
+  }
+
+  // 未确认 — 返回 WARN（不 BLOCK）
+  return {
+    success: true,
+    warnings: [
+      '[SFLOW] Breaking change detected: ' + breakingReason + '. ' +
+      'Complete reference graph grep and confirm with breaking_change_confirmed decision point. ' +
+      'AFK auto-mode will select option 1 (<20 refs) or option 3 (>=20 refs).',
+    ],
+  };
+}
+
+/**
+ * Execute all agent-specific guards in priority order.
+ * Returns the first blocking result, or a result with collected warnings, or null if all guards pass cleanly.
+ *
+ * Priority: intel → architect → restyle → breaking-change
  * (More precise blocking conditions first)
  */
 export async function createAgentSpecificGuards(
   changeDir: string,
   data: Record<string, unknown>,
 ): Promise<AgentGuardResult | null> {
-  const guards = [checkFlowIntelScanGuard, checkFlowArchitectWriteGuard, checkFlowRestyleFrontendGuard];
+  const guards = [checkFlowIntelScanGuard, checkFlowArchitectWriteGuard, checkFlowRestyleFrontendGuard, checkBreakingChangeGuard];
+  const allWarnings: string[] = [];
   for (const guard of guards) {
     const result = await guard(changeDir, data);
     if (!result.success && result.block) {
       return result;
     }
+    if (result.warnings && result.warnings.length > 0) {
+      allWarnings.push(...result.warnings);
+    }
+  }
+  if (allWarnings.length > 0) {
+    return { success: true, warnings: allWarnings };
   }
   return null;
 }

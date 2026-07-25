@@ -37,6 +37,7 @@ import { SFLOW_AGENT_NAMES } from '../../../workflows/sflow/index.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
 import { createAgnesTools } from './agnes-tools.js';
 import { getCurrentWorkflowState, executeContractValidator, executeArtifactInspector } from './sflow-tool-helpers.js';
+import { applyTokenBudgetToContent } from './features/token-budget-limiter.js';
 
 // ─── Background task registry (shared for combined plugin) ────────────────────
 
@@ -190,6 +191,9 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
   const skillLoader = await createSkillLoader();
   const mcpManager = createMcpManager();
 
+  // Token Budget: 存储 read 工具的文件路径，供 tool.execute.after 截断使用
+  const readFilePaths = new Map<string, string>();
+
   // Build combined tool definitions
   const tools = createCombinedTools(sflowClient);
   const validatorTools = createValidatorTools();
@@ -339,6 +343,18 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
         markOmoUsed();
       }
 
+      // Token Budget: 记录 read 工具的文件路径，供 tool.execute.after 截断使用
+      if (lowerTool === 'read') {
+        const readPath = (((output.args ?? {}) as Record<string, unknown>).filePath
+          ?? ((output.args ?? {}) as Record<string, unknown>).path
+          ?? ((output.args ?? {}) as Record<string, unknown>).file_path
+          ?? '') as string;
+        if (readPath) {
+          const sessionId = (input as { sessionID?: string }).sessionID ?? '';
+          readFilePaths.set(sessionId, readPath);
+        }
+      }
+
       const filePath = (lowerTool === 'write' || lowerTool === 'edit')
         ? (((output.args ?? {}) as Record<string, unknown>).filePath
           ?? ((output.args ?? {}) as Record<string, unknown>).path
@@ -373,6 +389,18 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
 
     "tool.execute.after": async (input, output) => {
       const toolName = input.tool;
+
+      // Token Budget: 对 read 工具返回的内容应用截断策略
+      // 工件文件（proposal.md, design.md, specs/*.md 等）豁免不截断
+      if (toolName === 'read') {
+        const sessionId = (input as { sessionID?: string }).sessionID ?? '';
+        const readPath = readFilePaths.get(sessionId);
+        readFilePaths.delete(sessionId);
+        if (readPath && typeof output.output === 'string') {
+          output.output = applyTokenBudgetToContent(readPath, output.output);
+        }
+      }
+
       if (!SFLOW_TOOLS.has(toolName)) return;
 
       const validationHook = hookComposer.getHook('artifact_validation');

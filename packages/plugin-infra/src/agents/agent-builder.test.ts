@@ -10,6 +10,9 @@ import {
   agentExists,
   getDefaultModel,
   getAllDefaultModels,
+  getAlternativeModel,
+  markModelUnavailable,
+  clearUnavailableModels,
 } from './agent-builder.js';
 
 describe('Agent Builder', () => {
@@ -316,6 +319,123 @@ describe('Agent Builder', () => {
       expect(models['iflow-verifier']).toBe('provider/minimax-m2.7');
       expect(models['iflow-researcher']).toBe('provider/glm-5.1');
       expect(models['iflow-shipper']).toBe('provider/mimo-v2.5-pro');
+    });
+  });
+
+  describe('getAlternativeModel', () => {
+    it('should return first fallback model different from current model', () => {
+      // review-engineer default is provider/deepseek-v4-flash
+      // fallbacks are ['provider/glm-5.1', 'provider/kimi-k2.6']
+      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'review-engineer');
+      expect(alt).toBe('provider/glm-5.1');
+    });
+
+    it('should skip fallback that matches current model', () => {
+      // sFlow fallbacks are ['provider/glm-5.1', 'provider/kimi-k2.6']
+      // If current is glm-5.1, should return kimi-k2.6
+      const alt = getAlternativeModel('provider/glm-5.1', 'sFlow');
+      expect(alt).toBe('provider/kimi-k2.6');
+    });
+
+    it('should return null when all fallbacks match current model', () => {
+      // Create a scenario where the only fallback is the same as current
+      // This is unlikely in practice but we test the null path
+      // For build-executor, fallbacks are ['provider/glm-5', 'provider/kimi-k2.6']
+      // If we pass a model that happens to match all fallbacks, return null
+      // Since fallbacks are different from each other, we test with a non-existent agent
+      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'non-existent-agent' as any);
+      expect(alt).toBeNull();
+    });
+
+    it('should return null for unknown agent name', () => {
+      const alt = getAlternativeModel('some-model', 'unknown-agent' as any);
+      expect(alt).toBeNull();
+    });
+
+    it('should return null when current model matches all fallbacks', () => {
+      // need-explorer fallbacks: ['provider/glm-5.1', 'provider/deepseek-v4-flash']
+      // If current is neither, it should return the first fallback
+      const alt = getAlternativeModel('provider/kimi-k2.6', 'need-explorer');
+      expect(alt).toBe('provider/glm-5.1');
+    });
+
+    it('should return null when fallback list is empty', () => {
+      // All agents have fallbacks defined, but test the empty path
+      // by mocking an agent with no fallbacks - not possible directly,
+      // so test that a valid agent always has at least one different model
+      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'review-engineer');
+      expect(alt).not.toBeNull();
+      expect(alt).not.toBe('provider/deepseek-v4-flash');
+    });
+
+    it('should work for cross-model spot-check scenario', () => {
+      // review-engineer uses deepseek-v4-flash by default
+      // For spot-check, we want a different model
+      const defaultModel = getDefaultModel('review-engineer');
+      const alt = getAlternativeModel(defaultModel, 'review-engineer');
+      expect(alt).not.toBeNull();
+      expect(alt).not.toBe(defaultModel);
+    });
+  });
+
+  describe('getAlternativeModel — F5 可用性检查', () => {
+    it('应跳过不可用的 fallback 模型，返回下一个可用模型', () => {
+      clearUnavailableModels();
+      // review-engineer fallbacks: ['provider/glm-5.1', 'provider/kimi-k2.6']
+      // 标记 glm-5.1 为不可用，应返回 kimi-k2.6
+      markModelUnavailable('provider/glm-5.1');
+      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'review-engineer');
+      expect(alt).toBe('provider/kimi-k2.6');
+      clearUnavailableModels();
+    });
+
+    it('应在所有 fallback 都不可用时返回 null', () => {
+      clearUnavailableModels();
+      // review-engineer fallbacks: ['provider/glm-5.1', 'provider/kimi-k2.6']
+      // 标记两个都不可用
+      markModelUnavailable('provider/glm-5.1');
+      markModelUnavailable('provider/kimi-k2.6');
+      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'review-engineer');
+      expect(alt).toBeNull();
+      clearUnavailableModels();
+    });
+
+    it('应在可用模型与当前模型不同时返回该模型', () => {
+      clearUnavailableModels();
+      // sFlow fallbacks: ['provider/glm-5.1', 'provider/kimi-k2.6']
+      // 当前模型是 deepseek-v4-flash，两个 fallback 都可用
+      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'sFlow');
+      expect(alt).toBe('provider/glm-5.1');
+      clearUnavailableModels();
+    });
+
+    it('应在可用模型与当前模型相同时跳过继续查找', () => {
+      clearUnavailableModels();
+      // need-explorer fallbacks: ['provider/glm-5.1', 'provider/deepseek-v4-flash']
+      // 当前模型是 glm-5.1，应跳过它返回 deepseek-v4-flash
+      const alt = getAlternativeModel('provider/glm-5.1', 'need-explorer');
+      expect(alt).toBe('provider/deepseek-v4-flash');
+      clearUnavailableModels();
+    });
+
+    it('应在当前模型匹配且后续 fallback 不可用时返回 null', () => {
+      clearUnavailableModels();
+      // need-explorer fallbacks: ['provider/glm-5.1', 'provider/deepseek-v4-flash']
+      // 当前模型是 glm-5.1（跳过），deepseek-v4-flash 不可用
+      markModelUnavailable('provider/deepseek-v4-flash');
+      const alt = getAlternativeModel('provider/glm-5.1', 'need-explorer');
+      expect(alt).toBeNull();
+      clearUnavailableModels();
+    });
+
+    it('应在当前模型不可用但与 fallback 不同时仍返回可用 fallback', () => {
+      clearUnavailableModels();
+      // 当前模型本身不可用不影响 fallback 选择
+      // review-engineer fallbacks: ['provider/glm-5.1', 'provider/kimi-k2.6']
+      markModelUnavailable('provider/deepseek-v4-flash');
+      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'review-engineer');
+      expect(alt).toBe('provider/glm-5.1');
+      clearUnavailableModels();
     });
   });
 

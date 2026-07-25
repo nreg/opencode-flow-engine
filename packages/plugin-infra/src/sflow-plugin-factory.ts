@@ -46,6 +46,7 @@ import { createAgnesTools } from './agnes-tools.js';
 import { getCurrentWorkflowState, executeContractValidator, executeArtifactInspector } from './sflow-tool-helpers.js';
 import { createExecutionPlan, reviseExecutionPlan, readExecutionPlan, recordReviewReceipt } from './features/execution-plan.js';
 import { fileExists, readJsonFile } from '@opencode-flow-engine/shared';
+import { applyTokenBudgetToContent } from './features/token-budget-limiter.js';
 // ─── Background task registry (per-factory instance) ──────────────────────────
 
 const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
@@ -344,6 +345,9 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
       const mcpManager = createMcpManager();
       const taskTracker = createTaskTracker(undefined, '.flow-engine/sflow/subagent-tracker.json');
 
+      // Token Budget: 存储 read 工具的文件路径，供 tool.execute.after 截断使用
+      const readFilePaths = new Map<string, string>();
+
       // Build tool definitions using @opencode-ai/plugin format
       const tools = createSFlowTools(sflowClient);
       const validatorTools = createValidatorTools();
@@ -510,6 +514,19 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           if (lowerTool === 'call_omo_agent') {
             markOmoUsed();
           }
+
+          // Token Budget: 记录 read 工具的文件路径，供 tool.execute.after 截断使用
+          if (lowerTool === 'read') {
+            const readPath = (((output.args ?? {}) as Record<string, unknown>).filePath
+              ?? ((output.args ?? {}) as Record<string, unknown>).path
+              ?? ((output.args ?? {}) as Record<string, unknown>).file_path
+              ?? '') as string;
+            if (readPath) {
+              const sessionId = (input as { sessionID?: string }).sessionID ?? '';
+              readFilePaths.set(sessionId, readPath);
+            }
+          }
+
           const filePath = (lowerTool === 'write' || lowerTool === 'edit')
             ? (((output.args ?? {}) as Record<string, unknown>).filePath
               ?? ((output.args ?? {}) as Record<string, unknown>).path
@@ -531,6 +548,13 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
               _sflow_guard_reason: agentGuardResult.blockReason ?? 'Agent guard condition not met',
             };
             return;
+          }
+          // Surface guard warnings to the agent (e.g. breaking change WARN)
+          if (agentGuardResult && agentGuardResult.warnings && agentGuardResult.warnings.length > 0) {
+            output.args = {
+              ...(output.args ?? {}),
+              _sflow_guard_warnings: agentGuardResult.warnings,
+            };
           }
           if (guardHook) {
             const guardResult = await guardHook.execute({
@@ -561,6 +585,18 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
 
         "tool.execute.after": async (input, output) => {
           const toolName = input.tool;
+
+          // Token Budget: 对 read 工具返回的内容应用截断策略
+          // 工件文件（proposal.md, design.md, specs/*.md 等）豁免不截断
+          if (toolName === 'read') {
+            const sessionId = (input as { sessionID?: string }).sessionID ?? '';
+            const readPath = readFilePaths.get(sessionId);
+            readFilePaths.delete(sessionId);
+            if (readPath && typeof output.output === 'string') {
+              output.output = applyTokenBudgetToContent(readPath, output.output);
+            }
+          }
+
           if (!SFLOW_TOOLS.has(toolName)) return;
 
           const validationHook = hookComposer.getHook('artifact_validation');

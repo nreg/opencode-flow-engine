@@ -57,6 +57,7 @@ export {
   getDefaultModel,
   getAllDefaultModels,
   clearConfigCache,
+  getAlternativeModel,
 } from './agent-builder.js';
 
 export type {
