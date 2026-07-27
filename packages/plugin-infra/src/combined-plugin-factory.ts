@@ -273,6 +273,10 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
         }
       }
 
+      // 屏蔽 OpenCode 默认的 build 和 plan agents
+      cfg.agent["build"] = { mode: "subagent", hidden: true };
+      cfg.agent["plan"] = { mode: "subagent", hidden: true };
+
       // Register horizontal flow commands (test/review/intel/architect/evolve/health/restyle)
       // These are independent of sFlow/iFlow workflow context
       registerFlowCommands(cfg as any);

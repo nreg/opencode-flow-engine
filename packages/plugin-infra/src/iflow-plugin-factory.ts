@@ -224,6 +224,10 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
           }
         }
 
+        // 屏蔽 OpenCode 默认的 build 和 plan agents
+        cfg.agent["build"] = { mode: "subagent", hidden: true };
+        cfg.agent["plan"] = { mode: "subagent", hidden: true };
+
         // Register skill-embedded MCPs (Tier 3)
         if (!cfg.mcp) cfg.mcp = {};
         const skillsWithMcp = skillLoader.getSkillsWithMcp();

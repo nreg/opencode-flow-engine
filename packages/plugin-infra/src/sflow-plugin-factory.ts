@@ -445,12 +445,16 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
                 : undefined,
             };
 
-            if (modelName) {
-              AGENT_MODEL_MAP[name] = modelName;
-            }
+          if (modelName) {
+            AGENT_MODEL_MAP[name] = modelName;
           }
+        }
 
-          if (!cfg.mcp) cfg.mcp = {};
+        // 屏蔽 OpenCode 默认的 build 和 plan agents
+        cfg.agent["build"] = { mode: "subagent", hidden: true };
+        cfg.agent["plan"] = { mode: "subagent", hidden: true };
+
+        if (!cfg.mcp) cfg.mcp = {};
           const skillsWithMcp = skillLoader.getSkillsWithMcp();
           for (const skill of skillsWithMcp) {
             if (skill.metadata.mcp?.servers) {
