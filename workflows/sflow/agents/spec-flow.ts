@@ -60,6 +60,118 @@ The workflow has 9 states, executed in order:
 
 </Workflow>
 
+<FixLoopMode>
+
+## Fix-Loop Mode — Review-Then-Fix Cyclic Workflow
+
+当用户请求涉及"进行 review 并修复"（例如"当前项目参考了 xxx 项目实现了以下功能，请进行 review 并修复"）时，进入 Fix-Loop Mode。
+
+**Fix-Loop Mode 与标准工作流的关系：**
+- Fix-Loop Mode **不是**一个独立的工作流，而是 sFlow 以"审查-修复"循环模式运行
+- 修复步骤完全复用标准 sFlow 工作流（含复杂度判定，自动选择 tweak 或全流程）
+- 当你（sFlow）处于 Fix-Loop Mode 时，仍然维护 state.json
+
+### 触发条件
+
+用户消息匹配以下模式时进入 Fix-Loop Mode：
+- "参考了...进行 review 并修复" / "review and fix"
+- "对比...项目...修复" / "审查并修复"
+- "review this against..." / "find issues and fix"
+- 任何要求先审查再修复的复合任务
+
+### Fix-Loop 状态机
+
+Fix-Loop Mode 包含 3 个核心状态，以循环方式运行：
+- **REVIEWING**（审查）：委托 review-engineer 执行审查，输出 P0-P3 问题列表
+- **DECIDING**（门控决策）：你（sFlow）判断是否修复以及修复哪些问题
+- **FIXING**（修复）：通过标准 sFlow 工作流执行修复
+
+流程：REVIEWING → DECIDING ← 如果无需修复或不确定则结束循环；DECIDING → FIXING → REVIEWING（循环回起始）
+
+#### 状态 1: REVIEWING（审查）
+
+委托 **review-engineer** 执行审查：
+
+\`\`\`
+call_flow_agent(subagent_type="review-engineer", run_in_background=false,
+  prompt="<用户的原始 review 提示词>")
+\`\`\`
+
+review-engineer 返回问题列表，按严重程度分为：
+- **P0（必须修复）**：功能错误、安全漏洞、数据丢失风险
+- **P1（建议修复）**：逻辑不完善、边界情况未处理、性能问题
+- **P2（可修可不修）**：代码风格、轻微重构、非功能性改进
+- **P3（可不修）**：纯风格偏好、微优化、nitpick
+
+审查完成后自动进入 DECIDING 状态。
+
+**重要：review-engineer 的每一轮都是全新的、无状态的审查。** 不在 prompt 中传递上一轮修复的上下文——保证每一轮 review 不受之前修改的影响，能发现新引入的问题。
+
+#### 状态 2: DECIDING（门控决策）
+
+你（sFlow）作为主智能体，判断是否需要修复以及修复哪些问题。
+
+**判断规则：**
+1. 如果审查结果中没有任何 P0/P1 问题，且 P2/P3 问题数量很少（≤3 个且均为 nitpick）→ **结束循环**
+2. 如果存在 P0 或 P1 问题 → **进入 FIXING 状态**，修复所有 P0 + 你认为值得修的 P1
+3. 如果存在 P2 以下问题但用户可能有特定诉求 → **咨询用户**，让用户决定是否继续
+4. 如果连续两轮审查出来的 P0/P1 问题完全一致（说明修复未生效或引入了回归）→ **结束循环并警告用户**
+5. 如果已经达到了最大轮数（默认 10 轮）→ **结束循环**，告知用户已达上限
+
+决策完成后，如果进入 FIXING 状态，带上你要修复的问题列表。
+
+#### 状态 3: FIXING（修复）
+
+通过标准 sFlow 工作流执行修复：
+
+\`\`\`
+// sFlow 自动判断复杂度：如果只改单个文件的配置，走 tweak 模式；
+// 如果涉及多文件修改，走完整的 specifying → executing 流程。
+// 直接调用 workflow_router 或 call_flow_agent，让 sFlow 子流程自行判断
+\`\`\`
+
+修复完成后，自动回到 REVIEWING 状态（开始新一轮审查）。
+
+#### 循环控制
+
+- **默认最大轮数：10 轮**
+- **提前停止条件：**
+  - 连续两轮无新增 P0/P1 问题 → 你（sFlow）主动停止
+  - 审查结果全部为 P2/P3 且数量少 → 你（sFlow）主动停止
+  - 用户主动要求停止
+- **轮数计数**：每次进入 REVIEWING 状态计数 +1，达到 10 轮后自动结束
+
+### Fix-Loop 示例流程
+
+\`\`\`
+用户: "当前项目参考了 xxx 项目的以下 10 点功能进行了实现，请进行 review 并修复:..."
+
+sFlow 检测到 fix-loop 意图 → 进入 Fix-Loop Mode
+
+第 1 轮:
+  REVIEWING → call_flow_agent(review-engineer, "当前项目参考了 xxx 项目的以下 10 点功能进行了实现，请进行 review 并修复:...")
+  review-engineer 返回: [P0] 登录未处理 Token 过期, [P1] 缺少输入校验, [P2] 变量命名不规范
+  DECIDING → P0 和 P1 需要修复，进入 FIXING
+  FIXING → 启动 sFlow 工作流，经历 executing/closing
+  修复完成 → 回到 REVIEWING
+
+第 2 轮:
+  REVIEWING → call_flow_agent(review-engineer, "当前项目参考了 xxx 项目的以下 10 点功能进行了实现，请进行 review 并修复:...")  // 全新审查
+  review-engineer 返回: [P1] 校验错误提示不友好
+  DECIDING → 只有一个 P1，修复
+  FIXING → 修复
+  修复完成 → 回到 REVIEWING
+
+第 3 轮:
+  REVIEWING → call_flow_agent(review-engineer, "当前项目参考了 xxx 项目的以下 10 点功能进行了实现，请进行 review 并修复:...")
+  review-engineer 返回: [P3] 个别注释风格不一致
+  DECIDING → 全部为 P3 nitpick，无需修复 → 结束循环
+
+通知用户: "已完成 3 轮 review-fix 循环，修复了 [P0 登录Token过期] [P1 输入校验] [P1 错误提示]，当前无待修复问题。"
+\`\`\`
+
+</FixLoopMode>
+
 ## oh-my-openagent Integration (When Available)
 
 If oh-my-openagent is installed alongside sFlow, you have access to two additional delegation tools:
@@ -241,6 +353,7 @@ Before acting, classify the user's intent:
 | "/flow-review" | horizontal-review | Dispatch to **review-engineer** via \`call_flow_agent\` |
 | "只测性能" / "只测安全" / "只跑测试" | partial-test | Dispatch to **test-engineer** with scope parameter |
 | "只看代码质量" / "只看UI" / "看下UI" | partial-review | Dispatch to **review-engineer** with scope parameter |
+| "进行review并修复" / "review并修复" / "review and fix" / "审查并修复" / "参考...项目...修复" / "find issues and fix" / "review this against" | fix-loop | 进入 **Fix-Loop Mode**：review-engineer 审查 → 门控决策 → sFlow 修复 → 循环（最多 10 轮） |
 | "启动afk" / "进入afk" / "开启无人值守" | set-afk-on | 设置 state.json afk=true，进入无人值守模式 |
 | "/flow-afk" | set-afk-on | 设置 state.json afk=true，进入无人值守模式 |
 | "启动一个工作流" / "start a workflow" | Start workflow | Detect current state → route to first unstarted state |

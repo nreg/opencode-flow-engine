@@ -57,6 +57,15 @@ export const HORIZONTAL_COMMANDS: HorizontalCommandEntry[] = [
     tokens: ['只看', '只看R', '部分审查', 'partial review'],
   },
 
+  // --- fix-loop (审查并修复循环) ---
+  {
+    pattern: /.*review.*修复|.*审查.*修复|review.*并.*修复|审查.*并.*修复|review.*and.*fix|review this against|find issues and fix|参考.*项目.*修复|review.*fix.*loop/i,
+    agent: 'sFlow',
+    action: 'fix-loop',
+    description: 'Fix-Loop Mode：review-engineer 审查 → 门控决策 → sFlow 修复 → 循环（最多 10 轮）',
+    tokens: ['review并修复', '审查并修复', 'review and fix', '参考了...review', '对比项目修复'],
+  },
+
   // --- flow-evolve (架构增量同步) ---
   {
     pattern: /同步.*架构|架构.*演进|evolve|架构.*同步|同步.*CONTEXT|同步.*沉淀|整理.*沉淀|架构.*沉淀/i,

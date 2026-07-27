@@ -348,6 +348,41 @@ describe('matchHorizontalCommand — AFK Mode', () => {
   });
 });
 
+describe('matchHorizontalCommand — Fix-Loop Mode', () => {
+  const testCases = [
+    { input: '参考了xxx项目请review并修复', expected: 'sFlow', action: 'fix-loop' },
+    { input: 'review并修复', expected: 'sFlow', action: 'fix-loop' },
+    { input: '审查并修复', expected: 'sFlow', action: 'fix-loop' },
+    { input: 'review and fix', expected: 'sFlow', action: 'fix-loop' },
+    { input: 'review this against', expected: 'sFlow', action: 'fix-loop' },
+    { input: 'find issues and fix', expected: 'sFlow', action: 'fix-loop' },
+    { input: '对比xxx项目进行修复', expected: 'sFlow', action: 'fix-loop' },
+  ];
+
+  for (const { input, expected, action } of testCases) {
+    it(`should match "${input}" → ${expected} (${action})`, () => {
+      const result = matchHorizontalCommand(input);
+      expect(result).not.toBeNull();
+      expect(result!.agent).toBe(expected);
+      expect(result!.action).toBe(action);
+    });
+  }
+
+  it('should not interfere with existing commands — "全面审查" still matches review-engineer', () => {
+    const result = matchHorizontalCommand('全面审查');
+    expect(result).not.toBeNull();
+    expect(result!.agent).toBe('review-engineer');
+    expect(result!.action).toBe('full-review');
+  });
+
+  it('should not interfere with existing commands — "帮我检查项目健康" still matches flow-health', () => {
+    const result = matchHorizontalCommand('帮我检查项目健康');
+    expect(result).not.toBeNull();
+    expect(result!.agent).toBe('flow-health');
+    expect(result!.action).toBe('health-check');
+  });
+});
+
 describe('HORIZONTAL_COMMANDS — All agents uniqueness', () => {
   it('should have all 8 agents registered', () => {
     const agents = new Set(HORIZONTAL_COMMANDS.map(c => c.agent));
