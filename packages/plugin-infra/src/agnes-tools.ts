@@ -17,7 +17,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
         try {
           const { readFile, writeFile, mkdir } = await import('node:fs/promises');
           const { homedir } = await import('node:os');
-          const { join, dirname, extname } = await import('node:path');
+          const { join, dirname, extname, isAbsolute } = await import('node:path');
 
           let apiKey: string;
           try {
@@ -34,9 +34,9 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
 
           // Convert local image paths to base64 data URIs for image-to-image / multi-image composition
           let imageUrls: string[] | undefined;
-          if (args.image_paths && args.image_paths.length > 0) {
+          if (Array.isArray(args.image_paths) && args.image_paths.length > 0) {
             imageUrls = await Promise.all(args.image_paths.map(async (imgPath: string) => {
-              const fullImgPath = join(changeDir, imgPath);
+              const fullImgPath = isAbsolute(imgPath) ? imgPath : join(changeDir, imgPath);
               const imgExt = extname(imgPath).toLowerCase();
               const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
               const mime = mimeMap[imgExt] || 'image/png';
@@ -51,7 +51,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
               'Authorization': `Bearer ${apiKey}`,
               'Content-Type': 'application/json',
             },
-            signal: AbortSignal.timeout(90_000),
+            signal: AbortSignal.timeout(300_000),
             body: JSON.stringify({
               model: 'agnes-image-2.1-flash',
               prompt: args.prompt,
@@ -146,10 +146,10 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
             body: JSON.stringify({
               model: 'agnes-video-v2.0',
               prompt: args.prompt,
-              width: args.width || 1152,
-              height: args.height || 768,
-              num_frames: args.num_frames || 121,
-              frame_rate: args.frame_rate || 24,
+              width: Number(args.width) || 1152,
+              height: Number(args.height) || 768,
+              num_frames: Number(args.num_frames) || 121,
+              frame_rate: Number(args.frame_rate) || 24,
             }),
           });
 
@@ -230,7 +230,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
         try {
           const { readFile } = await import('node:fs/promises');
           const { homedir } = await import('node:os');
-          const { join, extname } = await import('node:path');
+          const { join, extname, isAbsolute } = await import('node:path');
 
           let apiKey: string;
           try {
@@ -242,7 +242,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
             return { title: 'Agnes Image Understand', output: JSON.stringify({ success: false, error: 'Agnesmore auth not found or invalid. Run /connect in OpenCode to configure agnesmore first.' }, null, 2) };
           }
 
-          const imagePath = join(changeDir, args.image_path);
+          const imagePath = isAbsolute(args.image_path) ? args.image_path : join(changeDir, args.image_path);
           const ext = extname(args.image_path).toLowerCase();
           const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
           const mime = mimeMap[ext] || 'image/png';
@@ -289,6 +289,112 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
         } catch (error) {
           return {
             title: 'Agnes Image Understand',
+            output: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }, null, 2),
+          };
+        }
+      },
+    },
+
+    sense_image_generate: {
+      description: 'Generate an image using SenseNova U1 Fast model. Text-to-image only (no image input). Image URL expires in 1 hour — tool auto-downloads it immediately. Requires agnesmore auth configured.',
+      args: {
+        prompt: z.string().describe('Text description of the image to generate. Max 4096 tokens. Use format: [subject] + [scene] + [style] + [lighting] + [composition]'),
+        output_path: z.string().optional().describe('Relative path to save the image (e.g. "public/images/hero.png"). Defaults to src/assets/images/sense-<timestamp>.png'),
+        ratio: z.string().optional().describe('Aspect ratio. Supported: 16:9 (default), 9:16, 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 21:9, 9:21'),
+        n: z.number().optional().describe('Number of images to generate (default: 1). Only the first image is saved when n > 1.'),
+      },
+      execute: async (args: { prompt: string; output_path?: string; ratio?: string; n?: number }, context) => {
+        const changeDir = context.directory || process.cwd();
+        try {
+          const { readFile, writeFile, mkdir } = await import('node:fs/promises');
+          const { homedir } = await import('node:os');
+          const { join, dirname } = await import('node:path');
+
+          let apiKey: string;
+          try {
+            const authContent = await readFile(join(homedir(), '.sensemore', 'auth.json'), 'utf-8');
+            const auth = JSON.parse(authContent);
+            apiKey = auth.keys?.[0] || '';
+            if (!apiKey) throw new Error('No API key found');
+          } catch {
+            return { title: 'Sense Image Gen', output: JSON.stringify({ success: false, error: 'SenseNova auth not found at ~/.sensemore/auth.json. Configure via OpenCode sensemore provider first.' }, null, 2) };
+          }
+
+          // SenseNova U1 Fast fixed resolutions per aspect ratio
+          const RATIO_SIZE_MAP: Record<string, string> = {
+            '2:3': '1664x2496',
+            '3:2': '2496x1664',
+            '3:4': '1760x2368',
+            '4:3': '2368x1760',
+            '4:5': '1824x2272',
+            '5:4': '2272x1824',
+            '1:1': '2048x2048',
+            '16:9': '2752x1536',
+            '9:16': '1536x2752',
+            '21:9': '3072x1376',
+            '9:21': '1344x3136',
+          };
+          const ratio = args.ratio || '16:9';
+          const size = RATIO_SIZE_MAP[ratio];
+          if (!size) {
+            return { title: 'Sense Image Gen', output: JSON.stringify({ success: false, error: `Unsupported ratio "${ratio}". Supported: ${Object.keys(RATIO_SIZE_MAP).join(', ')}` }, null, 2) };
+          }
+
+          const response = await fetch('https://token.sensenova.cn/v1/images/generations', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            signal: AbortSignal.timeout(300_000),
+            body: JSON.stringify({
+              model: 'sensenova-u1-fast',
+              prompt: args.prompt,
+              size,
+              n: args.n || 1,
+            }),
+          });
+
+          if (!response.ok) {
+            const errText = await response.text();
+            return { title: 'Sense Image Gen', output: JSON.stringify({ success: false, error: `API error ${response.status}: ${errText}` }, null, 2) };
+          }
+
+          const data = await response.json() as { created?: number; data?: Array<{ url?: string }> };
+          const imageUrl = data?.data?.[0]?.url;
+          if (!imageUrl) {
+            return { title: 'Sense Image Gen', output: JSON.stringify({ success: false, error: 'No image URL in response' }, null, 2) };
+          }
+
+          // Image URL expires in 1 hour — download immediately
+          const imgResponse = await fetch(imageUrl, { signal: AbortSignal.timeout(120_000) });
+          if (!imgResponse.ok) {
+            return { title: 'Sense Image Gen', output: JSON.stringify({ success: false, error: `Failed to download image: ${imgResponse.status}` }, null, 2) };
+          }
+          const imgBuffer = await imgResponse.arrayBuffer();
+
+          const outputPath = args.output_path || `src/assets/images/sense-${Date.now()}.png`;
+          const fullPath = join(changeDir, outputPath);
+          await mkdir(dirname(fullPath), { recursive: true });
+          await writeFile(fullPath, Buffer.from(imgBuffer));
+
+          return {
+            title: 'Sense Image Gen',
+            output: JSON.stringify({
+              success: true,
+              prompt: args.prompt,
+              ratio,
+              size,
+              output_path: outputPath,
+              image_url: imageUrl,
+            }, null, 2),
+          };
+        } catch (error) {
+          return {
+            title: 'Sense Image Gen',
             output: JSON.stringify({
               success: false,
               error: error instanceof Error ? error.message : String(error),

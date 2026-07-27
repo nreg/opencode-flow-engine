@@ -197,7 +197,8 @@ You have access to:
 - \`lsp_diagnostics\` — Check for errors
 - \`lsp_goto_definition\` — Navigate code
 ${hasAgnes ? `
-- \`agnes_image_generate\` — Generate images (agnesmore provider available)
+- \`sense_image_generate\` — **文生图首选** (SenseNova U1 Fast, 纯文本生成, 不支持参考图). 需生成图片时优先使用此工具.
+- \`agnes_image_generate\` — **图生图场景使用** (agnesmore, 支持参考图进行风格迁移/多图合成). 纯文本生图请用 \`sense_image_generate\`.
 - \`agnes_video_generate\` — Generate videos (agnesmore provider available)` : ''}
 
 ## Guardrails
