@@ -1,71 +1,38 @@
 # Web Vital 指标优化指南
 
-## 核心 Web Vitals 指标
+## 核心指标定义
+| 指标 | 定义 | 优秀阈值 | 良好阈值 | 较差阈值 |
+|------|------|----------|----------|----------|
+| LCP（最大内容绘制） | 页面主要内容加载完成的时间 | < 2.5s | 2.5s - 4s | > 4s |
+| FID（首次输入延迟） | 用户首次交互到浏览器响应的时间 | < 100ms | 100ms - 300ms | > 300ms |
+| CLS（累积布局偏移） | 页面元素意外布局偏移的总和 | < 0.1 | 0.1 - 0.25 | > 0.25 |
+| FCP（首次内容绘制） | 第一个DOM元素渲染完成的时间 | < 1.8s | 1.8s - 3s | > 3s |
+| TTI（可交互时间） | 页面完全可交互的时间 | < 3.8s | 3.8s - 7.3s | > 7.3s |
 
-### LCP（Largest Contentful Paint）
-目标：≤ 2.5s（75 分位）
+## LCP优化方案
+1. 优化服务器响应时间（TTFB < 800ms）
+2. 提前预加载LCP资源
+3. 压缩LCP资源体积，使用合适的格式
+4. 避免LCP资源被其他资源阻塞
+5. 使用CDN加速静态资源访问
 
-优化策略：
-- 资源预加载：`<link rel="preload">` 提前加载 LCP 资源
-- 资源体积：压缩 LCP 图片，使用 webp/avif 格式
-- 服务器响应：优化 TTFB，使用 CDN、缓存、SSR
-- 渲染阻塞：移除阻塞渲染的 JS/CSS
-- 资源优先级：LCP 资源设置 `fetchpriority="high"`
+## FID优化方案
+1. 拆分长任务，每个任务执行时间不超过50ms
+2. 延迟执行非关键JS代码
+3. 使用Web Worker处理大计算量任务
+4. 减少第三方脚本的数量和体积
+5. 预加载关键路径资源
 
-常见问题：
-- LCP 元素是背景图片：改用 `<img>` 标签
-- LCP 元素是字体：`font-display: optional` 或预加载
-- LCP 元素是视频：提供封面图，延迟加载
+## CLS优化方案
+1. 为图片/视频/iframe设置固定的宽高比
+2. 避免在现有内容上方动态插入内容
+3. 使用transform做动画，避免触发布局变化
+4. 提前为广告、动态内容预留空间
+5. 字体加载使用font-display: optional或swap，避免FOIT/FOUT
 
-### FID（First Input Delay）
-目标：≤ 100ms（75 分位）
-
-优化策略：
-- 拆分长任务：超过 50ms 的任务拆分为多个小任务
-- 延迟非关键 JS：第三方脚本延迟加载
-- 代码分割：路由/组件懒加载
-- 异步执行：requestIdleCallback 处理低优先级任务
-- Web Worker：大计算量任务移到 Worker 线程
-
-### CLS（Cumulative Layout Shift）
-目标：≤ 0.1（75 分位）
-
-优化策略：
-- 图片尺寸：`<img>` 设置 width/height 或 aspect-ratio
-- 字体加载：`font-display: optional` 或匹配回退字体
-- 动态内容：预留空间（骨架屏/占位符）
-- 动画：使用 transform/opacity，避免布局变化
-- 广告/嵌入：预留固定高度容器
-
-## 辅助 Web Vitals 指标
-
-### FCP（First Contentful Paint）
-目标：≤ 1.8s  
-优化：内联关键 CSS，移除渲染阻塞资源
-
-### TTFB（Time to First Byte）
-目标：≤ 600ms  
-优化：CDN 加速、服务端缓存、数据库优化
-
-### TTI（Time to Interactive）
-目标：≤ 3.8s  
-优化：减少 JS 体积，延迟非关键脚本
-
-## 测量工具
-
-### 实验室数据
-- Lighthouse：Chrome DevTools 集成
-- WebPageTest：多地点、多设备测试
-- Chrome UX Report：Chrome 用户真实数据
-
-### 真实用户数据（RUM）
-- web-vitals 库：Google 官方库
-- Performance API：获取性能数据
-- 上报时机：页面加载完成、用户离开页面
-
-## 监控与告警
-
-- 收集 7 天数据，计算 75 分位值作为基线
-- 设置告警阈值：基线的 120%
-- 每日报告：平均值、75 分位、95 分位
-- 异常告警：指标超过阈值时自动通知
+## 打包体积优化
+1. 开启Tree Shaking移除无用代码
+2. 第三方依赖按需引入，替换大体积库
+3. 代码分割，按路由/组件懒加载
+4. 开启Gzip/Brotli压缩
+5. 合理设置缓存策略，充分利用浏览器缓存

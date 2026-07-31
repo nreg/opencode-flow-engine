@@ -1,80 +1,224 @@
 # 前端安全检查清单
 
-## XSS 防护
+## XSS（跨站脚本攻击）
 
-### 输入输出处理
-- 用户输入必须转义后再渲染
-- 使用框架的安全渲染：React 自动转义，Vue 的 {{ }} 自动转义
-- 富文本内容使用 DOMPurify 库清理
-- URL 参数拼接前编码：encodeURIComponent
+### 高危操作检查
+```tsx
+// 危险：直接将用户输入注入 HTML
+element.innerHTML = userInput  // 高危！
+document.write(userInput)      // 高危！
+<div dangerouslySetInnerHTML={{ __html: userInput }} />  // 高危！
 
-### 危险 API 避免
-- 避免使用 innerHTML、outerHTML、document.write
-- 避免使用 eval、new Function、setTimeout(string)
-- 避免使用 v-html（Vue）、dangerouslySetInnerHTML（React）
-- 必须使用时，内容必须经过严格清理
+// 安全做法：使用文本节点或转义
+element.textContent = userInput  // 安全
+// 或使用专业库进行 HTML 净化
+import DOMPurify from 'dompurify'
+element.innerHTML = DOMPurify.sanitize(userInput)  // 净化后安全
+```
 
-## CSRF 防护
+### eval 类函数检查
+```js
+// 高危：动态执行代码
+eval(userInput)
+new Function(userInput)
+setTimeout(userInput, 0)   // 字符串形式高危
 
-### Token 机制
-- 关键操作必须验证 CSRF Token
-- Token 存储在 HttpOnly Cookie
-- 每次请求携带 Token：X-CSRF-Token
-- Token 定期刷新
+// 安全做法
+setTimeout(() => {}, 0)  // 函数形式安全
+```
 
-### SameSite Cookie
-- Cookie 设置 SameSite=Strict 或 SameSite=Lax
-- 跨站请求禁止携带 Cookie（Strict）
-- 顶级导航允许携带 Cookie（Lax）
+### URL 参数注入
+```tsx
+// 危险：直接将 URL 参数用作链接
+const { redirect } = useSearchParams()
+<a href={redirect}>返回</a>  // 可能被注入 javascript: 协议
 
-## 敏感信息保护
+// 安全做法：验证 URL 协议
+function isSafeUrl(url: string) {
+  try {
+    const parsed = new URL(url, window.location.origin)
+    return ['http:', 'https:'].includes(parsed.protocol)
+  } catch {
+    return false
+  }
+}
+<a href={isSafeUrl(redirect) ? redirect : '/'}>返回</a>
+```
 
-- 禁止在前端代码中硬编码 API Key、Secret、Token
-- 敏感配置通过环境变量注入
-- .env 文件加入 .gitignore
-- 生产环境禁用 Source Map
-- 日志输出脱敏：不打印用户手机号、身份证
-- 前端展示脱敏：手机号中间 4 位显示为 *
-- 本地存储慎用：不存储敏感信息
-- 内存中及时清理：使用完的敏感数据及时置为 null
+---
+
+## 敏感信息泄漏
+
+### 检查清单
+- [ ] 源代码中不含 API Key、密钥、Token、数据库凭证
+- [ ] `console.log` 中不含敏感用户数据（生产环境）
+- [ ] LocalStorage / SessionStorage 不存储明文密码、Token
+- [ ] 前端代码不暴露内部 API 地址、数据库结构
+- [ ] Git 历史中没有提交过敏感信息（使用 git-secrets 检查）
+
+```bash
+# 检查敏感信息
+npm install -g git-secrets
+git secrets --scan
+
+# 常见敏感信息正则
+# API Key: /[A-Za-z0-9]{32,}/
+# JWT: /eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*/
+# AWS: /AKIA[0-9A-Z]{16}/
+```
+
+### 环境变量规范
+```bash
+# .env（提交到 git，存放默认配置）
+NEXT_PUBLIC_APP_NAME=MyApp
+NEXT_PUBLIC_API_URL=https://api.example.com
+
+# .env.local（不提交到 git，存放真实密钥）
+DATABASE_URL=postgresql://...
+NEXTAUTH_SECRET=your-secret-key
+
+# 确保 .env.local 在 .gitignore 中
+echo ".env.local" >> .gitignore
+echo ".env.production" >> .gitignore
+```
+
+---
+
+## CSRF（跨站请求伪造）
+
+```tsx
+// 检查：敏感操作是否添加了 CSRF 保护？
+// 方案 1：同源检测（Referer + Origin 头）
+// 方案 2：CSRF Token
+
+// React 中在请求头中携带 CSRF Token
+async function apiRequest(url: string, options: RequestInit) {
+  const csrfToken = document.cookie
+    .split(';')
+    .find(c => c.trim().startsWith('csrf-token='))
+    ?.split('=')[1]
+
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      'X-CSRF-Token': csrfToken ?? '',
+    },
+  })
+}
+```
+
+---
 
 ## 权限控制
 
-- 路由守卫：未登录跳转登录页
-- 按钮/菜单权限：根据用户角色动态显示
-- 前端校验仅作为 UX 优化，后端必须再次校验
-- 避免仅前端隐藏敏感信息
-- 用户 ID 从 Token 解析，不接受前端传递
-- 资源 ID 校验：用户只能访问自己有权限的资源
-- 避免通过修改 URL 参数越权访问
+```tsx
+// 前端权限校验（仅用于 UI 展示，后端必须同样校验！）
+
+// 路由级权限保护
+function ProtectedRoute({ children, requiredRole }: Props) {
+  const { user } = useAuth()
+
+  if (!user) return <Navigate to="/login" replace />
+  if (requiredRole && !user.roles.includes(requiredRole)) {
+    return <Navigate to="/403" replace />
+  }
+
+  return <>{children}</>
+}
+
+// 按钮级权限控制
+function DeleteButton({ resourceId }: Props) {
+  const { user } = useAuth()
+  const canDelete = user?.permissions.includes('resource:delete')
+
+  if (!canDelete) return null  // 无权限不显示
+
+  return (
+    <button onClick={() => handleDelete(resourceId)}>
+      删除
+    </button>
+  )
+}
+
+// 警告：前端权限控制只是 UI 层面，API 请求必须由后端验证权限！
+```
+
+---
 
 ## 第三方依赖安全
 
-- 定期运行 npm audit/yarn audit
-- 及时更新有漏洞的依赖版本
-- 使用 Snyk/Dependabot 自动监控
-- 锁定依赖版本：package-lock.json/yarn.lock
-- 从官方源安装依赖
-- 按需引入第三方库
+```bash
+# 检查已知安全漏洞
+npm audit
 
-## 传输安全
+# 修复低风险漏洞
+npm audit fix
 
-- 全站强制 HTTPS
-- HSTS 响应头：Strict-Transport-Security
-- 敏感接口使用 POST
-- 响应头 X-Content-Type-Options: nosniff
-- 响应头 X-Frame-Options: DENY
-- Content-Security-Policy 配置
+# 查看详细报告
+npm audit --json > audit-report.json
 
-## 点击劫持防护
+# 使用 Snyk 进行更全面的安全扫描
+npx snyk test
 
-- X-Frame-Options: DENY 禁止任何域嵌入
-- 或 X-Frame-Options: SAMEORIGIN 仅允许同源嵌入
-- CSP frame-ancestors 'none' 或 'self'
+# CI 中自动检查（GitHub Actions）
+- name: Security audit
+  run: npm audit --audit-level=high
+```
 
-## 用户追踪与隐私
+### 依赖锁定
+```bash
+# 使用 lockfile 锁定依赖版本（不要删除 package-lock.json 或 yarn.lock）
+# 定期升级依赖修复安全漏洞
+npm update
+npx npm-check-updates -u  # 查看可升级的包
+```
 
-- 第三方追踪脚本告知用户
-- 提供 Do Not Track 支持
-- 遵守隐私法规：GDPR、CCPA
-- 非必要 Cookie 需用户同意
+---
+
+## Content Security Policy（CSP）
+
+```html
+<!-- 通过 HTTP 头或 meta 标签配置 CSP -->
+<meta http-equiv="Content-Security-Policy"
+  content="
+    default-src 'self';
+    script-src 'self' 'nonce-{RANDOM}';
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' https: data:;
+    connect-src 'self' https://api.example.com;
+    font-src 'self' https://fonts.gstatic.com;
+    frame-ancestors 'none';
+  ">
+```
+
+**CSP 配置原则**：
+- `default-src 'self'`：默认只允许同源资源
+- 禁止 `'unsafe-eval'`：防止 XSS 利用 eval
+- 限制 `connect-src`：防止数据被发送到外部域
+- `frame-ancestors 'none'`：防止点击劫持
+
+---
+
+## Clickjacking（点击劫持）
+
+```nginx
+# Nginx 配置防止被嵌入 iframe
+add_header X-Frame-Options "DENY";
+# 或更现代的 CSP
+add_header Content-Security-Policy "frame-ancestors 'none'";
+```
+
+---
+
+## 安全审查总结
+
+| 风险等级 | 问题类型 | 必须修复 |
+|----------|----------|----------|
+| 严重 | XSS（innerHTML + 用户输入） | 是 |
+| 严重 | 硬编码敏感信息（API Key、密码） | 是 |
+| 高 | 权限校验仅在前端 | 是 |
+| 高 | 依赖中含高危漏洞（npm audit high） | 是 |
+| 中 | 未设置 CSRF 防护 | 建议 |
+| 中 | 缺少 CSP 配置 | 建议 |
+| 低 | console.log 打印敏感数据 | 建议 |
