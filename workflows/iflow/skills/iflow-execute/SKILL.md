@@ -92,18 +92,18 @@ Format:
 
 ## Common Pitfalls
 
-- **git add .**: NEVER use this. Stage files one by one per task.
-- **Partial commits**: If a task modifies 5 files but you commit 3, the commit is incomplete.
-- **Silent deviations**: Applying Rule 2 (auto-add) without documenting in SUMMARY.md.
-- **Checkpoint skipping**: When a task has `type: checkpoint`, you MUST stop. Don't auto-approve.
-- **Not verifying AGENTS.md**: If project has AGENTS.md, its rules override plan defaults.
+- git add .: NEVER use this. Stage files one by one per task.
+- Partial commits: If a task modifies 5 files but you commit 3, the commit is incomplete.
+- Silent deviations: Applying Rule 2 (auto-add) without documenting in SUMMARY.md.
+- Checkpoint skipping: When a task has `type: checkpoint`, you MUST stop. Don't auto-approve.
+- Not verifying AGENTS.md: If project has AGENTS.md, its rules override plan defaults.
 
 ## Anti-Patterns to Avoid
 
-- **Scope creep**: Deviation Rules allow bug fixes, not feature additions. Don't add unplanned features.
-- **Premature optimization**: Don't optimize code that works. Fix what's broken, not what might break.
-- **Over-engineering**: Implement what the plan says, not what you think it should say.
-- **Skipping verification**: After each task, run the `<automated>` verification command.
+- Scope creep: Deviation Rules allow bug fixes, not feature additions. Don't add unplanned features.
+- Premature optimization: Don't optimize code that works. Fix what's broken, not what might break.
+- Over-engineering: Implement what the plan says, not what you think it should say.
+- Skipping verification: After each task, run the `<automated>` verification command.
 
 ## State Transition Detection
 

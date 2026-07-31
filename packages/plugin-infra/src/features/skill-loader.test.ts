@@ -196,3 +196,106 @@ name: test
     });
   });
 });
+
+describe('References Auto-Merge', () => {
+  let loader: SkillLoader;
+
+  beforeEach(() => {
+    loader = new SkillLoader();
+  });
+
+  describe('mergeReferences', () => {
+    it('should merge references when directory exists (ui-director with 2 refs)', async () => {
+      const skill = await loader.loadSkill('ui-director');
+      expect(skill).toBeDefined();
+      expect(skill!.content).toBeDefined();
+      
+      // 验证包含分隔标记
+      expect(skill!.content).toContain('--- ### Sub-file: design-matrix.md ---');
+      expect(skill!.content).toContain('--- ### Sub-file: tone-cards.md ---');
+      
+      // 验证字典序：design-matrix.md 应该在 tone-cards.md 之前
+      const designMatrixIndex = skill!.content.indexOf('--- ### Sub-file: design-matrix.md ---');
+      const toneCardsIndex = skill!.content.indexOf('--- ### Sub-file: tone-cards.md ---');
+      expect(designMatrixIndex).toBeLessThan(toneCardsIndex);
+    });
+
+    it('should merge references in correct order (taste-skill with 11 refs)', async () => {
+      const skill = await loader.loadSkill('taste-skill');
+      expect(skill).toBeDefined();
+      expect(skill!.content).toBeDefined();
+      
+      // 验证所有 11 个 references 都被合并
+      const expectedRefs = [
+        'ai-tells.md',
+        'apple-liquid-glass.md',
+        'block-library.md',
+        'canonical-sources.md',
+        'dark-mode.md',
+        'dial-definitions.md',
+        'install-commands.md',
+        'out-of-scope.md',
+        'performance-accessibility.md',
+        'pre-flight.md',
+        'vocabulary.md',
+      ];
+      
+      for (const ref of expectedRefs) {
+        expect(skill!.content).toContain(`--- ### Sub-file: ${ref} ---`);
+      }
+      
+      // 验证字典序
+      const indices = expectedRefs.map(ref => 
+        skill!.content.indexOf(`--- ### Sub-file: ${ref} ---`)
+      );
+      
+      for (let i = 0; i < indices.length - 1; i++) {
+        expect(indices[i]).toBeLessThan(indices[i + 1]);
+      }
+    });
+
+    it('should merge references when directory exists', async () => {
+      const skill = await loader.loadSkill('workflow-start');
+      expect(skill).toBeDefined();
+      expect(skill!.content).toBeDefined();
+      
+      // workflow-start 在 Wave 1 重构后创建了 references 目录，应包含分隔标记
+      expect(skill!.content).toContain('--- ### Sub-file:');
+      expect(skill!.content).toContain('dirty-worktree.md');
+      expect(skill!.content).toContain('dp-0-gate.md');
+    });
+
+    it('should preserve sub-file content integrity', async () => {
+      const skill = await loader.loadSkill('ui-director');
+      expect(skill).toBeDefined();
+      
+      // 读取实际的 reference 文件内容，验证合并后包含完整内容
+      const { readFile } = await import('fs/promises');
+      const { join } = await import('path');
+      
+      const designMatrixContent = await readFile(
+        join(process.cwd(), 'workflows', 'sflow', 'skills', 'ui-director', 'references', 'design-matrix.md'),
+        'utf-8'
+      );
+      
+      // 验证 design-matrix.md 的内容被完整合并
+      expect(skill!.content).toContain(designMatrixContent.trim());
+    });
+
+    it('should use correct separator format', async () => {
+      const skill = await loader.loadSkill('ui-director');
+      expect(skill).toBeDefined();
+      
+      // 验证分隔标记格式：前后各有两个换行符
+      const separatorPattern = /\n\n--- ### Sub-file: .+\.md ---\n\n/;
+      expect(separatorPattern.test(skill!.content)).toBe(true);
+    });
+
+    it('should not break frontmatter parsing', async () => {
+      const skill = await loader.loadSkill('ui-director');
+      expect(skill).toBeDefined();
+      expect(skill!.metadata.name).toBe('ui-director');
+      expect(skill!.metadata.description).toBeDefined();
+    });
+  });
+});

@@ -22,12 +22,26 @@ function resolveSkillsDir(givenDir?: string): string {
     // 方案 C: workflows/*/skills/ directories (3x .. from dist/ to root)
     join(__dirname, '..', '..', '..', 'workflows', 'sflow', 'skills'),
     join(__dirname, '..', '..', '..', 'workflows', 'iflow', 'skills'),
-    // Fallback: process.cwd() based path
+    // 方案 D: process.cwd() based workflows (for tests and development)
+    join(process.cwd(), 'workflows', 'sflow', 'skills'),
+    join(process.cwd(), 'workflows', 'iflow', 'skills'),
+    // Fallback: process.cwd() based path (deprecated mirror)
     join(process.cwd(), 'skills'),
   ];
+  
   for (const dir of candidates) {
-    if (existsSync(dir)) return dir;
+    if (existsSync(dir)) {
+      // 如果是废弃镜像路径，输出警告
+      if (dir === join(process.cwd(), 'skills')) {
+        console.warn(
+          `Skills directory '${dir}' appears to be a deprecated mirror. ` +
+          `Use 'workflows/sflow/skills/' or 'workflows/iflow/skills/' instead.`
+        );
+      }
+      return dir;
+    }
   }
+  
   return candidates[0]!;
 }
 
@@ -140,17 +154,20 @@ export class SkillLoader {
     const skillDir = join(this.skillsDir, name);
     const skillFile = join(skillDir, 'SKILL.md');
 
-if (!existsSync(skillFile)) {
+    if (!existsSync(skillFile)) {
       return null;
     }
 
     try {
       const content = await readFile(skillFile, 'utf-8');
       const metadata = this.parseMetadata(content);
+      
+      // Merge references if they exist
+      const mergedContent = await this.mergeReferences(skillDir, content);
 
       const skill: Skill = {
         metadata,
-        content,
+        content: mergedContent,
         path: skillFile,
       };
 
@@ -159,6 +176,49 @@ if (!existsSync(skillFile)) {
     } catch (error) {
       console.error(`Error loading skill ${name}:`, error);
       return null;
+    }
+  }
+  
+  /**
+   * Merge references directory content into skill content
+   */
+  private async mergeReferences(skillDir: string, skillContent: string): Promise<string> {
+    const referencesDir = join(skillDir, 'references');
+    
+    // Check if references directory exists
+    if (!existsSync(referencesDir)) {
+      return skillContent;
+    }
+    
+    try {
+      // Read all files in references directory
+      const files = await readdir(referencesDir);
+      
+      // Filter .md files and sort alphabetically
+      const mdFiles = files
+        .filter(file => file.endsWith('.md'))
+        .sort();
+      
+      // If no .md files, return original content
+      if (mdFiles.length === 0) {
+        return skillContent;
+      }
+      
+      // Read and merge each reference file
+      let mergedContent = skillContent;
+      for (const file of mdFiles) {
+        const filePath = join(referencesDir, file);
+        const fileContent = await readFile(filePath, 'utf-8');
+        
+        // Add separator and content
+        mergedContent += `\n\n--- ### Sub-file: ${file} ---\n\n${fileContent}`;
+      }
+      
+      return mergedContent;
+    } catch (error) {
+      // If error reading references, return original content
+      console.warn(`Error reading references for ${skillDir}:`, error);
+      return skillContent;
     }
   }
 

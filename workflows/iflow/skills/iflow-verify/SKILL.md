@@ -92,15 +92,15 @@ Check for: TODO, FIXME, placeholder, `return null`, `return []`, `console.log` i
 
 ## Common Pitfalls
 
-- **Overriding gaps**: Only use overrides when alternative implementation achieves the same goal
-- **Missing wiring check**: Files exist + have content but aren't connected → phase failed
-- **Under-verifying tests**: Test exists but tests wrong behavior or doesn't test at all
-- **Accepting human verification too easily**: Only flag truly human-checkable items (visual, real-time, external service)
+- Overriding gaps: Only use overrides when alternative implementation achieves the same goal
+- Missing wiring check: Files exist + have content but aren't connected → phase failed
+- Under-verifying tests: Test exists but tests wrong behavior or doesn't test at all
+- Accepting human verification too easily: Only flag truly human-checkable items (visual, real-time, external service)
 
 ## State Transition Detection
 
-- **→ shipping**: VERIFICATION.md status is `"passed"` → route to iflow-shipper
-- **→ executing**: VERIFICATION.md status is `"gaps_found"` → route to iflow-plan-executor for re-execution
+- → shipping: VERIFICATION.md status is `"passed"` → route to iflow-shipper
+- → executing: VERIFICATION.md status is `"gaps_found"` → route to iflow-plan-executor for re-execution
 
 ## VERIFICATION.md Format
 

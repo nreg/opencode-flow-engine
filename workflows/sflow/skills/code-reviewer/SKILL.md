@@ -5,348 +5,132 @@ description: Review completed implementation batches for spec compliance and cod
 
 # Code Reviewer
 
-This skill unifies two review responsibilities: requesting review (dispatching a reviewer subagent with a precise brief) and receiving review (acting on feedback with technical rigor, not performative agreement).
+Unifies two review responsibilities: requesting review (dispatching a reviewer subagent) and receiving review (acting on feedback with technical rigor).
 
-**Core principle:** Review early, review often. Verify before implementing feedback. Technical correctness over social comfort.
+Core principle: Review early, review often. Verify before implementing feedback. Technical correctness over social comfort.
 
 ---
 
-## Part 1: Requesting Review
+## Core Responsibilities
 
-### When to Request Review
+1. Spec Compliance Review — Verify implementation matches specification
+2. Code Quality Review — Check architecture, tests, error handling, performance
+3. Minimality Enforcement — Block over-engineering and unnecessary complexity
+4. UI Visual Review — For frontend changes, check design tokens, anti-patterns, accessibility
 
-**Mandatory:**
+---
 
-- After each task in subagent-driven development (via build-executor)
+## Review Workflow
+
+### Requesting Review
+
+Mandatory review points:
+- After each task in subagent-driven development
 - After completing a major feature
 - After each execution batch
 - Before merge to main
 
-**Optional but valuable:**
+How to request:
+1. Get git SHAs: `BASE_SHA=$(git rev-parse HEAD~1)`, `HEAD_SHA=$(git rev-parse HEAD)`
+2. Dispatch code reviewer subagent with `code-reviewer-prompt.md` template
+3. Fill placeholders: `[DESCRIPTION]`, `[PLAN_OR_REQUIREMENTS]`, `[BASE_SHA]`, `[HEAD_SHA]`
+4. Act on feedback by severity (see severity-levels.md)
 
-- When stuck (fresh perspective)
-- Before refactoring (baseline check)
-- After fixing complex bug
+See [requesting-review.md](references/requesting-review.md) for full protocol and examples.
 
-### How to Request
+### Receiving Feedback
 
-**1. Get git SHAs:**
+Response pattern:
+1. READ — Complete feedback without reacting
+2. UNDERSTAND — Restate requirement in own words (or ask)
+3. VERIFY — Check against codebase reality
+4. EVALUATE — Technically sound for THIS codebase?
+5. RESPOND — Technical acknowledgment or reasoned pushback
+6. IMPLEMENT — One item at a time, test each
 
-```bash
-BASE_SHA=$(git rev-parse HEAD~1)  # or origin/main
-HEAD_SHA=$(git rev-parse HEAD)
-```
+Forbidden responses:
+- "You're absolutely right!" / "Great point!" / "Thanks for..." (performative agreement)
+- "Let me implement that now" (before verification)
 
-**2. Dispatch code reviewer subagent:**
+Instead: Restate requirement, ask clarifying questions, push back with reasoning, or just fix it.
 
-Dispatch a subagent using the template at `skills/code-reviewer/code-reviewer-prompt.md`.
+See [receiving-feedback.md](references/receiving-feedback.md) for full protocol, pushback guidance, and examples.
 
-**Placeholders to fill:**
+---
 
-- `[DESCRIPTION]` — Brief summary of what was built
-- `[PLAN_OR_REQUIREMENTS]` — What it should do (reference the execution-contract.md or relevant spec)
-- `[BASE_SHA]` — Starting commit
-- `[HEAD_SHA]` — Ending commit
+## Severity Levels
 
-**3. Act on feedback:**
+| Level | Meaning | Action |
+|-------|---------|--------|
+| CRITICAL | Bugs, security issues, data loss, broken functionality | Fix immediately |
+| IMPORTANT | Architecture problems, missing features, test gaps | Fix before next batch |
+| MINOR | Code style, optimization, documentation | Fix opportunistically |
 
-- Fix Critical issues immediately
-- Fix Important issues before proceeding
-- Note Minor issues for later
-- Push back if reviewer is wrong (with reasoning — see Part 2)
+See [severity-levels.md](references/severity-levels.md) for assignment guidelines.
 
-### Example
+---
 
-```
-[Just completed Batch 1 of execution]
+## Minimality Discipline
 
-BASE_SHA=$(git log --oneline | grep "Before batch 1" | head -1 | awk '{print $1}')
-HEAD_SHA=$(git rev-parse HEAD)
+Enforce five core rules to prevent over-engineering:
 
-[Dispatch code reviewer subagent with code-reviewer-prompt.md]
-  DESCRIPTION: Batch 1 — auth module with session tokens and test suite
-  PLAN_OR_REQUIREMENTS: execution-contract.md Batch 1 obligations + specs/auth/spec.md
-  BASE_SHA: a7981ec
-  HEAD_SHA: 3df7661
+1. No Over-Design — Reject features not in spec or requested
+2. No Compatibility Shims — Reject code for out-of-scope targets
+3. No Unnecessary Abstractions — Reject single-implementation abstractions
+4. No Unnecessary Configuration — Reject config with only one reasonable value
+5. Reviewer Safeguard — BLOCK non-minimal implementations, don't just suggest
 
-[Subagent returns]:
-  Strengths: Clean architecture, real tests
-  Issues:
-    Important: Missing error handling for expired tokens
-    Minor: Magic number (3600) for session timeout
-  Assessment: Needs fixes
+The reviewer must BLOCK violations, not approve with suggestions.
 
-[Fix Important issues]
-[Continue to Batch 2]
-```
+See [minimality-discipline.md](references/minimality-discipline.md) for full rules, checklist, and YAGNI guidance.
 
-### Red Flags — Requesting
+---
 
-**Never:**
+## UI Visual Review
 
+Run when change includes UI files (`.css`, `.tsx`, `.vue`, `.html`, `.svelte`) or `.flow-engine/sflow/ui-design.md` exists.
+
+Three checks:
+1. Design Token Consistency — No hardcoded colors/fonts/spacing
+2. Anti-Pattern Scan — No `border-left` decoration, `#` tags, empty state flash, etc.
+3. Accessibility Fast-Check — Focus indicators, labels, reduced-motion, alt text
+
+See [ui-visual-review.md](references/ui-visual-review.md) for commands and anti-pattern list.
+
+---
+
+## Review Gates
+
+After each batch:
+- Run full test suite
+- Check spec violations
+- Verify code quality
+- Apply minimality discipline
+- For UI changes, run visual review
+- Report completion with issues classified by severity
+
+---
+
+## Red Flags
+
+Never:
 - Skip review because "it's simple"
-- Ignore Critical issues
-- Proceed with unfixed Important issues
+- Ignore CRITICAL issues
+- Proceed with unfixed IMPORTANT issues
 - Argue with valid technical feedback
+- Approve non-minimal implementations with "consider simplifying..."
 
-**If reviewer is wrong:**
-
+If reviewer is wrong:
 - Push back with technical reasoning
 - Show code/tests that prove it works
 - Request clarification
 
 ---
 
-## Part 2: Receiving and Acting on Review Feedback
-
-### The Response Pattern
-
-```
-WHEN receiving code review feedback:
-
-1. READ: Complete feedback without reacting
-2. UNDERSTAND: Restate requirement in own words (or ask)
-3. VERIFY: Check against codebase reality
-4. EVALUATE: Technically sound for THIS codebase?
-5. RESPOND: Technical acknowledgment or reasoned pushback
-6. IMPLEMENT: One item at a time, test each
-```
-
-### Three Severity Levels
-
-| Level | Meaning | Action |
-|-------|---------|--------|
-| **Critical** (Must Fix) | Bugs, security issues, data loss risks, broken functionality | Fix immediately before anything else |
-| **Important** (Should Fix) | Architecture problems, missing features, poor error handling, test gaps | Fix before proceeding to next batch |
-| **Minor** (Nice to Have) | Code style, optimization opportunities, documentation polish | Note and fix when convenient |
-
-### Forbidden Responses
-
-**NEVER:**
-
-- "You're absolutely right!" (explicit instruction-file violation)
-- "Great point!" / "Excellent feedback!" (performative)
-- "Let me implement that now" (before verification)
-
-**INSTEAD:**
-
-- Restate the technical requirement
-- Ask clarifying questions
-- Push back with technical reasoning if wrong
-- Just start working (actions > words)
-
-### Handling Unclear Feedback
-
-```
-IF any item is unclear:
-  STOP - do not implement anything yet
-  ASK for clarification on unclear items
-
-WHY: Items may be related. Partial understanding = wrong implementation.
-```
-
-**Example:**
-
-```
-Review feedback: "Fix items 1-6"
-You understand 1,2,3,6. Unclear on 4,5.
-
-✗ WRONG: Implement 1,2,3,6 now, ask about 4,5 later
-✓ RIGHT: "I understand items 1,2,3,6. Need clarification on 4 and 5 before proceeding."
-```
-
-### Source-Specific Handling
-
-#### From the user
-
-- **Trusted** — implement after understanding
-- **Still ask** if scope unclear
-- **No performative agreement**
-- **Skip to action** or technical acknowledgment
-
-#### From External Reviewers (subagent or tool)
-
-```
-BEFORE implementing:
-  1. Check: Technically correct for THIS codebase?
-  2. Check: Breaks existing functionality?
-  3. Check: Reason for current implementation?
-  4. Check: Works on all platforms/versions?
-  5. Check: Does reviewer understand full context?
-
-IF suggestion seems wrong:
-  Push back with technical reasoning
-
-IF can't easily verify:
-  Say so: "I can't verify this without [X]. Should I [investigate/ask/proceed]?"
-
-IF conflicts with user's prior decisions:
-  Stop and discuss with user first
-```
-
-### YAGNI Check for "Professional" Features
-
-```
-IF reviewer suggests "implementing properly":
-  grep codebase for actual usage
-
-  IF unused: "This endpoint isn't called. Remove it (YAGNI)?"
-  IF used: Then implement properly
-```
-
-### Implementation Order
-
-```
-FOR multi-item feedback:
-  1. Clarify anything unclear FIRST
-  2. Then implement in this order:
-     - Blocking issues (breaks, security)
-     - Simple fixes (typos, imports)
-     - Complex fixes (refactoring, logic)
-  3. Test each fix individually
-  4. Verify no regressions
-```
-
-### When To Push Back
-
-Push back when:
-
-- Suggestion breaks existing functionality
-- Reviewer lacks full context
-- Violates YAGNI (unused feature)
-- Technically incorrect for this stack
-- Legacy/compatibility reasons exist
-- Conflicts with the user's architectural decisions
-
-**How to push back:**
-
-- Use technical reasoning, not defensiveness
-- Ask specific questions
-- Reference working tests/code
-- Involve the user if architectural
-
-### Acknowledging Correct Feedback
-
-When feedback IS correct:
-
-```
-✓ "Fixed. [Brief description of what changed]"
-✓ "Good catch — [specific issue]. Fixed in [location]."
-✓ [Just fix it and show in the code]
-
-✗ "You're absolutely right!"
-✗ "Great point!"
-✗ "Thanks for catching that!"
-✗ "Thanks for [anything]"
-✗ ANY gratitude expression
-```
-
-**Why no thanks:** Actions speak. Just fix it. The code itself shows you heard the feedback.
-
-**If you catch yourself about to write "Thanks":** DELETE IT. State the fix instead.
-
-### Gracefully Correcting Your Pushback
-
-If you pushed back and were wrong:
-
-```
-✓ "You were right — I checked [X] and it does [Y]. Implementing now."
-✓ "Verified this and you're correct. My initial understanding was wrong because [reason]. Fixing."
-
-✗ Long apology
-✗ Defending why you pushed back
-✗ Over-explaining
-```
-
-State the correction factually and move on.
-
-### Common Mistakes
-
-| Mistake | Fix |
-|---------|-----|
-| Performative agreement | State requirement or just act |
-| Blind implementation | Verify against codebase first |
-| Batch without testing | One at a time, test each |
-| Assuming reviewer is right | Check if breaks things |
-| Avoiding pushback | Technical correctness > comfort |
-| Partial implementation | Clarify all items first |
-| Can't verify, proceed anyway | State limitation, ask for direction |
-
-### Real Examples
-
-**Performative Agreement (Bad):**
-
-```
-Reviewer: "Remove legacy code"
-✗ "You're absolutely right! Let me remove that..."
-```
-
-**Technical Verification (Good):**
-
-```
-Reviewer: "Remove legacy code"
-✓ "Checking... build target is 10.15+, this API needs 13+. Need legacy for backward compat. Current impl has wrong bundle ID — fix it or drop pre-13 support?"
-```
-
-**YAGNI (Good):**
-
-```
-Reviewer: "Implement proper metrics tracking with database, date filters, CSV export"
-✓ "Grepped codebase — nothing calls this endpoint. Remove it (YAGNI)? Or is there usage I'm missing?"
-```
-
-**Unclear Item (Good):**
-
-```
-User: "Fix items 1-6"
-You understand 1,2,3,6. Unclear on 4,5.
-✓ "Understand 1,2,3,6. Need clarification on 4 and 5 before implementing."
-```
-
-## The Bottom Line
-
-**External feedback = suggestions to evaluate, not orders to follow.**
-
-Verify. Question. Then implement.
-
-No performative agreement. Technical rigor always.
-
----
-
-## Part 3: UI Visual Review (for frontend projects)
-
-Run this additional review round when the change includes UI files (`.css`, `.tsx`, `.vue`, `.html`, `.svelte`) or when `.flow-engine/sflow/ui-design.md` exists.
-
-### Design Token Consistency
-
-Check that implementation colors come from the design token system, not hardcoded values:
-
-```bash
-# Find hardcoded hex colors outside token files
-grep -rn "#[0-9a-fA-F]\{3,8\}" src/ --include="*.{css,tsx,vue,scss}" | grep -v "tokens\|theme\|variables"
-# Find hardcoded font-family declarations
-grep -rn "font-family" src/ --include="*.{css,tsx,vue,scss}"
-# Find hardcoded spacing values
-grep -rn "margin:\|padding:" src/ --include="*.css" | grep -v "var(--"
-```
-
-Severity: Hardcoded colors/fonts that should use tokens → **CRITICAL**
-
-### Anti-Pattern Scan
-
-Common AI-generated UI anti-patterns to check:
-
-- `border-left` as decorative stripe → **CRITICAL**
-- Tags/labels starting with `#` → **IMPORTANT**
-- Inter/Roboto/Arial as primary font → **IMPORTANT**
-- Pure black (#000) or pure white (#fff) → **IMPORTANT**
-- `const styles` object pattern (React) → **IMPORTANT**
-- `scrollIntoView` without reduced-motion check → **IMPORTANT**
-- Empty state flash (no `v-if` guard) → **CRITICAL**
-
-### Accessibility Fast-Check
-
-- Focus indicators visible (`:focus-visible`)
-- Form labels associated (`<label>` or `aria-label`)
-- `prefers-reduced-motion` respected
-- Image alt text
+## Reference Documentation
+
+- [requesting-review.md](references/requesting-review.md) — When and how to request review
+- [receiving-feedback.md](references/receiving-feedback.md) — Acting on feedback with rigor
+- [severity-levels.md](references/severity-levels.md) — Issue classification guidelines
+- [minimality-discipline.md](references/minimality-discipline.md) — Over-engineering prevention
+- [ui-visual-review.md](references/ui-visual-review.md) — Frontend visual review protocol
