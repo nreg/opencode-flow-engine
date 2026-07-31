@@ -45,7 +45,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
             }));
           }
 
-          const response = await fetch('https://apihub.agnes-ai.cn/v1/images/generations', {
+          const response = await fetch('https://api.agnes-ai.cn/v1/images/generations', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${apiKey}`,
@@ -136,7 +136,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
             return { title: 'Agnes Video Gen', output: JSON.stringify({ success: false, error: 'Agnesmore auth not found or invalid. Run /connect in OpenCode to configure agnesmore first.' }, null, 2) };
           }
 
-          const createResponse = await fetch('https://apihub.agnes-ai.cn/v1/videos', {
+          const createResponse = await fetch('https://api.agnes-ai.cn/v1/videos', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${apiKey}`,
@@ -169,7 +169,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
           let videoUrl = '';
           for (let attempt = 0; attempt < maxAttempts; attempt++) {
             await new Promise(r => setTimeout(r, pollIntervalMs));
-            const pollResponse = await fetch(`https://apihub.agnes-ai.cn/agnesapi?video_id=${videoId}`, {
+            const pollResponse = await fetch(`https://api.agnes-ai.cn/agnesapi?video_id=${videoId}`, {
               headers: { 'Authorization': `Bearer ${apiKey}` },
             });
             if (!pollResponse.ok) continue;
@@ -250,7 +250,7 @@ export function createAgnesTools(): Record<string, ToolDefinition> {
           const imageBuffer = await readFile(imagePath);
           const base64 = imageBuffer.toString('base64');
 
-          const response = await fetch('https://apihub.agnes-ai.cn/v1/chat/completions', {
+          const response = await fetch('https://api.agnes-ai.cn/v1/chat/completions', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${apiKey}`,
