@@ -365,6 +365,31 @@ export function createWorkflowRouterTool(): ToolDefinition {
         }
       }
 
+      // T3.2: 终端状态阻断 - closing/abandoned 状态下阻断非横向命令路由
+      // 在横向命令检测之后、intent 匹配之前执行
+      const wfStateForTerminalCheck = await readWorkflowState(changeDir);
+      if (wfStateForTerminalCheck?.state === 'closing' || wfStateForTerminalCheck?.state === 'abandoned') {
+        const terminalState = wfStateForTerminalCheck.state;
+        return {
+          title: "Workflow Router",
+          output: JSON.stringify({
+            success: false,
+            data: {
+              terminal: true,
+              state: terminalState,
+              message: `工作流已结束（${terminalState}），当前阶段不允许操作。如需重新开始，请初始化新的 change。`,
+              stateGuardBlocked: true,
+              reasons: [`Terminal state detected: ${terminalState}`],
+              routingDeclaration: {
+                loaded: [],
+                notLoaded: ['All workflow artifacts — terminal state blocks routing'],
+                nextAction: 'No further routing allowed in terminal state',
+              },
+            },
+          }),
+        };
+      }
+
       // Phase 1: Intent-based routing (if user gave a clear intent)
       if (userIntent) {
         // P4: Try intent matching FIRST. Only fall back to "new thing detection"

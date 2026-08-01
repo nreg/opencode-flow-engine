@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'bun:test';
-import { Validator } from './validator.js';
+import { Validator, countScenarios, extractRequirementText } from './validator.js';
 
 describe('Validator', () => {
   const validator = new Validator();
@@ -546,5 +546,102 @@ The system SHALL allow users to log out.
 
       expect(report.hasConflicts).toBe(false);
     });
+  });
+});
+
+describe('countScenarios', () => {
+  it('should count scenarios correctly', () => {
+    const blockRaw = `### Requirement: Login
+
+The system SHALL allow login.
+
+#### Scenario: Successful Login
+
+**When:** User logs in successfully
+
+#### Scenario: Failed Login
+
+**When:** User logs in with invalid credentials
+`;
+
+    const count = countScenarios(blockRaw);
+    expect(count).toBe(2);
+  });
+
+  it('should ignore scenarios inside fenced code blocks', () => {
+    const blockRaw = `### Requirement: Login
+
+The system SHALL allow login.
+
+\`\`\`markdown
+#### Scenario: Fake Scenario
+
+This should be ignored.
+\`\`\`
+
+#### Scenario: Real Scenario
+
+**When:** User logs in
+`;
+
+    const count = countScenarios(blockRaw);
+    expect(count).toBe(1);
+  });
+
+  it('should return 0 when no scenarios', () => {
+    const blockRaw = `### Requirement: Login
+
+The system SHALL allow login.
+`;
+
+    const count = countScenarios(blockRaw);
+    expect(count).toBe(0);
+  });
+});
+
+describe('extractRequirementText', () => {
+  it('should extract requirement text', () => {
+    const blockRaw = `### Requirement: Login
+
+The system SHALL allow login.
+
+#### Scenario: Login
+
+**When:** User logs in
+`;
+
+    const text = extractRequirementText(blockRaw);
+    expect(text).toBe('The system SHALL allow login.');
+  });
+
+  it('should ignore text inside fenced code blocks', () => {
+    const blockRaw = `### Requirement: Login
+
+\`\`\`markdown
+This text is in a code block and should be ignored.
+\`\`\`
+
+The system SHALL allow login.
+
+#### Scenario: Login
+
+**When:** User logs in
+`;
+
+    const text = extractRequirementText(blockRaw);
+    expect(text).toBe('The system SHALL allow login.');
+    expect(text).not.toContain('ignored');
+  });
+
+  it('should return undefined when no requirement text', () => {
+    const blockRaw = `### Requirement: Login
+
+#### Scenario: Login
+
+**When:** User logs in
+`;
+
+    const text = extractRequirementText(blockRaw);
+    expect(text).toBeUndefined();
   });
 });

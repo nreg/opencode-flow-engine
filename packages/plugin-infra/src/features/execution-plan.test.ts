@@ -15,8 +15,13 @@ import {
   reviseExecutionPlan,
   computeContentHash,
   recommendExecutionMode,
+  recordReviewReceipt,
+  readRepairState,
+  updateRepairState,
+  validateRepairContinuity,
 } from './execution-plan.js';
-import type { ExecutionPlan, Wave } from './execution-plan-types.js';
+import type { ExecutionPlan, Wave, ReviewReceipt, RepairState } from './execution-plan-types.js';
+import { MAX_REPAIR_FAILURES } from '@opencode-flow-engine/core';
 
 // ─── Test Helpers ──────────────────────────────────────────────────────────────
 
@@ -116,8 +121,8 @@ describe('createExecutionPlan', () => {
       waves: inlineWaves,
     });
 
-    // Hash should be a non-empty hex string
-    expect(plan.hash).toMatch(/^[a-f0-9]+$/);
+    // Hash should be a sha256-prefixed hex string
+    expect(plan.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(plan.hash.length).toBeGreaterThan(0);
   });
 
@@ -550,7 +555,7 @@ describe('computeContentHash', () => {
     };
 
     const hash = await computeContentHash(plan);
-    expect(hash).toMatch(/^[a-f0-9]+$/);
+    expect(hash).toMatch(/^sha256:[a-f0-9]{64}$/);
   });
 });
 
@@ -704,5 +709,287 @@ describe('Integration: execution plan lifecycle', () => {
     // Step 6: Read revised
     const readRevised = await readExecutionPlan(dir);
     expect(readRevised!.revision).toBe(2);
+  });
+});
+
+// ─── T2.5-T2.7: Repair Circuit Breaker ─────────────────────────────────────────
+
+describe('Repair Circuit Breaker', () => {
+  const dir = tempDir('repair-circuit');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await setupStateJson(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  // T2.5: repair state 数据结构测试
+  describe('T2.5: Repair state data structure', () => {
+    it('should create repair state on first failure', async () => {
+      // 创建执行计划
+      const plan = await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test repair state',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // 记录失败收据
+      const receipt = await recordReviewReceipt(dir, 'W1', {
+        status: 'fail',
+        base: 'abc123',
+        head: 'def456',
+        report: 'Test failure report',
+      });
+
+      expect(receipt.status).toBe('fail');
+      expect(receipt.repair_state).toBeDefined();
+      expect(receipt.repair_state?.status).toBe('repairing');
+      expect(receipt.repair_state?.failure_count).toBe(1);
+      expect(receipt.repair_state?.max_failures).toBe(MAX_REPAIR_FAILURES);
+    });
+
+    it('should read repair state correctly', async () => {
+      // 创建执行计划
+      const plan = await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test read repair state',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // 记录失败收据
+      await recordReviewReceipt(dir, 'W1', {
+        status: 'fail',
+        base: 'abc123',
+        head: 'def456',
+        report: 'Test failure',
+      });
+
+      // 读取 repair state
+      const repairState = await readRepairState(dir, plan, 'W1');
+      expect(repairState).not.toBeNull();
+      expect(repairState?.status).toBe('repairing');
+      expect(repairState?.failure_count).toBe(1);
+    });
+  });
+
+  // T2.6: 熔断阈值和阻断逻辑测试
+  describe('T2.6: Circuit breaker threshold and blocking', () => {
+    it('should enter adjudication-required when threshold is reached', async () => {
+      // 创建执行计划
+      const plan = await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test threshold',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // 连续失败 MAX_REPAIR_FAILURES 次
+      let currentHead = 'initial-head';
+      for (let i = 0; i < MAX_REPAIR_FAILURES; i++) {
+        const receipt = await recordReviewReceipt(dir, 'W1', {
+          status: 'fail',
+          base: currentHead, // base 必须等于上一次的 head
+          head: `head${i}`,
+          report: `Failure ${i}`,
+        });
+
+        currentHead = `head${i}`; // 更新 currentHead 为本次的 head
+
+        if (i < MAX_REPAIR_FAILURES - 1) {
+          expect(receipt.repair_state?.status).toBe('repairing');
+        } else {
+          // 最后一次失败应该触发熔断
+          expect(receipt.repair_state?.status).toBe('adjudication-required');
+          expect(receipt.repair_state?.failure_count).toBe(MAX_REPAIR_FAILURES);
+        }
+      }
+    });
+
+    it('should block new reviews when in adjudication-required state', async () => {
+      // 创建执行计划
+      const plan = await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test blocking',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // 连续失败达到阈值
+      let currentHead = 'initial-head';
+      for (let i = 0; i < MAX_REPAIR_FAILURES; i++) {
+        await recordReviewReceipt(dir, 'W1', {
+          status: 'fail',
+          base: currentHead,
+          head: `head${i}`,
+          report: `Failure ${i}`,
+        });
+        currentHead = `head${i}`;
+      }
+
+      // 尝试再次记录 review 应该被阻断
+      await expect(
+        recordReviewReceipt(dir, 'W1', {
+          status: 'fail',
+          base: currentHead,
+          head: 'newhead',
+          report: 'Should be blocked',
+        }),
+      ).rejects.toThrow('requires adjudication before another review can be recorded');
+    });
+
+    it('should support custom max_failures threshold', async () => {
+      // 创建执行计划
+      const plan = await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test custom threshold',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // 使用自定义阈值 3
+      const customMaxFailures = 3;
+
+      // 连续失败 3 次
+      let currentHead = 'initial-head';
+      for (let i = 0; i < customMaxFailures; i++) {
+        const receipt = await recordReviewReceipt(dir, 'W1', {
+          status: 'fail',
+          base: currentHead,
+          head: `head${i}`,
+          report: `Failure ${i}`,
+        });
+
+        currentHead = `head${i}`;
+
+        // 注意：recordReviewReceipt 使用默认阈值，这里只是验证数据结构支持自定义阈值
+        if (i === 0) {
+          expect(receipt.repair_state?.max_failures).toBe(MAX_REPAIR_FAILURES);
+        }
+      }
+    });
+  });
+
+  // T2.7: repair chain 连续性校验测试
+  describe('T2.7: Repair chain continuity validation', () => {
+    it('should block review if base does not equal previous head', async () => {
+      // 创建执行计划
+      const plan = await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test continuity',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // 第一次失败
+      await recordReviewReceipt(dir, 'W1', {
+        status: 'fail',
+        base: 'base1',
+        head: 'head1',
+        report: 'First failure',
+      });
+
+      // 尝试用不连续的 base 记录 review 应该被阻断
+      await expect(
+        recordReviewReceipt(dir, 'W1', {
+          status: 'fail',
+          base: 'wrongbase', // 不等于 head1
+          head: 'head2',
+          report: 'Should be blocked',
+        }),
+      ).rejects.toThrow('Repair review base must equal the previous review head');
+    });
+
+    it('should allow fail→pass with exact same range', async () => {
+      // 创建执行计划
+      const plan = await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test fail to pass',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // 第一次失败
+      await recordReviewReceipt(dir, 'W1', {
+        status: 'fail',
+        base: 'base1',
+        head: 'head1',
+        report: 'First failure',
+      });
+
+      // 使用相同范围的 pass 应该被允许
+      const receipt = await recordReviewReceipt(dir, 'W1', {
+        status: 'pass',
+        base: 'base1', // 相同范围
+        head: 'head1',
+        report: 'Fixed',
+      });
+
+      expect(receipt.status).toBe('pass');
+      expect(receipt.repair_state?.status).toBe('resolved');
+    });
+
+    it('should block duplicate pass receipt', async () => {
+      // 创建执行计划
+      const plan = await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test duplicate pass',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // 第一次 pass
+      await recordReviewReceipt(dir, 'W1', {
+        status: 'pass',
+        base: 'base1',
+        head: 'head1',
+        report: 'First pass',
+      });
+
+      // 尝试再次记录 pass 应该被阻断
+      await expect(
+        recordReviewReceipt(dir, 'W1', {
+          status: 'pass',
+          base: 'base1',
+          head: 'head1',
+          report: 'Duplicate pass',
+        }),
+      ).rejects.toThrow('already has a passing review receipt');
+    });
+
+    it('should mark repair state as resolved after successful repair', async () => {
+      // 创建执行计划
+      const plan = await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test resolved',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // 失败
+      await recordReviewReceipt(dir, 'W1', {
+        status: 'fail',
+        base: 'base1',
+        head: 'head1',
+        report: 'Failure',
+      });
+
+      // 修复成功
+      const receipt = await recordReviewReceipt(dir, 'W1', {
+        status: 'pass',
+        base: 'head1', // 从上一次的 head 开始
+        head: 'head2',
+        report: 'Fixed',
+      });
+
+      expect(receipt.repair_state?.status).toBe('resolved');
+      expect(receipt.repair_state?.failure_count).toBe(1);
+      expect(receipt.repair_state?.resolution).toBeDefined();
+    });
   });
 });

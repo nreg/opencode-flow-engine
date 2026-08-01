@@ -106,10 +106,28 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
         return await stateFileMutex.runExclusive(async () => {
           const currentState = await readStateFile(changeDir);
 
+          // 先检查状态转换是否有效
           if (!isValidTransition(currentState.state, newState)) {
             return {
               success: false,
               error: `Invalid transition from ${currentState.state} to ${newState}`,
+            } as FeatureResult;
+          }
+
+          // T3.1: 终端状态阻断 - abandoned 状态下拒绝任何状态转换
+          // closing 状态下只允许转换到 abandoned（因为 abandoned 也是终端状态）
+          // 注意：这个检查在 isValidTransition 之后，因为 isValidTransition 已经定义了有效转换
+          if (currentState.state === 'abandoned') {
+            return {
+              success: false,
+              error: `工作流已结束（${currentState.state}），不允许状态转换`,
+            } as FeatureResult;
+          }
+
+          if (currentState.state === 'closing' && newState !== 'abandoned') {
+            return {
+              success: false,
+              error: `工作流已结束（${currentState.state}），不允许状态转换`,
             } as FeatureResult;
           }
 
@@ -126,6 +144,16 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
                 } as FeatureResult;
               }
             }
+          }
+
+          // P1-1: 自动迁移旧 spec_merged 到 publication receipt
+          // 当首次进入 bridging 状态时，如果检测到旧的 spec_merged=true 但没有 publication receipt，
+          // 自动生成初始 receipt，确保向后兼容
+          if (newState === 'bridging' && currentState.state !== 'bridging') {
+            await migrateSpecMergedToReceipt(changeDir, currentState).catch(err => {
+              // 迁移失败不影响状态转换，仅记录警告
+              console.warn('[P1-1] Migration from spec_merged to publication receipt failed:', err);
+            });
           }
 
           const now = new Date().toISOString();
@@ -198,16 +226,38 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
   };
 }
 
+/**
+ * P0-2: 推断工作流模式（支持 quick 模式）
+ * 
+ * 推断规则（优先级从高到低）：
+ * 1. 无 proposal 且无 contract → hotfix（<=2 文件/任务）或 full
+ * 2. 有 contract → full
+ * 3. 低风险代码工作（<=3 文件/任务）→ quick
+ * 4. config/doc-only（<=4 文件/任务）→ tweak
+ * 5. 默认 → full
+ */
 function inferModeFromArtifacts(hasProposal: boolean, hasContract: boolean, changedFiles: number, taskCount: number): string {
+  // 无 proposal 且无 contract → hotfix 或 full
   if (!hasProposal && !hasContract) {
     return changedFiles <= 2 && taskCount <= 2 ? 'hotfix' : 'full';
   }
+  
+  // 有 contract → full
   if (hasContract) {
     return 'full';
   }
+  
+  // P0-2: 低风险代码工作 → quick
+  if (changedFiles <= 3 && taskCount <= 3) {
+    return 'quick';
+  }
+  
+  // config/doc-only → tweak
   if (changedFiles <= 4 && taskCount <= 4) {
     return 'tweak';
   }
+  
+  // 默认 → full
   return 'full';
 }
 
@@ -258,6 +308,7 @@ async function readStateFile(changeDir: string): Promise<{
   contractApproved: boolean;
   verificationStatus: string;
   isFrontend?: boolean;
+  artifact_language?: 'zh' | 'en';
   [key: string]: unknown;
 }> {
   const statePath = `${changeDir}/${STATE_FILE}`;
@@ -272,6 +323,7 @@ async function readStateFile(changeDir: string): Promise<{
     contractApproved: boolean;
     verificationStatus: string;
     isFrontend?: boolean;
+    artifact_language?: 'zh' | 'en';
     [key: string]: unknown;
   }>(
     statePath,
@@ -298,6 +350,7 @@ async function readStateFile(changeDir: string): Promise<{
     contractApproved: false,
     verificationStatus: 'pending',
     isFrontend: false,
+    artifact_language: undefined,
   };
 }
 
@@ -316,5 +369,104 @@ async function archiveWorkflow(changeDir: string): Promise<void> {
     batches_completed: stateSnapshot?.batches_completed,
   };
   await writeJsonFile(`${changeDir}/${ARCHIVE_DIR}/archive.json`, archiveData);
+}
+
+/**
+ * P1-1: 自动迁移旧 spec_merged 到 publication receipt
+ * 
+ * 迁移场景：
+ * - 首次进入 bridging 状态时
+ * - 检测到 state.json 中 spec_merged=true
+ * - 但 .flow-engine/sflow/spec-publication/ 目录不存在或为空
+ * 
+ * 迁移逻辑：
+ * 1. 读取当前 specs/ 目录下的所有 capability
+ * 2. 为每个 capability 生成初始 publication receipt
+ * 3. 将 receipt 写入 .flow-engine/sflow/spec-publication/<capability>.json
+ * 
+ * 注意：
+ * - 此函数在 transitionState 内部调用，已受 stateFileMutex 保护
+ * - 迁移失败不影响状态转换，仅记录警告
+ * - 代码注释必须清晰说明迁移来源和兼容策略
+ */
+async function migrateSpecMergedToReceipt(
+  changeDir: string,
+  currentState: Record<string, unknown>
+): Promise<void> {
+  // 检查是否需要迁移：spec_merged=true 但无 publication receipt
+  if (currentState.spec_merged !== true) {
+    return; // 无需迁移
+  }
+
+  // 动态导入 spec-publication 模块（避免循环依赖）
+  const {
+    hasPublicationReceipts,
+    createPublicationReceipt,
+    savePublicationReceipt,
+    resolvePublicationContext,
+  } = await import('./spec-publication.js');
+
+  // 检查是否已存在 receipt
+  const hasReceipts = await hasPublicationReceipts(changeDir);
+  if (hasReceipts) {
+    return; // 已存在 receipt，无需迁移
+  }
+
+  // 迁移逻辑：为当前所有 specs 生成初始 receipt
+  console.log('[P1-1] Migrating legacy spec_merged=true to publication receipts...');
+
+  const context = resolvePublicationContext(changeDir);
+  const { readdir } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+
+  // 读取 specs 目录下的所有 capability
+  const specsDir = join(context.projectRoot, 'specs');
+  const specsExists = await directoryExists(specsDir);
+  if (!specsExists) {
+    console.log('[P1-1] No specs directory found, skipping migration');
+    return;
+  }
+
+  try {
+    const entries = await readdir(specsDir, { withFileTypes: true });
+    const capabilities = entries
+      .filter(e => e.isDirectory())
+      .map(e => e.name)
+      .filter(name => !name.startsWith('.')); // 忽略隐藏目录
+
+    if (capabilities.length === 0) {
+      console.log('[P1-1] No capabilities found in specs/, skipping migration');
+      return;
+    }
+
+    // 为每个 capability 生成初始 receipt
+    for (const capability of capabilities) {
+      // 构造 spec 文件列表（简化：假设每个 capability 有一个 spec.md）
+      const specFiles = [join(specsDir, capability, 'spec.md')];
+      
+      // 生成 receipt（使用当前 baseline 哈希）
+      const receipt = await createPublicationReceipt(
+        changeDir,
+        context.projectRoot,
+        specFiles,
+        'migrated-from-spec-merged', // 标记为迁移来源
+        currentState.change_id as string || 'legacy-change'
+      );
+
+      // 添加迁移标记
+      receipt.warnings.push(
+        'P1-1: This receipt was auto-generated from legacy spec_merged=true flag during first bridging entry.'
+      );
+
+      // 保存 receipt
+      await savePublicationReceipt(context.projectRoot, receipt);
+      console.log(`[P1-1] Migrated receipt for capability: ${capability}`);
+    }
+
+    console.log(`[P1-1] Migration complete: ${capabilities.length} receipt(s) generated`);
+  } catch (error) {
+    console.error('[P1-1] Migration failed:', error);
+    throw error; // 重新抛出，让调用方处理
+  }
 }
 

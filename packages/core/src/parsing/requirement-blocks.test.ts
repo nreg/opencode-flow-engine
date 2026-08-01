@@ -10,6 +10,8 @@ import {
   parseChangeMarkdown,
   normalizeRequirementName,
   REQUIREMENT_HEADER_REGEX,
+  scanMarkdownLines,
+  requirementNameFromMatch,
 } from './requirement-blocks.js';
 
 describe('normalizeRequirementName', () => {
@@ -105,6 +107,51 @@ The system SHALL allow login.
     const parts = extractRequirementsSection(content);
     expect(parts.preamble).toContain('Some preamble text');
     expect(parts.bodyBlocks.length).toBe(1);
+  });
+
+  it('should ignore requirement headers inside fenced code blocks', () => {
+    const content = `## Requirements
+
+### Requirement: Real Requirement
+
+The system SHALL do something real.
+
+\`\`\`markdown
+### Requirement: Fake Requirement
+
+This should be ignored.
+\`\`\`
+
+### Requirement: Another Real One
+
+The system SHALL do another thing.
+`;
+
+    const parts = extractRequirementsSection(content);
+    expect(parts.bodyBlocks.length).toBe(2);
+    expect(parts.bodyBlocks[0]?.name).toBe('Real Requirement');
+    expect(parts.bodyBlocks[1]?.name).toBe('Another Real One');
+
+    // 确保假标题没有被识别
+    const names = parts.bodyBlocks.map(b => b.name);
+    expect(names).not.toContain('Fake Requirement');
+  });
+
+  it('should handle fenced blocks with tilde markers', () => {
+    const content = `## Requirements
+
+### Requirement: Real
+
+The system SHALL work.
+
+~~~
+### Requirement: Fake
+~~~
+`;
+
+    const parts = extractRequirementsSection(content);
+    expect(parts.bodyBlocks.length).toBe(1);
+    expect(parts.bodyBlocks[0]?.name).toBe('Real');
   });
 });
 
@@ -227,12 +274,135 @@ describe('REQUIREMENT_HEADER_REGEX', () => {
     const line = '### Requirement: User Login';
     const match = line.match(REQUIREMENT_HEADER_REGEX);
     expect(match).not.toBeNull();
-    expect(match?.[1]).toBe('User Login');
+    expect(match).toBeDefined();
+    if (match) {
+      expect(requirementNameFromMatch(match)).toBe('User Login');
+    }
   });
 
   it('should be case-insensitive', () => {
     const line = '### requirement: User Login';
     const match = line.match(REQUIREMENT_HEADER_REGEX);
     expect(match).not.toBeNull();
+  });
+
+  it('should support Chinese colon（中文冒号支持）', () => {
+    const line = '### 需求：用户登录';
+    const match = line.match(REQUIREMENT_HEADER_REGEX);
+    expect(match).not.toBeNull();
+    expect(match).toBeDefined();
+    if (match) {
+      expect(requirementNameFromMatch(match)).toBe('用户登录');
+    }
+  });
+
+  it('should support REQ-ID format（REQ-ID 格式支持）', () => {
+    const line = '### REQ-AUTH-001 用户登录';
+    const match = line.match(REQUIREMENT_HEADER_REGEX);
+    expect(match).not.toBeNull();
+    expect(match).toBeDefined();
+    if (match) {
+      expect(requirementNameFromMatch(match)).toBe('用户登录');
+    }
+  });
+
+  it('should support REQ-ID with colon', () => {
+    const line = '### REQ-AUTH-001: User Login';
+    const match = line.match(REQUIREMENT_HEADER_REGEX);
+    expect(match).not.toBeNull();
+    expect(match).toBeDefined();
+    if (match) {
+      expect(requirementNameFromMatch(match)).toBe('User Login');
+    }
+  });
+
+  it('should support mixed Chinese and English', () => {
+    const line1 = '### Requirement: 用户登录';
+    const match1 = line1.match(REQUIREMENT_HEADER_REGEX);
+    expect(match1).not.toBeNull();
+    expect(match1).toBeDefined();
+    if (match1) {
+      expect(requirementNameFromMatch(match1)).toBe('用户登录');
+    }
+
+    const line2 = '### 需求：User Login';
+    const match2 = line2.match(REQUIREMENT_HEADER_REGEX);
+    expect(match2).not.toBeNull();
+    expect(match2).toBeDefined();
+    if (match2) {
+      expect(requirementNameFromMatch(match2)).toBe('User Login');
+    }
+  });
+});
+
+describe('scanMarkdownLines', () => {
+  it('should mark lines inside fenced code blocks', () => {
+    const content = `Some text
+
+\`\`\`markdown
+### Requirement: FakeTitle
+\`\`\`
+
+### Requirement: RealTitle`;
+    const lines = scanMarkdownLines(content);
+    expect(lines.length).toBeGreaterThan(0);
+
+    // 找到 FakeTitle 所在行
+    const fakeLine = lines.find(l => l.text.includes('FakeTitle'));
+    expect(fakeLine).toBeDefined();
+    expect(fakeLine?.fenced).toBe(true);
+
+    // 找到 RealTitle 所在行
+    const realLine = lines.find(l => l.text.includes('RealTitle'));
+    expect(realLine).toBeDefined();
+    expect(realLine?.fenced).toBe(false);
+  });
+
+  it('should handle nested fences with different markers', () => {
+    const content = `\`\`\`
+Inside backticks
+~~~
+Nested tildes
+~~~
+\`\`\`
+
+Outside all fences`;
+    const lines = scanMarkdownLines(content);
+    const nestedLine = lines.find(l => l.text.includes('Nested tildes'));
+    expect(nestedLine?.fenced).toBe(true);
+
+    const outsideLine = lines.find(l => l.text.includes('Outside all fences'));
+    expect(outsideLine?.fenced).toBe(false);
+  });
+
+  it('should handle tilde fences', () => {
+    const content = `~~~
+### Requirement: TildeFake
+~~~
+
+### Requirement: Real`;
+    const lines = scanMarkdownLines(content);
+    const tildeFake = lines.find(l => l.text.includes('TildeFake'));
+    expect(tildeFake?.fenced).toBe(true);
+
+    const real = lines.find(l => l.text.includes('Real'));
+    expect(real?.fenced).toBe(false);
+  });
+
+  it('should preserve line numbers', () => {
+    const content = `Line 1
+Line 2
+Line 3`;
+    const lines = scanMarkdownLines(content);
+    expect(lines[0]?.lineNumber).toBe(1);
+    expect(lines[1]?.lineNumber).toBe(2);
+    expect(lines[2]?.lineNumber).toBe(3);
+  });
+
+  it('should handle empty content', () => {
+    const lines = scanMarkdownLines('');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.text).toBe('');
+    expect(lines[0]?.fenced).toBe(false);
   });
 });

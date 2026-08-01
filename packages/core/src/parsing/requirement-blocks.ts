@@ -7,9 +7,119 @@
 import type { RequirementBlock, RequirementsSectionParts, DeltaPlan, ParsedDelta, ParsedChange } from './types.js';
 
 /**
- * Regex for requirement headers (### Requirement: Name)
+ * Markdown 行结构，包含文本、行号和是否在 fenced code block 内的标记
  */
-export const REQUIREMENT_HEADER_REGEX = /^#{3,4}\s*Requirement:\s*(.+)\s*$/i;
+export interface MarkdownLine {
+  text: string;
+  lineNumber: number;
+  fenced: boolean;
+}
+
+/**
+ * Fenced code block 的围栏信息
+ */
+interface Fence {
+  marker: '`' | '~';
+  length: number;
+}
+
+/**
+ * 检测行是否为 opening fence（``` 或 ~~~）
+ */
+function openingFence(line: string): Fence | undefined {
+  const match = line.match(/^ {0,3}(`{3,}|~{3,})/);
+  if (!match) return undefined;
+  return {
+    marker: match[1]![0] as Fence['marker'],
+    length: match[1]!.length,
+  };
+}
+
+/**
+ * 检测行是否关闭当前 fence
+ */
+function closesFence(line: string, fence: Fence): boolean {
+  const match = line.match(/^ {0,3}(`+|~+)\s*$/);
+  return Boolean(
+    match && match[1]![0] === fence.marker && match[1]!.length >= fence.length
+  );
+}
+
+/**
+ * 扫描 markdown 内容，标记每行是否在 fenced code block 内
+ * 用于忽略代码示例中的假标题、假场景等
+ *
+ * @param content Markdown 内容
+ * @returns 带有 fenced 标记的行数组
+ */
+export function scanMarkdownLines(content: string): MarkdownLine[] {
+  const normalized = content.replace(/\r\n?/g, '\n');
+  const lines = normalized.split('\n');
+  let activeFence: Fence | undefined;
+
+  return lines.map((text, index) => {
+    // 如果当前在 fenced block 内
+    if (activeFence) {
+      // 检查是否为 closing fence
+      if (closesFence(text, activeFence)) {
+        activeFence = undefined;
+        return { text, lineNumber: index + 1, fenced: false };
+      }
+      // 仍在 fenced block 内
+      return { text, lineNumber: index + 1, fenced: true };
+    }
+
+    // 不在 fenced block 内，检查是否为 opening fence
+    const fence = openingFence(text);
+    if (fence) activeFence = fence;
+    return { text, lineNumber: index + 1, fenced: false };
+  });
+}
+
+/**
+ * Regex for requirement headers
+ * 支持以下格式：
+ * - ### Requirement: <name> (英文标准格式)
+ * - ### 需求：<name> (中文冒号格式)
+ * - ### REQ-<ID> <name> (REQ-ID 格式，无冒号)
+ * - ### REQ-<ID>: <name> (REQ-ID 格式，带冒号)
+ *
+ * 捕获组说明：
+ * - match[1]: Requirement/需求 格式的 name
+ * - match[2]: REQ-ID 格式的完整内容（需要进一步解析）
+ */
+export const REQUIREMENT_HEADER_REGEX = /^###\s*(?:(?:Requirement|需求)\s*[:：]\s*(.+)|(REQ-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\s*:?\s*.+))\s*$/i;
+
+/**
+ * 从正则匹配结果中提取 requirement name
+ * 处理两种格式的差异：
+ * - Requirement/需求 格式：直接使用 match[1]
+ * - REQ-ID 格式：从 match[2] 中去除 ID 前缀
+ */
+export function requirementNameFromMatch(match: RegExpMatchArray): string {
+  // match[1] 存在说明是 Requirement: 或 需求： 格式
+  if (match[1]) {
+    return normalizeRequirementName(match[1]);
+  }
+
+  // match[2] 存在说明是 REQ-ID 格式
+  if (match[2]) {
+    // REQ-ID 格式：REQ-XXX-NNN name 或 REQ-XXX-NNN: name
+    // 需要去除 REQ-ID 前缀
+    const content = match[2];
+    // 匹配 REQ-ID 部分（可能包含多个连字符）
+    const idMatch = content.match(/^REQ-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\s*:?\s*/);
+    if (idMatch) {
+      const name = content.slice(idMatch[0].length);
+      return normalizeRequirementName(name);
+    }
+    // 如果无法解析，返回原始内容
+    return normalizeRequirementName(content);
+  }
+
+  // 理论上不会到达这里，但为了类型安全
+  return '';
+}
 
 /**
  * Normalize a requirement name (trim)
@@ -27,27 +137,34 @@ function normalizeLineEndings(content: string): string {
 /**
  * Extract the requirements section from a spec file
  * Aligned with spec-superflow: returns structured parts
+ * 使用 scanMarkdownLines 过滤 fenced code block 内的内容
  */
 export function extractRequirementsSection(content: string): RequirementsSectionParts {
   const normalized = normalizeLineEndings(content);
   const lines = normalized.split('\n');
-  const reqHeaderIndex = lines.findIndex((l) => /^##\s+Requirements\s*$/i.test(l));
+  const structure = scanMarkdownLines(normalized);
+
+  // 查找 ## Requirements 标题，忽略 fenced block 内的假标题
+  const reqHeaderIndex = structure.findIndex(
+    ({ text, fenced }) => !fenced && /^##\s+Requirements\s*$/i.test(text)
+  );
 
   if (reqHeaderIndex === -1) {
     const before = content.trimEnd();
     const headerLine = '## Requirements';
     return {
       before: before ? before + '\n\n' : '',
-      headerLine: headerLine!,
+      headerLine,
       preamble: '',
       bodyBlocks: [],
       after: '\n',
     };
   }
 
+  // 查找下一个 ## 标题作为结束位置，忽略 fenced block 内的假标题
   let endIndex = lines.length;
   for (let i = reqHeaderIndex + 1; i < lines.length; i++) {
-    if (/^##\s+/.test(lines[i]!)) {
+    if (!structure[i]!.fenced && /^##\s+/.test(lines[i]!)) {
       endIndex = i;
       break;
     }
@@ -61,32 +178,46 @@ export function extractRequirementsSection(content: string): RequirementsSection
   let cursor = 0;
   const preambleLines: string[] = [];
 
+  // 收集 preamble（在第一个 requirement header 之前的内容）
+  // 忽略 fenced block 内的假 requirement header
   while (
     cursor < sectionBodyLines.length &&
-    !REQUIREMENT_HEADER_REGEX.test(sectionBodyLines[cursor]!)
+    (structure[reqHeaderIndex + 1 + cursor]!.fenced ||
+      !REQUIREMENT_HEADER_REGEX.test(sectionBodyLines[cursor]!))
   ) {
     preambleLines.push(sectionBodyLines[cursor]!);
     cursor++;
   }
 
+  // 解析 requirement blocks
   while (cursor < sectionBodyLines.length) {
     const headerLineCandidate = sectionBodyLines[cursor]!;
-    const headerMatch = headerLineCandidate.match(REQUIREMENT_HEADER_REGEX);
+    // 检查是否为 requirement header，忽略 fenced block 内的假标题
+    const headerMatch = structure[reqHeaderIndex + 1 + cursor]!.fenced
+      ? undefined
+      : headerLineCandidate.match(REQUIREMENT_HEADER_REGEX);
+
     if (!headerMatch) {
       cursor++;
       continue;
     }
-    const name = normalizeRequirementName(headerMatch[1]!);
+
+    const name = requirementNameFromMatch(headerMatch);
     cursor++;
     const bodyLines: string[] = [headerLineCandidate];
+
+    // 收集 requirement body，直到下一个 requirement header 或 ## 标题
+    // 忽略 fenced block 内的假标题
     while (
       cursor < sectionBodyLines.length &&
-      !REQUIREMENT_HEADER_REGEX.test(sectionBodyLines[cursor]!) &&
-      !/^##\s+/.test(sectionBodyLines[cursor]!)
+      (structure[reqHeaderIndex + 1 + cursor]!.fenced ||
+        (!REQUIREMENT_HEADER_REGEX.test(sectionBodyLines[cursor]!) &&
+          !/^##\s+/.test(sectionBodyLines[cursor]!)))
     ) {
       bodyLines.push(sectionBodyLines[cursor]!);
       cursor++;
     }
+
     const raw = bodyLines.join('\n').trimEnd();
     blocks.push({ headerLine: headerLineCandidate!, name, raw });
   }

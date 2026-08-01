@@ -322,7 +322,8 @@ describe('Workflow State Machine — Invalid Transitions', () => {
     await writeStateFile(dir, { state: from, mode: 'full' });
     const result = await wf.transitionState(dir, to);
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Invalid transition');
+    // 接受两种错误消息：Invalid transition 或 工作流已结束
+    expect(result.error).toMatch(/Invalid transition|工作流已结束/);
   });
 });
 

@@ -18,10 +18,13 @@ export {
 export type {
   ExecutionMode,
   ReceiptStatus,
+  RepairStatus,
   WaveStrategy,
   PlanSource,
   Wave,
   ReviewReceipt,
+  ReviewEvidence,
+  RepairState,
   DP4Result,
   ExecutionPlan,
 } from './execution-plan-types.js';
@@ -35,6 +38,9 @@ export {
   recommendExecutionMode,
   validatePlanStructure,
   recordReviewReceipt,
+  readRepairState,
+  updateRepairState,
+  validateRepairContinuity,
 } from './execution-plan.js';
 
 export type {
@@ -145,5 +151,33 @@ export {
   ABSTRACTION_CATEGORIES,
   detectNewAbstraction,
   recordGrepResult,
+} from './abstraction-grep-tracker.js';
+
+// ─── Spec Publication (P1-1) ───────────────────────────────────────────────────
+
+export type {
+  PublicationReceipt,
+  DeltaOperation,
+  ApplyDeltaResult,
+  PublicationContext,
+  ReceiptValidationResult,
+} from './spec-publication.js';
+
+export {
+  SPEC_PUBLICATION_DIR,
+  applyDeltaToBaseline,
+  applyDeltaToBaselineDetailed,
+  resolvePublicationContext,
+  hashChangeDelta,
+  hashPublishedBaseline,
+  createPublicationReceipt,
+  savePublicationReceipt,
+  readPublicationReceipt,
+  validatePublicationReceipt,
+  hasPublicationReceipts,
+  listPublicationReceipts,
+} from './spec-publication.js';
+
+export {
   hasGrepRecord,
 } from './abstraction-grep-tracker.js';

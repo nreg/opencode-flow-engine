@@ -59,7 +59,7 @@ export const HORIZONTAL_COMMANDS: HorizontalCommandEntry[] = [
 
   // --- fix-loop (审查并修复循环) ---
   {
-    pattern: /.*review.*修复|.*审查.*修复|review.*并.*修复|审查.*并.*修复|review.*and.*fix|review this against|find issues and fix|参考.*项目.*修复|review.*fix.*loop/i,
+    pattern: /.*review.*修复|.*审查.*修复|review.*并.*修复|审查.*并.*修复|review.*and.*fix|review this against|find issues and fix|参考.*项目.*修复|对比.*项目.*修复|review.*fix.*loop/i,
     agent: 'sFlow',
     action: 'fix-loop',
     description: 'Fix-Loop Mode：review-engineer 审查 → 门控决策 → sFlow 修复 → 循环（最多 10 轮）',

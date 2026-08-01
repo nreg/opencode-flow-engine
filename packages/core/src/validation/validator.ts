@@ -20,10 +20,11 @@ import {
   parseDeltaSpec,
   normalizeRequirementName,
   extractRequirementsSection,
+  scanMarkdownLines,
 } from '../parsing/requirement-blocks.js';
 
 const REQUIREMENT_HEADER_REGEX = /^#{3,4}\s*Requirement:\s*(.+)\s*$/i;
-const SCENARIO_HEADER_REGEX = /^####\s+Scenario:/gim;
+const SCENARIO_HEADER_REGEX = /^####\s+Scenario:/i;
 
 function normalizeLineEndings(content: string): string {
   return content.replace(/\r\n?/g, '\n');
@@ -51,22 +52,51 @@ function containsShallOrMust(text: string): boolean {
   return /\b(SHALL|MUST)\b/.test(text);
 }
 
-function countScenarios(blockRaw: string): number {
-  const matches = blockRaw.match(SCENARIO_HEADER_REGEX);
-  return matches ? matches.length : 0;
+/**
+ * 统计 requirement block 中的场景数量
+ * 使用 scanMarkdownLines 忽略 fenced code block 内的假场景
+ */
+export function countScenarios(blockRaw: string): number {
+  return scanMarkdownLines(blockRaw).filter(
+    ({ text, fenced }) => !fenced && SCENARIO_HEADER_REGEX.test(text)
+  ).length;
 }
 
-function extractRequirementText(blockRaw: string): string | undefined {
-  const lines = blockRaw.split('\n');
+/**
+ * 提取 requirement block 的需求文本
+ * 使用 scanMarkdownLines 忽略 fenced code block 内的内容
+ */
+export function extractRequirementText(blockRaw: string): string | undefined {
+  const lines = scanMarkdownLines(blockRaw);
+  const paragraph: string[] = [];
+
   for (let i = 1; i < lines.length; i++) {
-    const line = lines[i]!;
+    const { text: line, fenced } = lines[i]!;
+
+    // 忽略 fenced block 内的内容
+    if (fenced) continue;
+
+    // 跳过 fence 标记行（``` 或 ~~~）
+    if (/^ {0,3}(`{3,}|~{3,})/.test(line)) continue;
+
+    // 遇到 #### 标题就停止
     if (/^####\s+/.test(line)) break;
+
     const trimmed = line.trim();
-    if (trimmed.length === 0) continue;
+
+    // 空行：如果已收集文本则停止，否则继续
+    if (trimmed.length === 0) {
+      if (paragraph.length > 0) break;
+      continue;
+    }
+
+    // 跳过字段元数据（**Field**: value 格式）
     if (/^\*\*[^*]+\*\*:/.test(trimmed)) continue;
-    return trimmed;
+
+    paragraph.push(trimmed);
   }
-  return undefined;
+
+  return paragraph.length > 0 ? paragraph.join(' ') : undefined;
 }
 
 function buildMissingShallOrMustMessage(

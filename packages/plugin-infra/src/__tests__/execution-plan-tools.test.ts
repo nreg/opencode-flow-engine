@@ -120,7 +120,7 @@ describe('recordReviewReceipt', () => {
     };
     const receipt2: Omit<ReviewReceipt, 'recorded_at'> = {
       status: 'pass',
-      base: 'abc1234',
+      base: 'def5678', // 修复：re-review 的 base 应为前一次的 head，满足 P1-2 连续性校验
       head: 'ghi9012',
       report: 'Re-review passed after fixes',
     };

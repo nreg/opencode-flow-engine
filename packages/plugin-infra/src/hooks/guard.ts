@@ -459,10 +459,20 @@ async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow' | 'sf
 // ─── Wave W5: checkSpecsMerged ────────────────────────────────────────────────
 
 /**
- * CG-6: Check if specs have been merged before closing (Issue #28).
- * - Check if .flow-engine/sflow/state.json has spec_merged: true
- * - If delta-specs directory exists (specs/delta/) and spec_merged is not true → block closing
- * - If no delta-specs directory → skip (backward compatible)
+ * CG-6: Check if specs have been merged before closing (Issue #28, P1-1).
+ * 
+ * P1-1 更新：优先使用 Publication Receipt 验证，spec_merged 作为降级兼容。
+ * 
+ * 验证优先级：
+ * 1. 检查 .flow-engine/sflow/spec-publication/ 目录是否存在收据
+ * 2. 如果存在收据，验证其完整性和一致性
+ * 3. 如果不存在收据但 state.json 中 spec_merged=true，发出 WARNING 但放行（降级兼容）
+ * 4. 如果既无收据也无 spec_merged，阻断 closing
+ * 
+ * 向后兼容：
+ * - 旧项目可能只有 spec_merged=true，无 publication receipt
+ * - 给予过渡期，仅警告不阻断
+ * 
  * Only applies for sflow workflow.
  * READ-ONLY (C4): never writes state.
  */
@@ -478,26 +488,66 @@ async function checkSpecsMerged(changeDir: string, activeWorkflow: 'iflow' | 'sf
   if (!deltaSpecsExists) return { success: true };
 
   // Check if delta-specs directory has any .md files
+  let mdFiles: string[] = [];
   try {
     const { readdir } = await import('node:fs/promises');
     const files = await readdir(deltaSpecsPath);
-    const mdFiles = files.filter(f => f.endsWith('.md'));
+    mdFiles = files.filter(f => f.endsWith('.md'));
     if (mdFiles.length === 0) return { success: true }; // Empty delta-specs dir, skip
   } catch {
     return { success: true }; // Can't read dir, skip
   }
 
-  // Read state.json to check spec_merged
+  // P1-1: 优先检查 Publication Receipt
+  const { hasPublicationReceipts, listPublicationReceipts, readPublicationReceipt, validatePublicationReceipt } = await import('../features/spec-publication.js');
+  
+  const hasReceipts = await hasPublicationReceipts(changeDir);
+  if (hasReceipts) {
+    // 存在收据目录，验证收据完整性
+    const receiptCapabilities = await listPublicationReceipts(changeDir);
+    
+    // 读取所有收据并验证
+    for (const capability of receiptCapabilities) {
+      const receipt = await readPublicationReceipt(changeDir, capability);
+      if (!receipt) continue;
+      
+      // 构造 spec 文件列表（简化：假设每个 delta spec 对应一个 capability）
+      const specFiles = mdFiles.map(f => `${deltaSpecsPath}/${f}`);
+      
+      // 验证收据
+      const validation = await validatePublicationReceipt(changeDir, changeDir, receipt, specFiles);
+      if (!validation.pass) {
+        return {
+          success: false,
+          block: true,
+          blockReason: `[SFLOW] Specs publication check: publication receipt validation failed. ${validation.reason} Re-run spec merge to update receipt.`,
+        };
+      }
+    }
+    
+    // 所有收据验证通过
+    return { success: true };
+  }
+
+  // P1-1: 降级兼容 - 检查旧的 spec_merged flag
   const stateData = await readJsonFile<{ spec_merged?: boolean }>(`${changeDir}/${getStateFilePath('sflow')}`);
-  if (!stateData || stateData.spec_merged !== true) {
+  if (stateData?.spec_merged === true) {
+    // 旧项目过渡期：仅有 spec_merged=true，无 publication receipt
+    // 发出 WARNING 但放行
     return {
-      success: false,
-      block: true,
-      blockReason: `[SFLOW] Specs merged check: delta-specs exist in specs/delta/ but spec_merged is not true in state.json. Merge delta specs before closing.`,
+      success: true,
+      warnings: [
+        `[SFLOW] Specs merged check: using legacy spec_merged=true flag. Consider migrating to publication receipts for stronger verification.`,
+      ],
     };
   }
 
-  return { success: true };
+  // 既无收据也无 spec_merged，阻断 closing
+  return {
+    success: false,
+    block: true,
+    blockReason: `[SFLOW] Specs merged check: delta-specs exist in specs/delta/ but no publication receipt found and spec_merged is not true. Merge delta specs before closing.`,
+  };
 }
 
 // ─── Wave W6: checkGitBranchIsolation ────────────────────────────────────────
@@ -1438,11 +1488,13 @@ export async function checkSchemaMigrationGuard(
   try {
     const { execSync: realExecSync } = await import('child_process');
     const execFn = options?.execSync ?? realExecSync;
-    stagedOutput = execFn('git diff --cached --name-only', {
+    const result = execFn('git diff --cached --name-only', {
       cwd: changeDir,
       encoding: 'utf8',
       stdio: 'pipe',
     });
+    // 确保返回值为 string 类型（encoding: 'utf8' 时应为 string，但类型定义可能包含 Buffer）
+    stagedOutput = typeof result === 'string' ? result : result.toString('utf8');
   } catch {
     // Not a git repo or git not available — skip gracefully
     return { success: true };

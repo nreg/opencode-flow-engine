@@ -77,6 +77,15 @@ export const RECEIPT_STATUS = {
   FAIL: 'fail',
 } as const;
 
+// ─── Repair Circuit Breaker ───────────────────────────────────────────────────
+
+/**
+ * Maximum number of consecutive repair failures before adjudication is required.
+ * T2.6: Configurable threshold for circuit breaker.
+ * Default: 5 (can be overridden via configuration)
+ */
+export const MAX_REPAIR_FAILURES = 5;
+
 // ─── Artifact Preflight Gate: State → Required Artifacts ───────────────────
 
 /**
