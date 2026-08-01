@@ -14,7 +14,8 @@
  * context.directory to resolve paths.
  */
 
-import type { ToolDefinition, ToolContext } from '@opencode-ai/plugin';
+import type { ToolContext } from '@opencode-ai/plugin';
+import type { LocalToolDefinition } from '../types/local-tool-definition.js';
 import { z } from 'zod';
 import { sharedValidator } from '@opencode-flow-engine/core';
 import type { DecisionPoint } from '@opencode-flow-engine/core';
@@ -38,7 +39,7 @@ function resolvePath(context: ToolContext, filePath?: string, defaultRelative?: 
  * Create all built-in validation tool definitions.
  * All accept file paths (not content) to minimize token usage.
  */
-export function createValidatorTools(): Record<string, ToolDefinition> {
+export function createValidatorTools(): Record<string, LocalToolDefinition> {
   return {
     validate_spec: {
       description: 'Validate a spec file. Reads from <dir>/.flow-engine/sflow/specs/<name>.md by default. Pass spec_path to use a different location.',
@@ -208,7 +209,7 @@ export function createValidatorTools(): Record<string, ToolDefinition> {
             // Extract "既有抽象层" section from CONTEXT.md
             // Matches headings like "## 5. 既有抽象层", "## 既有抽象层", "## 5."
             const abstractionSectionMatch = contextContent.match(/^#{1,3}\s+(?:\d+\.\s*)?既有抽象层.*\n([\s\S]*?)(?=\n#{1,3}\s|$)/m);
-            const existingAbstractions = abstractionSectionMatch ? abstractionSectionMatch[1].trim() : '';
+            const existingAbstractions = abstractionSectionMatch && abstractionSectionMatch[1] ? abstractionSectionMatch[1].trim() : '';
 
             if (existingAbstractions) {
               const abstractionLines = existingAbstractions.split('\n').filter(line => line.trim().length > 0);
@@ -219,7 +220,7 @@ export function createValidatorTools(): Record<string, ToolDefinition> {
                 for (const entry of resolved) {
                   // Check if the delta spec mentions or modifies this abstraction
                   const deltaContent = entry.content.toLowerCase();
-                  const abstractionName = line.replace(/^[-*]\s*/, '').split(/[—\-:]/)[0].trim().toLowerCase();
+                  const abstractionName = (line.replace(/^[-*]\s*/, '').split(/[—\-:]/)[0] || '').trim().toLowerCase();
                   if (abstractionName && deltaContent.includes(abstractionName)) {
                     conflictingChanges.push(entry.changeName);
                   }
@@ -232,9 +233,9 @@ export function createValidatorTools(): Record<string, ToolDefinition> {
                 }
               }
 
-              (report as Record<string, unknown>)['contextConflicts'] = contextConflicts;
-              (report as Record<string, unknown>)['contextPath'] = contextFilePath;
-              (report as Record<string, unknown>)['abstractionsChecked'] = abstractionLines.length;
+              (report as unknown as Record<string, unknown>)['contextConflicts'] = contextConflicts;
+              (report as unknown as Record<string, unknown>)['contextPath'] = contextFilePath;
+              (report as unknown as Record<string, unknown>)['abstractionsChecked'] = abstractionLines.length;
             }
           }
         }
@@ -248,7 +249,7 @@ export function createValidatorTools(): Record<string, ToolDefinition> {
 /**
  * Built-in workflow tools: state mutation operations.
  */
-export function createWorkflowTools(): Record<string, ToolDefinition> {
+export function createWorkflowTools(): Record<string, LocalToolDefinition> {
   return {
     record_decision_point: {
       description: 'Record a decision point (DP-0 .. DP-5) in the workflow state',
@@ -312,17 +313,17 @@ export function createWorkflowTools(): Record<string, ToolDefinition> {
  * Now wraps ToolDefinitions instead of a custom MCP protocol.
  */
 export class BuiltinMcpRegistry {
-  private tools: Record<string, ToolDefinition> = {};
+  private tools: Record<string, LocalToolDefinition> = {};
 
   constructor() {
     this.tools = { ...createValidatorTools(), ...createWorkflowTools() };
   }
 
-  getTool(name: string): ToolDefinition | undefined {
+  getTool(name: string): LocalToolDefinition | undefined {
     return this.tools[name];
   }
 
-  getAllTools(): Record<string, ToolDefinition> {
+  getAllTools(): Record<string, LocalToolDefinition> {
     return { ...this.tools };
   }
 }

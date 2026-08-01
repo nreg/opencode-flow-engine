@@ -193,12 +193,12 @@ function inferTableName(filePath: string): string {
 
   // Entity file: order.entity → "order"
   if (basename.includes('.entity')) {
-    return basename.split('.entity')[0];
+    return basename.split('.entity')[0] || basename;
   }
 
   // Model file with .model suffix: user.model → "user"
   if (basename.includes('.model')) {
-    return basename.split('.model')[0];
+    return basename.split('.model')[0] || basename;
   }
 
   // Prisma schema.prisma → generic "schema"
@@ -212,7 +212,7 @@ function inferTableName(filePath: string): string {
   const sqlNameMatch = basename.match(
     /(?:create|add|alter|drop|rename)_([\w]+)(?:_table)?$/i,
   );
-  if (sqlNameMatch) {
+  if (sqlNameMatch && sqlNameMatch[1]) {
     return sqlNameMatch[1];
   }
 

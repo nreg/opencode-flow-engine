@@ -135,7 +135,7 @@ async function detectIFlowState(changeDir: string): Promise<IFlowStateResult> {
         result = {
           state: artifactState,
           iteration: stateData.iteration ?? 1,
-          artifacts,
+          artifacts: artifacts as unknown as Record<string, boolean>,
           reasons: [`Rollback detected: state.json says "${currentPersisted}" but artifacts indicate "${artifactState}". User likely navigated back.`],
           rollbackDetected: true,
           previousState: currentPersisted,
@@ -155,7 +155,7 @@ async function detectIFlowState(changeDir: string): Promise<IFlowStateResult> {
       result = {
         state: determineArtifactState(artifacts),
         iteration: 1,
-        artifacts,
+        artifacts: artifacts as unknown as Record<string, boolean>,
         reasons: [getArtifactReason(artifacts)],
       };
     }

@@ -9,4 +9,4 @@
  *   "plugin": ["opencode-flow-engine/iflow"]
  * }
  */
-export { default, createIFlowPluginModule as createIFlowPlugin } from './packages/plugin-infra/dist/iflow-plugin-factory.js';
+export { createIFlowPluginModule as createIFlowPlugin, default } from './packages/plugin-infra/src/iflow-plugin-factory.js';

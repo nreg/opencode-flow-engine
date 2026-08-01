@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { execSync } from 'child_process';
-import type { ToolDefinition } from '@opencode-ai/plugin';
+import type { LocalToolDefinition } from '../types/local-tool-definition.js';
 
 export const TOOLS = ['jscpd', 'knip', 'depcheck', 'ts-prune'] as const;
 
@@ -15,14 +15,14 @@ export function checkToolAvailability(tools: string[]): Array<{ tool: string; st
   });
 }
 
-export function createCheckToolAvailableTool(): ToolDefinition {
+export function createCheckToolAvailableTool(): LocalToolDefinition {
   return {
     description: 'Check if external CLI tools are available for execution',
     args: {
       tools: z.array(z.enum(TOOLS)).describe('List of tool names to check'),
     },
     execute: async (args) => {
-      const results = checkToolAvailability(args.tools);
+      const results = checkToolAvailability(args.tools as string[]);
       return { title: 'Tool Availability Check', output: JSON.stringify(results, null, 2) };
     },
   };

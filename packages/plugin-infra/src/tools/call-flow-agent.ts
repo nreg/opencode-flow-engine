@@ -85,8 +85,9 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
   };
 
   const callFlowAgentTool: ToolDefinition = {
+    name: 'call_flow_agent' as never,
     description: `Invoke a specialized ${workflowName} subagent. Supports sync (run_in_background=false) and async (run_in_background=true) modes. Async mode returns a task_id; use flowagent_output to retrieve results when complete.`,
-    args: {
+    parameters: {
       description: z.string().describe('Short (3-5 words) description of the task'),
       prompt: z.string().describe('The task for the subagent to perform'),
       subagent_type: z.string().describe(`The subagent to invoke (e.g. ${workflowName.toLowerCase()}-plan-executor, build-executor)`),
@@ -94,18 +95,18 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
       session_id: z.string().optional().describe('Existing session to continue (sync mode only)'),
       agent_id: z.string().optional().describe('Resume a previous subagent by agent_id. When provided, context from the previous run is injected into the prompt.'),
       output_mode: z.enum(['last_message', 'structured']).optional().describe('Output mode: last_message (default, return raw text) or structured (extract JSON block from output)'),
-    },
+    } as Record<string, unknown>,
     execute: async (args, context) => {
       const changeDir = context.directory || '';
       const { subagent_type, prompt, run_in_background, session_id, description, agent_id, output_mode } = args;
 
       // Validate agent name
-      const validationError = await validateAgent(subagent_type as string, context as Record<string, unknown>);
+      const validationError = await validateAgent(subagent_type as string, context as unknown as Record<string, unknown>);
       if (validationError) {
         return await formatToolError(validationError);
       }
 
-      const sessionLabel = resolveSessionLabel(subagent_type as string, context as Record<string, unknown>);
+      const sessionLabel = resolveSessionLabel(subagent_type as string, context as unknown as Record<string, unknown>);
 
       // P1: subagent-store 实例
       const store = createSubagentStore({ changeDir });
@@ -364,13 +365,14 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
   };
 
   const flowagentOutputTool: ToolDefinition = {
+    name: 'flowagent_output' as never,
     description: `Retrieve results from a background ${workflowName} subagent task (call_flow_agent async mode). Call this when a <system-reminder> notifies you that a background task completed. Use block=true to wait for completion (timeout: 120s).`,
-    args: {
+    parameters: {
       task_id: z.string().describe('The task ID returned by call_flow_agent (run_in_background=true, prefix: sf_)'),
       block: z.boolean().optional().describe('Wait for completion (default: false)'),
-    },
-    execute: async (args: { task_id: string; block?: boolean }, _context) => {
-      const { task_id, block } = args;
+    } as Record<string, unknown>,
+    execute: async (args: Record<string, unknown>, _context) => {
+      const { task_id, block } = args as { task_id: string; block?: boolean };
 
       const pollAndComplete = async (task: BackgroundTaskEntry): Promise<BackgroundTaskEntry> => {
         const output = await pollSessionCompletion(
@@ -489,12 +491,13 @@ export function createCallFlowAgentTools(options: CallFlowAgentOptions): Record<
   };
 
   const flowagentCancelTool: ToolDefinition = {
+    name: 'flowagent_cancel' as never,
     description: `Cancel a running ${workflowName} subagent task by task_id (call_flow_agent async mode). Use this when you no longer need the result.`,
-    args: {
+    parameters: {
       taskId: z.string().describe('Task ID to cancel (required, prefix: sf_)'),
-    },
-    execute: async (args: { taskId: string }, _context) => {
-      const { taskId } = args;
+    } as Record<string, unknown>,
+    execute: async (args: Record<string, unknown>, _context) => {
+      const { taskId } = args as { taskId: string };
       try {
         const task = backgroundTaskRegistry.get(taskId);
         if (!task) {

@@ -8,7 +8,8 @@
  * - IFlow hooks (iflow_state_transition, iflow_guard, session_start, session_end)
  */
 
-import type { PluginInput, PluginOptions, Hooks, PluginModule, ToolDefinition } from '@opencode-ai/plugin';
+import type { PluginInput, PluginOptions, Hooks, PluginModule } from '@opencode-ai/plugin';
+import type { LocalToolDefinition } from './types/local-tool-definition.js';
 import { z } from 'zod';
 
 import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentModelMap } from './types.js';
@@ -44,7 +45,7 @@ const AGENT_MODEL_MAP: AgentModelMap = {};
 
 // ─── IFlow tool definitions ──────────────────────────────────────────────────
 
-function createIFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
+function createIFlowTools(client: SFlowClient): Record<string, LocalToolDefinition> {
   const sharedTools = createCallFlowAgentTools({
     client,
     backgroundTaskRegistry,
@@ -320,7 +321,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
         }
         // TaskTracker: 记录子 agent 调用开始
         if (taskTracker && taskTracker.beforeHook) {
-          await taskTracker.beforeHook(input);
+          await taskTracker.beforeHook({ ...input, args: {} });
         }
       },
 
@@ -365,7 +366,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
       "experimental.session.compacting": async (input, output) => {
         try {
           const stateFile = `${workDir}/${getStateFilePath('iflow')}`;
-          const { readJsonFile } = await import('../../helpers/index.js');
+          const { readJsonFile } = await import('@opencode-flow-engine/shared');
           const state = await readJsonFile(stateFile) as Record<string, unknown> | null;
           if (!state || !state.state) return;
           const context = createCompactionContext('iFlow', state as never);

@@ -10,7 +10,8 @@
  *   session_end, pre_process, post_process, continuation)
  */
 
-import type { PluginInput, PluginOptions, Hooks, PluginModule, ToolDefinition } from '@opencode-ai/plugin';
+import type { PluginInput, PluginOptions, Hooks, PluginModule } from '@opencode-ai/plugin';
+import type { LocalToolDefinition } from './types/local-tool-definition.js';
 import { z } from 'zod';
 
 import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentModelMap } from './types.js';
@@ -58,7 +59,7 @@ const AGENT_MODEL_MAP: AgentModelMap = {};
 
 // ─── SFlow tool sub-factories ──────────────────────────────────────────────
 
-function createWorkflowRouterTools(client: SFlowClient): Record<string, ToolDefinition> {
+function createWorkflowRouterTools(client: SFlowClient): Record<string, LocalToolDefinition> {
   return {
     workflow_router: {
       description: 'Detect current workflow state and route to the appropriate agent. Supports GO.md-style intent matching.',
@@ -82,7 +83,7 @@ function createWorkflowRouterTools(client: SFlowClient): Record<string, ToolDefi
   };
 }
 
-function createContractTools(): Record<string, ToolDefinition> {
+function createContractTools(): Record<string, LocalToolDefinition> {
   return {
     contract_validator: {
       description: 'Validate execution contract for correctness and completeness',
@@ -114,7 +115,7 @@ function createContractTools(): Record<string, ToolDefinition> {
   };
 }
 
-function createExecutionPlanTools(): Record<string, ToolDefinition> {
+function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
   return {
     record_execution_plan: {
       description: 'Record or revise an execution plan for the current change. Validates contract existence, checks workflow state, and writes .flow-engine/sflow/execution-plan.json.',
@@ -132,7 +133,18 @@ function createExecutionPlanTools(): Record<string, ToolDefinition> {
       },
       execute: async (args, context) => {
         const changeDir = context.directory || '';
-        const { mode, waves, source, rationale, override } = args;
+        const { mode, waves, source, rationale, override } = args as {
+          mode: 'inline' | 'batch-inline' | 'sdd';
+          waves: Array<{
+            id: string;
+            strategy: 'parallel' | 'serial';
+            tasks: string[];
+            depends_on: string[];
+          }>;
+          source: 'user-override' | 'default';
+          rationale: string;
+          override?: boolean;
+        };
 
         try {
           // REP-2: Validate contract existence
@@ -256,7 +268,13 @@ function createExecutionPlanTools(): Record<string, ToolDefinition> {
       },
       execute: async (args, context) => {
         const changeDir = context.directory || '';
-        const { waveId, status, base, head, report } = args;
+        const { waveId, status, base, head, report } = args as {
+          waveId: string;
+          status: 'pass' | 'fail';
+          base: string;
+          head: string;
+          report: string;
+        };
 
         try {
           const receipt = await recordReviewReceipt(changeDir, waveId, { status, base, head, report });
@@ -290,7 +308,12 @@ function createExecutionPlanTools(): Record<string, ToolDefinition> {
 
 // ─── SFlow tool definitions ──────────────────────────────────────────────────
 
-export function createSFlowTools(client: SFlowClient): Record<string, ToolDefinition> {
+export function createSFlowTools(client: SFlowClient): Record<string, LocalToolDefinition> {
+  // createCallFlowAgentTools returns Record<string, ToolDefinition> (zod v4 types)
+  // We need Record<string, LocalToolDefinition> (zod v3 compatible)
+  // The double assertion is necessary because ToolDefinition and LocalToolDefinition
+  // have incompatible args types (zod v4 ZodRawShape vs Record<string, unknown>)
+  // Runtime behavior is unchanged - both use the same execute function signature
   const callFlowAgentTools = createCallFlowAgentTools({
     client,
     backgroundTaskRegistry,
@@ -307,9 +330,9 @@ export function createSFlowTools(client: SFlowClient): Record<string, ToolDefini
       }
       return null;
     },
-  });
+  }) as unknown as Record<string, LocalToolDefinition>;
 
-  const tools: Record<string, ToolDefinition> = {
+  const tools: Record<string, LocalToolDefinition> = {
     ...createWorkflowRouterTools(client),
     ...createContractTools(),
     ...createExecutionPlanTools(),
@@ -583,7 +606,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           }
           // TaskTracker: 记录子 agent 调用开始
           if (taskTracker && taskTracker.beforeHook) {
-            await taskTracker.beforeHook(input);
+            await taskTracker.beforeHook({ ...input, args: {} });
           }
         },
 
@@ -711,7 +734,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
         "experimental.session.compacting": async (input, output) => {
           try {
             const stateFile = `${workDir}/${getStateFilePath('sflow')}`;
-            const { readJsonFile } = await import('../../helpers/index.js');
+            const { readJsonFile } = await import('@opencode-flow-engine/shared');
             const state = await readJsonFile(stateFile) as Record<string, unknown> | null;
             if (!state || !state.state) return;
             const context = createCompactionContext('sFlow', state as never);

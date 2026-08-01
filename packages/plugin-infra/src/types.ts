@@ -3,7 +3,7 @@
  * Extracted from index.ts to enable entry point separation.
  */
 
-import type { PluginInput, ToolDefinition } from '@opencode-ai/plugin';
+import type { PluginInput } from '@opencode-ai/plugin';
 import { z } from 'zod';
 import { sleep as crossSleep } from '@opencode-flow-engine/shared';
 

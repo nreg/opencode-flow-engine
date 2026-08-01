@@ -189,7 +189,7 @@ export async function checkIFlowProgressAntiRepeatGuard(changeDir: string, data?
     if (!content) return { success: true };
 
     const tableSection = content.match(/## 已排除的方案[\s\S]*?((?:\|.*\|\n?)+)/);
-    if (!tableSection) return { success: true };
+    if (!tableSection || !tableSection[1]) return { success: true };
 
     const excludedApproaches: { id: string; approach: string; reason: string }[] = [];
     const rows = tableSection[1].trim().split('\n');

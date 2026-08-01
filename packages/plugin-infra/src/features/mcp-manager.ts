@@ -147,7 +147,7 @@ export class McpManager {
         // Read available stdout/stderr without blocking
         if (stdoutReader) {
           const stdoutResult = await Promise.race([
-            stdoutReader.read().catch(() => ({ done: true, value: undefined })),
+            (stdoutReader as { read: () => Promise<{ done: boolean; value?: Uint8Array }> }).read().catch(() => ({ done: true, value: undefined })),
             crossSleep(50).then(() => ({ done: false, value: undefined })),
           ]);
           if (stdoutResult.value) {
@@ -157,7 +157,7 @@ export class McpManager {
 
         if (stderrReader) {
           const stderrResult = await Promise.race([
-            stderrReader.read().catch(() => ({ done: true, value: undefined })),
+            (stderrReader as { read: () => Promise<{ done: boolean; value?: Uint8Array }> }).read().catch(() => ({ done: true, value: undefined })),
             crossSleep(50).then(() => ({ done: false, value: undefined })),
           ]);
           if (stderrResult.value) {
@@ -172,8 +172,8 @@ export class McpManager {
       }
 
       // Release readers after startup check
-      stdoutReader?.releaseLock();
-      stderrReader?.releaseLock();
+      (stdoutReader as { releaseLock?: () => void })?.releaseLock?.();
+      (stderrReader as { releaseLock?: () => void })?.releaseLock?.();
 
       if (exitedRef.value) {
         instance.state = 'error';

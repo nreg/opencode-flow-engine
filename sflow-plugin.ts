@@ -9,4 +9,4 @@
  *   "plugin": ["opencode-flow-engine/sflow"]
  * }
  */
-export { default, createSFlowPluginModule as createSFlowPlugin } from './packages/plugin-infra/dist/sflow-plugin-factory.js';
+export { createSFlowPluginModule as createSFlowPlugin, default } from './packages/plugin-infra/src/sflow-plugin-factory.js';

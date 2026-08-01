@@ -10,7 +10,8 @@
  * - PLUGIN_ID = 'opencode-sflow' for backward compat (when used as default)
  */
 
-import type { PluginInput, PluginOptions, Hooks, PluginModule, ToolDefinition } from '@opencode-ai/plugin';
+import type { PluginInput, PluginOptions, Hooks, PluginModule } from '@opencode-ai/plugin';
+import type { LocalToolDefinition } from './types/local-tool-definition.js';
 import { z } from 'zod';
 
 import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentModelMap } from './types.js';
@@ -50,7 +51,7 @@ const AGENT_MODEL_MAP: AgentModelMap = {};
 
 // ─── Combined tool definitions (SFlow + IFlow) ────────────────────────────────
 
-function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition> {
+function createCombinedTools(client: SFlowClient): Record<string, LocalToolDefinition> {
   const callFlowAgentTools = createCallFlowAgentTools({
     client,
     backgroundTaskRegistry,
@@ -112,7 +113,7 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
       } else {
         // Unknown context: allow all registered + shared agents
         const allAgents = [...new Set([...IFLOW_AGENT_NAMES, ...SFLOW_AGENT_NAMES, ...SHARED_AGENT_NAMES])];
-        if (!allAgents.includes(subagentType as string)) {
+        if (!allAgents.includes(subagentType as never)) {
           return `无效的 agent: "${subagentType}"。可用 agent: ${allAgents.join(', ')}`;
         }
         return null;
@@ -120,7 +121,7 @@ function createCombinedTools(client: SFlowClient): Record<string, ToolDefinition
     },
   });
 
-  const tools: Record<string, ToolDefinition> = {
+  const tools: Record<string, LocalToolDefinition> = {
     workflow_router: {
       description: 'Detect current workflow state and route to the appropriate agent. Supports GO.md-style intent matching.',
       args: {

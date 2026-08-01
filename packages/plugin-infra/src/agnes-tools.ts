@@ -1,7 +1,7 @@
-import type { ToolDefinition } from '@opencode-ai/plugin';
+import type { LocalToolDefinition } from './types/local-tool-definition.js';
 import { z } from 'zod';
 
-export function createAgnesTools(): Record<string, ToolDefinition> {
+export function createAgnesTools(): Record<string, LocalToolDefinition> {
   return {
     agnes_image_generate: {
       description: 'Generate an image using agnesmore provider. Supports text-to-image, image-to-image, and multi-image composition. Requires agnesmore plugin installed and configured.',
