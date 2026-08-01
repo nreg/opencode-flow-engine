@@ -5,15 +5,7 @@ import {
   ensureReceiptDir,
 } from '../plan-scoped-paths.js';
 import { readExecutionPlan } from '../execution-plan.js';
-
-// Local simpleHash implementation to avoid circular dependency
-async function simpleHash(content: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(content);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
-}
+import { simpleHash } from './state-detection.js';
 
 // ─── Checkpoint Types ──────────────────────────────────────────────────────
 

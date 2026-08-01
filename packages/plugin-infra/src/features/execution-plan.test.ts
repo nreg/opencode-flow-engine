@@ -991,5 +991,42 @@ describe('Repair Circuit Breaker', () => {
       expect(receipt.repair_state?.failure_count).toBe(1);
       expect(receipt.repair_state?.resolution).toBeDefined();
     });
+
+    it('should ensure previous_report is string in resolved state (P2 fix)', async () => {
+      // 创建执行计划
+      const plan = await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test previous_report fallback',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // 第一次失败（没有 previousRepair）
+      await recordReviewReceipt(dir, 'W1', {
+        status: 'fail',
+        base: 'base1',
+        head: 'head1',
+        report: 'First failure',
+      });
+
+      // 修复成功（此时 priorFailures 有数据，但 previousRepair.previous_report 可能为空）
+      const receipt = await recordReviewReceipt(dir, 'W1', {
+        status: 'pass',
+        base: 'head1',
+        head: 'head2',
+        report: 'Fixed',
+      });
+
+      // 验证 resolved 状态的 previous_report 是字符串
+      expect(receipt.repair_state?.status).toBe('resolved');
+      expect(typeof receipt.repair_state?.previous_report).toBe('string');
+      expect(receipt.repair_state?.previous_report).toBe('First failure');
+
+      // 验证写入的 repair state 能被 validateRepairState 正确读取
+      const repairState = await readRepairState(dir, plan, 'W1');
+      expect(repairState).not.toBeNull();
+      expect(repairState?.status).toBe('resolved');
+      expect(typeof repairState?.previous_report).toBe('string');
+    });
   });
 });

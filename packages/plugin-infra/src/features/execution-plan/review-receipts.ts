@@ -8,7 +8,7 @@
  * T2.10: 自动迁移旧收据到 plan-scoped 目录
  */
 import type { ExecutionPlan, ReviewReceipt, RepairState, ReviewEvidence } from '../execution-plan-types.js';
-import { ensureDir, readJsonFile, writeJsonFile, fileExists } from '@opencode-flow-engine/shared';
+import { ensureDir, readJsonFile, writeJsonFile, atomicWriteJsonFile, fileExists } from '@opencode-flow-engine/shared';
 import { MAX_REPAIR_FAILURES } from '@opencode-flow-engine/core';
 import {
   getOverlayPaths,
@@ -111,8 +111,7 @@ async function migrateReceiptType(
       };
       await writeJsonFile(targetPath, migratedReceipt);
       
-      // P1-3: 从根级收据迁移，保持 plan_hash 与 plan_revision 为空以兼容旧格式
-      // 注释：迁移后保留原文件，确保向后兼容
+      // P1-3: 从根级收据迁移，注入当前 plan 的 plan_hash 与 plan_revision，原文件保留以实现向后兼容
     }
   }
 }
@@ -197,17 +196,17 @@ export async function recordReviewReceipt(
     plan_revision: plan.revision,
   };
 
-  // T2.9: 双写机制 - 根级兼容镜像
-  const rootPaths = getOverlayPaths(changeDir);
-  const rootReceiptPath = rootPaths.reviews + '/' + waveId + '.json';
-  await ensureReceiptDir(rootPaths.reviews);
-  await writeJsonFile(rootReceiptPath, fullReceipt);
-
   // T2.9: 双写机制 - plan-scoped 权威副本
   const planPaths = getPlanScopedPaths(changeDir, plan);
   const planReceiptPath = planPaths.reviews + '/' + waveId + '.json';
   await ensureReceiptDir(planPaths.reviews);
-  await writeJsonFile(planReceiptPath, fullReceipt);
+  await atomicWriteJsonFile(planReceiptPath, fullReceipt);
+
+  // T2.9: 双写机制 - 根级兼容镜像
+  const rootPaths = getOverlayPaths(changeDir);
+  const rootReceiptPath = rootPaths.reviews + '/' + waveId + '.json';
+  await ensureReceiptDir(rootPaths.reviews);
+  await atomicWriteJsonFile(rootReceiptPath, fullReceipt);
 
   // T2.6: Update repair state
   const updatedRepairState = await updateRepairState(
@@ -468,7 +467,7 @@ export async function updateRepairState(
       failure_count: priorFailures.length,
       max_failures: maxFailures,
       previous_head: receipt.head,
-      previous_report: previousRepair?.previous_report ?? priorFailures[priorFailures.length - 1]?.report ?? null,
+      previous_report: previousRepair?.previous_report ?? priorFailures[priorFailures.length - 1]?.report ?? receipt.report,
       failures: priorFailures,
       updated_at: now,
       resolution: {
@@ -485,6 +484,6 @@ export async function updateRepairState(
     return null;
   }
 
-  await writeJsonFile(statePath, state);
+  await atomicWriteJsonFile(statePath, state);
   return state;
 }

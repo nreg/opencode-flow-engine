@@ -449,7 +449,10 @@ export async function checkSpecsMerged(changeDir: string, activeWorkflow: 'iflow
     // 读取所有收据并验证
     for (const capability of receiptCapabilities) {
       const receipt = await readPublicationReceipt(changeDir, capability);
-      if (!receipt) continue;
+      if (!receipt) {
+        console.warn(`[P1-1] Publication receipt damaged for capability: ${capability}`);
+        continue;
+      }
       
       // 构造 spec 文件列表（简化：假设每个 delta spec 对应一个 capability）
       const specFiles = mdFiles.map(f => `${deltaSpecsPath}/${f}`);
