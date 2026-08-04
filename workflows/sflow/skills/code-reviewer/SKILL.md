@@ -134,3 +134,50 @@ If reviewer is wrong:
 - [severity-levels.md](references/severity-levels.md) — Issue classification guidelines
 - [minimality-discipline.md](references/minimality-discipline.md) — Over-engineering prevention
 - [ui-visual-review.md](references/ui-visual-review.md) — Frontend visual review protocol
+
+## Standard Handoff Format
+
+This skill uses the standard handoff format for all user-facing phase reports. The handoff follows a four-section structure:
+
+- **Current stage**: Where we are now in the workflow
+- **Completed / blocker**: What's been completed or what's blocking progress
+- **Next stage**: Where we're going next
+- **Entry condition**: What must be true to proceed
+
+### Handoff Scenarios
+
+The `formatStandardHandoff` function in `packages/plugin-infra/src/features/handoffs.ts` supports five scenarios:
+
+1. **normal** - Normal workflow progression
+2. **blocked** - Blocked by missing evidence or failure
+3. **approval-wait** - Waiting for user approval (DP gates)
+4. **closing-in-progress** - Release verification or archive in progress
+5. **terminal** - Successfully reached closing or abandoned
+
+### Usage Example
+
+```typescript
+import { formatStandardHandoff } from '../features/handoffs';
+
+const handoff = formatStandardHandoff('blocked', {
+  currentStage: 'executing',
+  completedWork: 'Review found 2 Critical issues in auth module',
+  nextStage: 'executing',
+  entryCondition: 'Fix Critical issues: missing error handling, SQL injection risk',
+});
+
+console.log(handoff);
+```
+
+### Output Format
+
+```
+[Handoff: blocked]
+
+- Current stage: `executing`.
+- Completed / blocker: `Review found 2 Critical issues in auth module`.
+- Next stage: `executing`.
+- Entry condition: `Fix Critical issues: missing error handling, SQL injection risk`.
+```
+
+For blocked, approval-wait, and closing-in-progress scenarios, the format adapts to clearly communicate the blocking condition or approval requirement.

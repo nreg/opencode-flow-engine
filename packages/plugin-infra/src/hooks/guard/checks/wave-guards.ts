@@ -8,6 +8,7 @@ import { fileExists, directoryExists, readJsonFile } from "@opencode-flow-engine
 import { readExecutionPlan as readExecutionPlanFeature } from "../../../features/execution-plan.js";
 import type { Wave } from "../../../features/execution-plan-types.js";
 import { getStateFilePath } from "../../../features/state-manager.js";
+import { GitRangeValidator } from "./git-range-validator.js";
 
 /**
  * Topological sort using Kahn's algorithm (BFS-based).
@@ -192,17 +193,14 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
       }
     }
 
-    // RR-4: Commit hash revalidation via git rev-parse --verify
+    // RR-4: Commit hash revalidation via GitRangeValidator (cached)
     try {
-      const { execSync } = await import('child_process');
+      // Create validator for this repo
+      const validator = new GitRangeValidator(changeDir);
+
       // First check if this is a git repo
-      try {
-        execSync('git rev-parse --git-dir', {
-          cwd: changeDir,
-          encoding: 'utf8',
-          stdio: 'pipe',
-        });
-      } catch {
+      const gitDirResult = await validator.verify('--git-dir');
+      if (gitDirResult === null) {
         // Not a git repo — skip commit validation gracefully
         continue;
       }
@@ -211,13 +209,8 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
       const headHash = String(receipt.head);
 
       if (baseHash) {
-        try {
-          execSync(`git rev-parse --verify "${baseHash}"`, {
-            cwd: changeDir,
-            encoding: 'utf8',
-            stdio: 'pipe',
-          });
-        } catch {
+        const verifiedBase = await validator.verify(baseHash);
+        if (verifiedBase === null) {
           return {
             success: false,
             block: true,
@@ -227,13 +220,8 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
       }
 
       if (headHash) {
-        try {
-          execSync(`git rev-parse --verify "${headHash}"`, {
-            cwd: changeDir,
-            encoding: 'utf8',
-            stdio: 'pipe',
-          });
-        } catch {
+        const verifiedHead = await validator.verify(headHash);
+        if (verifiedHead === null) {
           return {
             success: false,
             block: true,
@@ -244,13 +232,8 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
 
       // Ancestor validation: base must be an ancestor of head
       if (baseHash && headHash) {
-        try {
-          execSync(`git merge-base --is-ancestor "${baseHash}" "${headHash}"`, {
-            cwd: changeDir,
-            encoding: 'utf8',
-            stdio: 'pipe',
-          });
-        } catch {
+        const isAncestor = await validator.isAncestor(baseHash, headHash);
+        if (!isAncestor) {
           return {
             success: false,
             block: true,

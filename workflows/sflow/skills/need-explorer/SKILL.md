@@ -152,3 +152,50 @@ Before handing off to `spec-writer`, perform a self-review:
 3. **Scope check**: Can you draw a bright line between what's in and what's out? If a developer read this, would they know where to stop?
 
 If any of these checks fail, stay in exploration until they pass.
+
+## Standard Handoff Format
+
+This skill uses the standard handoff format for all user-facing phase reports. The handoff follows a four-section structure:
+
+- **Current stage**: Where we are now in the workflow
+- **Completed / blocker**: What's been completed or what's blocking progress
+- **Next stage**: Where we're going next
+- **Entry condition**: What must be true to proceed
+
+### Handoff Scenarios
+
+The `formatStandardHandoff` function in `packages/plugin-infra/src/features/handoffs.ts` supports five scenarios:
+
+1. **normal** - Normal workflow progression
+2. **blocked** - Blocked by missing evidence or failure
+3. **approval-wait** - Waiting for user approval (DP gates)
+4. **closing-in-progress** - Release verification or archive in progress
+5. **terminal** - Successfully reached closing or abandoned
+
+### Usage Example
+
+```typescript
+import { formatStandardHandoff } from '../features/handoffs';
+
+const handoff = formatStandardHandoff('normal', {
+  currentStage: 'exploring',
+  completedWork: 'Clarified scope, constraints, and success criteria',
+  nextStage: 'specifying',
+  entryCondition: 'DP-1 confirmation recorded',
+});
+
+console.log(handoff);
+```
+
+### Output Format
+
+```
+[Handoff: normal]
+
+- Current stage: `exploring`.
+- Completed / blocker: `Clarified scope, constraints, and success criteria`.
+- Next stage: `specifying`.
+- Entry condition: `DP-1 confirmation recorded`.
+```
+
+For blocked, approval-wait, and closing-in-progress scenarios, the format adapts to clearly communicate the blocking condition or approval requirement.

@@ -48,6 +48,24 @@ Before routing to `spec-writer`, confirm key decisions with user. See `reference
 ### Workflow Path Intake
 Inspect change folder and check for plugin updates before routing. See `references/workflow-path-intake.md`.
 
+### Path-Aware Quick Mode Intake
+When the user initiates a workflow, perform path-aware quick mode detection:
+1. **Infer affected_paths**: Analyze the user's request or repository state to identify affected file paths
+2. **Delegate explore subagent**: Call `explore` subagent to survey the 9 exclusion checks:
+   - `production_behavior`: Does the change affect production behavior?
+   - `public_boundary`: Does the change cross public API boundaries?
+   - `installer`: Does the change involve installer scripts?
+   - `state_machine`: Does the change modify state machine logic?
+   - `external_side_effect`: Does the change have external side effects?
+   - `data_permission_config_semantics`: Does the change alter data permission or config semantics?
+   - `expected_behavior_clear`: Is the expected behavior clear and well-defined?
+   - `verification_reproducible`: Can the verification be reproduced reliably?
+   - `impact_paths_complete`: Are all impact paths identified and complete?
+3. **Call recommendWorkflowPath**: Pass the gathered facts to `recommendWorkflowPath` to get the recommendation
+4. **Quick confirmation**: If `quick` mode is recommended with relaxed threshold, ask the user to confirm the `verification_strategy` before proceeding
+
+See `references/mode-detection.md` for detailed rules and threshold configurations.
+
 ### Mode Detection
 Determine workflow mode: `full`, `hotfix`, `tweak`, or `quick`. See `references/mode-detection.md`.
 

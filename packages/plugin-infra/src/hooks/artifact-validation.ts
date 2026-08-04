@@ -2,9 +2,11 @@
  * Artifact Validation hook - Validate artifacts on state transitions
  */
 
+import { basename, dirname, join } from 'node:path';
 import type { HookHandler, HookContext, HookResult } from './types.js';
 import { sharedValidator } from '@opencode-flow-engine/core';
-import { readFile, listFiles } from '@opencode-flow-engine/shared';
+import { readFile, listFiles, fileExists } from '@opencode-flow-engine/shared';
+import { applyDeltaToBaselineDetailed } from '../features/spec-publication.js';
 
 /**
  * Create the artifact validation hook
@@ -78,16 +80,35 @@ async function validateForBridging(changeDir: string): Promise<HookResult> {
     };
   }
 
+  // Step 1: Schema validation (delta specs)
   for (const specFile of specFiles) {
     const specContent = await readFile(`${specsDir}/${specFile}`);
     if (specContent) {
-      const report = sharedValidator.validateSpecContent(specFile.replace('.md', ''), specContent);
+      // Validate as delta spec (not baseline spec)
+      const report = sharedValidator.validateDeltaSpec(specContent, specFile.replace('.md', ''));
       if (!report.valid) {
         return {
           success: false,
-          error: `Spec validation failed: ${specFile}`,
+          error: `Delta spec validation failed: ${specFile}`,
           block: true,
-          blockReason: `Spec ${specFile} has ${report.summary.errors} error(s)`,
+          blockReason: `Delta spec ${specFile} has ${report.summary.errors} error(s)`,
+        };
+      }
+    }
+  }
+
+  // Step 2: Preflight delta specs against baselines (Wave 3: P1)
+  const projectRoot = deriveProjectRoot(changeDir);
+  if (projectRoot) {
+    // Only run preflight if changeDir follows changes/ convention
+    for (const specFile of specFiles) {
+      const preflightError = await preflightDeltaSpec(projectRoot, changeDir, specFile);
+      if (preflightError) {
+        return {
+          success: false,
+          error: preflightError,
+          block: true,
+          blockReason: `Delta spec ${specFile} conflicts with baseline`,
         };
       }
     }
@@ -142,4 +163,72 @@ async function validateForClosing(changeDir: string): Promise<HookResult> {
   }
 
   return { success: true };
+}
+
+// ─── Wave 3: P1 Spec Baseline Preflight ──────────────────────────────────────
+
+/**
+ * Derive projectRoot from changeDir
+ * 
+ * spec-superflow convention: changeDir is under changes/ directory
+ * Example: /project/changes/my-change → /project
+ * 
+ * If changeDir doesn't follow this convention, return null (skip preflight)
+ */
+function deriveProjectRoot(changeDir: string): string | null {
+  const parent = dirname(changeDir);
+  const dirName = basename(parent);
+  
+  // Check if parent directory is named 'changes'
+  if (dirName === 'changes') {
+    return dirname(parent);
+  }
+  
+  // Not following changes/ convention, skip preflight
+  return null;
+}
+
+/**
+ * Preflight delta spec against baseline
+ * 
+ * Calls applyDeltaToBaselineDetailed to detect conflicts between delta spec
+ * and baseline spec. Returns null if successful, or error message if conflict detected.
+ */
+async function preflightDeltaSpec(
+  projectRoot: string,
+  changeDir: string,
+  specFile: string
+): Promise<string | null> {
+  // Extract capability from spec file path
+  // specFile is relative to changeDir/specs, e.g., "auth.md"
+  const capability = specFile.replace('.md', '');
+  
+  // Read baseline spec
+  const baselinePath = join(projectRoot, 'specs', capability, 'spec.md');
+  const baselineExists = await fileExists(baselinePath);
+  const baselineContent = baselineExists ? (await readFile(baselinePath) || '') : '';
+  
+  // Read delta spec
+  const deltaPath = join(changeDir, 'specs', specFile);
+  const deltaContent = await readFile(deltaPath);
+  
+  if (!deltaContent) {
+    // No delta spec content, skip
+    return null;
+  }
+  
+  // If no baseline exists, this is a new capability - skip preflight
+  if (!baselineExists) {
+    return null;
+  }
+  
+  try {
+    // Apply delta to baseline to detect conflicts
+    applyDeltaToBaselineDetailed(baselineContent, deltaContent, capability);
+    return null; // Success, no conflicts
+  } catch (error) {
+    // Conflict detected
+    const message = error instanceof Error ? error.message : String(error);
+    return `(baseline preflight) ${message}`;
+  }
 }

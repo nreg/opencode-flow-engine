@@ -130,3 +130,50 @@ Your response should include:
 5. Delta spec status (exist or not)
 6. Recommended routing (to `spec-merger` or archive)
 7. LESSONS nomination summary
+
+## Standard Handoff Format
+
+This skill uses the standard handoff format for all user-facing phase reports. The handoff follows a four-section structure:
+
+- **Current stage**: Where we are now in the workflow
+- **Completed / blocker**: What's been completed or what's blocking progress
+- **Next stage**: Where we're going next
+- **Entry condition**: What must be true to proceed
+
+### Handoff Scenarios
+
+The `formatStandardHandoff` function in `packages/plugin-infra/src/features/handoffs.ts` supports five scenarios:
+
+1. **normal** - Normal workflow progression
+2. **blocked** - Blocked by missing evidence or failure
+3. **approval-wait** - Waiting for user approval (DP gates)
+4. **closing-in-progress** - Release verification or archive in progress
+5. **terminal** - Successfully reached closing or abandoned
+
+### Usage Example
+
+```typescript
+import { formatStandardHandoff } from '../features/handoffs';
+
+const handoff = formatStandardHandoff('terminal', {
+  currentStage: 'closing',
+  completedWork: 'All artifacts archived, verification complete',
+  nextStage: 'none',
+  entryCondition: 'No further transition exists',
+});
+
+console.log(handoff);
+```
+
+### Output Format
+
+```
+[Handoff: terminal]
+
+- Current stage: successfully persisted `closing` or `abandoned`.
+- Completed / blocker: `All artifacts archived, verification complete`.
+- Next stage: `none`.
+- Entry condition: no further transition exists.
+```
+
+For blocked, approval-wait, and closing-in-progress scenarios, the format adapts to clearly communicate the blocking condition or approval requirement.

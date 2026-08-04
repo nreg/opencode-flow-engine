@@ -22,6 +22,21 @@ export type YesNoUnknown = 'yes' | 'no' | 'unknown';
 export type LowHighUnknown = 'low' | 'high' | 'unknown';
 export type RequestKind = 'standard' | 'incident';
 
+/** 排除检查项（9 项） */
+export type ExclusionCheckKey =
+  | 'production_behavior'
+  | 'public_boundary'
+  | 'installer'
+  | 'state_machine'
+  | 'external_side_effect'
+  | 'data_permission_config_semantics'
+  | 'expected_behavior_clear'
+  | 'verification_reproducible'
+  | 'impact_paths_complete';
+
+/** 排除检查结果 */
+export type ExclusionChecks = Record<ExclusionCheckKey, YesNoUnknown>;
+
 /** Intake Facts 结构 */
 export interface WorkflowFacts {
   task_count: number | null;
@@ -33,6 +48,10 @@ export interface WorkflowFacts {
   cross_module_change: YesNoUnknown;
   uncertainty: LowHighUnknown;
   request_kind: RequestKind;
+  /** 受影响的文件路径（仓库相对路径） */
+  affected_paths: string[] | null;
+  /** 排除检查结果（9 项） */
+  exclusion_checks: ExclusionChecks | null;
 }
 
 /** 推荐结果 */
@@ -94,6 +113,96 @@ const FACT_KEYS = [
 
 const WORKFLOW_SELECTION_FILE = '.flow-engine/sflow/workflow-selection.json';
 
+/** 白名单路径前缀 */
+const WHITELIST_PREFIXES = ['tests/', 'docs/', 'test-support/'] as const;
+
+/** 放宽阈值配置 */
+const RELAXED_THRESHOLD = {
+  maxFiles: 10,
+  maxTasks: 8,
+};
+
+// ─── Path Normalization and Whitelist Validation ────────────────────────────
+
+/** 路径规范化结果 */
+export interface NormalizeAffectedPathsResult {
+  normalized: string[];
+  rejected: string[];
+}
+
+/**
+ * 规范化受影响路径
+ * - 拒绝绝对路径
+ * - 拒绝 .. 穿越
+ * - 返回规范化后的路径列表
+ */
+export function normalizeAffectedPaths(paths: string[] | null): NormalizeAffectedPathsResult {
+  if (!paths || paths.length === 0) {
+    return { normalized: [], rejected: [] };
+  }
+
+  const normalized: string[] = [];
+  const rejected: string[] = [];
+
+  for (const path of paths) {
+    // 拒绝绝对路径（以 / 或盘符开头，如 C:\）
+    if (path.startsWith('/') || /^[A-Za-z]:/.test(path)) {
+      rejected.push(path);
+      continue;
+    }
+
+    // 拒绝 .. 穿越
+    if (path.includes('..')) {
+      rejected.push(path);
+      continue;
+    }
+
+    // 拒绝空路径
+    if (!path.trim()) {
+      rejected.push(path);
+      continue;
+    }
+
+    normalized.push(path);
+  }
+
+  return { normalized, rejected };
+}
+
+/**
+ * 判断路径是否在白名单内
+ * 白名单前缀：tests/、docs/、test-support/
+ */
+export function isLightweightPath(path: string): boolean {
+  return WHITELIST_PREFIXES.some(prefix => path.startsWith(prefix));
+}
+
+/**
+ * 判断所有路径是否都在白名单内
+ */
+function allPathsWhitelisted(paths: string[]): boolean {
+  return paths.length > 0 && paths.every(isLightweightPath);
+}
+
+/**
+ * 判断所有排除检查是否都通过
+ */
+function allChecksPassed(checks: ExclusionChecks): boolean {
+  const requiredKeys: ExclusionCheckKey[] = [
+    'production_behavior',
+    'public_boundary',
+    'installer',
+    'state_machine',
+    'external_side_effect',
+    'data_permission_config_semantics',
+    'expected_behavior_clear',
+    'verification_reproducible',
+    'impact_paths_complete',
+  ];
+
+  return requiredKeys.every(key => checks[key] === 'yes');
+}
+
 // ─── Fact Normalization ────────────────────────────────────────────────────
 
 /**
@@ -111,7 +220,51 @@ export function normalizeWorkflowFacts(input: Partial<WorkflowFacts> = {}): Work
     cross_module_change: normalizeEnum(input.cross_module_change, ['yes', 'no', 'unknown']),
     uncertainty: normalizeEnum(input.uncertainty, ['low', 'high', 'unknown']),
     request_kind: normalizeRequestKind(input.request_kind),
+    affected_paths: normalizeAffectedPathsField(input.affected_paths),
+    exclusion_checks: normalizeExclusionChecks(input.exclusion_checks),
   };
+}
+
+/**
+ * 归一化 affected_paths 字段
+ */
+function normalizeAffectedPathsField(paths: string[] | null | undefined): string[] | null {
+  if (!paths) return null;
+  const { normalized } = normalizeAffectedPaths(paths);
+  return normalized.length > 0 ? normalized : null;
+}
+
+/**
+ * 归一化 exclusion_checks 字段
+ * - 确保 data_permission_config_semantics 默认为 'no'
+ */
+function normalizeExclusionChecks(checks: Partial<ExclusionChecks> | null | undefined): ExclusionChecks | null {
+  if (!checks) return null;
+
+  const requiredKeys: ExclusionCheckKey[] = [
+    'production_behavior',
+    'public_boundary',
+    'installer',
+    'state_machine',
+    'external_side_effect',
+    'data_permission_config_semantics',
+    'expected_behavior_clear',
+    'verification_reproducible',
+    'impact_paths_complete',
+  ];
+
+  const result: Partial<ExclusionChecks> = {};
+
+  for (const key of requiredKeys) {
+    if (key === 'data_permission_config_semantics') {
+      // 默认为 'no'（用户未明确确认）
+      result[key] = normalizeEnum<YesNoUnknown>(checks[key], ['yes', 'no', 'unknown'], 'no');
+    } else {
+      result[key] = normalizeEnum<YesNoUnknown>(checks[key], ['yes', 'no', 'unknown']);
+    }
+  }
+
+  return result as ExclusionChecks;
 }
 
 function normalizeCount(value: unknown): number | null {
@@ -122,8 +275,8 @@ function normalizeCount(value: unknown): number | null {
   return value;
 }
 
-function normalizeEnum<T extends string>(value: unknown, allowed: T[]): T {
-  if (value === null || value === undefined) return 'unknown' as T;
+function normalizeEnum<T extends string>(value: unknown, allowed: T[], defaultValue: T = 'unknown' as T): T {
+  if (value === null || value === undefined) return defaultValue;
   if (!allowed.includes(value as T)) {
     throw new Error(`invalid workflow fact value: ${value}`);
   }
@@ -179,6 +332,28 @@ export function recommendWorkflowPath(input: Partial<WorkflowFacts> = {}): {
   if (riskReasons.length > 0) {
     return ready(base, 'full', 'Risk signals require the user to choose Quick or Full.', riskReasons);
   }
+
+  // ─── Stage ①: 路径感知两段式判定 ────────────────────────────────────────
+  // 白名单命中 + 9 项 checks 全通过 → 放宽阈值（file≤10 && task≤8）
+  if (facts.affected_paths && facts.exclusion_checks) {
+    const pathEligible = allPathsWhitelisted(facts.affected_paths);
+    const checksEligible = allChecksPassed(facts.exclusion_checks);
+
+    if (pathEligible && checksEligible) {
+      // 放宽阈值判定
+      if (
+        facts.task_count! <= RELAXED_THRESHOLD.maxTasks &&
+        facts.file_count! <= RELAXED_THRESHOLD.maxFiles
+      ) {
+        return ready(
+          base,
+          'quick',
+          'All affected paths are whitelisted and exclusion checks pass. Relaxed threshold applied.'
+        );
+      }
+    }
+  }
+  // ─── End Stage ① ────────────────────────────────────────────────────────
 
   // config/doc-only → tweak
   if (facts.config_doc_only === 'yes' && facts.task_count! <= 4 && facts.file_count! <= 4) {

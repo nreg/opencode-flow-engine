@@ -197,3 +197,50 @@ After syncing:
 - Invoked by `release-archivist` after verification completes
 - Can be invoked by `workflow-start` if stale main specs are detected
 - Specs synced here become the new baseline for future `need-explorer` and `spec-writer` work
+
+## Standard Handoff Format
+
+This skill uses the standard handoff format for all user-facing phase reports. The handoff follows a four-section structure:
+
+- **Current stage**: Where we are now in the workflow
+- **Completed / blocker**: What's been completed or what's blocking progress
+- **Next stage**: Where we're going next
+- **Entry condition**: What must be true to proceed
+
+### Handoff Scenarios
+
+The `formatStandardHandoff` function in `packages/plugin-infra/src/features/handoffs.ts` supports five scenarios:
+
+1. **normal** - Normal workflow progression
+2. **blocked** - Blocked by missing evidence or failure
+3. **approval-wait** - Waiting for user approval (DP gates)
+4. **closing-in-progress** - Release verification or archive in progress
+5. **terminal** - Successfully reached closing or abandoned
+
+### Usage Example
+
+```typescript
+import { formatStandardHandoff } from '../features/handoffs';
+
+const handoff = formatStandardHandoff('normal', {
+  currentStage: 'closing',
+  completedWork: 'Delta specs merged into main specs',
+  nextStage: 'closing',
+  entryCondition: 'Archive work complete',
+});
+
+console.log(handoff);
+```
+
+### Output Format
+
+```
+[Handoff: normal]
+
+- Current stage: `closing`.
+- Completed / blocker: `Delta specs merged into main specs`.
+- Next stage: `closing`.
+- Entry condition: `Archive work complete`.
+```
+
+For blocked, approval-wait, and closing-in-progress scenarios, the format adapts to clearly communicate the blocking condition or approval requirement.

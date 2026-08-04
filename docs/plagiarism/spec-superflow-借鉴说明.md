@@ -477,3 +477,137 @@ opencode-flow-engine 对 spec-superflow 的借鉴非常彻底：
 本次更新可借鉴价值总体较低，属于"多平台分发 + CI 质量门禁"的一次性投入，没有新的工作流机制。唯一值得记录的是 CI 插件扫描器模式（可作为 sFlow 插件自检 CI 参考），其余对纯 OpenCode 插件的 sFlow 不适用。与上一轮 `fd671ebe → 5cdd0992`（收据闭环转型）形成鲜明对比——本轮没有值得进入工作流的借鉴项。
 
 **最终决策：不借鉴**
+
+# spec-superflow 演进分析（0fa65588 → 2e0337f1）
+
+> 0fa65588 → 2e0337f1（28 个提交，v0.12.1 → v1.0.0）。核心功能 3 项，其余为测试加固、文档与发布准备。
+
+## 更新主题总览
+
+| #    | 主题                          | 核心提交                                            | 一句话说明                                                   |
+| ---- | ----------------------------- | --------------------------------------------------- | ------------------------------------------------------------ |
+| 1    | **Lightweight 内部工作流路径**（最大新特性） | `721341d` / `94d9cd2` / `86b6257` | 新增第 5 种模式：纯 `tests/`、`docs/`、`test-support/` 变更走免契约快路径，需 9 项排除证明 + scope 确认 + closing 证据 |
+| 2    | **Git 验证缓存（性能）**      | `f055921` / `2bc27fb`                               | 进程级缓存 git root、commit 解析、祖先验证结果（含失败缓存），只信任完整不可变 SHA |
+| 3    | Full workflow 恢复摩擦移除    | `08f67cf` / `2e47381` / `5df08a5`                   | ensure-branch 复制 active change 到 worktree、worktree 名称安全约束、spec 基线 preflight |
+| 4    | 标准 Handoff 文档             | `1307a2c`                                           | 9 个 skill 统一 5 种场景的用户交接格式                       |
+| 5    | task-brief 对齐新模板         | `5855851`                                           | 支持 checkbox 格式任务行 `- [x] **1.1**`                     |
+| 6    | 测试基础设施                  | `96d1e0c` 等 9 个提交                               | Git seed fixture、in-process 运行时测试（141s 全量套件）     |
+| 7    | v1.0.0 发布准备               | `5285037`                                           | 版本号同步修复（`ssf version 1.0.0` 不再产生 `0.0.0`）       |
+
+## 可借鉴性评级（对照 sFlow 现状）
+
+### P0 — 强烈建议借鉴：Lightweight 模式
+
+sFlow 现状：`WorkflowMode` 仅 `full/hotfix/tweak`（core schema）+ `quick`（workflow-recommendation.ts），复杂度判定基于**文件/任务计数**（`inferModeFromArtifacts`），无路径白名单、无排除证明。
+
+spec-superflow 的 lightweight 把判定升级为**确定性证据链**：
+
+1. **路径白名单**：`affected_paths` 必须全部以 `tests/` / `docs/` / `test-support/` 开头（拒绝绝对路径、`..` 穿越），否则降级 full
+2. **9 项排除检查**：`production_behavior` / `public_boundary` / `installer` / `state_machine` / `external_side_effect` / `data_permission_config_semantics`（须 `no`）+ `expected_behavior_clear` / `verification_reproducible` / `impact_paths_complete`（须 `yes`），任一 `unknown` 即不通过
+3. **选择约束**：必须提供单行 `scope_confirmation` + `verification_strategy`（tdd/new-test/bounded）
+4. **关闭证据**：`executing:closing` 新增 guard `lightweight-completion-evidence`——必须有且仅有一次 focused review + 持久化的 pass 验证结果（`recordLightweightCompletionEvidence`），防重复 review
+5. **升级通道**：`ssf workflow escalate` 命令把 lightweight → full，清空 DP-2/3/4/6/7 状态、重置 execution_mode/plan_hash，写入 `escalated_from=lightweight`
+
+**落地建议**：在 sFlow 的 `workflow-recommendation.ts` 增加 `lightweight` 模式 + `affected_paths`/`exclusion_checks` facts；把 `checkClosingGate` 扩展 lightweight 证据检查；`escalate` 可直接映射到 sFlow 已有的状态重置逻辑。工作量中等。
+
+### P1 — 建议借鉴：Git 验证缓存
+
+sFlow 现状：`wave-guards.ts:195-260` 每次 guard 都 `execSync` 跑 `rev-parse --verify` + `merge-base --is-ancestor`，无任何缓存，多 wave 验证时反复调用外部进程。
+
+spec-superflow 的 `createGitRangeValidator`：
+
+- 进程级 `Map` 缓存 git root、`<root>\0<revision>` commit 解析结果
+- `verifiedRanges` 缓存验证过的 `(root, base, head)` 三元组，**失败也缓存（null）**，避免重复 merge-base
+- 仅对完整 40 位 SHA 启用缓存（`FULL_COMMIT_SHA`），可变 revision 每次重新解析——保证正确性
+- 可注入 `runGit`，便于测试 mock
+
+**落地建议**：将 `wave-guards.ts` 的收据验证改造为带缓存的 validator 类。对多 wave 的大计划，可减少一半以上的 git 子进程调用。工作量低。
+
+### P1 — 建议借鉴：spec 基线 preflight
+
+sFlow 现状：`spec-publication.ts` 已有 `applyDeltaToBaseline`/`applyDeltaToBaselineDetailed`（上一轮已移植），但 `validate` 流程中无基线预检。
+
+spec-superflow 的 `cmd-validate.mjs`：spec 校验通过后，立即对 canonical baseline 执行 `applyDeltaToBaselineDetailed` 预演，失败则报 `(baseline preflight)` 错误——**在写入前发现 delta 冲突**，而非到 closing 才暴露。
+
+**落地建议**：在 sFlow 的 artifact-preflight 或 spec 校验 hook 中接入已有的 `applyDeltaToBaselineDetailed`。工作量低。
+
+### P2 — 按需借鉴
+
+| 借鉴点                          | 说明                                                         |
+| ------------------------------- | ------------------------------------------------------------ |
+| Handoff 标准化（`1307a2c`）     | 5 种场景（normal/blocked/approval-wait/closing-in-progress/terminal）固定四段格式。sFlow 的 9 个 agent prompt 无统一交接格式，可作为报告输出规范参考，工作量低 |
+| task-brief checkbox 解析（`5855851`） | 新 tasks.md 模板使用 `- [x] **1.1**` 行而非 `## Task 1` 标题。sFlow 若采用 checkbox 任务行格式，`task-brief` 类工具需同步支持 |
+| worktree 名称约束（`5df08a5`）  | `isSafePathSegment` 拒绝 `.`/`..`/分隔符/控制字符。sFlow 无 worktree 创建逻辑，仅作安全参考 |
+
+### P3 — 不适用
+
+| 功能                          | 理由                                                         |
+| ----------------------------- | ------------------------------------------------------------ |
+| in-process 测试运行时（141s 优化） | 纯测试基础设施优化，sFlow 的测试体系（`packages/core` jest）架构不同 |
+| v1.0.0 发布同步               | sFlow 有自身版本管理（`d2869f0` 后版本号逻辑已独立）          |
+| ensure-branch 复制 active change 到 worktree | sFlow 用 guard 阻断而非 worktree 隔离，架构不适用 |
+
+## 借鉴决策（2026-08-04 确认）
+
+**借鉴（进入工作流实现）：**
+
+| 优先级 | 借鉴点                        | 状态 |
+| ------ | ----------------------------- | ---- |
+| P0     | Lightweight 模式              | ✅ 决策采纳 |
+| P1     | Git 验证缓存                  | ✅ 决策采纳 |
+| P1     | spec 基线 preflight           | ✅ 决策采纳 |
+| P2     | Handoff 标准化（`1307a2c`）   | ✅ 决策采纳 |
+
+**不借鉴：**
+
+| 借鉴点                    | 理由                                       |
+| ------------------------- | ------------------------------------------ |
+| task-brief checkbox 解析  | sFlow 任务模板不采用 checkbox 行格式       |
+| worktree 名称约束         | sFlow 无 worktree 创建逻辑                 |
+| P3 不适用部分             | 架构不适用                                 |
+
+## 总体结论
+
+本次更新是 spec-superflow **v1.0.0 的功能收敛**，核心增量只有一个：**Lightweight 模式**——把上一轮"quick 路径"进一步细分出"纯内部变更"档位，并引入"路径白名单 + 排除证明 + 关闭证据 + 升级通道"的完整证据闭环。这与上一轮"收据驱动转型"一脉相承，是同一设计哲学的深化。
+
+对照 sFlow：
+
+- **立即行动（P0）**：Lightweight 模式移植——本次唯一的新工作流机制，与 sFlow 的 quick/tweak 定位互补而非冲突
+- **顺手完成（P1）**：Git 验证缓存（`wave-guards.ts` 性能优化）、spec 基线 preflight（复用已有 `applyDeltaToBaselineDetailed`）
+- **可选（P2）**：Handoff 报告格式标准化
+
+# 决策变更记录（2026-08-04）：Lightweight 借鉴方案收敛
+
+> 初始决策（2026-08-04 上午）为完整移植 Lightweight 独立模式（方案 A），经 sFlow 主 agent 深度分析与用户共同评审后，**收敛为方案 B**：不新增 lightweight 第 5 模式，改为将 lightweight 的判定机制并入 quick 模式，升级为"路径感知两段式判定"。
+
+## 方案 A → 方案 B 的收敛理由
+
+| 维度 | 方案 A（完整移植 lightweight 独立模式） | 方案 B（路径感知并入 quick） |
+|------|----------------------------------------|------------------------------|
+| 模式数量 | 5 种（新增 lightweight） | 4 种（不变：full/hotfix/tweak/quick） |
+| 状态机 | 5 模式 × 8 状态转换矩阵扩展 | 无改动 |
+| Guard | 新增 `checkLightweightCompletionEvidence` | 复用现有 quick closing（`direct-test-result`） |
+| 用户确认 | scope_confirmation + verification_strategy | 仅 verification_strategy |
+| 升级机制 | 新增 `escalateLightweightWorkflow` | 复用现有 `checkPresetUpgrade`（MODE_RANK） |
+| 工作量 | ~17 文件 + 3 测试 | ~13 文件 + 2 测试 |
+| 认知负担 | 用户需理解"quick vs lightweight 何时用哪个" | 无新增概念 |
+
+**核心判断**：lightweight 的价值在**判定质量升级**（路径性质 vs 数量），不在"第 5 种模式"。sFlow 已有完整的 quick 快路径闭环（`check-direct-short-path.ts` 处理 4 个转换 + `direct-test-result` closing guard + `checkPresetUpgrade` 升级机制），为补一个判定盲区（改 10 个 `tests/` 文件零风险却因超 3 文件被顶成 full）引入整套模式复杂度，不值。
+
+## 方案 B 最终借鉴范围（已确认进入工作流实现）
+
+| 优先级 | 借鉴点 | 实现方式 | 状态 |
+|--------|--------|----------|------|
+| P0 | Quick 路径感知两段式判定 | `workflow-recommendation.ts` 新增 `affected_paths` + `exclusion_checks`（9 项）；quick 判定：① 路径全在 tests/docs/test-support 且 9 项 checks 通过 → 放宽文件数阈值走 quick；② 否则维持现有 task≤3 && file≤3；`workflow-start/SKILL.md` + `mode-detection.md` 添加引导 | ✅ 决策采纳 |
+| P1 | Git 验证缓存 | `wave-guards.ts` 收据验证改进程级缓存 validator（git root / commit 解析 / (root,base,head) 三元组含失败缓存，仅完整 40 位 SHA 启用） | ✅ 决策采纳 |
+| P1 | Spec 基线 preflight | `artifact-validation.ts`（或 preflight.ts）在 spec 校验后、DP-2 门前调用 `applyDeltaToBaselineDetailed`，失败报 `(baseline preflight)`；guard 保持纯 Validator | ✅ 决策采纳 |
+| P2 | Handoff 标准化 | `handoffs.ts` 新增 `formatStandardHandoff` 四段式 + 8 个执行 skills 统一格式 | ✅ 决策采纳 |
+
+**明确排除项**：lightweight 独立模式、completion-evidence guard、scope_confirmation 字段、escalate 函数、状态机改动、task-brief checkbox 解析、worktree 名称约束。
+
+## 设计澄清（重要）
+
+**Lightweight 与 Preflight 是正交的两个东西**：
+- Lightweight（路径选择）是**启动前判定**，回答"改动是否纯 tests/docs/test-support 内部变更"
+- Preflight（spec 质量验证）是 **spec 写入后**的验证，服务**会产生 delta spec 的路径**（full/quick 产生 spec 的场景），lightweight 式变更不产生 spec 故不需要 preflight
+- 两者并列列出，实际是独立的两项

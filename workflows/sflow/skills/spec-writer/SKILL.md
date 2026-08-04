@@ -123,3 +123,50 @@ When handing off, report:
 2. validation results (pass/fail for each artifact)
 3. whether this is a frontend project (ui-design.md generated)
 4. a one-sentence summary of what the change does
+
+## Standard Handoff Format
+
+This skill uses the standard handoff format for all user-facing phase reports. The handoff follows a four-section structure:
+
+- **Current stage**: Where we are now in the workflow
+- **Completed / blocker**: What's been completed or what's blocking progress
+- **Next stage**: Where we're going next
+- **Entry condition**: What must be true to proceed
+
+### Handoff Scenarios
+
+The `formatStandardHandoff` function in `packages/plugin-infra/src/features/handoffs.ts` supports five scenarios:
+
+1. **normal** - Normal workflow progression
+2. **blocked** - Blocked by missing evidence or failure
+3. **approval-wait** - Waiting for user approval (DP gates)
+4. **closing-in-progress** - Release verification or archive in progress
+5. **terminal** - Successfully reached closing or abandoned
+
+### Usage Example
+
+```typescript
+import { formatStandardHandoff } from '../features/handoffs';
+
+const handoff = formatStandardHandoff('normal', {
+  currentStage: 'specifying',
+  completedWork: 'Generated proposal.md, spec.md, design.md, tasks.md',
+  nextStage: 'bridging',
+  entryCondition: 'All artifacts validated and DP-2 review passed',
+});
+
+console.log(handoff);
+```
+
+### Output Format
+
+```
+[Handoff: normal]
+
+- Current stage: `specifying`.
+- Completed / blocker: `Generated proposal.md, spec.md, design.md, tasks.md`.
+- Next stage: `bridging`.
+- Entry condition: `All artifacts validated and DP-2 review passed`.
+```
+
+For blocked, approval-wait, and closing-in-progress scenarios, the format adapts to clearly communicate the blocking condition or approval requirement.
