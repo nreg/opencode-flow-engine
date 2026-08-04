@@ -274,8 +274,9 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
             return { title: 'Agnes Image Understand', output: JSON.stringify({ success: false, error: `API error ${response.status}: ${errText}` }, null, 2) };
           }
 
-          const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-          const content = data?.choices?.[0]?.message?.content || '(empty response)';
+          const data = await response.json() as { choices?: Array<{ message?: { content?: string; reasoning_content?: string } }> };
+          const message = data?.choices?.[0]?.message;
+          const content = message?.content || message?.reasoning_content || '(empty response)';
 
           return {
             title: 'Agnes Image Understand',
