@@ -175,15 +175,16 @@ sFlow 检测到 fix-loop 意图 → 进入 Fix-Loop Mode
 ## oh-my-openagent Integration (When Available)
 
 If oh-my-openagent is installed alongside sFlow, you have access to two additional delegation tools:
-\`call_omo_agent\` (explore/librarian only) and \`task\` (full delegation with categories + skills).
+\`call_omo_agent\` (named agents: \`explore\`, \`librarian\`) and \`task\` (full delegation with categories + skills).
+\`explore\` is OpenCode's native subagent AND an omo-callable agent — use either \`call_omo_agent(subagent_type="explore")\` or \`task(subagent_type="explore")\`. \`librarian\` is omo-only.
 
 ### Stage-Specific Strategy
 
 #### 🔍 exploring stage — Parallel Codebase Exploration
-**MUST** use \`call_omo_agent\` with \`run_in_background=true\` to analyze existing code patterns before dispatching need-explorer:
+**MUST** analyze existing code patterns before dispatching need-explorer. Launch parallel exploration with \`call_omo_agent(subagent_type="explore")\` (or \`task(subagent_type="explore")\`) for codebase search and \`call_omo_agent(subagent_type="librarian")\` for external doc research:
 
 \`\`\`
-// Launch parallel exploration
+// Launch parallel exploration (explore: OpenCode native + omo-callable; librarian: omo-only)
 call_omo_agent(subagent_type="explore", run_in_background=true,
   prompt="Search the codebase for patterns related to: <user request>")
 call_omo_agent(subagent_type="librarian", run_in_background=true,
@@ -194,7 +195,7 @@ call_flow_agent(subagent_type="need-explorer",
   prompt="Based on this context: <explore+librarian results>, clarify requirements for: <user request>")
 \`\`\`
 
-> **Fallback**: If oh-my-openagent is not installed, skip \`call_omo_agent\` and route directly to \`need-explorer\`.
+> **Fallback**: If oh-my-openagent is not installed, skip \`call_omo_agent\`/librarian and rely on OpenCode's native \`explore\` subagent (via \`task\`) or route directly to \`need-explorer\`.
 
 #### 📝 specifying stage — Research-Backed Specification
 **MUST** use \`librarian\` to gather external documentation before spec-writer generates artifacts:
@@ -257,16 +258,18 @@ call_flow_agent(subagent_type="build-executor", run_in_background=false,
 
 ### Tool Reference
 
-| Tool | Allowed Subagent Types | When to Use |
+| Tool | Allowed Subagent Types / Categories | When to Use |
 |------|----------------------|-------------|
 | \`call_omo_agent\` | \`explore\`, \`librarian\` only | Codebase exploration, doc research |
-| \`task\` | Any category or subagent_type | Full delegation with model/skill control |
+| \`task\` | Any subagent_type (oracle, multimodal-looker, ...) or category (quick, deep, ...) | Full delegation with model/skill control |
 
 ### Important Notes
 
-- These tools are **only available when oh-my-openagent is installed**. Do not mention them to the user if they aren't available.
-- \`call_omo_agent\` can ONLY call \`explore\` and \`librarian\`. Do not attempt to dispatch other agents.
-- The \`task\` tool supports both \`category\` (model class) and \`subagent_type\` (direct agent name), but not both at the same time.
+- \`call_omo_agent\` and \`task\` are **only available when oh-my-openagent is installed**. Do not mention them to the user if they aren't available.
+- \`call_omo_agent\` can ONLY call \`explore\` and \`librarian\`. Other agents and categories go through \`task\`.
+- \`explore\` is OpenCode's **native subagent** — it also works without omo (via \`task(subagent_type="explore")\`).
+- omo agents useful to sFlow: \`oracle\` (read-only consultation), \`multimodal-looker\` (image/PDF analysis). \`metis\`/\`momus\` serve Prometheus planning — not needed here.
+- The \`task\` tool supports both \`category\` (quick, deep, ...) and \`subagent_type\` (direct agent name), but not both at the same time.
 - Always prefer \`call_flow_agent\` for sFlow's own subagents (need-explorer, spec-writer, etc.) — these tools are supplements, not replacements.
 
 <Delegation>
