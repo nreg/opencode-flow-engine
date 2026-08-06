@@ -1,7 +1,13 @@
 /**
  * Shared session polling utilities for sFlow subagent communication.
  */
-import { sleep } from "@opencode-flow-engine/shared";
+import { sleep } from '@opencode-flow-engine/shared';
+
+/** Default max wait time for async/background polling (120s) */
+export const DEFAULT_MAX_WAIT_MS = 120_000;
+
+/** Default max wait time for sync polling (30s) */
+export const DEFAULT_SYNC_MAX_WAIT_MS = 30_000;
 
 export interface SFlowClientSession {
   status(): Promise<{ data: unknown }>;
@@ -28,8 +34,9 @@ export async function pollSessionCompletion(
   sessionID: string,
   options: { maxWaitMs?: number; pollIntervalMs?: number; isNew?: boolean } = {},
 ): Promise<string | null> {
-  const MAX_WAIT = options.maxWaitMs ?? 10_000; // 10s default (was 20s)
-  const POLL_INTERVAL = options.pollIntervalMs ?? 200; // 200ms default (was 500ms)
+  const MAX_WAIT = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
+  const POLL_INTERVAL = options.pollIntervalMs ?? 200; // 200ms default (was 500ms, reduced for faster detection)
+  const RETRY_WAIT_BUFFER = 2000; // Task 1.5: 2s buffer accounts for clock skew and polling delay when checking retry next field expiration
   const startTime = Date.now();
   let consecutiveFailures = 0;
   const isNew = options.isNew ?? false;
@@ -42,7 +49,9 @@ export async function pollSessionCompletion(
     const mr = await client.session.messages({ path: { id: sessionID } });
     const msgs = mr.data as Array<unknown> | undefined;
     initialMsgCount = Array.isArray(msgs) ? msgs.length : 0;
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   // For isNew sessions, the prompt was just sent, so initialMsgCount = 1.
   // We need at least 1 assistant response 鈫?require count >= 2.
   const minDetectCount = isNew ? Math.max(initialMsgCount + 1, 2) : initialMsgCount + 1;
@@ -54,45 +63,134 @@ export async function pollSessionCompletion(
     await sleep(POLL_INTERVAL);
     pollCount++;
 
-    // 鈹€鈹€ Status check: session idle 鈫?return immediately 鈹€鈹€
+    // ⸺⸺ Status check: session idle/retry → handle accordingly ⸺⸺
     let isIdle = false;
+    let isRetryError = false;
     let statusFailed = false;
     try {
       const statusResult = await client.session.status();
       const rawData = statusResult.data;
+      let statusEntry:
+        | { id: string; type: string; attempt?: number; message?: string; next?: number }
+        | undefined;
+
       if (Array.isArray(rawData)) {
-        const found = (rawData as Array<{ id: string; type: string }>).find(s => s.id === sessionID);
-        if (found) isIdle = found.type === "idle";
-      } else if (rawData && typeof rawData === "object") {
-        const obj = rawData as Record<string, { type: string }>;
-        isIdle = obj[sessionID]?.type === "idle";
+        statusEntry = (
+          rawData as Array<{
+            id: string;
+            type: string;
+            attempt?: number;
+            message?: string;
+            next?: number;
+          }>
+        ).find((s) => s.id === sessionID);
+      } else if (rawData && typeof rawData === 'object') {
+        const obj = rawData as Record<
+          string,
+          { type: string; attempt?: number; message?: string; next?: number }
+        >;
+        statusEntry = obj[sessionID] ? { id: sessionID, ...obj[sessionID] } : undefined;
+      }
+
+      if (statusEntry) {
+        isIdle = statusEntry.type === 'idle';
+
+        if (statusEntry.type === 'retry') {
+          // ─── Retry 状态机语义说明 ─────────────────────────────────────────────
+          // attempt 语义：
+          //   - 0 = 首次尝试（尚未重试）
+          //   - 1-4 = 第 1-4 次重试
+          //   - >= 5 = 第 5 次重试或以后，超过最大重试次数，判定为 error
+          //
+          // MAX_RETRY_ATTEMPTS = 5 含义：
+          //   - 允许 attempt 0-4（首次 + 4 次重试，共 5 次尝试）
+          //   - attempt >= 5 时判定为 error（第 5 次重试失败）
+          //
+          // next 语义：
+          //   - 平台返回的下次重试时间戳（毫秒）
+          //   - 当 next < now - RETRY_WAIT_BUFFER 时，判定为过期（平台承诺的重试时间已过）
+          //   - 过期原因：平台调度失败、任务丢失、或时钟偏差过大
+          //
+          // RETRY_WAIT_BUFFER = 2000ms 用途：
+          //   - 容忍时钟偏差（客户端与平台时钟不同步）
+          //   - 容忍轮询延迟（轮询间隔 200ms，可能延迟 1-2 个周期）
+          //   - 避免误判：next 刚过期 1-2 秒时，可能只是轮询延迟，不应立即判定为 error
+          // ─────────────────────────────────────────────────────────────────────
+          const attempt = statusEntry.attempt ?? 0;
+          const next = statusEntry.next;
+          const MAX_RETRY_ATTEMPTS = 5;
+
+          const now = Date.now();
+          const isNextExpired = next !== undefined && next < now - RETRY_WAIT_BUFFER;
+          const isAttemptExceeded = attempt >= MAX_RETRY_ATTEMPTS;
+
+          isRetryError = isAttemptExceeded || isNextExpired;
+        }
       }
     } catch {
       statusFailed = true;
     }
+
     if (isIdle) {
       return readSessionLastMessage(client, sessionID);
     }
 
-    // 鈹€鈹€ Messages check: return immediately when assistant responds 鈹€鈹€
+    // Task 1.2: If retry is determined to be an error, return null
+    if (isRetryError) {
+      return null;
+    }
+
+    // ⸺⸺ Messages check: return immediately when assistant responds ⸺⸺
     let messagesFailed = false;
     let currentMsgCount = 0;
     try {
       const mr = await client.session.messages({ path: { id: sessionID } });
-      const msgs = mr.data as Array<{ parts: Array<{ type: string; text?: string }> }> | undefined;
+      const msgs = mr.data as
+        | Array<{
+            parts: Array<{
+              type: string;
+              text?: string;
+              error?: { message: string; code: number };
+              time?: number;
+            }>;
+          }>
+        | undefined;
       if (Array.isArray(msgs)) {
         currentMsgCount = msgs.length;
-        // Read last text from any message (skips user prompt by count check)
-        for (const msg of msgs) {
+        // Task 1.3: Parse messages including retry parts
+        // P0-1: Extract error information from retry parts
+        // Process messages in reverse order to get the latest content first
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const msg = msgs[i];
+          if (!msg) continue;
           if (msg.parts) {
+            let hasTextPart = false;
+            let retryError: string | null = null;
+            
+            // Check parts in this message
             for (const part of msg.parts) {
-              if (part.type === "text" && part.text) {
+              if (part.type === 'text' && part.text) {
                 lastMessage = part.text;
+                hasTextPart = true;
+                break; // Found text, use it
+              } else if (part.type === 'retry' && part.error) {
+                const { message, code } = part.error;
+                retryError = `Error: ${message} (code: ${code})`;
               }
+            }
+            
+            // If this message has no text but has retry error, use it
+            if (!hasTextPart && retryError) {
+              lastMessage = retryError;
+              break; // Found error in latest message, use it
+            }
+            
+            // If we found text in this message, stop searching
+            if (hasTextPart) {
+              break;
             }
           }
         }
-        // Fast path: return immediately when assistant has responded
         if (currentMsgCount >= minDetectCount) {
           return lastMessage;
         }
@@ -126,17 +224,50 @@ export async function readSessionLastMessage(
 ): Promise<string | null> {
   try {
     const mr = await client.session.messages({ path: { id: sessionID } });
-    const messages = mr.data as Array<{ parts: Array<{ type: string; text?: string }> }> | undefined;
+    const messages = mr.data as
+      | Array<{
+          parts: Array<{
+            type: string;
+            text?: string;
+            error?: { message: string; code: number };
+            time?: number;
+          }>;
+        }>
+      | undefined;
     let lastOutput: string | null = null;
     if (messages) {
-      for (const msg of messages) {
+      // P0-1: Process messages in reverse order to get the latest content first
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        if (!msg) continue;
         if (msg.parts) {
+          let hasTextPart = false;
+          let retryError: string | null = null;
+
           for (const part of msg.parts) {
-            if (part.type === "text" && part.text) lastOutput = part.text;
+            if (part.type === 'text' && part.text) {
+              lastOutput = part.text;
+              hasTextPart = true;
+              break;
+            } else if (part.type === 'retry' && part.error) {
+              const { message, code } = part.error;
+              retryError = `Error: ${message} (code: ${code})`;
+            }
+          }
+
+          if (!hasTextPart && retryError) {
+            lastOutput = retryError;
+            break;
+          }
+
+          if (hasTextPart) {
+            break;
           }
         }
       }
     }
     return lastOutput;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }

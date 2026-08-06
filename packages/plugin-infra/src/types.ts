@@ -4,7 +4,6 @@
  */
 
 import type { PluginInput } from '@opencode-ai/plugin';
-import { z } from 'zod';
 import { sleep as crossSleep } from '@opencode-flow-engine/shared';
 
 // ─── Client type ──────────────────────────────────────────────────────────────
@@ -25,6 +24,14 @@ export interface BackgroundTaskEntry {
   output_mode?: 'last_message' | 'structured';
   /** P3: warning message when completion enforcement retries are exhausted */
   warning?: string;
+  /** R1.4: flag to prevent double slot release (watcher vs pollAndComplete race) */
+  slotReleased?: boolean;
+  /** R1: changeDir for notification and subagent-store updates */
+  changeDir?: string;
+  /** P1-3: error count for watcher retry logic (internal use) */
+  _errorCount?: number;
+  /** P1-1: processing flag to prevent race condition between watcher and pollAndComplete */
+  _processing?: boolean;
 }
 
 export type BackgroundTaskRegistry = Map<string, BackgroundTaskEntry>;
@@ -37,17 +44,34 @@ export type AgentModelMap = Record<string, string>;
 
 /** sFlow native tool names (used in tool.execute.after for post-processing) */
 export const SFLOW_TOOLS = new Set([
-  'workflow_router', 'iflow_router', 'contract_validator', 'artifact_inspector',
-  'validate_spec', 'validate_proposal', 'validate_delta_spec', 'validate_tasks',
-  'validate_contract', 'validate_design', 'validate_implementation',
-  'detect_sync_conflicts', 'record_decision_point',
-  'call_flow_agent', 'flowagent_output', 'flowagent_cancel',
-  'record_execution_plan', 'record_review_receipt',
+  'workflow_router',
+  'iflow_router',
+  'contract_validator',
+  'artifact_inspector',
+  'validate_spec',
+  'validate_proposal',
+  'validate_delta_spec',
+  'validate_tasks',
+  'validate_contract',
+  'validate_design',
+  'validate_implementation',
+  'detect_sync_conflicts',
+  'record_decision_point',
+  'call_flow_agent',
+  'flowagent_output',
+  'flowagent_cancel',
+  'record_execution_plan',
+  'record_review_receipt',
 ]);
 
 /** IFlow workflow states */
 export const IFLOW_STATES = new Set([
-  'discussing', 'researching', 'planning', 'executing', 'verifying', 'shipping',
+  'discussing',
+  'researching',
+  'planning',
+  'executing',
+  'verifying',
+  'shipping',
 ]);
 
 /** Agent color mapping */
@@ -98,13 +122,15 @@ export function detectOmoPlugin(
   pluginConfig: (string | [string, Record<string, unknown>])[] | undefined,
 ): boolean {
   if (!pluginConfig) return false;
-  return pluginConfig.some(p => {
+  return pluginConfig.some((p) => {
     const name = Array.isArray(p) ? p[0] : p;
-    return name === 'oh-my-openagent'
-      || name === 'oh-my-opencode'
-      || name.startsWith('oh-my-openagent')
-      || name.startsWith('oh-my-opencode')
-      || name === 'omo';
+    return (
+      name === 'oh-my-openagent' ||
+      name === 'oh-my-opencode' ||
+      name.startsWith('oh-my-openagent') ||
+      name.startsWith('oh-my-opencode') ||
+      name === 'omo'
+    );
   });
 }
 
@@ -118,7 +144,7 @@ export async function detectAgnesProvider(cfg: {
 }): Promise<boolean> {
   if (cfg.provider && 'agnesmore' in cfg.provider) return true;
   if (cfg.plugin) {
-    const hasPlugin = cfg.plugin.some(p => {
+    const hasPlugin = cfg.plugin.some((p) => {
       const name = Array.isArray(p) ? p[0] : p;
       return name === 'agnesmore';
     });

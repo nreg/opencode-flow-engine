@@ -11,15 +11,13 @@
  *     └── sf_1699999000_1.json
  */
 
-import { join, dirname } from 'path';
+import { dirname, join } from 'node:path';
 import {
   ensureDir,
-  writeJsonFile,
-  readJsonFile,
-  fileExists,
   listFiles,
+  readJsonFile,
   removeFile,
-  directoryExists,
+  writeJsonFile,
 } from '@opencode-flow-engine/shared';
 
 // ─── 常量 ──────────────────────────────────────────────────────────────────
@@ -29,10 +27,10 @@ const CONSUMED_SUBDIR = 'consumed';
 
 // ─── 类型定义 ──────────────────────────────────────────────────────────────
 
-export type NotificationType = 'sync_completed' | 'async_completed';
+export type NotificationType = 'sync_completed' | 'async_completed' | 'async_error';
 
 export interface WriteNotificationParams {
-  /** 通知类型：同步完成 / 异步完成 */
+  /** 通知类型：同步完成 / 异步完成 / 异步错误 */
   type: NotificationType;
   /** 子 agent 类型（如 "build-executor"） */
   subagent: string;
@@ -77,11 +75,12 @@ export interface NotificationManager {
  * 将通知内容格式化为 system prompt 片段
  */
 function formatNotification(entry: NotificationEntry): string {
-  const completionInfo = entry.has_completion_signal === true
-    ? '（输出包含完成信号）'
-    : entry.has_completion_signal === false
-      ? '（输出可能不完整）'
-      : '';
+  const completionInfo =
+    entry.has_completion_signal === true
+      ? '（输出包含完成信号）'
+      : entry.has_completion_signal === false
+        ? '（输出可能不完整）'
+        : '';
   return `[子 agent 通知] ${entry.subagent} (${entry.type}) 任务 ${entry.task_id} 已完成${completionInfo}。摘要: ${entry.summary}`;
 }
 
@@ -90,7 +89,7 @@ function formatNotification(entry: NotificationEntry): string {
  */
 async function moveFile(src: string, dst: string): Promise<boolean> {
   try {
-    const { copyFile, unlink } = await import('fs/promises');
+    const { copyFile, unlink } = await import('node:fs/promises');
     await ensureDir(dirname(dst));
     await copyFile(src, dst);
     await unlink(src);
@@ -130,7 +129,9 @@ export function createNotificationManager(config: { changeDir: string }): Notifi
         session_id: params.session_id,
         completed_at: new Date().toISOString(),
         summary: params.summary,
-        ...(params.has_completion_signal !== undefined && { has_completion_signal: params.has_completion_signal }),
+        ...(params.has_completion_signal !== undefined && {
+          has_completion_signal: params.has_completion_signal,
+        }),
       };
 
       const filePath = join(notificationsDir, `${params.task_id}.json`);
@@ -164,13 +165,17 @@ export function createNotificationManager(config: { changeDir: string }): Notifi
 
       // 去重：删除已存在于 consumed/ 中的根目录重复文件（并行）
       const dedupTasks = files
-        .filter(fileName => consumedSet.has(fileName))
-        .map(fileName => removeFile(join(notificationsDir, fileName)).catch(err => console.warn('[NotificationManager] 删除重复通知失败:', err)));
+        .filter((fileName) => consumedSet.has(fileName))
+        .map((fileName) =>
+          removeFile(join(notificationsDir, fileName)).catch((err) =>
+            console.warn('[NotificationManager] 删除重复通知失败:', err),
+          ),
+        );
       await Promise.allSettled(dedupTasks);
 
       // 并行读取并移动未消费的通知文件
       const tasks = files
-        .filter(fileName => !consumedSet.has(fileName))
+        .filter((fileName) => !consumedSet.has(fileName))
         .map(async (fileName) => {
           const filePath = join(notificationsDir, fileName);
           const entry = await readJsonFile<NotificationEntry>(filePath);
