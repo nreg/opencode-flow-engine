@@ -75,7 +75,8 @@ export async function migrateSingleArtifact(srcPath: string, dstPath: string): P
   if (srcExists && !dstExists) {
     try {
       await copyFile(srcPath, dstPath);
-    } catch {
+    } catch (err) {
+      console.warn(`[migrateSingleArtifact] Failed to copy ${srcPath} -> ${dstPath}:`, err instanceof Error ? err.message : err);
     }
   }
 }
@@ -96,7 +97,8 @@ export async function migrateLegacyArtifacts(changeDir: string): Promise<void> {
   
   try {
     await ensureMigrateDir(changeDir);
-  } catch {
+  } catch (err) {
+    console.warn(`[migrateLegacyArtifacts] ensureMigrateDir failed for ${changeDir}:`, err instanceof Error ? err.message : err);
     return;
   }
   
@@ -124,14 +126,16 @@ export async function migrateLegacyArtifacts(changeDir: string): Promise<void> {
           await migrateSingleArtifact(`${legacySpecsDir}/${file}`, `${newSpecsDir}/${file}`);
         }
       }
-    } catch {
+    } catch (err) {
+      console.warn(`[migrateLegacyArtifacts] Specs directory migration failed (${legacySpecsDir} -> ${newSpecsDir}):`, err instanceof Error ? err.message : err);
     }
   }
   
   try {
     const { writeFile } = await import('node:fs/promises');
     await writeFile(markerPath, new Date().toISOString());
-  } catch {
+  } catch (err) {
+    console.warn(`[migrateLegacyArtifacts] Marker write failed (${markerPath}):`, err instanceof Error ? err.message : err);
   }
 }
 
@@ -274,7 +278,9 @@ export async function detectWorkflowState(
           skill = 'contract-builder';
           reasons.push('Contract is stale, needs regeneration');
         }
-      } catch { /* ignore staleness check failures */ }
+      } catch (err) {
+        console.warn(`[detectWorkflowState] Contract staleness check failed for ${changeDir}:`, err instanceof Error ? err.message : err);
+      }
     }
   }
 
@@ -327,7 +333,9 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
         const { unlink } = await import('node:fs/promises');
         const uiDesignPath = await resolveArtifactPath(changeDir, 'ui-design.md');
         await unlink(uiDesignPath);
-      } catch { /* ignore */ }
+      } catch (err) {
+        console.warn(`[detectStateMismatch] Failed to delete invalid ui-design.md at ${changeDir}:`, err instanceof Error ? err.message : err);
+      }
     }
     return 'specifying';
   }
