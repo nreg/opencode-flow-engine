@@ -121,9 +121,11 @@ export async function clearCheckpoint(changeDir: string, taskId: string): Promis
 
   // Read existing checkpoint (if any) and mark as stale instead of deleting
   const existing = await readJsonFile<CheckpointFile>(filePath);
+  const timestamp = new Date().toISOString();
+
   if (existing) {
     existing.status = 'stale';
-    existing.timestamp = new Date().toISOString();
+    existing.timestamp = timestamp;
     await writeJsonFile(filePath, existing);
   } else {
     // No existing checkpoint — create a stub stale record for audit trace
@@ -131,9 +133,33 @@ export async function clearCheckpoint(changeDir: string, taskId: string): Promis
     const stub: CheckpointFile = {
       taskId,
       contractHash: '',
-      timestamp: new Date().toISOString(),
+      timestamp,
       status: 'stale',
     };
     await writeJsonFile(filePath, stub);
+  }
+
+  // P1-2: Also sync plan-scoped path
+  const plan = await readExecutionPlan(changeDir);
+  if (plan) {
+    const planPaths = getPlanScopedPaths(changeDir, plan);
+    const planFilePath = planPaths.checkpoints + '/' + taskId + '.json';
+    const planExisting = await readJsonFile<CheckpointFile>(planFilePath);
+
+    if (planExisting) {
+      planExisting.status = 'stale';
+      planExisting.timestamp = timestamp;
+      await writeJsonFile(planFilePath, planExisting);
+    } else {
+      // Create stub stale record in plan-scoped path
+      await ensureReceiptDir(planPaths.checkpoints);
+      const stub: CheckpointFile = {
+        taskId,
+        contractHash: '',
+        timestamp,
+        status: 'stale',
+      };
+      await writeJsonFile(planFilePath, stub);
+    }
   }
 }

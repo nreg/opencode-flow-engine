@@ -145,7 +145,7 @@ describe('Task 7.1: DP-4 Recommendation in state-transition', () => {
     await writeFile(dir + '/design.md', '# Design\n\n## Architecture\nSome design.');
     await writeFile(dir + '/specs/test.md', '# Spec');
     await writeFile(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nTest contract.');
-    // No tasks.md — transition should still succeed
+    // No tasks.md — preflight gate should block transition
 
     const result = await hook.execute({
       changeDir: dir,
@@ -155,8 +155,9 @@ describe('Task 7.1: DP-4 Recommendation in state-transition', () => {
       data: { newState: 'approved-for-build' },
     });
 
-    expect(result.success).toBe(true);
-    // dp_4_result may be absent or have default values
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Preflight gate');
+    expect(result.error).toContain('tasks.md');
   });
 });
 

@@ -34,12 +34,8 @@ export async function checkArtifactPreflight(
 ): Promise<PreflightCheckResult> {
   const { changeDir, targetState, fileExists, directoryExists, readJson } = params;
 
-  // P29: Check cache first — avoids redundant filesystem operations
-  const cacheKey = changeDir + ':' + targetState;
-  const cached = caches.artifactPreflight.get(cacheKey);
-  if (cached) {
-    return cached;
-  }
+  // P1-3: Cache removed — preflight checks are lightweight operations (file existence checks),
+  // and the 5s TTL cache provides minimal benefit while risking stale results when artifacts change.
 
   const gate = ARTIFACT_PREFLIGHT[targetState];
   if (!gate || gate.required.length === 0) {
@@ -63,8 +59,6 @@ export async function checkArtifactPreflight(
       passed: false, missing, existence, preflightState: route.state,
       reason: `[SFLOW] Preflight gate: missing ${missing.join(', ')}. Route to "${route.state}" first (${route.actionHint}).`,
     };
-    // P29: Cache negative result briefly (shorter TTL for failures)
-    caches.artifactPreflight.set(cacheKey, { passed: result.passed, missing: result.missing, existence: result.existence || {} }, 2000);
     return result;
   }
   // P4: Extended frontend check — also covers specifying state for frontend projects
@@ -80,7 +74,6 @@ export async function checkArtifactPreflight(
             passed: false, missing: ['ui-design.md'], existence, preflightState: 'ui-design',
             reason: 'Frontend project needs ui-design.md before "' + targetState + '".',
           };
-          caches.artifactPreflight.set(cacheKey, { passed: result.passed, missing: result.missing, existence: result.existence || {} }, 2000);
           return result;
         }
       }
@@ -91,14 +84,11 @@ export async function checkArtifactPreflight(
         preflightState: targetState,
         reason: 'Frontend detection failed: ' + (err instanceof Error ? err.message : String(err)) + '. Cannot verify ui-design.md requirement.',
       };
-      caches.artifactPreflight.set(cacheKey, { passed: result.passed, missing: result.missing, existence: result.existence || {} }, 2000);
       return result;
     }
   }
 
   const result: PreflightCheckResult = { passed: true, missing: [], existence };
-  // P29: Cache positive result with full TTL
-  caches.artifactPreflight.set(cacheKey, { passed: result.passed, missing: result.missing, existence: result.existence || {} });
   return result;
 }
 

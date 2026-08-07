@@ -371,6 +371,49 @@ describe('clearCheckpoint', () => {
     expect(staleRecord!.taskId).toBe('nonexistent-task');
     expect(staleRecord!.contractHash).toBe('');
   });
+
+  // P1-2: clearCheckpoint should sync plan-scoped paths
+  it('should mark both root and plan-scoped checkpoints as stale when execution plan exists', async () => {
+    // Setup: create execution plan
+    const plan = {
+      hash: 'sha256:' + 'a'.repeat(64),
+      revision: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/execution-plan.json', JSON.stringify(plan));
+
+    // Save checkpoint (will write to both root and plan-scoped paths)
+    const checkpoint: CheckpointFile = {
+      taskId: 'task-plan-test',
+      contractHash: 'testhash',
+      timestamp: new Date().toISOString(),
+    };
+    await saveCheckpoint(dir, checkpoint);
+
+    // Verify both paths exist
+    const rootFilePath = dir + '/.flow-engine/sflow/checkpoints/task-plan-test.json';
+    const planIdentity = `r${plan.revision}-${plan.hash.slice('sha256:'.length).toLowerCase()}`;
+    const planFilePath = dir + '/.flow-engine/sflow/plans/' + planIdentity + '/checkpoints/task-plan-test.json';
+
+    const rootExistsBefore = await Bun.file(rootFilePath).exists();
+    const planExistsBefore = await Bun.file(planFilePath).exists();
+    expect(rootExistsBefore).toBe(true);
+    expect(planExistsBefore).toBe(true);
+
+    // Clear checkpoint
+    await clearCheckpoint(dir, 'task-plan-test');
+
+    // Verify both are marked stale
+    const rootContent = JSON.parse(await readFile(rootFilePath, 'utf-8'));
+    const planContent = JSON.parse(await readFile(planFilePath, 'utf-8'));
+
+    expect(rootContent.status).toBe('stale');
+    expect(planContent.status).toBe('stale');
+    expect(rootContent.taskId).toBe('task-plan-test');
+    expect(planContent.taskId).toBe('task-plan-test');
+  });
 });
 
 // ─── Integration: save → read → detect stale → clear ────────────────────
