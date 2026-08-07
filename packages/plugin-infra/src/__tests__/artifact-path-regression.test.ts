@@ -39,6 +39,16 @@ const HARDCODED_PATTERNS = [
   // 3. 根目录 specs 拼接（在 src 目录下）
   /[`'"]\$\{[^}]+\}\/specs[`'"]/,
   /\+\s*['"]\/specs['"]/,
+  
+  // 4. path.join 拼接 artifact 文件名
+  /path\.join\([^)]*,\s*['"]proposal\.md['"]\)/,
+  /path\.join\([^)]*,\s*['"]design\.md['"]\)/,
+  /path\.join\([^)]*,\s*['"]tasks\.md['"]\)/,
+  /path\.join\([^)]*,\s*['"]execution-contract\.md['"]\)/,
+  /path\.join\([^)]*,\s*['"]ui-design\.md['"]\)/,
+  
+  // 5. path.join 拼接 specs 目录
+  /path\.join\([^)]*,\s*['"]specs['"]\)/,
 ];
 
 // 允许的上下文（在这些上下文中，路径访问是合理的）
