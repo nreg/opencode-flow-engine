@@ -6,7 +6,7 @@ import type { FeatureConfig, FeatureResult } from './types.js';
 import { isValidTransition } from '@opencode-flow-engine/core';
 import { readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, stateFileMutex, fileExists, directoryExists, readFile, listFiles } from '@opencode-flow-engine/shared';
 import { detectStateMismatch } from './state-manager.js';
-import { readArtifactContent } from './state-manager/artifact-paths.js';
+import { readArtifactContent, artifactExists } from './state-manager/artifact-paths.js';
 
 const SFLOW_DIR = '.flow-engine/sflow';
 const STATE_FILE = `${SFLOW_DIR}/state.json`;
@@ -202,15 +202,9 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
 
         async inferStateFromArtifacts(changeDir: string): Promise<{ state: string; mode: string }> {
       const state = await detectStateMismatch(changeDir, 'exploring');
-      const hasProposalNew = await fileExists(changeDir + '/.flow-engine/sflow/proposal.md');
-      const hasProposalOld = await fileExists(changeDir + '/proposal.md');
-      const hasProposal = hasProposalNew || hasProposalOld;
-      const hasContractNew = await fileExists(changeDir + '/.flow-engine/sflow/execution-contract.md');
-      const hasContractOld = await fileExists(changeDir + '/execution-contract.md');
-      const hasContract = hasContractNew || hasContractOld;
-      const tasksNew = await readFile(changeDir + '/.flow-engine/sflow/tasks.md').catch(() => null);
-      const tasksOld = await readFile(changeDir + '/tasks.md').catch(() => null);
-      const tasksContent = tasksNew || tasksOld;
+      const hasProposal = await artifactExists(changeDir, 'proposal.md');
+      const hasContract = await artifactExists(changeDir, 'execution-contract.md');
+      const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
         const taskLines = tasksContent ? tasksContent.split('\n').filter((line: string) => line.match(/^-\s*\[.\]\s+/)) : [];
       const changedFileCount = await countChangedFiles(changeDir);
       const mode = inferModeFromArtifacts(hasProposal, hasContract, changedFileCount, taskLines.length);

@@ -5,6 +5,18 @@
 import { fileExists, readFile } from "@opencode-flow-engine/shared";
 
 /**
+ * Canonical set of artifact file names.
+ * Shared across the codebase to ensure consistency.
+ */
+export const ARTIFACT_NAMES = new Set([
+  'proposal.md',
+  'design.md',
+  'tasks.md',
+  'execution-contract.md',
+  'ui-design.md',
+]);
+
+/**
  * Resolve artifact path with dual-path compatibility.
  * Priority: .flow-engine/sflow/<artifact> (new) → <changeDir>/<artifact> (legacy)
  */

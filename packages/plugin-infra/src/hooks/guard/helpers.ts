@@ -2,8 +2,9 @@
  * Guard helper functions — extracted from guard.ts for maintainability.
  */
 
+import { ARTIFACT_NAMES } from '../../features/state-manager/artifact-paths.js';
+
 export const SOURCE_CODE_PATTERNS = /\.(ts|js|tsx|jsx|mjs|cjs|mts|cts|py|java|kt|rs|go|rb|php|c|cpp|h|hpp|cs|swift|vue|svelte|css|scss|less)$/i;
-export const ARTIFACT_NAMES = new Set(['proposal.md', 'design.md', 'tasks.md', 'execution-contract.md', 'ui-design.md']);
 
 export function isArtifactPath(filePath: string, changeDir: string): boolean {
   const normalized = filePath.replace(/\\/g, '/');
@@ -11,7 +12,7 @@ export function isArtifactPath(filePath: string, changeDir: string): boolean {
   
   if (normalized.includes('.flow-engine/sflow/')) {
     const afterSflow = normalized.split('.flow-engine/sflow/')[1] || '';
-    const artifactName = afterSflow.split('/')[0];
+    const artifactName = afterSflow.split('/')[0] || '';
     if (ARTIFACT_NAMES.has(artifactName)) return true;
     if (afterSflow.startsWith('specs/') || afterSflow === 'specs') return true;
   }

@@ -45,7 +45,7 @@ export function createArtifactValidationHook(): HookHandler {
 }
 
 async function validateForSpecifying(changeDir: string): Promise<HookResult> {
-  const proposalContent = await readFile(`${changeDir}/proposal.md`);
+  const proposalContent = await readArtifactContent(changeDir, 'proposal.md');
   if (!proposalContent) {
     return {
       success: false,
@@ -143,7 +143,7 @@ async function validateForExecution(changeDir: string): Promise<HookResult> {
 }
 
 async function validateForClosing(changeDir: string): Promise<HookResult> {
-  const tasksContent = await readFile(`${changeDir}/tasks.md`);
+  const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
   if (!tasksContent) {
     return {
       success: false,
