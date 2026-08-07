@@ -27,6 +27,7 @@ import { getStateFilePath } from './features/state-manager.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { setHasAgnesProvider } from './agents/agent-tools.js';
 import { pollSessionCompletion } from './helpers/polling.js';
+import { resolveChangeDir } from './helpers/resolve-change-dir.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
 import { createTaskTracker } from './features/task-tracker.js';
@@ -71,7 +72,7 @@ function createIFlowTools(client: SFlowClient): Record<string, LocalToolDefiniti
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
       execute: async (args, context) => {
-        return createIFlowRouterTool().execute({ ...args, changeDir: context.directory || '' }, context);
+        return createIFlowRouterTool().execute({ ...args, changeDir: resolveChangeDir(undefined, context.directory) }, context);
       },
     },
 

@@ -5,6 +5,7 @@
 
 import type { ToolDefinition, ToolContext, ToolResult } from "./types.js";
 import { fileExists, directoryExists, readFile, readJsonFile, ensureDir, writeJsonFile, writeFile, removeFile } from "@opencode-flow-engine/shared";
+import { resolveChangeDir } from "../helpers/resolve-change-dir.js";
 
 /**
  * Shared agent names that are not bound to any workflow state.
@@ -318,7 +319,7 @@ export function createIFlowRouterTool(): ToolDefinition {
     },
     execute: async (params, context) => {
       const p = params as { changeDir?: string; intent?: string };
-      const changeDir = p.changeDir || context.directory || '';
+      const changeDir = resolveChangeDir(p.changeDir, context.directory);
       const userIntent = p.intent || '';
 
       try {

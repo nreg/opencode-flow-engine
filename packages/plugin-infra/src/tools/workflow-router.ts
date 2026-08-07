@@ -6,6 +6,7 @@ import type { ToolDefinition, ToolContext, ToolResult } from "./types.js";
 import { fileExists, directoryExists, readJsonFile, isContractStale } from "@opencode-flow-engine/shared";
 import { detectFrontend } from "../features/workflow-manager.js";
 import { detectWorkflowState, writeStateFile } from "../features/state-manager.js";
+import { resolveChangeDir } from "../helpers/resolve-change-dir.js";
 
 /**
  * Shared agent names that are not bound to any workflow state.
@@ -298,7 +299,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
     },
     execute: async (params, context) => {
       const p = params as { changeDir?: string; intent?: string };
-      const changeDir = await findActiveChangeDir(p.changeDir || '', context.directory || '');
+      const changeDir = await findActiveChangeDir(p.changeDir, resolveChangeDir(undefined, context.directory));
       const userIntent = p.intent || '';
 
       // Phase 0: Horizontal command detection
