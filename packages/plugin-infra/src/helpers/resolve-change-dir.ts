@@ -40,27 +40,26 @@ export function resolveChangeDir(
 
   const errorReason = cwdError ? ` (cwd error: ${cwdError.message})` : '';
   
-  let callerInfo = '';
-  try {
-    const stack = new Error().stack;
-    if (stack) {
-      const lines = stack.split('\n');
-      const callerLine = lines.find((line, index) => {
-        if (index === 0) return false;
-        return !line.includes('resolveChangeDir') && line.trim().length > 0;
-      });
-      if (callerLine) {
-        const match = callerLine.match(/at\s+(.+?)\s+\(/);
-        if (match) {
-          callerInfo = ` (called by ${match[1]})`;
-        }
-      }
-    }
-  } catch {
-    // Stack trace extraction failed, continue without caller info
-  }
+  const callerInfo = extractCallerInfo();
   
   throw new Error(
     `Unable to resolve changeDir: no explicit path, no context directory, and cwd unavailable${errorReason}${callerInfo}`,
   );
+}
+
+function extractCallerInfo(): string {
+  try {
+    const stack = new Error().stack;
+    if (!stack) return '';
+    
+    const callerLine = stack
+      .split('\n')
+      .slice(2)
+      .find(line => !line.includes('resolveChangeDir') && line.trim());
+    
+    const match = callerLine?.match(/at\s+(.+?)\s+\(/);
+    return match ? ` (called by ${match[1]})` : '';
+  } catch {
+    return '';
+  }
 }

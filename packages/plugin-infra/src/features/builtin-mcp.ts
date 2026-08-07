@@ -275,18 +275,6 @@ export function createWorkflowTools(): Record<string, LocalToolDefinition> {
           const currentStateData = await readJsonFile<Record<string, unknown>>(statePath);
           const currentState = (currentStateData?.state as string) || 'exploring';
 
-          // Guard check: validate state transition
-          if (!isValidTransition(currentState, args.target_state)) {
-            const valid = getValidTransitions(currentState);
-            return {
-              title: 'Record Decision Point',
-              output: JSON.stringify({
-                success: false,
-                error: `Invalid state transition from "${currentState}" to "${args.target_state}". Valid transitions: ${valid.join(', ')}`,
-              }, null, 2),
-            };
-          }
-
           // Build decision point record
           const record: DecisionPoint = {
             id: args.dp_id,
@@ -299,8 +287,24 @@ export function createWorkflowTools(): Record<string, LocalToolDefinition> {
             record.metadata = args.metadata;
           }
 
-          // Atomic state update via shared writeStateFile
-          await writeStateFile(changeDir, args.target_state, { decisionPoint: record });
+          // P0 fix: Atomic state update with transition validation
+          // Guard check is now inside writeStateFile's mutex for TOCTOU safety
+          const result = await writeStateFile(
+            changeDir,
+            args.target_state,
+            { decisionPoint: record },
+            { validateTransitionFrom: currentState }
+          );
+
+          if (!result.success) {
+            return {
+              title: 'Record Decision Point',
+              output: JSON.stringify({
+                success: false,
+                error: result.error,
+              }, null, 2),
+            };
+          }
 
           // Read back to get total count
           const updatedState = await readJsonFile<Record<string, unknown>>(statePath);

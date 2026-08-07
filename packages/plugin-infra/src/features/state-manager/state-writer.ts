@@ -5,6 +5,7 @@
 
 import { ensureDir, readJsonFile, atomicWriteJsonFile, stateFileMutex } from "@opencode-flow-engine/shared";
 import type { DecisionPoint } from '@opencode-flow-engine/core';
+import { isValidTransition, getValidTransitions } from '@opencode-flow-engine/core';
 
 /**
  * Apply AFK auto-deactivation on terminal states.
@@ -64,12 +65,32 @@ function upsertDecisionPoint(
  * - Both can coexist in the same call
  *
  * Pure implementation: works on a fresh copy, no reference side effects.
+ *
+ * P1-1 fix: Preserve non-array decisionPoints with warning instead of silently discarding.
  */
 function appendDecisionPoint(
   state: Record<string, unknown>,
   extra: Record<string, unknown> | undefined,
   now: string
 ): void {
+  // P1-1: Check if decisionPoints exists but is not an array
+  // This check must happen before any decision point processing
+  // Note: null is treated as missing (not malformed)
+  if ('decisionPoints' in state && 
+      state.decisionPoints !== null && 
+      !Array.isArray(state.decisionPoints)) {
+    console.warn(
+      `state.decisionPoints is not an array (got ${typeof state.decisionPoints}), ` +
+      `preserving original value and skipping decision point update`
+    );
+    return;
+  }
+
+  // Treat null as missing (convert to empty array)
+  if (state.decisionPoints === null) {
+    state.decisionPoints = [];
+  }
+
   if (!extra) return;
 
   // Work on a fresh copy — no reference side effects
@@ -114,13 +135,30 @@ function appendDecisionPoint(
  * - Helper functions: AFK deactivation, AFK consistency, DP appending
  * 
  * Uses atomicWriteJsonFile for crash safety.
+ * 
+ * P0 fix: TOCTOU race condition — atomic state transition validation.
+ * 
+ * @param changeDir - Project directory path
+ * @param newState - Target state to transition to
+ * @param extra - Additional fields to merge into state
+ * @param options - Optional validation options
+ * @param options.validateTransitionFrom - Expected current state for atomic check
+ * @returns { success: boolean, error?: string } - Result of the write operation
  */
-export async function writeStateFile(changeDir: string, newState: string, extra?: Record<string, unknown>): Promise<void> {
+export async function writeStateFile(
+  changeDir: string,
+  newState: string,
+  extra?: Record<string, unknown>,
+  options?: { validateTransitionFrom?: string }
+): Promise<{ success: boolean; error?: string }> {
   const now = new Date().toISOString();
   const statePath = changeDir + '/.flow-engine/sflow/state.json';
   await ensureDir(changeDir + '/.flow-engine/sflow');
-  await stateFileMutex.runExclusive(async () => {
+  
+  return stateFileMutex.runExclusive(async () => {
     const existing = await readJsonFile<Record<string, unknown>>(statePath);
+    const isNewFile = !existing;
+    
     const state: Record<string, unknown> = existing ?? {
       state: 'exploring',
       mode: 'full',
@@ -134,6 +172,32 @@ export async function writeStateFile(changeDir: string, newState: string, extra?
       verificationStatus: 'pending',
       createdAt: now,
     };
+
+    // Get actual current state
+    const actualCurrent = (state.state as string) || 'exploring';
+
+    // P0: Atomic state transition validation within mutex
+    // Skip validation for new files (initial state setup)
+    if (!isNewFile) {
+      if (options?.validateTransitionFrom) {
+        // Check if state changed concurrently
+        if (actualCurrent !== options.validateTransitionFrom) {
+          return {
+            success: false,
+            error: `State changed concurrently: expected "${options.validateTransitionFrom}" but found "${actualCurrent}"`,
+          };
+        }
+      }
+
+      // Validate state transition (allow staying in same state)
+      if (actualCurrent !== newState && !isValidTransition(actualCurrent, newState)) {
+        const valid = getValidTransitions(actualCurrent);
+        return {
+          success: false,
+          error: `Invalid state transition from "${actualCurrent}" to "${newState}". Valid transitions: ${valid.join(', ')}`,
+        };
+      }
+    }
 
     // Apply state update
     state.state = newState;
@@ -157,5 +221,7 @@ export async function writeStateFile(changeDir: string, newState: string, extra?
     appendDecisionPoint(state, extra, now);
 
     await atomicWriteJsonFile(statePath, state);
+    
+    return { success: true };
   });
 }

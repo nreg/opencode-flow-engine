@@ -584,7 +584,9 @@ describe('writeStateFile — Combined behaviors', () => {
   });
 
   it('should create new state file if not exists', async () => {
-    await writeStateFile(dir, 'exploring');
+    const result = await writeStateFile(dir, 'exploring');
+    
+    expect(result.success).toBe(true);
 
     const state = await readStateJson(dir);
     expect(state).not.toBeNull();
@@ -887,5 +889,160 @@ describe('writeStateFile — decisionPoints field protection (P0 fix)', () => {
     expect(state!.afk).toBe(true);
     expect(state!.afkTier).toBe(2);
     expect(state!.customField).toBe('custom value');
+  });
+});
+
+// =============================================================================
+// P0: TOCTOU Race Condition Fix — Atomic state transition validation
+// =============================================================================
+describe('writeStateFile — TOCTOU race condition (P0 fix)', () => {
+  const dir = tempDir('state-writer-toctou-race');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await ensureDir(dir + '/.flow-engine/sflow');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should reject concurrent state transition when state changed between read and write', async () => {
+    // Initial state: exploring
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'exploring', mode: 'full' })
+    );
+
+    // P0 fix: Atomic state transition validation within mutex
+    // Two concurrent calls with same expected state - only one should succeed
+    
+    // Start both calls concurrently (they will serialize due to mutex)
+    const call1Promise = writeStateFile(dir, 'specifying', undefined, { validateTransitionFrom: 'exploring' });
+    const call2Promise = writeStateFile(dir, 'abandoned', undefined, { validateTransitionFrom: 'exploring' });
+
+    const [result1, result2] = await Promise.all([call1Promise, call2Promise]);
+
+    // One should succeed, one should fail due to concurrent state change
+    const successCount = [result1, result2].filter(r => r.success).length;
+    const failureCount = [result1, result2].filter(r => !r.success).length;
+
+    expect(successCount).toBe(1);
+    expect(failureCount).toBe(1);
+
+    // Check that the failure is due to concurrent state change
+    const failedResult = [result1, result2].find(r => !r.success);
+    expect(failedResult!.error).toContain('State changed concurrently');
+  });
+
+  it('should reject invalid state transition within mutex', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'exploring', mode: 'full' })
+    );
+
+    // Try invalid transition: exploring -> executing (not allowed)
+    const result = await writeStateFile(dir, 'executing', undefined, { validateTransitionFrom: 'exploring' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid state transition');
+  });
+
+  it('should succeed when state matches expected and transition is valid', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'exploring', mode: 'full' })
+    );
+
+    const result = await writeStateFile(dir, 'specifying', undefined, { validateTransitionFrom: 'exploring' });
+
+    expect(result.success).toBe(true);
+
+    const state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    expect(state!.state).toBe('specifying');
+  });
+
+  it('should maintain backward compatibility when validateTransitionFrom is not provided', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'exploring', mode: 'full' })
+    );
+
+    // Old behavior: no validation option, just write
+    await writeStateFile(dir, 'specifying');
+
+    const state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    expect(state!.state).toBe('specifying');
+  });
+});
+
+// =============================================================================
+// P1-1: Non-array decisionPoints handling — Preserve with warning
+// =============================================================================
+describe('writeStateFile — non-array decisionPoints handling (P1-1 fix)', () => {
+  const dir = tempDir('state-writer-non-array-dps');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await ensureDir(dir + '/.flow-engine/sflow');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should preserve non-array decisionPoints and log warning', async () => {
+    // Create malformed state with non-array decisionPoints
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({
+        state: 'exploring',
+        mode: 'full',
+        decisionPoints: 'this-is-not-an-array', // Malformed data
+      })
+    );
+
+    // Capture console.warn
+    const warnSpy: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnSpy.push(args.join(' '));
+    };
+
+    try {
+      await writeStateFile(dir, 'specifying');
+
+      const state = await readStateJson(dir);
+      expect(state).not.toBeNull();
+      // Should preserve the original malformed value
+      expect(state!.decisionPoints).toBe('this-is-not-an-array');
+      // Should have logged a warning
+      expect(warnSpy.length).toBeGreaterThan(0);
+      expect(warnSpy[0]).toContain('decisionPoints is not an array');
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it('should handle null decisionPoints gracefully', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({
+        state: 'exploring',
+        mode: 'full',
+        decisionPoints: null,
+      })
+    );
+
+    await writeStateFile(dir, 'specifying');
+
+    const state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    // null should be treated as missing, so decisionPoints should be created as array
+    expect(Array.isArray(state!.decisionPoints)).toBe(true);
   });
 });
