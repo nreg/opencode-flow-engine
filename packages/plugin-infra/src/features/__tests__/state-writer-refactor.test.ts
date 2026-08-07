@@ -596,3 +596,94 @@ describe('writeStateFile — Combined behaviors', () => {
     expect(state!.updatedAt).toBeDefined();
   });
 });
+
+// =============================================================================
+// P1-2: Defensive checks for malformed decisionPoint input
+// =============================================================================
+describe('writeStateFile — defensive checks for malformed decisionPoint', () => {
+  const dir = tempDir('state-writer-malformed-dp');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await ensureDir(dir + '/.flow-engine/sflow');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should skip null decisionPoint without error', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'exploring', mode: 'full' })
+    );
+
+    // @ts-expect-error - testing malformed input
+    await writeStateFile(dir, 'specifying', { decisionPoint: null });
+
+    const state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    expect(state!.state).toBe('specifying');
+    expect(state!.decisionPoints).toBeUndefined();
+  });
+
+  it('should skip decisionPoint without id field without error', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'exploring', mode: 'full' })
+    );
+
+    await writeStateFile(dir, 'specifying', {
+      decisionPoint: { rationale: 'test' }
+    });
+
+    const state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    expect(state!.state).toBe('specifying');
+    expect(state!.decisionPoints).toBeUndefined();
+  });
+
+  it('should skip decisionPoint with non-string id without error', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'exploring', mode: 'full' })
+    );
+
+    await writeStateFile(dir, 'specifying', {
+      decisionPoint: { id: 123, rationale: 'test' }
+    });
+
+    const state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    expect(state!.state).toBe('specifying');
+    expect(state!.decisionPoints).toBeUndefined();
+  });
+
+  it('should handle valid decisionPoint alongside malformed ones', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'exploring', mode: 'full' })
+    );
+
+    await writeStateFile(dir, 'specifying', {
+      decisionPoint: { id: 'dp-1', rationale: 'valid' }
+    });
+
+    let state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    expect(state!.decisionPoints).toBeDefined();
+    expect(Array.isArray(state!.decisionPoints)).toBe(true);
+    expect((state!.decisionPoints as any[]).length).toBe(1);
+
+    await writeStateFile(dir, 'bridging', {
+      decisionPoint: { rationale: 'no-id' }
+    });
+
+    state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    expect(state!.state).toBe('bridging');
+    expect((state!.decisionPoints as any[]).length).toBe(1);
+    expect((state!.decisionPoints as any[])[0].id).toBe('dp-1');
+  });
+});

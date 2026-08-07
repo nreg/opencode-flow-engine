@@ -30,12 +30,19 @@ function applyAfkConsistency(state: Record<string, unknown>): void {
 /**
  * Upsert decision point: find existing by id → update or push.
  * Single responsibility: handles the common append/update logic.
+ *
+ * Defensive checks:
+ * - Skip if dp is null/undefined or not an object
+ * - Skip if dp.id is missing or not a string
  */
 function upsertDecisionPoint(
   dps: Array<Record<string, unknown>>,
   dp: Record<string, unknown>,
   now: string
 ): void {
+  if (!dp || typeof dp !== 'object') return;
+  if (typeof dp.id !== 'string') return;
+
   const existingIndex = dps.findIndex(d => d.id === dp.id);
   if (existingIndex >= 0) {
     dps[existingIndex] = { ...dp, timestamp: now };
@@ -47,7 +54,7 @@ function upsertDecisionPoint(
 /**
  * Append or update decision point entry.
  * Single responsibility: handles both DP-4 (via dp_4_result) and generic decisionPoint.
- * 
+ *
  * Unified logic:
  * - dp_4_result is converted to DecisionPoint format and merged
  * - decisionPoint is appended/updated directly
@@ -60,11 +67,13 @@ function appendDecisionPoint(
 ): void {
   if (!extra) return;
 
+  const existingDps: Array<Record<string, unknown>> = Array.isArray(state.decisionPoints)
+    ? [...(state.decisionPoints as Array<Record<string, unknown>>)]
+    : [];
+
   const dps: Array<Record<string, unknown>> = Array.isArray(state.decisionPoints)
     ? (state.decisionPoints as Array<Record<string, unknown>>)
     : [];
-
-  let changed = false;
 
   // Handle dp_4_result: convert to DecisionPoint format
   if (extra.dp_4_result && typeof extra.dp_4_result === 'object') {
@@ -74,16 +83,16 @@ function appendDecisionPoint(
       mode: dp4.mode,
       rationale: dp4.rationale,
     } as Record<string, unknown>, now);
-    changed = true;
   }
 
   // Handle generic decisionPoint — same upsert path
   if (extra.decisionPoint && typeof extra.decisionPoint === 'object') {
     upsertDecisionPoint(dps, extra.decisionPoint as Record<string, unknown>, now);
-    changed = true;
   }
 
-  if (changed) state.decisionPoints = dps;
+  if (dps.length > 0 && JSON.stringify(dps) !== JSON.stringify(existingDps)) {
+    state.decisionPoints = dps;
+  }
 }
 
 /**

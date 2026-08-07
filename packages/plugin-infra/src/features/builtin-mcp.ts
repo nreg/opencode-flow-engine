@@ -266,13 +266,6 @@ export function createWorkflowTools(): Record<string, LocalToolDefinition> {
       execute: async (args: { dp_id: string; state: string; target_state: string; metadata?: string; change_dir?: string }, context) => {
 
         const changeDir = resolveChangeDir(args.change_dir, context.directory);
-        if (!changeDir) {
-          return {
-            title: 'Record Decision Point',
-            output: JSON.stringify({ success: false, error: 'sFlow change directory not detected. Pass change_dir explicitly.' }, null, 2),
-          };
-        }
-
         const { readJsonFile, ensureDir } = await import('@opencode-flow-engine/shared');
 
         const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
