@@ -343,6 +343,177 @@ describe('writeStateFile — Generic decisionPoint handling', () => {
 });
 
 // =============================================================================
+// P1-4: Boundary test — dp_4_result and decisionPoint coexistence
+// =============================================================================
+describe('writeStateFile — dp_4_result and decisionPoint coexistence', () => {
+  const dir = tempDir('state-writer-dp-coexistence');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await ensureDir(dir + '/.flow-engine/sflow');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should handle both dp_4_result and decisionPoint in same call', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'bridging', mode: 'full' })
+    );
+
+    await writeStateFile(dir, 'approved-for-build', {
+      dp_4_result: {
+        mode: 'inline',
+        taskCount: 2,
+        hasDependencies: false,
+        rationale: 'Simple tasks',
+      },
+      decisionPoint: {
+        id: 'dp-3',
+        name: 'Contract Approval',
+        confirmedInState: 'bridging',
+        targetState: 'approved-for-build',
+        metadata: 'Contract validated',
+      },
+    });
+
+    const state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    expect(Array.isArray(state!.decisionPoints)).toBe(true);
+    const dps = state!.decisionPoints as Array<Record<string, unknown>>;
+    
+    // Both DP-4 and DP-3 should be present
+    expect(dps).toHaveLength(2);
+    
+    const dp4 = dps.find(dp => dp.id === 'dp-4');
+    expect(dp4).toBeDefined();
+    expect(dp4!.mode).toBe('inline');
+    expect(dp4!.rationale).toBe('Simple tasks');
+    expect(dp4!.timestamp).toBeDefined();
+    
+    const dp3 = dps.find(dp => dp.id === 'dp-3');
+    expect(dp3).toBeDefined();
+    expect(dp3!.name).toBe('Contract Approval');
+    expect(dp3!.metadata).toBe('Contract validated');
+    expect(dp3!.timestamp).toBeDefined();
+  });
+
+  it('should update both dp_4_result and decisionPoint when they exist', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({
+        state: 'bridging',
+        mode: 'full',
+        decisionPoints: [
+          {
+            id: 'dp-4',
+            mode: 'sdd',
+            rationale: 'Initial recommendation',
+            timestamp: '2025-01-01T00:00:00.000Z',
+          },
+          {
+            id: 'dp-3',
+            name: 'Contract Approval',
+            confirmedInState: 'bridging',
+            targetState: 'approved-for-build',
+            metadata: 'Initial metadata',
+            timestamp: '2025-01-01T00:00:00.000Z',
+          },
+        ],
+      })
+    );
+
+    await writeStateFile(dir, 'approved-for-build', {
+      dp_4_result: {
+        mode: 'inline',
+        taskCount: 1,
+        hasDependencies: false,
+        rationale: 'Updated recommendation',
+      },
+      decisionPoint: {
+        id: 'dp-3',
+        name: 'Contract Approval',
+        confirmedInState: 'bridging',
+        targetState: 'approved-for-build',
+        metadata: 'Updated metadata',
+      },
+    });
+
+    const state = await readStateJson(dir);
+    const dps = state!.decisionPoints as Array<Record<string, unknown>>;
+    
+    // Should still have exactly 2 entries (updated, not duplicated)
+    expect(dps).toHaveLength(2);
+    
+    const dp4 = dps.find(dp => dp.id === 'dp-4');
+    expect(dp4).toBeDefined();
+    expect(dp4!.mode).toBe('inline');
+    expect(dp4!.rationale).toBe('Updated recommendation');
+    
+    const dp3 = dps.find(dp => dp.id === 'dp-3');
+    expect(dp3).toBeDefined();
+    expect(dp3!.metadata).toBe('Updated metadata');
+    
+    // Ensure no duplicates
+    expect(dps.filter(dp => dp.id === 'dp-4')).toHaveLength(1);
+    expect(dps.filter(dp => dp.id === 'dp-3')).toHaveLength(1);
+  });
+
+  it('should preserve other decisionPoints when adding both dp_4_result and decisionPoint', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({
+        state: 'bridging',
+        mode: 'full',
+        decisionPoints: [
+          {
+            id: 'dp-0',
+            name: 'Language Detection',
+            confirmedInState: 'exploring',
+            targetState: 'specifying',
+            timestamp: '2025-01-01T00:00:00.000Z',
+          },
+        ],
+      })
+    );
+
+    await writeStateFile(dir, 'approved-for-build', {
+      dp_4_result: {
+        mode: 'inline',
+        taskCount: 2,
+        hasDependencies: false,
+        rationale: 'Simple tasks',
+      },
+      decisionPoint: {
+        id: 'dp-3',
+        name: 'Contract Approval',
+        confirmedInState: 'bridging',
+        targetState: 'approved-for-build',
+      },
+    });
+
+    const state = await readStateJson(dir);
+    const dps = state!.decisionPoints as Array<Record<string, unknown>>;
+    
+    // Should have 3 entries: dp-0 (existing), dp-4 (new), dp-3 (new)
+    expect(dps).toHaveLength(3);
+    
+    const dp0 = dps.find(dp => dp.id === 'dp-0');
+    expect(dp0).toBeDefined();
+    expect(dp0!.name).toBe('Language Detection');
+    
+    const dp4 = dps.find(dp => dp.id === 'dp-4');
+    expect(dp4).toBeDefined();
+    
+    const dp3 = dps.find(dp => dp.id === 'dp-3');
+    expect(dp3).toBeDefined();
+  });
+});
+
+// =============================================================================
 // Combined behavior tests
 // =============================================================================
 describe('writeStateFile — Combined behaviors', () => {

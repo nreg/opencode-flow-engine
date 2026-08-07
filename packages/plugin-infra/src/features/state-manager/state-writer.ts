@@ -28,6 +28,23 @@ function applyAfkConsistency(state: Record<string, unknown>): void {
 }
 
 /**
+ * Upsert decision point: find existing by id → update or push.
+ * Single responsibility: handles the common append/update logic.
+ */
+function upsertDecisionPoint(
+  dps: Array<Record<string, unknown>>,
+  dp: Record<string, unknown>,
+  now: string
+): void {
+  const existingIndex = dps.findIndex(d => d.id === dp.id);
+  if (existingIndex >= 0) {
+    dps[existingIndex] = { ...dp, timestamp: now };
+  } else {
+    dps.push({ ...dp, timestamp: now });
+  }
+}
+
+/**
  * Append or update decision point entry.
  * Single responsibility: handles both DP-4 (via dp_4_result) and generic decisionPoint.
  * 
@@ -43,43 +60,30 @@ function appendDecisionPoint(
 ): void {
   if (!extra) return;
 
-  const decisionPoints = Array.isArray(state.decisionPoints)
+  const dps: Array<Record<string, unknown>> = Array.isArray(state.decisionPoints)
     ? (state.decisionPoints as Array<Record<string, unknown>>)
     : [];
+
+  let changed = false;
 
   // Handle dp_4_result: convert to DecisionPoint format
   if (extra.dp_4_result && typeof extra.dp_4_result === 'object') {
     const dp4 = extra.dp_4_result as Record<string, unknown>;
-    const existingDp4 = decisionPoints.find(dp => dp.id === 'dp-4');
-    if (existingDp4) {
-      existingDp4.mode = dp4.mode;
-      existingDp4.rationale = dp4.rationale;
-      existingDp4.timestamp = now;
-    } else {
-      decisionPoints.push({
-        id: 'dp-4',
-        mode: dp4.mode,
-        rationale: dp4.rationale,
-        timestamp: now,
-      });
-    }
+    upsertDecisionPoint(dps, {
+      id: 'dp-4',
+      mode: dp4.mode,
+      rationale: dp4.rationale,
+    } as Record<string, unknown>, now);
+    changed = true;
   }
 
-  // Handle generic decisionPoint
+  // Handle generic decisionPoint — same upsert path
   if (extra.decisionPoint && typeof extra.decisionPoint === 'object') {
-    const newDp = extra.decisionPoint as DecisionPoint;
-    const existingIndex = decisionPoints.findIndex(dp => dp.id === newDp.id);
-    if (existingIndex >= 0) {
-      decisionPoints[existingIndex] = { ...newDp, timestamp: now };
-    } else {
-      decisionPoints.push({ ...newDp, timestamp: now });
-    }
+    upsertDecisionPoint(dps, extra.decisionPoint as Record<string, unknown>, now);
+    changed = true;
   }
 
-  // Update state if any decision points were processed
-  if (extra.dp_4_result || extra.decisionPoint) {
-    state.decisionPoints = decisionPoints;
-  }
+  if (changed) state.decisionPoints = dps;
 }
 
 /**
