@@ -1,5 +1,6 @@
 import type { HookHandler, HookContext, HookResult } from './types.js';
 import { readJsonFile, fileExists } from '@opencode-flow-engine/shared';
+import { artifactExists } from '../features/state-manager/artifact-paths.js';
 
 const TERMINAL_STATES = new Set(['closing', 'abandoned']);
 const DEFAULT_NEXT_SKILL: Record<string, string> = {
@@ -60,9 +61,7 @@ export function createContinuationHook(): HookHandler {
       if (currentState === 'executing' && buildPause && buildPause !== null) {
         const isolation = stateData.isolation;
         const buildMode = stateData.build_mode;
-        const contractExistsNew = await fileExists(`${changeDir}/.flow-engine/sflow/execution-contract.md`);
-        const contractExistsOld = await fileExists(`${changeDir}/execution-contract.md`);
-        const contractExists = contractExistsNew || contractExistsOld;
+        const contractExists = await artifactExists(changeDir, 'execution-contract.md');
 
         // Sub-state 1: Corrupted pause — build_pause set but contract file missing
         if (!contractExists) {

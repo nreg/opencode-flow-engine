@@ -6,6 +6,7 @@ import type { FeatureConfig, FeatureResult } from './types.js';
 import { isValidTransition } from '@opencode-flow-engine/core';
 import { readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, stateFileMutex, fileExists, directoryExists, readFile, listFiles } from '@opencode-flow-engine/shared';
 import { detectStateMismatch } from './state-manager.js';
+import { readArtifactContent } from './state-manager/artifact-paths.js';
 
 const SFLOW_DIR = '.flow-engine/sflow';
 const STATE_FILE = `${SFLOW_DIR}/state.json`;
@@ -133,9 +134,7 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
 
           // P22: Block transition to closing when tasks are still incomplete
           if (newState === 'closing' || newState === 'abandoned') {
-            const tasksNew = await readFile(changeDir + '/.flow-engine/sflow/tasks.md').catch(() => null);
-            const tasksOld = await readFile(changeDir + '/tasks.md').catch(() => null);
-            const tasksContent = tasksNew || tasksOld;
+            const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
             if (tasksContent) {
               const taskLines = tasksContent.split('\n').filter((line: string) => line.match(/^-\s*\[.\]\s+/));
               const incompleteTasks = taskLines.filter((line: string) => line.match(/^-\s*\[\s\]/));

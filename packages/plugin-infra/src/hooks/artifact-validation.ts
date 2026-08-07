@@ -7,6 +7,7 @@ import type { HookHandler, HookContext, HookResult } from './types.js';
 import { sharedValidator } from '@opencode-flow-engine/core';
 import { readFile, listFiles, fileExists } from '@opencode-flow-engine/shared';
 import { applyDeltaToBaselineDetailed } from '../features/spec-publication.js';
+import { readArtifactContent } from '../features/state-manager/artifact-paths.js';
 
 /**
  * Create the artifact validation hook
@@ -118,9 +119,7 @@ async function validateForBridging(changeDir: string): Promise<HookResult> {
 }
 
 async function validateForExecution(changeDir: string): Promise<HookResult> {
-  const contractNew = await readFile(`${changeDir}/.flow-engine/sflow/execution-contract.md`).catch(() => null);
-  const contractOld = await readFile(`${changeDir}/execution-contract.md`).catch(() => null);
-  const contractContent = contractNew || contractOld;
+  const contractContent = await readArtifactContent(changeDir, 'execution-contract.md');
   if (!contractContent) {
     return {
       success: false,

@@ -40,3 +40,13 @@ export async function isArtifactNewPath(changeDir: string, artifactName: string)
   const newPath = `${changeDir}/.flow-engine/sflow/${artifactName}`;
   return fileExists(newPath);
 }
+
+/**
+ * Check if artifact exists in either new or legacy path.
+ */
+export async function artifactExists(changeDir: string, artifactName: string): Promise<boolean> {
+  const newPath = `${changeDir}/.flow-engine/sflow/${artifactName}`;
+  const legacyPath = `${changeDir}/${artifactName}`;
+  
+  return (await fileExists(newPath)) || (await fileExists(legacyPath));
+}
