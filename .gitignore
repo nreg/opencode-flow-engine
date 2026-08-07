@@ -21,3 +21,4 @@ bin-release/
 /packages/opencode-adapter/dist/
 /packages/shared/dist/
 *.tsbuildinfo
+/archive/
