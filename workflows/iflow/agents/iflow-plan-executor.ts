@@ -5,7 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory } from '../../../packages/plugin-infra/src/agents/types.js';
-import { getAgentTools, getHasOmoPlugin } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
+import { getAgentTools } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
 
 export const createIFlowPlanExecutorAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'iflow-plan-executor',
@@ -118,5 +118,5 @@ Before executing any task, check for project-level AGENTS.md. Extract all action
 **Conflict resolution:** If a plan action contradicts AGENTS.md, AGENTS.md WINS. Document the override as a Deviation (Rule 2) and include in SUMMARY.md: "AGENTS.md override: [directive] took precedence over plan instruction."
 </AGENTS_MD_Enforcement>`,
   temperature: options?.temperature ?? 0.6,
-  tools: getAgentTools('iflow-plan-executor', getHasOmoPlugin()),
+  tools: getAgentTools('iflow-plan-executor'),
 });

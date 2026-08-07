@@ -24,7 +24,7 @@ export { createCombinedPluginModule } from './combined-plugin-factory.js';
 // ─── Re-export shared types ──────────────────────────────────────────────────
 
 export type { BackgroundTaskEntry, BackgroundTaskRegistry, SFlowClient, AgentModelMap } from './types.js';
-export { SFLOW_TOOLS, IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolOutput, formatToolError, sleep, detectOmoPlugin, detectAgnesProvider } from './types.js';
+export { SFLOW_TOOLS, IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolOutput, formatToolError, sleep, detectAgnesProvider } from './types.js';
 
 // ─── Re-export core types ────────────────────────────────────────────────────
 

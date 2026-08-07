@@ -4,10 +4,6 @@
  *
  * call_flow_agent + flowagent_output + flowagent_cancel are sFlow's native
  * subagent routing tools registered via the Hooks.tool path.
- *
- * When oh-my-openagent is installed (hasOmoPlugin=true):
- * - call_omo_agent: Explore codebase / research docs via named agents
- * - task: Full delegation with categories, skills, model fallback
  */
 
 type AgentTools = Record<string, boolean>;
@@ -19,16 +15,7 @@ const COMMON_TOOLS = {
 } as const;
 
 /** Module-level flag: set once at plugin init by index.ts */
-let _hasOmoPlugin = false;
 let _hasAgnesProvider = false;
-
-export function setHasOmoPlugin(v: boolean): void {
-  _hasOmoPlugin = v;
-}
-
-export function getHasOmoPlugin(): boolean {
-  return _hasOmoPlugin;
-}
 
 export function setHasAgnesProvider(v: boolean): void {
   _hasAgnesProvider = v;
@@ -37,15 +24,6 @@ export function setHasAgnesProvider(v: boolean): void {
 export function getHasAgnesProvider(): boolean {
   return _hasAgnesProvider;
 }
-
-/**
- * oh-my-openagent tools that sFlow can leverage when available.
- * Includes both call_omo_agent (explore/librarian only) and task (full delegation).
- */
-const OMO_TOOLS: AgentTools = {
-  call_omo_agent: true,
-  task: true,
-};
 
 export const AGENT_TOOLS: Record<string, AgentTools> = {
   /** Main orchestrator - delegates to subagents */
@@ -363,15 +341,7 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
 
 /**
  * Get tool permissions for a specific agent.
- * When hasOmoPlugin=true, injects oh-my-openagent tools (call_omo_agent, task)
- * into sFlow and build-executor agents.
  */
-export function getAgentTools(name: string, hasOmoPlugin?: boolean): Record<string, boolean> {
-  const base = AGENT_TOOLS[name] || { ...COMMON_TOOLS };
-  // Use passed-in flag or fall back to module-level flag
-  const omoAvailable = hasOmoPlugin ?? _hasOmoPlugin;
-  if (omoAvailable && (name === 'sFlow' || name === 'iFlow')) {
-    return { ...base, ...OMO_TOOLS };
-  }
-  return { ...base };
+export function getAgentTools(name: string): Record<string, boolean> {
+  return AGENT_TOOLS[name] || { ...COMMON_TOOLS };
 }

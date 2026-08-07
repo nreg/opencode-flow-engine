@@ -251,17 +251,6 @@ Step 7: 反 AI-slop 检查  → 8 类 42 条规则
 
 `validate_spec`、`validate_proposal`、`validate_delta_spec`、`validate_tasks`、`validate_contract`、`validate_design`、`validate_implementation`、`detect_sync_conflicts`
 
-### oh-my-openagent 工具（可选集成）
-
-当同时安装 oh-my-openagent 时，sFlow 自动启用：
-
-| 工具 | 使用场景 |
-|------|---------|
-| `call_omo_agent` | 并行代码库探索（explore）+ 文档研究（librarian） |
-| `task` | 基于类别的委托，带模型选择和技能注入 |
-
-> 未安装 oh-my-openagent 时，sFlow 完全通过 `call_flow_agent` 正常工作，无需任何配置。
-
 ---
 
 ## 执行模式
@@ -423,14 +412,6 @@ AFK (Away From Keyboard) 模式允许工作流自动推进，无需用户手动�
 }
 ```
 
-同时安装 oh-my-openagent：
-
-```json
-{
-  "plugin": ["oh-my-openagent", "opencode-flow-engine"]
-}
-```
-
 ### 项目配置
 
 ```bash
@@ -519,7 +500,6 @@ opencode-flow-engine/
 - [OpenSpec](https://github.com/Fission-AI/OpenSpec) — 规划引擎
 - [Superpowers](https://github.com/obra/superpowers) — 执行纪律
 - [GSD](https://github.com/telestrial-org/get-shit-done) — iFlow 迭代方法论来源
-- [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) — 架构灵感 + 可选集成
 - [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) — 验证引擎移植来源
 - [flow-kit](https://github.com/rihebty/flow-kit) — 测试金字塔、审查框架、横向命令系统、UI 设计方法论参考（2a-ui-design、反 AI-slop、brownfield 对齐）
 - [grill-me](https://github.com/mattpocock/skills/tree/main/skills/productivity/grilling) — 需求澄清方法论

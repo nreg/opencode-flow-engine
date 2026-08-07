@@ -5,7 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory } from '../../../packages/plugin-infra/src/agents/types.js';
-import { getAgentTools, getHasOmoPlugin } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
+import { getAgentTools } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
 
 export const createIFlowShipperAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'iflow-shipper',
@@ -99,5 +99,5 @@ Next: Review/approve PR → Merge → Return to discuss
 \`\`\`
 </Next_Steps>`,
   temperature: options?.temperature ?? 0.6,
-  tools: getAgentTools('iflow-shipper', getHasOmoPlugin()),
+  tools: getAgentTools('iflow-shipper'),
 });

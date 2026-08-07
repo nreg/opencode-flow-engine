@@ -30,10 +30,7 @@ export type { SchemaMigrationGuardOptions } from './schema-guards.js';
 
 export {
   checkLessonsGuard,
-  checkOmoUsageGuard,
   checkProgressAntiRepeatGuard,
-  markOmoUsed,
-  resetOmoTracking,
 } from './knowledge-guards.js';
 
 export {

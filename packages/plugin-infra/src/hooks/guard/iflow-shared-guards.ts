@@ -7,7 +7,6 @@
 import type { HookResult } from "../types.js";
 import { fileExists, readFile, readJsonFile, directoryExists } from "@opencode-flow-engine/shared";
 import { searchLessonsInFile, findProjectRoot, readProgressFile, detectProgressAntiRepeat } from "../../features/state-manager.js";
-import { getHasOmoPlugin } from "../../agents/agent-tools.js";
 
 const IFLOW_STATES = ['discussing', 'researching', 'planning', 'executing', 'verifying', 'shipping'] as const;
 type IFlowState = typeof IFLOW_STATES[number];
@@ -223,45 +222,6 @@ export async function checkIFlowProgressAntiRepeatGuard(changeDir: string, data?
         blockReason: `[IFLOW] PROGRESS anti-repeat: current operation matches excluded approach ${result.matched.id} ("${result.matched.approach}"). ${result.reason}`,
       };
     }
-  }
-
-  return { success: true };
-}
-
-/**
- * IFlow OMO usage guard.
- * Warns when iFlow uses read/grep in researching phase
- * without first calling call_omo_agent when omo is available.
- */
-let _iflowOmoUsedInCurrentResearching = false;
-
-export function markIFlowOmoUsed(): void {
-  _iflowOmoUsedInCurrentResearching = true;
-}
-
-export function resetIFlowOmoTracking(): void {
-  _iflowOmoUsedInCurrentResearching = false;
-}
-
-export async function checkIFlowOmoUsageGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
-  if (!data) return { success: true };
-
-  const toolName = (data.toolName as string) || '';
-  if (toolName !== 'read' && toolName !== 'grep') return { success: true };
-
-  const iflowDir = `${changeDir}/.flow-engine/iflow`;
-  const stateData = await readJsonFile<{ state?: string }>(`${iflowDir}/state.json`);
-  const currentState = stateData?.state || '';
-  if (currentState !== 'researching') return { success: true };
-
-  const hasOmo = getHasOmoPlugin();
-  if (!hasOmo) return { success: true };
-
-  if (!_iflowOmoUsedInCurrentResearching) {
-    return {
-      success: true,
-      warnings: ['[IFLOW] OMO guard: iFlow used read/grep in researching phase without calling call_omo_agent first. When omo is available, you MUST use call_omo_agent for code exploration.'],
-    };
   }
 
   return { success: true };

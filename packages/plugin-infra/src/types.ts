@@ -115,26 +115,6 @@ export function formatToolError(msg: string): { title: string; output: string } 
 // ─── Plugin detection helpers ─────────────────────────────────────────────────
 
 /**
- * Detect oh-my-openagent from cfg.plugin list.
- * Called during config hook to set the hasOmoPlugin flag for agent-tools.
- */
-export function detectOmoPlugin(
-  pluginConfig: (string | [string, Record<string, unknown>])[] | undefined,
-): boolean {
-  if (!pluginConfig) return false;
-  return pluginConfig.some((p) => {
-    const name = Array.isArray(p) ? p[0] : p;
-    return (
-      name === 'oh-my-openagent' ||
-      name === 'oh-my-opencode' ||
-      name.startsWith('oh-my-openagent') ||
-      name.startsWith('oh-my-opencode') ||
-      name === 'omo'
-    );
-  });
-}
-
-/**
  * Detect agnesmore provider from cfg.provider or cfg.plugin.
  * Called during config hook to set the hasAgnesProvider flag for agent-tools.
  */

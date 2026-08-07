@@ -5,7 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory } from '../../../packages/plugin-infra/src/agents/types.js';
-import { getAgentTools, getHasOmoPlugin } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
+import { getAgentTools } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
 
 export const createIFlowResearcherAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'iflow-researcher',
@@ -153,5 +153,5 @@ Before finalizing: all domains investigated | negative claims verified with offi
 **Quality indicators:** Specific, not vague ("Three.js r160" not "use Three.js") | Verified, not assumed | Honest about gaps | Actionable for planner | Current (publication dates checked)
 </Success_Criteria>`,
   temperature: options?.temperature ?? 0.7,
-  tools: getAgentTools('iflow-researcher', getHasOmoPlugin()),
+  tools: getAgentTools('iflow-researcher'),
 });

@@ -5,7 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory } from '../../../packages/plugin-infra/src/agents/types.js';
-import { getAgentTools, getHasOmoPlugin } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
+import { getAgentTools } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
 
 export const createIFlowDiscussPlannerAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'iflow-discuss-planner',
@@ -152,5 +152,5 @@ Every task has five required fields:
 Before finalizing: 1. What must be TRUE? 2. What must EXIST? 3. What must be WIRED? Map each truth to concrete tasks. If a truth has no task covering it, ADD a task.
 </Output_Format>`,
   temperature: options?.temperature ?? 0.6,
-  tools: getAgentTools('iflow-discuss-planner', getHasOmoPlugin()),
+  tools: getAgentTools('iflow-discuss-planner'),
 });

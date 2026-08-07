@@ -25,13 +25,10 @@ import {
   checkGitCommitBoundary,
   checkSchemaMigrationGuard,
   checkLessonsGuard,
-  checkOmoUsageGuard,
   checkProgressAntiRepeatGuard,
   checkWorkflowModeTransition,
   checkDebuggingState,
   checkTaskCompletion,
-  markOmoUsed,
-  resetOmoTracking,
   checkAbstractionGrepGuard,
 } from "./guard/checks/index.js";
 import type { SchemaMigrationGuardOptions } from "./guard/checks/index.js";
@@ -139,7 +136,6 @@ export function createGuardHook(): HookHandler {
           await checkGitCommitBoundary(changeDir, data, activeWorkflow),
           await checkSchemaMigrationGuard(changeDir),
           await checkLessonsGuard(changeDir, data, activeWorkflow),
-          await checkOmoUsageGuard(changeDir, data, activeWorkflow),
           await checkAbstractionGrepGuard(changeDir, data),
           ...(await getIFlowGuards(changeDir, data, activeWorkflow)),
         ];
@@ -177,6 +173,5 @@ export function createGuardHook(): HookHandler {
 }
 
 // Re-export from checks for backward compatibility
-export { markOmoUsed, resetOmoTracking };
 export { checkSchemaMigrationGuard, checkAbstractionGrepGuard };
 export type { SchemaMigrationGuardOptions };

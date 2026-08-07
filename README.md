@@ -251,17 +251,6 @@ The `validate_ui_design` tool checks ui-design.md for 7 quality gates:
 
 `validate_spec`, `validate_proposal`, `validate_delta_spec`, `validate_tasks`, `validate_contract`, `validate_design`, `validate_implementation`, `detect_sync_conflicts`
 
-### oh-my-openagent Tools (Optional)
-
-When oh-my-openagent is also installed, sFlow auto-enables:
-
-| Tool | Use Case |
-|------|----------|
-| `call_omo_agent` | Parallel codebase exploration (explore) + documentation research (librarian) |
-| `task` | Category-based delegation with model selection and skill injection |
-
-> Without oh-my-openagent, sFlow works fully through `call_flow_agent`. No configuration needed.
-
 ---
 
 ## Execution Modes
@@ -423,14 +412,6 @@ AFK (Away From Keyboard) mode enables automated workflow execution without user 
 }
 ```
 
-To also use oh-my-openagent:
-
-```json
-{
-  "plugin": ["oh-my-openagent", "opencode-flow-engine"]
-}
-```
-
 ### Project Configuration
 
 ```bash
@@ -520,7 +501,6 @@ opencode-flow-engine/
 - [OpenSpec](https://github.com/Fission-AI/OpenSpec) — Planning engine
 - [Superpowers](https://github.com/obra/superpowers) — Execution discipline
 - [GSD](https://github.com/telestrial-org/get-shit-done) — iFlow iterative methodology source
-- [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) — Architecture inspiration + optional integration
 - [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) — Validation engine port source
 - [flow-kit](https://github.com/rihebty/flow-kit) — Test pyramid, review framework, lateral command system, UI design methodology reference (2a-ui-design, anti-AI-slop, brownfield alignment)
 - [grill-me](https://github.com/mattpocock/skills/tree/main/skills/productivity/grilling) — Requirements clarification methodology

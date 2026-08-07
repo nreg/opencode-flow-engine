@@ -5,7 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory } from '../../../packages/plugin-infra/src/agents/types.js';
-import { getAgentTools, getHasOmoPlugin } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
+import { getAgentTools } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
 
 export const createIFlowVerifierAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'iflow-verifier',
@@ -216,5 +216,5 @@ Footer: _Verified: {timestamp}_ / _Verifier: OpenCode (iflow-verifier)_
 **Correct classification**: PASS. The feature works end-to-end. Don't invent problems where there are none.
 </Few_Shot_Examples>`,
   temperature: options?.temperature ?? 0.6,
-  tools: getAgentTools('iflow-verifier', getHasOmoPlugin()),
+  tools: getAgentTools('iflow-verifier'),
 });

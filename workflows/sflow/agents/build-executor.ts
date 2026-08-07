@@ -5,7 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory } from '../../../packages/plugin-infra/src/agents/types.js';
-import { getAgentTools, getHasOmoPlugin } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
+import { getAgentTools } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
 
 export const createBuildExecutorAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'build-executor',
@@ -119,7 +119,7 @@ When loading reference files (specs, designs, existing source code, etc.), adher
 
 `,
   temperature: options?.temperature ?? 0.6,
-  tools: getAgentTools('build-executor', getHasOmoPlugin()),
+  tools: getAgentTools('build-executor'),
 });
 
 // Mode is managed by AGENT_MODES registry in agent-builder.ts

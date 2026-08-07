@@ -13,7 +13,7 @@ import type { LocalToolDefinition } from './types/local-tool-definition.js';
 import { z } from 'zod';
 
 import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentModelMap } from './types.js';
-import { IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolError, detectOmoPlugin, detectAgnesProvider } from './types.js';
+import { IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolError, detectAgnesProvider } from './types.js';
 
 import { getAgentMode, createAgent } from './agents/index.js';
 import { loadCascadedSFlowConfig, agentOverridesFromConfig } from './agents/config-loader.js';
@@ -25,7 +25,7 @@ import type { HookContext } from './hooks/types.js';
 import { ensureDir, writeJsonFile } from '@opencode-flow-engine/shared';
 import { getStateFilePath } from './features/state-manager.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
-import { setHasOmoPlugin, setHasAgnesProvider } from './agents/agent-tools.js';
+import { setHasAgnesProvider } from './agents/agent-tools.js';
 import { pollSessionCompletion } from './helpers/polling.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
@@ -150,9 +150,6 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
       config: async (cfg) => {
         // 注册 slash 命令
         registerFlowCommands(cfg);
-
-        const hasOmo = detectOmoPlugin(cfg.plugin);
-        setHasOmoPlugin(hasOmo);
 
         const hasAgnes = await detectAgnesProvider({ provider: cfg.provider as Record<string, unknown> | undefined, plugin: cfg.plugin });
         setHasAgnesProvider(hasAgnes);

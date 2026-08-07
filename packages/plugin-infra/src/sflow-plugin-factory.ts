@@ -15,7 +15,7 @@ import type { LocalToolDefinition } from './types/local-tool-definition.js';
 import { z } from 'zod';
 
 import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentModelMap } from './types.js';
-import { SFLOW_TOOLS, IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolError, detectOmoPlugin, detectAgnesProvider } from './types.js';
+import { SFLOW_TOOLS, IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolError, detectAgnesProvider } from './types.js';
 
 import { getAgentNames, getAgentMode, createAgent } from './agents/index.js';
 import { createWorkflowRouterTool } from './tools/index.js';
@@ -32,8 +32,7 @@ import { createCompactionContext } from '../../../workflows/shared/compaction-co
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
 import { createCheckToolAvailableTool } from './features/tool-availability.js';
-import { setHasOmoPlugin, setHasAgnesProvider } from './agents/agent-tools.js';
-import { markOmoUsed, resetOmoTracking } from './hooks/guard.js';
+import { setHasAgnesProvider } from './agents/agent-tools.js';
 import { createAgentSpecificGuards } from './hooks/guard/agent-guards.js';
 import { clearFrontendCache } from './features/frontend-detector.js';
 import { createTaskTracker } from './features/task-tracker.js';
@@ -435,9 +434,6 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           // 注册 slash 命令
           registerFlowCommands(cfg);
 
-          const hasOmo = detectOmoPlugin(cfg.plugin);
-          setHasOmoPlugin(hasOmo);
-
           const hasAgnes = await detectAgnesProvider({ provider: cfg.provider as Record<string, unknown> | undefined, plugin: cfg.plugin });
           setHasAgnesProvider(hasAgnes);
 
@@ -538,9 +534,6 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
         "tool.execute.before": async (input, output) => {
           const toolName = input.tool;
           const lowerTool = toolName?.toLowerCase();
-          if (lowerTool === 'call_omo_agent') {
-            markOmoUsed();
-          }
 
           // Token Budget: 记录 read 工具的文件路径，供 tool.execute.after 截断使用
           if (lowerTool === 'read') {
@@ -692,9 +685,6 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
                 data: { newState },
               });
             }
-            if (newState !== 'exploring') {
-              resetOmoTracking();
-            }
           }
 
           const postProcessHook = hookComposer.getHook('post_process');
@@ -718,9 +708,6 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
                     action: 'state-transition',
                     data: { newState: ppData.stateTransitionSignal.to },
                   });
-                }
-                if (ppData.stateTransitionSignal.to !== 'exploring') {
-                  resetOmoTracking();
                 }
               }
             }

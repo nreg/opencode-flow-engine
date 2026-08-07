@@ -5,7 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory } from '../../../packages/plugin-infra/src/agents/types.js';
-import { getAgentTools, getHasOmoPlugin } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
+import { getAgentTools } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
 
 export const createSFlowAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'sFlow',
@@ -171,106 +171,6 @@ sFlow 检测到 fix-loop 意图 → 进入 Fix-Loop Mode
 \`\`\`
 
 </FixLoopMode>
-
-## oh-my-openagent Integration (When Available)
-
-If oh-my-openagent is installed alongside sFlow, you have access to two additional delegation tools:
-\`call_omo_agent\` (named agents: \`explore\`, \`librarian\`) and \`task\` (full delegation with categories + skills).
-\`explore\` is OpenCode's native subagent AND an omo-callable agent — use either \`call_omo_agent(subagent_type="explore")\` or \`task(subagent_type="explore")\`. \`librarian\` is omo-only.
-
-### Stage-Specific Strategy
-
-#### 🔍 exploring stage — Parallel Codebase Exploration
-**MUST** analyze existing code patterns before dispatching need-explorer. Launch parallel exploration with \`call_omo_agent(subagent_type="explore")\` (or \`task(subagent_type="explore")\`) for codebase search and \`call_omo_agent(subagent_type="librarian")\` for external doc research:
-
-\`\`\`
-// Launch parallel exploration (explore: OpenCode native + omo-callable; librarian: omo-only)
-call_omo_agent(subagent_type="explore", run_in_background=true,
-  prompt="Search the codebase for patterns related to: <user request>")
-call_omo_agent(subagent_type="librarian", run_in_background=true,
-  prompt="Research best practices for: <topic>")
-
-// After results arrive, pass them as context to need-explorer
-call_flow_agent(subagent_type="need-explorer",
-  prompt="Based on this context: <explore+librarian results>, clarify requirements for: <user request>")
-\`\`\`
-
-> **Fallback**: If oh-my-openagent is not installed, skip \`call_omo_agent\`/librarian and rely on OpenCode's native \`explore\` subagent (via \`task\`) or route directly to \`need-explorer\`.
-
-#### 📝 specifying stage — Research-Backed Specification
-**MUST** use \`librarian\` to gather external documentation before spec-writer generates artifacts:
-
-\`\`\`
-// Research before writing specs
-call_omo_agent(subagent_type="librarian", run_in_background=true,
-  prompt="Find API documentation and usage examples for: <technology>")
-
-// Pass research findings to spec-writer
-call_flow_agent(subagent_type="spec-writer",
-  prompt="Research context: <librarian results>. Generate proposal, specs, design, and tasks for: <requirement>")
-\`\`\`
-
-> **Fallback**: If oh-my-openagent is not installed, route directly to \`spec-writer\` — it works purely from your provided context.
-
-#### 🔗 bridging stage — Optimized Contract Generation
-Use \`task\` with a capable category for contract generation when the scope is complex:
-
-\`\`\`
-// Use task with deep category for complex contracts
-task(category="deep", prompt="Generate execution contract for: <specs+design+tasks>")
-\`\`\`
-
-> **Fallback**: If oh-my-openagent is not installed, route to \`contract-builder\` via \`call_flow_agent\` as normal.
-
-#### ⚡ executing stage — Task Decomposition and Dispatch
-
-When the execution contract contains multiple tasks across waves, **you** (sFlow) are responsible for decomposing and dispatching work. Do NOT dump all tasks into a single build-executor call.
-
-**Task Routing Rules:**
-- **Backend tasks** (APIs, services, data, config, tests) → dispatch to \`build-executor\`
-- **Frontend tasks** (UI components, pages, styling, SVG, assets) → dispatch to \`ui-implementer\`
-- **Mixed tasks** → split into backend and frontend sub-tasks, dispatch separately
-
-**Wave Strategy:**
-- Read the execution-contract.md to identify waves and their dependency structure
-- **Serial waves** (dependent tasks): dispatch one wave at a time with \`run_in_background=false\`
-- **Independent waves**: dispatch in parallel with \`run_in_background=true\` and collect via \`flowagent_output\`
-- After each wave completes, check the result before proceeding to the next
-
-**Example — 5-wave decomposition:**
-\`\`\`
-// Wave 1: Bug fixes (serial, foundation layer)
-call_flow_agent(subagent_type="build-executor", run_in_background=false,
-  prompt="Execute Wave 1 — P6 Bug fixes: T10-T14. Details in execution-contract.md")
-
-// Wave 2: Core control plane (depends on Wave 1)
-call_flow_agent(subagent_type="build-executor", run_in_background=false,
-  prompt="Execute Wave 2 — P0 Core: T01-T04. Details in execution-contract.md")
-
-// Wave 3: DP-4 recommendation
-call_flow_agent(subagent_type="build-executor", run_in_background=false,
-  prompt="Execute Wave 3 — P2 DP-4: T09. Details in execution-contract.md")
-
-// Wave 4: Guards (independent of Wave 5, can be parallel)
-call_flow_agent(subagent_type="build-executor", run_in_background=false,
-  prompt="Execute Wave 4 — P3+P6 Guards: T05-T08. Details in execution-contract.md")
-\`\`\`
-
-### Tool Reference
-
-| Tool | Allowed Subagent Types / Categories | When to Use |
-|------|----------------------|-------------|
-| \`call_omo_agent\` | \`explore\`, \`librarian\` only | Codebase exploration, doc research |
-| \`task\` | Any subagent_type (oracle, multimodal-looker, ...) or category (quick, deep, ...) | Full delegation with model/skill control |
-
-### Important Notes
-
-- \`call_omo_agent\` and \`task\` are **only available when oh-my-openagent is installed**. Do not mention them to the user if they aren't available.
-- \`call_omo_agent\` can ONLY call \`explore\` and \`librarian\`. Other agents and categories go through \`task\`.
-- \`explore\` is OpenCode's **native subagent** — it also works without omo (via \`task(subagent_type="explore")\`).
-- omo agents useful to sFlow: \`oracle\` (read-only consultation), \`multimodal-looker\` (image/PDF analysis). \`metis\`/\`momus\` serve Prometheus planning — not needed here.
-- The \`task\` tool supports both \`category\` (quick, deep, ...) and \`subagent_type\` (direct agent name), but not both at the same time.
-- Always prefer \`call_flow_agent\` for sFlow's own subagents (need-explorer, spec-writer, etc.) — these tools are supplements, not replacements.
 
 <Delegation>
 
@@ -510,5 +410,5 @@ Always start your response with:
 - **No ANSI codes**: Plain text only. No colors or formatting codes.
 - **Keep it simple**: For simple confirmations, skip heavy formatting. For complex walkthroughs, use structured sections with code references.`,
       temperature: options?.temperature ?? 0.6,
-  tools: getAgentTools('sFlow', getHasOmoPlugin()),
+  tools: getAgentTools('sFlow'),
 });

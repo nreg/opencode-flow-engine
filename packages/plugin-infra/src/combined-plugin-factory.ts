@@ -15,7 +15,7 @@ import type { LocalToolDefinition } from './types/local-tool-definition.js';
 import { z } from 'zod';
 
 import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentModelMap } from './types.js';
-import { SFLOW_TOOLS, IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolError, detectOmoPlugin, detectAgnesProvider } from './types.js';
+import { SFLOW_TOOLS, IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolError, detectAgnesProvider } from './types.js';
 
 import { getAgentNames, getAgentMode, createAgent } from './agents/index.js';
 import { createWorkflowRouterTool } from './tools/index.js';
@@ -31,8 +31,7 @@ import { getStateFilePath } from './features/state-manager.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
 import { registerFlowCommands } from '../../../workflows/shared/slash-commands.js';
-import { setHasOmoPlugin, setHasAgnesProvider } from './agents/agent-tools.js';
-import { markOmoUsed, resetOmoTracking } from './hooks/guard.js';
+import { setHasAgnesProvider } from './agents/agent-tools.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SFLOW_AGENT_NAMES } from '../../../workflows/sflow/index.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
@@ -238,9 +237,6 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
     },
 
     config: async (cfg) => {
-      const hasOmo = detectOmoPlugin(cfg.plugin);
-      setHasOmoPlugin(hasOmo);
-
       const hasAgnes = await detectAgnesProvider({ provider: cfg.provider as Record<string, unknown> | undefined, plugin: cfg.plugin });
       setHasAgnesProvider(hasAgnes);
 
@@ -343,10 +339,6 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
     "tool.execute.before": async (input, output) => {
       const toolName = input.tool;
       const lowerTool = toolName?.toLowerCase();
-
-      if (lowerTool === 'call_omo_agent') {
-        markOmoUsed();
-      }
 
       // Token Budget: 记录 read 工具的文件路径，供 tool.execute.after 截断使用
       if (lowerTool === 'read') {
@@ -464,9 +456,6 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
             data: { newState },
           });
         }
-        if (newState !== 'exploring') {
-          resetOmoTracking();
-        }
       }
 
       const postProcessHook = hookComposer.getHook('post_process');
@@ -490,9 +479,6 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
                 action: 'state-transition',
                 data: { newState: ppData.stateTransitionSignal.to },
               });
-            }
-            if (ppData.stateTransitionSignal.to !== 'exploring') {
-              resetOmoTracking();
             }
           }
         }

@@ -6,18 +6,7 @@
 import type { HookResult } from "../../types.js";
 import { fileExists, readJsonFile, readFile } from "@opencode-flow-engine/shared";
 import { readProgressFile, searchLessonsInFile, getStateFilePath } from "../../../features/state-manager.js";
-import { getHasOmoPlugin } from "../../../agents/agent-tools.js";
-import { checkIFlowLessonsGuard, checkIFlowOmoUsageGuard, checkIFlowProgressAntiRepeatGuard } from "../iflow-shared-guards.js";
-
-let _omoUsedInCurrentExploring = false;
-
-export function markOmoUsed(): void {
-  _omoUsedInCurrentExploring = true;
-}
-
-export function resetOmoTracking(): void {
-  _omoUsedInCurrentExploring = false;
-}
+import { checkIFlowLessonsGuard, checkIFlowProgressAntiRepeatGuard } from "../iflow-shared-guards.js";
 
 /**
  * P21: LESSONS.md Knowledge Base Guard — warns when starting a task
@@ -84,37 +73,6 @@ export async function checkLessonsGuard(changeDir: string, data?: Record<string,
     return {
       success: true,
       warnings: ['[SFLOW] LESSONS guard: task matches ' + hits.length + ' active lesson(s): ' + hitList + '. Must declare difference in execution plan before proceeding.'],
-    };
-  }
-
-  return { success: true };
-}
-
-/**
- * PXX: OMO usage guard — warns when sFlow uses read/grep in exploring phase
- * without first calling call_omo_agent when omo is available.
- */
-export async function checkOmoUsageGuard(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
-  if (!changeDir || !data) return { success: true };
-
-  if (activeWorkflow === 'iflow') {
-    return checkIFlowOmoUsageGuard(changeDir, data);
-  }
-
-  const toolName = (data.toolName as string) || '';
-  if (toolName !== 'read' && toolName !== 'grep') return { success: true };
-
-  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
-  const currentState = stateData?.state || '';
-  if (currentState !== 'exploring') return { success: true };
-
-  const hasOmo = getHasOmoPlugin();
-  if (!hasOmo) return { success: true };
-
-  if (!_omoUsedInCurrentExploring) {
-    return {
-      success: true,
-      warnings: ['[SFLOW] OMO guard: sFlow used read/grep in exploring phase without calling call_omo_agent first. When omo is available, you MUST use call_omo_agent for code exploration.'],
     };
   }
 

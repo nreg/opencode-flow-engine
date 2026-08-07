@@ -5,7 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory } from '../../../packages/plugin-infra/src/agents/types.js';
-import { getAgentTools, getHasOmoPlugin } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
+import { getAgentTools } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
 
 export const createIFlowAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
   id: 'IFlow',
@@ -223,5 +223,5 @@ Always start your response with:
 - No nesting: Avoid nested bullet lists.
 - Keep it simple: For simple confirmations, skip heavy formatting.`,
   temperature: options?.temperature ?? 0.6,
-  tools: getAgentTools('iflow', getHasOmoPlugin()),
+  tools: getAgentTools('iflow'),
 });
