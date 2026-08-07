@@ -34,14 +34,16 @@ function applyAfkConsistency(state: Record<string, unknown>): void {
  * Defensive checks:
  * - Skip if dp is null/undefined or not an object
  * - Skip if dp.id is missing or not a string
+ *
+ * Returns true if upsert was performed, false if skipped.
  */
 function upsertDecisionPoint(
   dps: Array<Record<string, unknown>>,
   dp: Record<string, unknown>,
   now: string
-): void {
-  if (!dp || typeof dp !== 'object') return;
-  if (typeof dp.id !== 'string') return;
+): boolean {
+  if (!dp || typeof dp !== 'object') return false;
+  if (typeof dp.id !== 'string') return false;
 
   const existingIndex = dps.findIndex(d => d.id === dp.id);
   if (existingIndex >= 0) {
@@ -49,6 +51,7 @@ function upsertDecisionPoint(
   } else {
     dps.push({ ...dp, timestamp: now });
   }
+  return true;
 }
 
 /**
@@ -59,6 +62,8 @@ function upsertDecisionPoint(
  * - dp_4_result is converted to DecisionPoint format and merged
  * - decisionPoint is appended/updated directly
  * - Both can coexist in the same call
+ *
+ * Pure implementation: works on a fresh copy, no reference side effects.
  */
 function appendDecisionPoint(
   state: Record<string, unknown>,
@@ -67,30 +72,34 @@ function appendDecisionPoint(
 ): void {
   if (!extra) return;
 
-  const existingDps: Array<Record<string, unknown>> = Array.isArray(state.decisionPoints)
+  // Work on a fresh copy — no reference side effects
+  const dps: Array<Record<string, unknown>> = Array.isArray(state.decisionPoints)
     ? [...(state.decisionPoints as Array<Record<string, unknown>>)]
     : [];
 
-  const dps: Array<Record<string, unknown>> = Array.isArray(state.decisionPoints)
-    ? (state.decisionPoints as Array<Record<string, unknown>>)
-    : [];
+  let changed = false;
 
   // Handle dp_4_result: convert to DecisionPoint format
   if (extra.dp_4_result && typeof extra.dp_4_result === 'object') {
     const dp4 = extra.dp_4_result as Record<string, unknown>;
-    upsertDecisionPoint(dps, {
+    if (upsertDecisionPoint(dps, {
       id: 'dp-4',
       mode: dp4.mode,
       rationale: dp4.rationale,
-    } as Record<string, unknown>, now);
+    } as Record<string, unknown>, now)) {
+      changed = true;
+    }
   }
 
   // Handle generic decisionPoint — same upsert path
   if (extra.decisionPoint && typeof extra.decisionPoint === 'object') {
-    upsertDecisionPoint(dps, extra.decisionPoint as Record<string, unknown>, now);
+    if (upsertDecisionPoint(dps, extra.decisionPoint as Record<string, unknown>, now)) {
+      changed = true;
+    }
   }
 
-  if (dps.length > 0 && JSON.stringify(dps) !== JSON.stringify(existingDps)) {
+  // Only write back when something actually changed
+  if (changed) {
     state.decisionPoints = dps;
   }
 }

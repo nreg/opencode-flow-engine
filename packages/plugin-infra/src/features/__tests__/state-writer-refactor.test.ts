@@ -687,3 +687,109 @@ describe('writeStateFile — defensive checks for malformed decisionPoint', () =
     expect((state!.decisionPoints as any[])[0].id).toBe('dp-1');
   });
 });
+
+// =============================================================================
+// End-to-End Persistence Verification — Prevent regression of DP persistence issues
+// =============================================================================
+describe('writeStateFile — End-to-End DP persistence (E2E)', () => {
+  const dir = tempDir('state-writer-e2e-persistence');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await ensureDir(dir + '/.flow-engine/sflow');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should persist decisionPoints to state.json after writeStateFile', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'exploring', mode: 'full' })
+    );
+
+    await writeStateFile(dir, 'specifying', {
+      decisionPoint: { id: 'dp-1', rationale: 'test rationale' }
+    });
+
+    const state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    expect(state!.decisionPoints).toBeDefined();
+    expect(Array.isArray(state!.decisionPoints)).toBe(true);
+    expect((state!.decisionPoints as any[]).length).toBe(1);
+    
+    const dp = (state!.decisionPoints as any[])[0];
+    expect(dp.id).toBe('dp-1');
+    expect(dp.rationale).toBe('test rationale');
+    expect(dp.timestamp).toBeDefined();
+  });
+
+  it('should persist DP-4 result to state.json decisionPoints', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'bridging', mode: 'full' })
+    );
+
+    await writeStateFile(dir, 'approved-for-build', {
+      dp_4_result: { mode: 'inline', rationale: '2 tasks, no dependencies' }
+    });
+
+    const state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    expect(state!.decisionPoints).toBeDefined();
+    expect(Array.isArray(state!.decisionPoints)).toBe(true);
+    expect((state!.decisionPoints as any[]).length).toBe(1);
+    
+    const dp = (state!.decisionPoints as any[])[0];
+    expect(dp.id).toBe('dp-4');
+    expect(dp.mode).toBe('inline');
+    expect(dp.rationale).toBe('2 tasks, no dependencies');
+    expect(dp.timestamp).toBeDefined();
+  });
+
+  it('should persist multiple decisionPoints across sequential writes', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'exploring', mode: 'full' })
+    );
+
+    await writeStateFile(dir, 'specifying', {
+      decisionPoint: { id: 'dp-1', rationale: 'first decision' }
+    });
+
+    let state = await readStateJson(dir);
+    expect((state!.decisionPoints as any[]).length).toBe(1);
+
+    await writeStateFile(dir, 'bridging', {
+      decisionPoint: { id: 'dp-2', rationale: 'second decision' }
+    });
+
+    state = await readStateJson(dir);
+    expect((state!.decisionPoints as any[]).length).toBe(2);
+    expect((state!.decisionPoints as any[]).map((dp: any) => dp.id)).toEqual(['dp-1', 'dp-2']);
+  });
+
+  it('should update existing decisionPoint and persist the update', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'exploring', mode: 'full' })
+    );
+
+    await writeStateFile(dir, 'specifying', {
+      decisionPoint: { id: 'dp-1', rationale: 'initial' }
+    });
+
+    let state = await readStateJson(dir);
+    expect((state!.decisionPoints as any[])[0].rationale).toBe('initial');
+
+    await writeStateFile(dir, 'bridging', {
+      decisionPoint: { id: 'dp-1', rationale: 'updated' }
+    });
+
+    state = await readStateJson(dir);
+    expect((state!.decisionPoints as any[]).length).toBe(1);
+    expect((state!.decisionPoints as any[])[0].rationale).toBe('updated');
+  });
+});
