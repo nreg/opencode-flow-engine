@@ -1,5 +1,6 @@
 import type { LocalToolDefinition } from './types/local-tool-definition.js';
 import { z } from 'zod';
+import { resolveChangeDir } from './helpers/resolve-change-dir.js';
 
 export function createAgnesTools(): Record<string, LocalToolDefinition> {
   return {
@@ -13,7 +14,7 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
         image_paths: z.array(z.string()).optional().describe('Paths to reference images for image-to-image style transfer or multi-image composition. Single path for style transfer, multiple paths for composition.'),
       },
       execute: async (args: { prompt: string; output_path?: string; size?: string; ratio?: string; image_paths?: string[] }, context) => {
-        const changeDir = context.directory || process.cwd();
+        const changeDir = resolveChangeDir(undefined, context.directory);
         try {
           const { readFile, writeFile, mkdir } = await import('node:fs/promises');
           const { homedir } = await import('node:os');
@@ -120,7 +121,7 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
         frame_rate: z.number().optional().describe('Frame rate 1-60 (default: 24)'),
       },
       execute: async (args: { prompt: string; output_path?: string; width?: number; height?: number; num_frames?: number; frame_rate?: number }, context) => {
-        const changeDir = context.directory || process.cwd();
+        const changeDir = resolveChangeDir(undefined, context.directory);
         try {
           const { readFile, writeFile, mkdir } = await import('node:fs/promises');
           const { homedir } = await import('node:os');
@@ -226,7 +227,7 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
         prompt: z.string().optional().describe('Question or instruction about the image (default: "请详细描述这张图片的内容")'),
       },
       execute: async (args: { image_path: string; prompt?: string }, context) => {
-        const changeDir = context.directory || process.cwd();
+        const changeDir = resolveChangeDir(undefined, context.directory);
         try {
           const { readFile } = await import('node:fs/promises');
           const { homedir } = await import('node:os');
@@ -308,7 +309,7 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
         n: z.number().optional().describe('Number of images to generate (default: 1). Only the first image is saved when n > 1.'),
       },
       execute: async (args: { prompt: string; output_path?: string; ratio?: string; n?: number }, context) => {
-        const changeDir = context.directory || process.cwd();
+        const changeDir = resolveChangeDir(undefined, context.directory);
         try {
           const { readFile, writeFile, mkdir } = await import('node:fs/promises');
           const { homedir } = await import('node:os');

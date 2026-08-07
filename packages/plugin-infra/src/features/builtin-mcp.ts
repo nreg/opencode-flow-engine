@@ -19,6 +19,9 @@ import type { LocalToolDefinition } from '../types/local-tool-definition.js';
 import { z } from 'zod';
 import { sharedValidator } from '@opencode-flow-engine/core';
 import type { DecisionPoint } from '@opencode-flow-engine/core';
+import { isValidTransition, getValidTransitions } from '@opencode-flow-engine/core';
+import { writeStateFile } from './state-manager/state-writer.js';
+import { resolveChangeDir } from '../helpers/resolve-change-dir.js';
 
 async function readFileContent(filePath: string): Promise<string | null> {
   try {
@@ -31,7 +34,7 @@ async function readFileContent(filePath: string): Promise<string | null> {
 
 function resolvePath(context: ToolContext, filePath?: string, defaultRelative?: string): string {
   if (filePath) return filePath;
-  const dir = (context && context.directory) || '';
+  const dir = resolveChangeDir(undefined, context?.directory);
   return defaultRelative ? `${dir}/${defaultRelative}` : dir;
 }
 
@@ -262,7 +265,7 @@ export function createWorkflowTools(): Record<string, LocalToolDefinition> {
       },
       execute: async (args: { dp_id: string; state: string; target_state: string; metadata?: string; change_dir?: string }, context) => {
 
-        const changeDir = args.change_dir || context.directory || '';
+        const changeDir = resolveChangeDir(args.change_dir, context.directory);
         if (!changeDir) {
           return {
             title: 'Record Decision Point',
@@ -270,32 +273,49 @@ export function createWorkflowTools(): Record<string, LocalToolDefinition> {
           };
         }
 
-        const { readJsonFile, writeJsonFile, ensureDir, stateFileMutex } = await import('@opencode-flow-engine/shared');
+        const { readJsonFile, ensureDir } = await import('@opencode-flow-engine/shared');
 
         const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
         await ensureDir(`${changeDir}/.flow-engine/sflow`);
 
         try {
-          const result = await stateFileMutex.runExclusive(async () => {
-            const state = await readJsonFile<Record<string, unknown>>(statePath) || {};
-            const dps = (state.decisionPoints as DecisionPoint[] || []);
-            const record: DecisionPoint = {
-              id: args.dp_id,
-              name: args.dp_id,
-              confirmedInState: args.state as DecisionPoint['confirmedInState'],
-              targetState: args.target_state as DecisionPoint['targetState'],
-              timestamp: new Date().toISOString(),
+          const currentStateData = await readJsonFile<Record<string, unknown>>(statePath);
+          const currentState = (currentStateData?.state as string) || 'exploring';
+
+          // Guard check: validate state transition
+          if (!isValidTransition(currentState, args.target_state)) {
+            const valid = getValidTransitions(currentState);
+            return {
+              title: 'Record Decision Point',
+              output: JSON.stringify({
+                success: false,
+                error: `Invalid state transition from "${currentState}" to "${args.target_state}". Valid transitions: ${valid.join(', ')}`,
+              }, null, 2),
             };
-            if (args.metadata) {
-              record.metadata = args.metadata;
-            }
-            dps.push(record);
-            await writeJsonFile(statePath, { ...state, decisionPoints: dps });
-            return { record, total: dps.length };
-          });
+          }
+
+          // Build decision point record
+          const record: DecisionPoint = {
+            id: args.dp_id,
+            name: args.dp_id,
+            confirmedInState: args.state as DecisionPoint['confirmedInState'],
+            targetState: args.target_state as DecisionPoint['targetState'],
+            timestamp: new Date().toISOString(),
+          };
+          if (args.metadata) {
+            record.metadata = args.metadata;
+          }
+
+          // Atomic state update via shared writeStateFile
+          await writeStateFile(changeDir, args.target_state, { decisionPoint: record });
+
+          // Read back to get total count
+          const updatedState = await readJsonFile<Record<string, unknown>>(statePath);
+          const dps = (updatedState?.decisionPoints as DecisionPoint[]) || [];
+
           return {
             title: 'Record Decision Point',
-            output: JSON.stringify({ success: true, dp: result.record, totalDPs: result.total }, null, 2),
+            output: JSON.stringify({ success: true, dp: record, totalDPs: dps.length }, null, 2),
           };
         } catch (error) {
           return {

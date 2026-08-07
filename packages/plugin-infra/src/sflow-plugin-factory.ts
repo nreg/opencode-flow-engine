@@ -47,6 +47,7 @@ import { getCurrentWorkflowState, executeContractValidator, executeArtifactInspe
 import { createExecutionPlan, reviseExecutionPlan, readExecutionPlan, recordReviewReceipt } from './features/execution-plan.js';
 import { fileExists, readJsonFile } from '@opencode-flow-engine/shared';
 import { applyTokenBudgetToContent } from './features/token-budget-limiter.js';
+import { resolveChangeDir } from './helpers/resolve-change-dir.js';
 // ─── Background task registry (per-factory instance) ──────────────────────────
 
 const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
@@ -66,7 +67,8 @@ function createWorkflowRouterTools(client: SFlowClient): Record<string, LocalToo
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
       execute: async (args, context) => {
-        return createWorkflowRouterTool().execute({ ...args, changeDir: context.directory || '' }, context);
+        const changeDir = resolveChangeDir(undefined, context.directory);
+        return createWorkflowRouterTool().execute({ ...args, changeDir }, context);
       },
     },
 
@@ -76,7 +78,8 @@ function createWorkflowRouterTools(client: SFlowClient): Record<string, LocalToo
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
       execute: async (args, context) => {
-        return createIFlowRouterTool().execute({ ...args, changeDir: context.directory || '' }, context);
+        const changeDir = resolveChangeDir(undefined, context.directory);
+        return createIFlowRouterTool().execute({ ...args, changeDir }, context);
       },
     },
   };
@@ -90,9 +93,10 @@ function createContractTools(): Record<string, LocalToolDefinition> {
         contract_path: z.string().optional().describe('Path to the execution contract file'),
       },
       execute: async (args: { contract_path?: string }, context) => {
-        const changeDir = args.contract_path
+        const explicitChangeDir = args.contract_path
           ? args.contract_path.replace(/[/\\]execution-contract\.md$/, '')
-          : context.directory || '';
+          : undefined;
+        const changeDir = resolveChangeDir(explicitChangeDir, context.directory);
         const result = await executeContractValidator(changeDir);
         return { title: 'Contract Validator', output: JSON.stringify(result, null, 2) };
       },
@@ -104,9 +108,10 @@ function createContractTools(): Record<string, LocalToolDefinition> {
         artifact_path: z.string().optional().describe('Path to the artifact or change directory'),
       },
       execute: async (args: { artifact_path?: string }, context) => {
-        const changeDir = args.artifact_path
+        const explicitChangeDir = args.artifact_path
           ? args.artifact_path.replace(/[/\\](proposal|design|tasks)\.md$/, '').replace(/[/\\]specs$/, '')
-          : context.directory || '';
+          : undefined;
+        const changeDir = resolveChangeDir(explicitChangeDir, context.directory);
         const result = await executeArtifactInspector(changeDir);
         return { title: 'Artifact Inspector', output: JSON.stringify(result, null, 2) };
       },
@@ -131,7 +136,7 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
         override: z.boolean().optional().describe('Whether this is a user override of the recommended mode'),
       },
       execute: async (args, context) => {
-        const changeDir = context.directory || '';
+        const changeDir = resolveChangeDir(undefined, context.directory);
         const { mode, waves, source, rationale, override } = args as {
           mode: 'inline' | 'batch-inline' | 'sdd';
           waves: Array<{
@@ -200,7 +205,7 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
       description: 'Read and display the current execution plan from .flow-engine/sflow/execution-plan.json. Shows mode, waves, dependencies, review status, and plan hash.',
       args: {},
       execute: async (_args: Record<string, never>, context) => {
-        const changeDir = context.directory || '';
+        const changeDir = resolveChangeDir(undefined, context.directory);
         try {
           const plan = await readExecutionPlan(changeDir);
           if (!plan) {
@@ -266,7 +271,7 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
         report: z.string().describe('Review report content or path'),
       },
       execute: async (args, context) => {
-        const changeDir = context.directory || '';
+        const changeDir = resolveChangeDir(undefined, context.directory);
         const { waveId, status, base, head, report } = args as {
           waveId: string;
           status: 'pass' | 'fail';
@@ -359,7 +364,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
       const cascadedConfig = await loadCascadedSFlowConfig();
       const configOverrides = agentOverridesFromConfig(cascadedConfig);
 
-      const workDir = input.directory;
+      const workDir = resolveChangeDir(undefined, input.directory);
       const sflowClient = input.client;
 
       const hookComposer = createHookComposer();

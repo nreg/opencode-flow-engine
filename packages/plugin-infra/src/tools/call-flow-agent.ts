@@ -20,6 +20,7 @@ import {
   DEFAULT_MAX_WAIT_MS,
   DEFAULT_SYNC_MAX_WAIT_MS,
 } from '../helpers/polling.js';
+import { resolveChangeDir } from '../helpers/resolve-change-dir.js';
 import type {
   AgentModelMap,
   BackgroundTaskEntry,
@@ -346,7 +347,7 @@ export function createCallFlowAgentTools(
         ),
     } as Record<string, unknown>,
     execute: async (args, context) => {
-      const changeDir = context.directory || '';
+      const changeDir = resolveChangeDir(undefined, context.directory);
       const {
         subagent_type,
         prompt,
@@ -364,6 +365,29 @@ export function createCallFlowAgentTools(
       );
       if (validationError) {
         return await formatToolError(validationError);
+      }
+
+      // Detect multi-wave packing in build-executor prompts (constraint violation)
+      if (subagent_type === 'build-executor') {
+        const waveExecutionPattern = /(?:Execute|Run|Perform|Dispatch)\s+Wave\s+\d+/gi;
+        const waveMatches = (prompt as string).match(waveExecutionPattern);
+        const uniqueWaves = waveMatches ? new Set(waveMatches.map(w => w.toLowerCase())).size : 0;
+        
+        if (uniqueWaves > 1) {
+          return await formatToolError(
+            `Wave Orchestration Constraint Violation: Detected ${uniqueWaves} waves in single build-executor prompt. ` +
+            `Waves MUST be dispatched one at a time with Review Gate checks between them. ` +
+            `Please delegate waves sequentially: Wave 1 → Review Gate → Wave 2 → Review Gate → ...`
+          );
+        }
+        
+        if ((prompt as string).toLowerCase().includes('code-reviewer')) {
+          console.warn(
+            `[Wave Orchestration] WARNING: build-executor prompt contains 'code-reviewer'. ` +
+            `Cross-wave code review is sFlow's responsibility, not build-executor's. ` +
+            `Consider delegating code-review tasks to sFlow orchestrator instead.`
+          );
+        }
       }
 
       const sessionLabel = resolveSessionLabel(
@@ -693,6 +717,7 @@ export function createCallFlowAgentTools(
     } as Record<string, unknown>,
     execute: async (args: Record<string, unknown>, _context) => {
       const { task_id, block } = args as { task_id: string; block?: boolean };
+      const changeDir = resolveChangeDir(undefined, _context.directory);
 
       const pollAndComplete = async (task: BackgroundTaskEntry): Promise<BackgroundTaskEntry> => {
         const currentTask = backgroundTaskRegistry.get(task_id);
@@ -745,7 +770,7 @@ export function createCallFlowAgentTools(
             }
 
             try {
-              const nm = createNotificationManager({ changeDir: _context.directory || '' });
+              const nm = createNotificationManager({ changeDir });
               await nm.writeNotification({
                 type: 'async_error',
                 subagent: task.subagentType,
@@ -758,7 +783,7 @@ export function createCallFlowAgentTools(
             }
 
             try {
-              const asyncStore = createSubagentStore({ changeDir: _context.directory || '' });
+              const asyncStore = createSubagentStore({ changeDir });
               const agents = await asyncStore.listAgents();
               const matchedAgent = agents.find((a) => a.session_id === task.sessionID);
               if (matchedAgent) {
@@ -795,7 +820,7 @@ export function createCallFlowAgentTools(
           }
 
           try {
-            const nm = createNotificationManager({ changeDir: _context.directory || '' });
+            const nm = createNotificationManager({ changeDir });
             await nm.writeNotification({
               type: 'async_completed',
               subagent: task.subagentType,
@@ -809,7 +834,7 @@ export function createCallFlowAgentTools(
           }
 
           try {
-            const asyncStore = createSubagentStore({ changeDir: _context.directory || '' });
+            const asyncStore = createSubagentStore({ changeDir });
             const agents = await asyncStore.listAgents();
             const matchedAgent = agents.find((a) => a.session_id === task.sessionID);
             if (matchedAgent) {
@@ -851,7 +876,7 @@ export function createCallFlowAgentTools(
           }
 
           try {
-            const nm = createNotificationManager({ changeDir: _context.directory || '' });
+            const nm = createNotificationManager({ changeDir });
             await nm.writeNotification({
               type: 'async_error',
               subagent: task.subagentType,
@@ -864,7 +889,7 @@ export function createCallFlowAgentTools(
           }
 
           try {
-            const asyncStore = createSubagentStore({ changeDir: _context.directory || '' });
+            const asyncStore = createSubagentStore({ changeDir });
             const agents = await asyncStore.listAgents();
             const matchedAgent = agents.find((a) => a.session_id === task.sessionID);
             if (matchedAgent) {

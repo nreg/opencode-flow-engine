@@ -310,14 +310,14 @@ describe('performCompletionRetry', () => {
     expect(injectCallCount).toBe(2);
   });
 
-  it('should skip retry for agent NOT in enabled list (build-executor)', async () => {
+  it('should skip retry for agent NOT in enabled list (need-explorer)', async () => {
     let injectCallCount = 0;
     const result = await performCompletionRetry(
       '实现了功能 X，测试通过',
       async () => { injectCallCount++; },
       async () => '不应该被调用',
       COMPLETION_ENFORCEMENT_CONFIG,
-      'build-executor', // NOT in enabled list → skip retry
+      'need-explorer', // NOT in enabled list (interactive agent) → skip retry
     );
     expect(result.output).toBe('实现了功能 X，测试通过');
     expect(result.warning).toBeUndefined();

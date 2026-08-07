@@ -3,12 +3,16 @@
  * Extracted from index.ts to maintain pure re-export pattern.
  */
 
-import { ensureDir, readJsonFile, writeJsonFile, stateFileMutex } from "@opencode-flow-engine/shared";
+import { ensureDir, readJsonFile, atomicWriteJsonFile, stateFileMutex } from "@opencode-flow-engine/shared";
+import type { DecisionPoint } from '@opencode-flow-engine/core';
 
 /**
  * Shared writeStateFile — unified state.json writer.
  * Used by both state-transition hook and workflow-manager.
  * Replaces duplicate inline implementations.
+ * 
+ * Supports decisionPoint追加 via extra.decisionPoint.
+ * Uses atomicWriteJsonFile for crash safety.
  */
 export async function writeStateFile(changeDir: string, newState: string, extra?: Record<string, unknown>): Promise<void> {
   const now = new Date().toISOString();
@@ -67,6 +71,21 @@ export async function writeStateFile(changeDir: string, newState: string, extra?
       state.decisionPoints = decisionPoints;
     }
 
-    await writeJsonFile(statePath, state);
+    // Generic decisionPoint support: append/update decision point entry
+    if (extra && extra.decisionPoint && typeof extra.decisionPoint === 'object') {
+      const newDp = extra.decisionPoint as DecisionPoint;
+      const decisionPoints = Array.isArray(state.decisionPoints)
+        ? (state.decisionPoints as DecisionPoint[])
+        : [];
+      const existingIndex = decisionPoints.findIndex(dp => dp.id === newDp.id);
+      if (existingIndex >= 0) {
+        decisionPoints[existingIndex] = { ...newDp, timestamp: now };
+      } else {
+        decisionPoints.push({ ...newDp, timestamp: now });
+      }
+      state.decisionPoints = decisionPoints;
+    }
+
+    await atomicWriteJsonFile(statePath, state);
   });
 }

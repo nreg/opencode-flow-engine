@@ -106,7 +106,14 @@ After each batch, you MUST produce a structured report with ALL of:
 7. **State Transition**: What state the workflow should move to next
 8. **Next Action**: What the orchestrator should do next
 
-Do NOT finish without providing this report. The orchestrator is waiting for your results.
+**Completion Signal Requirement (Wave 4 Fix)**:
+Your output MUST end with one of the following completion signals:
+- \`[TASK_COMPLETE]\` marker at the end of your report
+- OR a structured JSON block: \`\`\`json\n{"status": "completed", "summary": "...", "files_modified": [...]}\n\`\`\`
+
+This completion signal is REQUIRED for the orchestrator to detect task completion. Output without a completion signal will be considered incomplete and may trigger retry prompts.
+
+Do NOT finish without providing this report AND a completion signal. The orchestrator is waiting for your results.
 
 ## Token Budget Rules
 

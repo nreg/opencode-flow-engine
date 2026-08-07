@@ -38,6 +38,7 @@ import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
 import { createAgnesTools } from './agnes-tools.js';
 import { getCurrentWorkflowState, executeContractValidator, executeArtifactInspector } from './sflow-tool-helpers.js';
 import { applyTokenBudgetToContent } from './features/token-budget-limiter.js';
+import { resolveChangeDir } from './helpers/resolve-change-dir.js';
 
 // ─── Background task registry (shared for combined plugin) ────────────────────
 
@@ -58,7 +59,7 @@ function createCombinedTools(client: SFlowClient): Record<string, LocalToolDefin
     agentModelMap: AGENT_MODEL_MAP,
     sessionLabelPrefix: (subagentType, context) => {
       // Determine workflow prefix based on context
-      const changeDir = (context.directory as string) || '';
+      const changeDir = resolveChangeDir(undefined, context.directory as string);
       const isIFlowCtx = changeDir ? true : false; // context available from execute
       // Use agent name from context to determine prefix
       const callerAgent = (context.agent as string) || '';
@@ -72,7 +73,7 @@ function createCombinedTools(client: SFlowClient): Record<string, LocalToolDefin
     },
     workflowName: 'workflow',
     validateAgent: async (subagentType, context) => {
-      const changeDir = (context.directory as string) || '';
+      const changeDir = resolveChangeDir(undefined, context.directory as string);
 
       // Detect workflow context
       const isSFlowContext = await directoryExists(`${changeDir}/.flow-engine/sflow`);
@@ -127,7 +128,8 @@ function createCombinedTools(client: SFlowClient): Record<string, LocalToolDefin
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
       execute: async (args, context) => {
-        return createWorkflowRouterTool().execute({ ...args, changeDir: context.directory || '' }, context);
+        const changeDir = resolveChangeDir(undefined, context.directory);
+        return createWorkflowRouterTool().execute({ ...args, changeDir }, context);
       },
     },
 
@@ -137,7 +139,8 @@ function createCombinedTools(client: SFlowClient): Record<string, LocalToolDefin
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
       execute: async (args, context) => {
-        return createIFlowRouterTool().execute({ ...args, changeDir: context.directory || '' }, context);
+        const changeDir = resolveChangeDir(undefined, context.directory);
+        return createIFlowRouterTool().execute({ ...args, changeDir }, context);
       },
     },
 
@@ -149,7 +152,7 @@ function createCombinedTools(client: SFlowClient): Record<string, LocalToolDefin
       execute: async (args: { contract_path?: string }, context) => {
         const changeDir = args.contract_path
           ? args.contract_path.replace(/[/\\]execution-contract\.md$/, '')
-          : context.directory || '';
+          : resolveChangeDir(undefined, context.directory);
         const result = await executeContractValidator(changeDir);
         return { title: 'Contract Validator', output: JSON.stringify(result, null, 2) };
       },
@@ -163,7 +166,7 @@ function createCombinedTools(client: SFlowClient): Record<string, LocalToolDefin
       execute: async (args: { artifact_path?: string }, context) => {
         const changeDir = args.artifact_path
           ? args.artifact_path.replace(/[/\\](proposal|design|tasks)\.md$/, '').replace(/[/\\]specs$/, '')
-          : context.directory || '';
+          : resolveChangeDir(undefined, context.directory);
         const result = await executeArtifactInspector(changeDir);
         return { title: 'Artifact Inspector', output: JSON.stringify(result, null, 2) };
       },

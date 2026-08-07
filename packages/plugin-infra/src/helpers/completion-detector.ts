@@ -4,11 +4,19 @@
  * Provides completion signal detection for subagent output and
  * retry configuration for the completion enforcement mechanism.
  *
- * Detection rules (ordered):
- * 1. [TASK_COMPLETE] marker → true
- * 2. JSON code fence (```json ... ```) → true
- * 3. Bare JSON object ({...}) → true
- * 4. Empty / null output → false
+ * Detection strategies (by agent type):
+ * 1. STRICT agents (spec-writer, contract-builder):
+ *    - [TASK_COMPLETE] marker → true
+ *    - JSON code fence (```json ... ```) → true
+ *    - Bare JSON object ({...}) → true
+ *    - Empty / null output → false
+ *
+ * 2. LOOSE agents (build-executor, code-reviewer, test-engineer, etc.):
+ *    - Output contains report keywords (Summary, 完成, Test Results, Batch Status, Files) → true
+ *    - Output length >= 200 characters → true
+ *    - Empty / very short output → false
+ *
+ * 3. Other agents: No retry (automatically exempt)
  *
  * Reuses extractJsonBlock from P2 for JSON-related detection.
  */
@@ -40,12 +48,38 @@ export interface CompletionEnforcementConfig {
   enabledAgents?: string[];
 }
 
-/** Agents known to output [TASK_COMPLETE] — only these get P3 completion enforcement.
- *  All other agents are automatically exempt since they don't output TASK_COMPLETE
- *  (interactive agents like need-explorer, execution agents like build-executor, etc.) */
-export const DEFAULT_COMPLETION_ENABLED_AGENTS: string[] = [
+/** STRICT completion agents — require [TASK_COMPLETE] marker or JSON output.
+ *  These agents output structured completion signals and must be strictly enforced.
+ */
+export const STRICT_COMPLETION_AGENTS: string[] = [
   'spec-writer',
   'contract-builder',
+];
+
+/** LOOSE completion agents — use substantial output detection.
+ *  These agents output human-readable reports and should use loose completion detection:
+ *  - Output non-empty and contains report keywords (Summary, 完成, Test Results, etc.)
+ *  - OR output length >= 200 characters (substantial content)
+ *  - Only retry when output is empty/very short/obviously truncated
+ */
+export const LOOSE_COMPLETION_AGENTS: string[] = [
+  'build-executor',
+  'code-reviewer',
+  'test-engineer',
+  'bug-investigator',
+  'release-archivist',
+  'spec-merger',
+  'ui-implementer',
+];
+
+/** Combined list of all agents with completion enforcement enabled.
+ *  STRICT agents use hasCompletionSignal ([TASK_COMPLETE] or JSON).
+ *  LOOSE agents use hasSubstantialOutput (report keywords or substantial length).
+ *  All other agents are automatically exempt.
+ */
+export const DEFAULT_COMPLETION_ENABLED_AGENTS: string[] = [
+  ...STRICT_COMPLETION_AGENTS,
+  ...LOOSE_COMPLETION_AGENTS,
 ];
 
 /** Result of the completion retry process */
@@ -116,14 +150,64 @@ export function hasCompletionSignal(output: string): boolean {
   return false;
 }
 
+/**
+ * Check whether subagent output is substantial (loose completion detection).
+ *
+ * Used for execution-type agents that output human-readable reports.
+ * Returns true if output:
+ * 1. Is non-empty and contains report keywords (Summary, 完成, Test Results, Batch Status, Files)
+ * 2. OR has substantial length (>= 200 characters)
+ *
+ * Returns false for empty, whitespace-only, or very short outputs.
+ *
+ * @param output - The raw output text from the subagent
+ * @returns true if output is substantial, false otherwise
+ */
+export function hasSubstantialOutput(output: string): boolean {
+  // Empty / null check
+  if (!output || typeof output !== 'string' || output.trim().length === 0) {
+    return false;
+  }
+
+  const trimmed = output.trim();
+
+  // Check for report keywords (case-insensitive)
+  const reportKeywords = [
+    'Summary',
+    '完成',
+    'Test Results',
+    'Batch Status',
+    'Files',
+  ];
+
+  const hasKeywords = reportKeywords.some(keyword => 
+    trimmed.toLowerCase().includes(keyword.toLowerCase())
+  );
+
+  if (hasKeywords) {
+    return true;
+  }
+
+  // Check for substantial length (>= 200 characters)
+  const SUBSTANTIAL_LENGTH_THRESHOLD = 200;
+  if (trimmed.length >= SUBSTANTIAL_LENGTH_THRESHOLD) {
+    return true;
+  }
+
+  return false;
+}
+
 // ─── Retry Logic ────────────────────────────────────────────────────────────
 
 /**
  * Perform completion enforcement retry logic.
  *
- * If the initial output contains a completion signal, returns immediately.
- * If the agent type is NOT in the enabled list (opt-in), returns immediately
- * (most agents don't output [TASK_COMPLETE] and should not be retried).
+ * Detection strategy by agent type:
+ * - STRICT agents (spec-writer, contract-builder): Use hasCompletionSignal ([TASK_COMPLETE] or JSON)
+ * - LOOSE agents (build-executor, etc.): Use hasSubstantialOutput (report keywords or substantial length)
+ * - Other agents: No retry (automatically exempt)
+ *
+ * If the initial output passes the detection check, returns immediately.
  * Otherwise, injects a system reminder and re-polls up to maxRetries times
  * with increasing backoff delays.
  *
@@ -135,7 +219,7 @@ export function hasCompletionSignal(output: string): boolean {
  * @param injectReminder - Function to inject a system reminder into the session
  * @param pollOutput - Function to poll for the subagent's latest output
  * @param config - Optional override for completion enforcement config (for testing)
- * @param agentType - Optional agent type; if NOT in config.enabledAgents, skips retry
+ * @param agentType - Optional agent type; determines detection strategy
  * @returns CompletionRetryResult with final output and optional warning
  */
 export async function performCompletionRetry(
@@ -147,14 +231,22 @@ export async function performCompletionRetry(
 ): Promise<CompletionRetryResult> {
   let currentOutput = initialOutput;
 
-  // If already has completion signal, return immediately
-  if (hasCompletionSignal(currentOutput)) {
+  // Determine detection strategy based on agent type
+  const isStrictAgent = agentType && STRICT_COMPLETION_AGENTS.includes(agentType);
+  const isLooseAgent = agentType && LOOSE_COMPLETION_AGENTS.includes(agentType);
+
+  // If agent is not in any completion group, skip retry
+  if (!isStrictAgent && !isLooseAgent) {
     return { output: currentOutput };
   }
 
-  // Completion enforcement is opt-in: only applies to agents that output [TASK_COMPLETE].
-  // All other agents (need-explorer, build-executor, etc.) are automatically exempt.
-  if (!agentType || !config.enabledAgents?.includes(agentType)) {
+  // Check initial output with appropriate detection strategy
+  // For LOOSE agents: check hasCompletionSignal first (higher priority), then hasSubstantialOutput
+  const hasCompletion = isStrictAgent 
+    ? hasCompletionSignal(currentOutput)
+    : (hasCompletionSignal(currentOutput) || hasSubstantialOutput(currentOutput));
+
+  if (hasCompletion) {
     return { output: currentOutput };
   }
 
@@ -177,8 +269,13 @@ export async function performCompletionRetry(
       currentOutput = newOutput;
     }
 
-    // Check if completion signal appeared
-    if (hasCompletionSignal(currentOutput)) {
+    // Check if completion signal appeared (use appropriate detection strategy)
+    // For LOOSE agents: check hasCompletionSignal first, then hasSubstantialOutput
+    const hasCompletionNow = isStrictAgent
+      ? hasCompletionSignal(currentOutput)
+      : (hasCompletionSignal(currentOutput) || hasSubstantialOutput(currentOutput));
+
+    if (hasCompletionNow) {
       return { output: currentOutput };
     }
   }
