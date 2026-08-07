@@ -444,6 +444,54 @@ Test Results: all pass
 All validation checks passed successfully.`;
     expect(hasSubstantialOutput(output)).toBe(true);
   });
+
+  // P1-3: Enhanced error pattern detection
+  it('should return false for JSON error field in response (P1-3)', () => {
+    const output = `API response received:
+{
+  "status": 500,
+  "error": "Internal server error occurred",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "details": "Additional error information to make output longer"
+}`;
+    expect(hasSubstantialOutput(output)).toBe(false);
+  });
+
+  it('should return false for JSON error field with different spacing (P1-3)', () => {
+    const output = `Response: {"error":"something went wrong","code":500,"data":null}`;
+    expect(hasSubstantialOutput(output)).toBe(false);
+  });
+
+  it('should return false for multi-line stack trace (P1-3)', () => {
+    const output = `Error: Cannot read property 'x' of undefined
+    at Object.<anonymous> (src/test.js:10:15)
+    at Module._compile (internal/modules/cjs/loader.js:1063:30)
+    at Object.Module._extensions..js (internal/modules/cjs/loader.js:1092:10)
+    at Module.load (internal/modules/cjs/loader.js:935:32)
+    at Function.Module._load (internal/modules/cjs/loader.js:776:14)
+    at Function.executeUserEntryPoint [as runMain] (internal/modules/run_main.js:72:12)
+    at internal/main/run_main_module.js:17:47`;
+    expect(hasSubstantialOutput(output)).toBe(false);
+  });
+
+  it('should return false for stack trace with nested error (P1-3)', () => {
+    const output = `Processing failed:
+Error: Database connection failed
+    at Database.connect (src/db.js:45:11)
+    at async Application.init (src/app.js:23:5)
+    at async main (src/index.js:10:1)
+    at processTicksAndRejections (internal/process/task_queues.js:95:5)`;
+    expect(hasSubstantialOutput(output)).toBe(false);
+  });
+
+  it('should NOT false positive on JSON without error field (P1-3)', () => {
+    const output = `Summary: Task completed
+
+Result: {"status": "success", "data": {"count": 42}}
+
+All operations completed successfully.`;
+    expect(hasSubstantialOutput(output)).toBe(true);
+  });
 });
 
 // ─── Loose Completion Detection for Execution Agents ──────────────────────────

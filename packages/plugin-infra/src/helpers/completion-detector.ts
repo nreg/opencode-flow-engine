@@ -178,6 +178,8 @@ export function hasSubstantialOutput(output: string): boolean {
     /^❌/m,
     /^FAIL:/im,
     /^Error:/m,
+    /"error"\s*:\s*"/i,
+    /Error:\s.*\n\s+at /s,
   ];
 
   const hasErrorPattern = errorPatterns.some(pattern => pattern.test(trimmed));
