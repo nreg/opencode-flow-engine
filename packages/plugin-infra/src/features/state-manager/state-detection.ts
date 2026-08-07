@@ -3,7 +3,8 @@
  * Extracted from index.ts to maintain pure re-export pattern.
  */
 
-import { fileExists, readJsonFile, directoryExists, isContractStale as checkContractStale, readFile } from "@opencode-flow-engine/shared";
+import { fileExists, readJsonFile, directoryExists, isContractStale as checkContractStale } from "@opencode-flow-engine/shared";
+import { resolveArtifactPath, readArtifactContent } from './artifact-paths.js';
 
 export const BOULDER_STATE_FILE = ".flow-engine/sflow/boulder-state.json";
 
@@ -51,49 +52,50 @@ export interface WorkflowStateDetection {
 }
 
 /**
- * Resolve artifact path with dual-path compatibility.
- * Priority: .flow-engine/sflow/<artifact> (new) → <changeDir>/<artifact> (legacy)
- * 
- * @param changeDir - The project/change directory
- * @param artifactName - Artifact file name (e.g., 'proposal.md')
- * @returns The resolved path (new location preferred)
+ * Ensure migration target directory exists.
+ * Single responsibility: directory creation only.
  */
-async function resolveArtifactPath(changeDir: string, artifactName: string): Promise<string> {
-  const newPath = `${changeDir}/.flow-engine/sflow/${artifactName}`;
-  const legacyPath = `${changeDir}/${artifactName}`;
-  
-  if (await fileExists(newPath)) {
-    return newPath;
-  }
-  
-  return legacyPath;
+export async function ensureMigrateDir(changeDir: string): Promise<void> {
+  const { mkdir } = await import('node:fs/promises');
+  const sflowDir = `${changeDir}/.flow-engine/sflow`;
+  await mkdir(sflowDir, { recursive: true });
 }
 
 /**
- * Read artifact content with dual-path compatibility.
- * Tries new path first, falls back to legacy path.
+ * Migrate single artifact from src to dst.
+ * Non-destructive: copies file, does not delete original.
+ * Skips if dst already exists or src does not exist.
  */
-async function readArtifactContent(changeDir: string, artifactName: string): Promise<string | null> {
-  const newPath = `${changeDir}/.flow-engine/sflow/${artifactName}`;
-  const legacyPath = `${changeDir}/${artifactName}`;
+export async function migrateSingleArtifact(srcPath: string, dstPath: string): Promise<void> {
+  const { copyFile } = await import('node:fs/promises');
   
-  const newContent = await readFile(newPath).catch(() => null);
-  if (newContent) return newContent;
+  const srcExists = await fileExists(srcPath);
+  const dstExists = await fileExists(dstPath);
   
-  return readFile(legacyPath).catch(() => null);
+  if (srcExists && !dstExists) {
+    try {
+      await copyFile(srcPath, dstPath);
+    } catch {
+    }
+  }
 }
 
 /**
  * Migrate legacy artifacts from root directory to .flow-engine/sflow/.
- * Called when legacy artifacts exist but new location is empty.
+ * Coordinates migration using single-responsibility helpers.
  * Non-destructive: copies files, does not delete originals.
+ * Uses migration marker to skip redundant migrations.
  */
-async function migrateLegacyArtifacts(changeDir: string): Promise<void> {
-  const { copyFile, mkdir } = await import('node:fs/promises');
+export async function migrateLegacyArtifacts(changeDir: string): Promise<void> {
   const sflowDir = `${changeDir}/.flow-engine/sflow`;
+  const markerPath = `${sflowDir}/.artifacts-migrated`;
+  
+  if (await fileExists(markerPath)) {
+    return;
+  }
   
   try {
-    await mkdir(sflowDir, { recursive: true });
+    await ensureMigrateDir(changeDir);
   } catch {
     return;
   }
@@ -103,16 +105,7 @@ async function migrateLegacyArtifacts(changeDir: string): Promise<void> {
   for (const artifact of artifacts) {
     const legacyPath = `${changeDir}/${artifact}`;
     const newPath = `${sflowDir}/${artifact}`;
-    
-    const legacyExists = await fileExists(legacyPath);
-    const newExists = await fileExists(newPath);
-    
-    if (legacyExists && !newExists) {
-      try {
-        await copyFile(legacyPath, newPath);
-      } catch {
-      }
-    }
+    await migrateSingleArtifact(legacyPath, newPath);
   }
   
   const legacySpecsDir = `${changeDir}/specs`;
@@ -123,16 +116,22 @@ async function migrateLegacyArtifacts(changeDir: string): Promise<void> {
   
   if (legacySpecsExists && !newSpecsExists) {
     try {
-      const { readdir } = await import('node:fs/promises');
+      const { readdir, mkdir } = await import('node:fs/promises');
       await mkdir(newSpecsDir, { recursive: true });
       const files = await readdir(legacySpecsDir);
       for (const file of files) {
         if (file.endsWith('.md')) {
-          await copyFile(`${legacySpecsDir}/${file}`, `${newSpecsDir}/${file}`);
+          await migrateSingleArtifact(`${legacySpecsDir}/${file}`, `${newSpecsDir}/${file}`);
         }
       }
     } catch {
     }
+  }
+  
+  try {
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(markerPath, new Date().toISOString());
+  } catch {
   }
 }
 

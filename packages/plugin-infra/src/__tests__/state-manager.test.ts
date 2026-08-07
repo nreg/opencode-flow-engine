@@ -2,9 +2,21 @@
  * State Manager tests — detectStateMismatch, upgradeMode, buildPause, updateSubagentProgress
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdir, rm, writeFile } from 'fs/promises';
+import { mkdir, rm, writeFile, readFile, access } from 'fs/promises';
 import { join } from 'path';
 import { createStateManager, detectStateMismatch, simpleHash, writeStateFile } from '../features/state-manager.js';
+// P1-1: Import migration helper functions
+import {
+  ensureMigrateDir,
+  migrateSingleArtifact,
+  migrateLegacyArtifacts
+} from '../features/state-manager/state-detection.js';
+// P1-2: Import artifact path helpers
+import {
+  resolveArtifactPath,
+  readArtifactContent,
+  isArtifactNewPath
+} from '../features/state-manager/artifact-paths.js';
 
 function tempDir(name: string): string {
   return join(import.meta.dir, '..', '__test_workdir__', name);
@@ -429,5 +441,300 @@ describe('detectArtifactExistence — dual-path compatibility', () => {
 
     expect(result.specs).toBe(true);
     expect(result.specsFileCount).toBe(1);
+  });
+});
+
+// ─── P1-1: Migration Helper Functions Tests ─────────────────────────────────────
+
+describe('ensureMigrateDir', () => {
+  const dir = tempDir('migrate-dir');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should create .flow-engine/sflow directory if not exists', async () => {
+    await ensureMigrateDir(dir);
+    const stat = await access(dir + '/.flow-engine/sflow').then(() => true).catch(() => false);
+    expect(stat).toBe(true);
+  });
+
+  it('should succeed if directory already exists', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await ensureMigrateDir(dir);
+    const stat = await access(dir + '/.flow-engine/sflow').then(() => true).catch(() => false);
+    expect(stat).toBe(true);
+  });
+});
+
+describe('migrateSingleArtifact', () => {
+  const dir = tempDir('migrate-single');
+  const srcPath = dir + '/proposal.md';
+  const dstPath = dir + '/.flow-engine/sflow/proposal.md';
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await ensureDir(dir + '/.flow-engine/sflow');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should copy file from src to dst if src exists and dst does not', async () => {
+    await writeFile(srcPath, '# Proposal');
+    await migrateSingleArtifact(srcPath, dstPath);
+    const content = await readFile(dstPath, 'utf-8');
+    expect(content).toBe('# Proposal');
+  });
+
+  it('should preserve original file (non-destructive)', async () => {
+    await writeFile(srcPath, '# Proposal');
+    await migrateSingleArtifact(srcPath, dstPath);
+    const originalExists = await access(srcPath).then(() => true).catch(() => false);
+    expect(originalExists).toBe(true);
+  });
+
+  it('should skip migration if dst already exists', async () => {
+    await writeFile(srcPath, '# Old Proposal');
+    await writeFile(dstPath, '# New Proposal');
+    await migrateSingleArtifact(srcPath, dstPath);
+    const content = await readFile(dstPath, 'utf-8');
+    expect(content).toBe('# New Proposal');
+  });
+
+  it('should skip migration if src does not exist', async () => {
+    await migrateSingleArtifact(srcPath, dstPath);
+    const dstExists = await access(dstPath).then(() => true).catch(() => false);
+    expect(dstExists).toBe(false);
+  });
+});
+
+describe('migrateLegacyArtifacts', () => {
+  const dir = tempDir('migrate-legacy');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should migrate all legacy artifacts to .flow-engine/sflow/', async () => {
+    await writeFile(dir + '/proposal.md', '# Proposal');
+    await writeFile(dir + '/design.md', '# Design');
+    await writeFile(dir + '/tasks.md', '# Tasks');
+    await writeFile(dir + '/execution-contract.md', '# Contract');
+    await writeFile(dir + '/ui-design.md', '# UI Design');
+
+    await migrateLegacyArtifacts(dir);
+
+    const files = ['proposal.md', 'design.md', 'tasks.md', 'execution-contract.md', 'ui-design.md'];
+    for (const file of files) {
+      const content = await readFile(dir + '/.flow-engine/sflow/' + file, 'utf-8');
+      expect(content.startsWith('#')).toBe(true);
+    }
+  });
+
+  it('should migrate specs directory', async () => {
+    await ensureDir(dir + '/specs');
+    await writeFile(dir + '/specs/auth.md', '# Auth Spec');
+    await writeFile(dir + '/specs/user.md', '# User Spec');
+
+    await migrateLegacyArtifacts(dir);
+
+    const authContent = await readFile(dir + '/.flow-engine/sflow/specs/auth.md', 'utf-8');
+    const userContent = await readFile(dir + '/.flow-engine/sflow/specs/user.md', 'utf-8');
+    expect(authContent).toBe('# Auth Spec');
+    expect(userContent).toBe('# User Spec');
+  });
+
+  it('should preserve original files (non-destructive)', async () => {
+    await writeFile(dir + '/proposal.md', '# Proposal');
+    await migrateLegacyArtifacts(dir);
+
+    const originalExists = await access(dir + '/proposal.md').then(() => true).catch(() => false);
+    expect(originalExists).toBe(true);
+  });
+
+  it('should skip migration if artifacts already in new location', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/proposal.md', '# New Proposal');
+    await writeFile(dir + '/proposal.md', '# Old Proposal');
+
+    await migrateLegacyArtifacts(dir);
+
+    const content = await readFile(dir + '/.flow-engine/sflow/proposal.md', 'utf-8');
+    expect(content).toBe('# New Proposal');
+  });
+});
+
+// ─── P1-2: Artifact Path Helpers Tests ──────────────────────────────────────────
+
+describe('resolveArtifactPath', () => {
+  const dir = tempDir('artifact-path');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should return new path if artifact exists in .flow-engine/sflow/', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/proposal.md', '# New Proposal');
+    const path = await resolveArtifactPath(dir, 'proposal.md');
+    expect(path).toBe(dir + '/.flow-engine/sflow/proposal.md');
+  });
+
+  it('should return legacy path if artifact only in root', async () => {
+    await writeFile(dir + '/proposal.md', '# Legacy Proposal');
+    const path = await resolveArtifactPath(dir, 'proposal.md');
+    expect(path).toBe(dir + '/proposal.md');
+  });
+
+  it('should prefer new path over legacy path', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/proposal.md', '# New Proposal');
+    await writeFile(dir + '/proposal.md', '# Legacy Proposal');
+    const path = await resolveArtifactPath(dir, 'proposal.md');
+    expect(path).toBe(dir + '/.flow-engine/sflow/proposal.md');
+  });
+
+  it('should return legacy path if artifact does not exist anywhere', async () => {
+    const path = await resolveArtifactPath(dir, 'proposal.md');
+    expect(path).toBe(dir + '/proposal.md');
+  });
+});
+
+describe('readArtifactContent', () => {
+  const dir = tempDir('artifact-read');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should read from new path if exists', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/proposal.md', '# New Proposal');
+    const content = await readArtifactContent(dir, 'proposal.md');
+    expect(content).toBe('# New Proposal');
+  });
+
+  it('should read from legacy path if new path does not exist', async () => {
+    await writeFile(dir + '/proposal.md', '# Legacy Proposal');
+    const content = await readArtifactContent(dir, 'proposal.md');
+    expect(content).toBe('# Legacy Proposal');
+  });
+
+  it('should prefer new path over legacy path', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/proposal.md', '# New Proposal');
+    await writeFile(dir + '/proposal.md', '# Legacy Proposal');
+    const content = await readArtifactContent(dir, 'proposal.md');
+    expect(content).toBe('# New Proposal');
+  });
+
+  it('should return null if artifact does not exist', async () => {
+    const content = await readArtifactContent(dir, 'proposal.md');
+    expect(content).toBeNull();
+  });
+});
+
+describe('isArtifactNewPath', () => {
+  const dir = tempDir('artifact-new-path');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should return true if artifact exists in new path', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/proposal.md', '# New Proposal');
+    const isNew = await isArtifactNewPath(dir, 'proposal.md');
+    expect(isNew).toBe(true);
+  });
+
+  it('should return false if artifact only in legacy path', async () => {
+    await writeFile(dir + '/proposal.md', '# Legacy Proposal');
+    const isNew = await isArtifactNewPath(dir, 'proposal.md');
+    expect(isNew).toBe(false);
+  });
+
+  it('should return false if artifact does not exist', async () => {
+    const isNew = await isArtifactNewPath(dir, 'proposal.md');
+    expect(isNew).toBe(false);
+  });
+});
+
+// ─── P1-3: Migration Marker Tests ───────────────────────────────────────────────
+
+describe('Migration Marker', () => {
+  const dir = tempDir('migration-marker');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should write migration marker after migration', async () => {
+    await writeFile(dir + '/proposal.md', '# Proposal');
+    await migrateLegacyArtifacts(dir);
+    
+    const markerExists = await access(dir + '/.flow-engine/sflow/.artifacts-migrated').then(() => true).catch(() => false);
+    expect(markerExists).toBe(true);
+  });
+
+  it('should skip migration if marker exists', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/.artifacts-migrated', new Date().toISOString());
+    await writeFile(dir + '/proposal.md', '# Proposal');
+    
+    await migrateLegacyArtifacts(dir);
+    
+    const proposalExists = await access(dir + '/.flow-engine/sflow/proposal.md').then(() => true).catch(() => false);
+    expect(proposalExists).toBe(false);
+  });
+
+  it('should execute migration if marker does not exist', async () => {
+    await writeFile(dir + '/proposal.md', '# Proposal');
+    await migrateLegacyArtifacts(dir);
+    
+    const content = await readFile(dir + '/.flow-engine/sflow/proposal.md', 'utf-8');
+    expect(content).toBe('# Proposal');
+  });
+
+  it('should write timestamp in marker', async () => {
+    await writeFile(dir + '/proposal.md', '# Proposal');
+    await migrateLegacyArtifacts(dir);
+    
+    const markerContent = await readFile(dir + '/.flow-engine/sflow/.artifacts-migrated', 'utf-8');
+    const timestamp = new Date(markerContent);
+    expect(timestamp.getTime()).not.toBeNaN();
   });
 });
