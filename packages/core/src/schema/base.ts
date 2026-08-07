@@ -116,6 +116,10 @@ export interface DecisionPoint {
   timestamp: string;
   /** Optional note about this decision point */
   metadata?: string;
+  /** Optional execution mode (DP-4 specific) */
+  mode?: string;
+  /** Optional rationale for the decision (DP-4 specific) */
+  rationale?: string;
 }
 
 /**
