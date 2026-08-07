@@ -151,8 +151,10 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
         };
 
         try {
-          // REP-2: Validate contract existence
-          const contractExists = await fileExists(changeDir + '/execution-contract.md');
+          // REP-2: Validate contract existence (dual-path compatibility)
+          const contractExistsNew = await fileExists(changeDir + '/.flow-engine/sflow/execution-contract.md');
+          const contractExistsOld = await fileExists(changeDir + '/execution-contract.md');
+          const contractExists = contractExistsNew || contractExistsOld;
           if (!contractExists) {
             return { title: 'Record Execution Plan', output: JSON.stringify({ success: false, error: 'execution-contract.md not found. Create a contract before recording an execution plan.' }, null, 2) };
           }

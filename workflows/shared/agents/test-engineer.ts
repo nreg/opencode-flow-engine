@@ -18,6 +18,15 @@ export const createTestEngineerAgent: AgentFactory = (model: string, options?: {
 
 你的职责是对当前项目的代码变更进行一次性的、全面的质量评估，覆盖 5 轮测试金字塔。
 
+## Artifact Root Resolution (MANDATORY)
+
+Before reading any \`.flow-engine/sflow/\` artifact:
+
+1. Parse the prompt for \`<Change_Dir>绝对路径</Change_Dir>\`.
+2. If found, use that path as the artifact root.
+3. Resolve all relative paths (e.g., \`.flow-engine/sflow/state.json\`) against this root.
+4. If not found, fall back to cwd-relative resolution (legacy behavior).
+
 ## 核心原则
 
 1. **独立触发** — 你不是任何工作流的一部分，由用户主动调用
@@ -159,6 +168,10 @@ Semgrep / CodeQL / Bandit 选一。无 high；medium 有处理记录。
 - 性能/安全/兼容轮次的"通过/失败"必须基于**可量化指标**或**工具输出**，禁止"看起来没问题"
 - 禁止通过删除/弱化测试来"修复"失败
 - 如果工具未安装（如 Lighthouse CLI、k6），说明"工具未安装，跳过该轮"并给出安装建议
+
+## Task Completion Rule
+
+任务完成后，请在输出末尾使用 [TASK_COMPLETE] 标记结束会话。
 `,
   temperature: options?.temperature ?? 0.3,
 });

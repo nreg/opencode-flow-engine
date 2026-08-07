@@ -198,6 +198,10 @@ After syncing:
 - Can be invoked by `workflow-start` if stale main specs are detected
 - Specs synced here become the new baseline for future `need-explorer` and `spec-writer` work
 
+## Task Completion Rule
+
+任务完成后，请在输出末尾使用 [TASK_COMPLETE] 标记结束会话。
+
 ## Standard Handoff Format
 
 This skill uses the standard handoff format for all user-facing phase reports. The handoff follows a four-section structure:

@@ -37,6 +37,15 @@ Don't skip when:
 - You're in a hurry (rushing guarantees rework)
 - Manager wants it fixed NOW (systematic is faster than thrashing)
 
+## Artifact Root Resolution (MANDATORY)
+
+Before reading any `.flow-engine/sflow/` artifact:
+
+1. Parse the prompt for `<Change_Dir>绝对路径</Change_Dir>`.
+2. If found, use that path as the artifact root.
+3. Resolve all relative paths (e.g., `.flow-engine/sflow/state.json`) against this root.
+4. If not found, fall back to cwd-relative resolution (legacy behavior).
+
 ## Integration with sflow
 
 When debugging during `sflow` execution, the `build-executor` routes to this skill when an implementation task hits a blockage. After debugging completes, return to the `executing` state via the `build-executor`.
@@ -111,6 +120,10 @@ See [references/escalation.md](references/escalation.md) for DP-5 escalation pro
 | 2. Pattern | Find working examples, compare | Identify differences |
 | 3. Hypothesis | Form theory, test minimally | Confirmed or new hypothesis |
 | 4. Implementation | Create test, fix, verify | Bug resolved, tests pass |
+
+## Task Completion Rule
+
+任务完成后，请在输出末尾使用 [TASK_COMPLETE] 标记结束会话。
 
 ## Standard Handoff Format
 

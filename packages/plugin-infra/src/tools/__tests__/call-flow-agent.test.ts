@@ -1554,3 +1554,148 @@ describe('F-2: watcher catch state refresh', () => {
     // The key is that status should be 'completed', not 'error'
   });
 });
+
+// ─── Wave 1: Change_Dir 标记注入 ───────────────────────────────────────────
+
+describe('Wave 1: Change_Dir 标记注入', () => {
+  let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
+
+  beforeEach(() => {
+    promptCalls = [];
+    currentTools = null;
+  });
+
+  it('同步模式：prompt 头部包含 <Change_Dir> 且路径与 query.directory 一致', async () => {
+    const client = createMockClient({
+      pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+      promptCalls,
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    const testDirectory = 'E:\\test\\project';
+    
+    // 同步模式调用
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: testDirectory },
+    );
+
+    // 验证 prompt 调用中包含 <Change_Dir> 标记
+    expect(promptCalls.length).toBeGreaterThan(0);
+    const firstPromptCall = promptCalls[0];
+    const parts = firstPromptCall.body.parts as Array<{ type: string; text: string }>;
+    const promptText = parts[0].text;
+    
+    // 验证标记存在
+    expect(promptText).toContain('<Change_Dir>');
+    expect(promptText).toContain('</Change_Dir>');
+    
+    // 验证标记在头部
+    expect(promptText.startsWith('<Change_Dir>')).toBe(true);
+    
+    // 验证路径正确
+    const changeDirMatch = promptText.match(/<Change_Dir>(.*?)<\/Change_Dir>/);
+    expect(changeDirMatch).not.toBeNull();
+    expect(changeDirMatch![1]).toBe(testDirectory);
+  });
+
+  it('异步模式：后台任务 prompt 也包含 <Change_Dir> 标记', async () => {
+    const client = createMockClient({
+      pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+      promptCalls,
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    const testDirectory = 'E:\\test\\async-project';
+    
+    // 异步模式调用
+    const startResult = await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: true,
+      },
+      { sessionID: 'parent-session', directory: testDirectory },
+    );
+
+    const startData = JSON.parse(startResult.output);
+    expect(startData.success).toBe(true);
+
+    // 验证 prompt 调用中包含 <Change_Dir> 标记
+    expect(promptCalls.length).toBeGreaterThan(0);
+    const firstPromptCall = promptCalls[0];
+    const parts = firstPromptCall.body.parts as Array<{ type: string; text: string }>;
+    const promptText = parts[0].text;
+    
+    // 验证标记存在且在头部
+    expect(promptText.startsWith('<Change_Dir>')).toBe(true);
+    expect(promptText).toContain('</Change_Dir>');
+    
+    // 验证路径正确
+    const changeDirMatch = promptText.match(/<Change_Dir>(.*?)<\/Change_Dir>/);
+    expect(changeDirMatch).not.toBeNull();
+    expect(changeDirMatch![1]).toBe(testDirectory);
+  });
+
+  it('resume 模式：恢复会话时 prompt 也包含 <Change_Dir> 标记', async () => {
+    const client = createMockClient({
+      pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+      promptCalls,
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    const testDirectory = 'E:\\test\\resume-project';
+    
+    // 先创建一个 agent 记录（模拟之前的运行）
+    const store = await import('../../features/subagent-store.js').then(m => m.createSubagentStore({ changeDir: testDirectory }));
+    const agentId = 'agent_resume_test';
+    await store.createAgent({
+      agent_id: agentId,
+      subagent_type: 'build-executor',
+      session_id: 'test-session-001',
+      prompt: 'Previous task',
+    });
+    
+    // resume 模式调用（传入 agent_id）
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Continue the task',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+        agent_id: agentId,
+      },
+      { sessionID: 'parent-session', directory: testDirectory },
+    );
+
+    // 验证 prompt 调用中包含 <Change_Dir> 标记
+    expect(promptCalls.length).toBeGreaterThan(0);
+    const firstPromptCall = promptCalls[0];
+    const parts = firstPromptCall.body.parts as Array<{ type: string; text: string }>;
+    const promptText = parts[0].text;
+    
+    // 验证标记存在且在头部
+    expect(promptText.startsWith('<Change_Dir>')).toBe(true);
+    expect(promptText).toContain('</Change_Dir>');
+    
+    // 验证路径正确
+    const changeDirMatch = promptText.match(/<Change_Dir>(.*?)<\/Change_Dir>/);
+    expect(changeDirMatch).not.toBeNull();
+    expect(changeDirMatch![1]).toBe(testDirectory);
+  });
+});

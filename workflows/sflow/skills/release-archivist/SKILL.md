@@ -17,6 +17,15 @@ Invoke this skill when the user says things like:
 - "what remains before we ship"
 - "prepare the handoff"
 
+## Artifact Root Resolution (MANDATORY)
+
+Before reading any `.flow-engine/sflow/` artifact:
+
+1. Parse the prompt for `<Change_Dir>绝对路径</Change_Dir>`.
+2. If found, use that path as the artifact root.
+3. Resolve all relative paths (e.g., `.flow-engine/sflow/state.json`) against this root.
+4. If not found, fall back to cwd-relative resolution (legacy behavior).
+
 ## Core Responsibilities
 
 1. Verify that the approved behavior was actually implemented
@@ -118,6 +127,10 @@ Closing 阶段扫描 SUMMARY.md 和 PROGRESS.md，按条件提名入库。
 - 否决理由不写在 design.md / ADR 里就会丢失
 
 See [references/lessons-nomination.md](references/lessons-nomination.md) for nomination procedure and pruning rules.
+
+## Task Completion Rule
+
+任务完成后，请在输出末尾使用 [TASK_COMPLETE] 标记结束会话。
 
 ## Output
 

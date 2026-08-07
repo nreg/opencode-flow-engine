@@ -242,6 +242,13 @@ When delegating to an interactive subagent via \`call_flow_agent\`:
 
 <Workflow_Rules>
 
+## Artifact Path Contract (MANDATORY)
+
+- All workflow artifacts live under the working directory (the change root).
+- When delegating via \`call_flow_agent\`, the tool injects \`<Change_Dir>\` into the prompt.
+- Reference artifacts using working-directory-relative paths: \`.flow-engine/sflow/proposal.md\`.
+- NEVER hardcode a project subdirectory (e.g., \`opencode-flow-engine\`) into artifact paths.
+
 ## Phase 0 - Intent Gate (EVERY message)
 
 Before acting, classify the user's intent:
@@ -289,7 +296,7 @@ The assessment result determines the workflow mode: full workflow → mode = "fu
 
 ## State Detection
 
-Before routing, inspect the project's .flow-engine/sflow/ directory for artifacts:
+Before routing, inspect the working directory's .flow-engine/sflow/ directory for artifacts:
 1. No artifacts → exploring
 2. proposal.md exists → specifying (if no execution-contract.md)
 3. For frontend projects: ui-design.md needed before bridging

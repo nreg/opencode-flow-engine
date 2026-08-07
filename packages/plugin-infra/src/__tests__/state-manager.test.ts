@@ -338,3 +338,96 @@ describe('restoreState — AFK force-close on terminal boulder-state', () => {
     expect(state.afkTier).toBe(1);
   });
 });
+
+// ─── Dual-Path Compatibility Tests (Wave 7) ───────────────────────────────────
+
+describe('detectArtifactExistence — dual-path compatibility', () => {
+  const dir = tempDir('dual-path');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should detect artifacts in new path (.flow-engine/sflow/)', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/proposal.md', '# Proposal');
+    await writeFile(dir + '/.flow-engine/sflow/design.md', '# Design');
+    await writeFile(dir + '/.flow-engine/sflow/tasks.md', '# Tasks');
+    await writeFile(dir + '/.flow-engine/sflow/execution-contract.md', '# Contract');
+
+    const { detectArtifactExistence } = await import('../features/state-manager/state-detection.js');
+    const result = await detectArtifactExistence(dir);
+
+    expect(result.proposal).toBe(true);
+    expect(result.design).toBe(true);
+    expect(result.tasks).toBe(true);
+    expect(result.contract).toBe(true);
+  });
+
+  it('should fallback to legacy path when new path does not exist', async () => {
+    await writeFile(dir + '/proposal.md', '# Proposal');
+    await writeFile(dir + '/design.md', '# Design');
+    await writeFile(dir + '/tasks.md', '# Tasks');
+    await writeFile(dir + '/execution-contract.md', '# Contract');
+
+    const { detectArtifactExistence } = await import('../features/state-manager/state-detection.js');
+    const result = await detectArtifactExistence(dir);
+
+    expect(result.proposal).toBe(true);
+    expect(result.design).toBe(true);
+    expect(result.tasks).toBe(true);
+    expect(result.contract).toBe(true);
+  });
+
+  it('should prefer new path over legacy path', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/proposal.md', '# New Proposal');
+    await writeFile(dir + '/proposal.md', '# Old Proposal');
+
+    const { detectArtifactExistence } = await import('../features/state-manager/state-detection.js');
+    const result = await detectArtifactExistence(dir);
+
+    expect(result.proposal).toBe(true);
+  });
+
+  it('should auto-migrate legacy artifacts to new path', async () => {
+    await writeFile(dir + '/proposal.md', '# Legacy Proposal');
+    await writeFile(dir + '/design.md', '# Legacy Design');
+
+    const { detectArtifactExistence } = await import('../features/state-manager/state-detection.js');
+    await detectArtifactExistence(dir);
+
+    const newProposal = await import('fs/promises').then(m => m.readFile(dir + '/.flow-engine/sflow/proposal.md', 'utf-8').catch(() => null));
+    const newDesign = await import('fs/promises').then(m => m.readFile(dir + '/.flow-engine/sflow/design.md', 'utf-8').catch(() => null));
+
+    expect(newProposal).toBe('# Legacy Proposal');
+    expect(newDesign).toBe('# Legacy Design');
+  });
+
+  it('should detect specs in new path', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow/specs');
+    await writeFile(dir + '/.flow-engine/sflow/specs/auth.md', '# Auth Spec');
+
+    const { detectArtifactExistence } = await import('../features/state-manager/state-detection.js');
+    const result = await detectArtifactExistence(dir);
+
+    expect(result.specs).toBe(true);
+    expect(result.specsFileCount).toBe(1);
+  });
+
+  it('should fallback to legacy specs directory', async () => {
+    await ensureDir(dir + '/specs');
+    await writeFile(dir + '/specs/auth.md', '# Auth Spec');
+
+    const { detectArtifactExistence } = await import('../features/state-manager/state-detection.js');
+    const result = await detectArtifactExistence(dir);
+
+    expect(result.specs).toBe(true);
+    expect(result.specsFileCount).toBe(1);
+  });
+});

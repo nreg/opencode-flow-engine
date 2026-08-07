@@ -111,7 +111,7 @@ export const REMINDER_MESSAGE: ReminderMessage = {
   type: 'system',
   parts: [{
     type: 'text',
-    text: '你的任务尚未完成。请提供完整的任务结果，并在输出末尾包含 [TASK_COMPLETE] 标记或结构化 JSON 输出。',
+    text: '你的任务尚未完成。请提供完整的任务结果，并在输出末尾包含 [TASK_COMPLETE] 标记。',
   }],
 };
 

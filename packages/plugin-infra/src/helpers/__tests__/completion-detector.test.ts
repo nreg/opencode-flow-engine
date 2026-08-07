@@ -201,8 +201,8 @@ describe('REMINDER_MESSAGE', () => {
     expect(REMINDER_MESSAGE.parts[0].text).toContain('[TASK_COMPLETE]');
   });
 
-  it('should contain structured JSON instruction', () => {
-    expect(REMINDER_MESSAGE.parts[0].text).toContain('结构化 JSON');
+  it('should NOT contain structured JSON instruction', () => {
+    expect(REMINDER_MESSAGE.parts[0].text).not.toContain('结构化 JSON');
   });
 
   it('should contain task incomplete notice', () => {

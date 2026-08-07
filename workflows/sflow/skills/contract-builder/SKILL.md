@@ -9,7 +9,7 @@ This skill is the defining layer of `sflow`.
 
 It converts planning artifacts into a single execution handshake:
 
-- `execution-contract.md`
+- `.flow-engine/sflow/execution-contract.md`
 
 ## Use This Skill When
 
@@ -22,14 +22,23 @@ Invoke this skill when the user says things like:
 - "refresh the contract"
 - "the spec changed, update the execution contract"
 
+## Artifact Root Resolution (MANDATORY)
+
+Before reading any `.flow-engine/sflow/` artifact:
+
+1. Parse the prompt for `<Change_Dir>绝对路径</Change_Dir>`.
+2. If found, use that path as the artifact root.
+3. Resolve all relative paths (e.g., `.flow-engine/sflow/state.json`) against this root.
+4. If not found, fall back to cwd-relative resolution (legacy behavior).
+
 ## Input Artifacts
 
-Read:
+Read (all from `.flow-engine/sflow/`):
 
-- `proposal.md`
-- `specs/`
-- `design.md`
-- `tasks.md`
+- `.flow-engine/sflow/proposal.md`
+- `.flow-engine/sflow/specs/`
+- `.flow-engine/sflow/design.md`
+- `.flow-engine/sflow/tasks.md`
 
 Do not rely on chat memory as a substitute for these files.
 
@@ -198,6 +207,10 @@ After `execution-contract.md` is written and validated:
 1. Use `artifact_inspector` to verify the contract's completeness and consistency
 2. Update `.flow-engine/sflow/state.json` with `artifacts_hash` and `contract_hash`
 3. The state file enables fast staleness detection in subsequent phases
+
+## Task Completion Rule
+
+任务完成后，请在输出末尾使用 [TASK_COMPLETE] 标记结束会话。
 
 ## Output Standard
 

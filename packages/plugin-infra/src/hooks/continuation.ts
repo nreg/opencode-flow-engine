@@ -60,7 +60,9 @@ export function createContinuationHook(): HookHandler {
       if (currentState === 'executing' && buildPause && buildPause !== null) {
         const isolation = stateData.isolation;
         const buildMode = stateData.build_mode;
-        const contractExists = await fileExists(`${changeDir}/execution-contract.md`);
+        const contractExistsNew = await fileExists(`${changeDir}/.flow-engine/sflow/execution-contract.md`);
+        const contractExistsOld = await fileExists(`${changeDir}/execution-contract.md`);
+        const contractExists = contractExistsNew || contractExistsOld;
 
         // Sub-state 1: Corrupted pause — build_pause set but contract file missing
         if (!contractExists) {

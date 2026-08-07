@@ -11,6 +11,15 @@ Core principle: Review early, review often. Verify before implementing feedback.
 
 ---
 
+## Artifact Root Resolution (MANDATORY)
+
+Before reading any `.flow-engine/sflow/` artifact:
+
+1. Parse the prompt for `<Change_Dir>绝对路径</Change_Dir>`.
+2. If found, use that path as the artifact root.
+3. Resolve all relative paths (e.g., `.flow-engine/sflow/state.json`) against this root.
+4. If not found, fall back to cwd-relative resolution (legacy behavior).
+
 ## Core Responsibilities
 
 1. Spec Compliance Review — Verify implementation matches specification
@@ -134,6 +143,10 @@ If reviewer is wrong:
 - [severity-levels.md](references/severity-levels.md) — Issue classification guidelines
 - [minimality-discipline.md](references/minimality-discipline.md) — Over-engineering prevention
 - [ui-visual-review.md](references/ui-visual-review.md) — Frontend visual review protocol
+
+## Task Completion Rule
+
+任务完成后，请在输出末尾使用 [TASK_COMPLETE] 标记结束会话。
 
 ## Standard Handoff Format
 

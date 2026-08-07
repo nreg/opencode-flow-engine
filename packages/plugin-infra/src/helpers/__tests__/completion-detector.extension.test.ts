@@ -252,8 +252,8 @@ describe('REMINDER_MESSAGE format', () => {
     expect(REMINDER_MESSAGE.parts[0].text).toContain('[TASK_COMPLETE]');
   });
 
-  it('should mention structured JSON output', () => {
-    expect(REMINDER_MESSAGE.parts[0].text).toContain('结构化 JSON');
+  it('should NOT mention structured JSON output', () => {
+    expect(REMINDER_MESSAGE.parts[0].text).not.toContain('结构化 JSON');
   });
 });
 

@@ -118,7 +118,9 @@ async function validateForBridging(changeDir: string): Promise<HookResult> {
 }
 
 async function validateForExecution(changeDir: string): Promise<HookResult> {
-  const contractContent = await readFile(`${changeDir}/execution-contract.md`);
+  const contractNew = await readFile(`${changeDir}/.flow-engine/sflow/execution-contract.md`).catch(() => null);
+  const contractOld = await readFile(`${changeDir}/execution-contract.md`).catch(() => null);
+  const contractContent = contractNew || contractOld;
   if (!contractContent) {
     return {
       success: false,

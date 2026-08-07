@@ -51,28 +51,136 @@ export interface WorkflowStateDetection {
 }
 
 /**
+ * Resolve artifact path with dual-path compatibility.
+ * Priority: .flow-engine/sflow/<artifact> (new) → <changeDir>/<artifact> (legacy)
+ * 
+ * @param changeDir - The project/change directory
+ * @param artifactName - Artifact file name (e.g., 'proposal.md')
+ * @returns The resolved path (new location preferred)
+ */
+async function resolveArtifactPath(changeDir: string, artifactName: string): Promise<string> {
+  const newPath = `${changeDir}/.flow-engine/sflow/${artifactName}`;
+  const legacyPath = `${changeDir}/${artifactName}`;
+  
+  if (await fileExists(newPath)) {
+    return newPath;
+  }
+  
+  return legacyPath;
+}
+
+/**
+ * Read artifact content with dual-path compatibility.
+ * Tries new path first, falls back to legacy path.
+ */
+async function readArtifactContent(changeDir: string, artifactName: string): Promise<string | null> {
+  const newPath = `${changeDir}/.flow-engine/sflow/${artifactName}`;
+  const legacyPath = `${changeDir}/${artifactName}`;
+  
+  const newContent = await readFile(newPath).catch(() => null);
+  if (newContent) return newContent;
+  
+  return readFile(legacyPath).catch(() => null);
+}
+
+/**
+ * Migrate legacy artifacts from root directory to .flow-engine/sflow/.
+ * Called when legacy artifacts exist but new location is empty.
+ * Non-destructive: copies files, does not delete originals.
+ */
+async function migrateLegacyArtifacts(changeDir: string): Promise<void> {
+  const { copyFile, mkdir } = await import('node:fs/promises');
+  const sflowDir = `${changeDir}/.flow-engine/sflow`;
+  
+  try {
+    await mkdir(sflowDir, { recursive: true });
+  } catch {
+    return;
+  }
+  
+  const artifacts = ['proposal.md', 'design.md', 'tasks.md', 'execution-contract.md', 'ui-design.md'];
+  
+  for (const artifact of artifacts) {
+    const legacyPath = `${changeDir}/${artifact}`;
+    const newPath = `${sflowDir}/${artifact}`;
+    
+    const legacyExists = await fileExists(legacyPath);
+    const newExists = await fileExists(newPath);
+    
+    if (legacyExists && !newExists) {
+      try {
+        await copyFile(legacyPath, newPath);
+      } catch {
+      }
+    }
+  }
+  
+  const legacySpecsDir = `${changeDir}/specs`;
+  const newSpecsDir = `${sflowDir}/specs`;
+  
+  const legacySpecsExists = await directoryExists(legacySpecsDir);
+  const newSpecsExists = await directoryExists(newSpecsDir);
+  
+  if (legacySpecsExists && !newSpecsExists) {
+    try {
+      const { readdir } = await import('node:fs/promises');
+      await mkdir(newSpecsDir, { recursive: true });
+      const files = await readdir(legacySpecsDir);
+      for (const file of files) {
+        if (file.endsWith('.md')) {
+          await copyFile(`${legacySpecsDir}/${file}`, `${newSpecsDir}/${file}`);
+        }
+      }
+    } catch {
+    }
+  }
+}
+
+/**
  * Read artifacts once and return a reusable map (avoids redundant I/O).
+ * Uses dual-path compatibility: new path (.flow-engine/sflow/) preferred, legacy path fallback.
  */
 export async function detectArtifactExistence(changeDir: string): Promise<{
   proposal: boolean; design: boolean; tasks: boolean; specs: boolean;
   specsFileCount: number; contract: boolean; uiDesign: boolean;
   executionPlan: boolean;
 }> {
-  const [hp, hd, ht, hc, hui, hep] = await Promise.all([
+  await migrateLegacyArtifacts(changeDir).catch(() => {});
+  
+  const [hpNew, hpOld, hdNew, hdOld, htNew, htOld, hcNew, hcOld, huiNew, huiOld, hep] = await Promise.all([
+    fileExists(changeDir + '/.flow-engine/sflow/proposal.md'),
     fileExists(changeDir + '/proposal.md'),
+    fileExists(changeDir + '/.flow-engine/sflow/design.md'),
     fileExists(changeDir + '/design.md'),
+    fileExists(changeDir + '/.flow-engine/sflow/tasks.md'),
     fileExists(changeDir + '/tasks.md'),
+    fileExists(changeDir + '/.flow-engine/sflow/execution-contract.md'),
     fileExists(changeDir + '/execution-contract.md'),
+    fileExists(changeDir + '/.flow-engine/sflow/ui-design.md'),
     fileExists(changeDir + '/ui-design.md'),
     fileExists(changeDir + '/.flow-engine/sflow/execution-plan.json'),
   ]);
-  const specsDirExists = await directoryExists(changeDir + '/specs');
-  const specsFileCount = specsDirExists
-    ? (await (await import('node:fs/promises')).readdir(changeDir + '/specs')).filter(n => n.endsWith('.md')).length
+  
+  const hp = hpNew || hpOld;
+  const hd = hdNew || hdOld;
+  const ht = htNew || htOld;
+  const hc = hcNew || hcOld;
+  const hui = huiNew || huiOld;
+  
+  const specsDirNew = await directoryExists(changeDir + '/.flow-engine/sflow/specs');
+  const specsDirOld = await directoryExists(changeDir + '/specs');
+  const specsDir = specsDirNew || specsDirOld;
+  const specsDirPath = specsDirNew 
+    ? changeDir + '/.flow-engine/sflow/specs'
+    : changeDir + '/specs';
+  
+  const specsFileCount = specsDir
+    ? (await (await import('node:fs/promises')).readdir(specsDirPath)).filter(n => n.endsWith('.md')).length
     : 0;
+  
   return {
     proposal: hp, design: hd, tasks: ht,
-    specs: specsDirExists && specsFileCount > 0,
+    specs: specsDir && specsFileCount > 0,
     specsFileCount, contract: hc, uiDesign: hui,
     executionPlan: hep,
   };
@@ -179,8 +287,6 @@ export async function detectWorkflowState(
 }
 
 export async function detectStateMismatch(changeDir: string, currentState: string): Promise<string> {
-  // Delegates to canonical detectWorkflowState for artifact detection,
-  // but keeps existing self-healing logic for state vs artifact consistency.
   const artifacts = await detectArtifactExistence(changeDir);
   const hp = artifacts.proposal;
   const hd = artifacts.design;
@@ -189,25 +295,24 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
   const hc = artifacts.contract;
   const hui = artifacts.uiDesign;
   const hep = artifacts.executionPlan;
-  const pc = hp ? await readFile(changeDir + '/proposal.md') : null;
-  const tc = ht ? await readFile(changeDir + '/tasks.md') : null;
+  const pc = hp ? await readArtifactContent(changeDir, 'proposal.md') : null;
+  const tc = ht ? await readArtifactContent(changeDir, 'tasks.md') : null;
   const inc = tc ? tc.split('\n').filter((l: string) => l.match(/^-\s*\[\s\]/)).length : 0;
   const allDone = tc ? tc.split('\n').filter((l: string) => l.match(/^-\s*\[.\]+\s/)).length > 0 && inc === 0 : false;
   if (hc && (currentState === 'approved-for-build' || currentState === 'executing')) {
     const sd = await readJsonFile<Record<string, unknown>>(changeDir + '/.flow-engine/sflow/state.json');
     const sh = (sd?.contract_hash as string) || '';
     if (sh) {
-      const cc = await readFile(changeDir + '/execution-contract.md');
+      const cc = await readArtifactContent(changeDir, 'execution-contract.md');
       const ch = await simpleHash(cc || '');
       if (ch !== sh) return 'bridging';
     }
   }
-  // Plan-contract hash mismatch: plan's contract_hash stale vs actual contract
   if (hep && (currentState === 'executing' || currentState === 'debugging')) {
     const plan = await readJsonFile<Record<string, unknown>>(changeDir + '/.flow-engine/sflow/execution-plan.json');
     const planContractHash = (plan?.contract_hash as string) || '';
     if (planContractHash && hc) {
-      const cc = await readFile(changeDir + '/execution-contract.md');
+      const cc = await readArtifactContent(changeDir, 'execution-contract.md');
       const ch = await simpleHash(cc || '');
       if (ch !== planContractHash) return 'bridging';
     }
@@ -221,7 +326,8 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
     if (hui) {
       try {
         const { unlink } = await import('node:fs/promises');
-        await unlink(changeDir + '/ui-design.md');
+        const uiDesignPath = await resolveArtifactPath(changeDir, 'ui-design.md');
+        await unlink(uiDesignPath);
       } catch { /* ignore */ }
     }
     return 'specifying';

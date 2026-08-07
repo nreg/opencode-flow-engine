@@ -3,12 +3,19 @@
  */
 
 export const SOURCE_CODE_PATTERNS = /\.(ts|js|tsx|jsx|mjs|cjs|mts|cts|py|java|kt|rs|go|rb|php|c|cpp|h|hpp|cs|swift|vue|svelte|css|scss|less)$/i;
-export const ARTIFACT_NAMES = new Set(['proposal.md', 'design.md', 'tasks.md', 'execution-contract.md']);
+export const ARTIFACT_NAMES = new Set(['proposal.md', 'design.md', 'tasks.md', 'execution-contract.md', 'ui-design.md']);
 
 export function isArtifactPath(filePath: string, changeDir: string): boolean {
   const normalized = filePath.replace(/\\/g, '/');
   const changeDirNorm = changeDir.replace(/\\/g, '/');
-  if (normalized.includes('.flow-engine/sflow/') || normalized.endsWith('.flow-engine/sflow')) return true;
+  
+  if (normalized.includes('.flow-engine/sflow/')) {
+    const afterSflow = normalized.split('.flow-engine/sflow/')[1] || '';
+    const artifactName = afterSflow.split('/')[0];
+    if (ARTIFACT_NAMES.has(artifactName)) return true;
+    if (afterSflow.startsWith('specs/') || afterSflow === 'specs') return true;
+  }
+  
   const relative = normalized.startsWith(changeDirNorm)
     ? normalized.slice(changeDirNorm.length + 1)
     : normalized;

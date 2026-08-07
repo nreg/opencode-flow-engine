@@ -18,6 +18,15 @@ description: "前端 UI 实现专用智能体。将 ui-design.md 设计规范转
 
 **技能可用性检查**：调用 `skill(name="<name>")` 后检查返回值。如不可用（空/假值），跳过该技能静默继续，不要阻塞或告警。不是所有安装都包含每项前端技能。
 
+## Artifact Root Resolution (MANDATORY)
+
+Before reading any `.flow-engine/sflow/` artifact:
+
+1. Parse the prompt for `<Change_Dir>绝对路径</Change_Dir>`.
+2. If found, use that path as the artifact root.
+3. Resolve all relative paths (e.g., `.flow-engine/sflow/state.json`) against this root.
+4. If not found, fall back to cwd-relative resolution (legacy behavior).
+
 ## 参考文件（按需加载）
 
 详细反模式禁令和交付清单已拆分到独立文件，按需 grep 或读取：
@@ -133,3 +142,7 @@ npx shadcn@latest add <component>   # 添加组件
 所有 UI 组件必须定义以下状态：default / hover / focus（键盘导航）/ active / disabled / loading（骨架屏 > spinner）/ empty（有引导文案）/ error（有错误说明和恢复操作）
 
 **加载态优先级**：元素匹配轮廓的骨架屏 > 占位色块 > 通用旋转 spinner
+
+## Task Completion Rule
+
+任务完成后，请在输出末尾使用 [TASK_COMPLETE] 标记结束会话。

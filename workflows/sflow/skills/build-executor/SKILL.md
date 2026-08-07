@@ -21,6 +21,15 @@ Invoke this skill when the user says things like:
 
 Only use it after the contract exists and the user has approved it.
 
+## Artifact Root Resolution (MANDATORY)
+
+Before reading any `.flow-engine/sflow/` artifact:
+
+1. Parse the prompt for `<Change_Dir>绝对路径</Change_Dir>`.
+2. If found, use that path as the artifact root.
+3. Resolve all relative paths (e.g., `.flow-engine/sflow/state.json`) against this root.
+4. If not found, fall back to cwd-relative resolution (legacy behavior).
+
 ## Required Inputs
 
 Read before implementation:
@@ -96,6 +105,10 @@ During implementation, keep reporting against the contract:
 - whether scope drift has appeared
 
 If drift appears, stop and route backward instead of improvising new behavior.
+
+## Task Completion Rule
+
+任务完成后，请在输出末尾使用 [TASK_COMPLETE] 标记结束会话。
 
 ## Completion Standard
 

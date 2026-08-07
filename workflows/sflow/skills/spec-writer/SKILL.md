@@ -18,6 +18,15 @@ Invoke this skill when the user says things like:
 - "formalize the plan"
 - "设计UI" or "UI design" (for frontend projects — generates ui-design.md)
 
+## Artifact Root Resolution (MANDATORY)
+
+Before reading any `.flow-engine/sflow/` artifact:
+
+1. Parse the prompt for `<Change_Dir>绝对路径</Change_Dir>`.
+2. If found, use that path as the artifact root.
+3. Resolve all relative paths (e.g., `.flow-engine/sflow/state.json`) against this root.
+4. If not found, fall back to cwd-relative resolution (legacy behavior).
+
 ## Required Inputs
 
 Before generating or revising artifacts, read:
@@ -35,13 +44,13 @@ See [references/frontend-detection.md](references/frontend-detection.md) for det
 
 ## Required Artifacts
 
-Create or refine:
+Create or refine (all under `.flow-engine/sflow/`):
 
-- `proposal.md` — Always
-- `specs/` — Always
-- `ui-design.md` — Only for frontend projects (between specs and design)
-- `design.md` — Always
-- `tasks.md` — Always
+- `.flow-engine/sflow/proposal.md` — Always
+- `.flow-engine/sflow/specs/` — Always
+- `.flow-engine/sflow/ui-design.md` — Only for frontend projects (between specs and design)
+- `.flow-engine/sflow/design.md` — Always
+- `.flow-engine/sflow/tasks.md` — Always
 
 ### Config Check
 
@@ -49,13 +58,13 @@ Before generating artifacts, check the project configuration in `.flow-engine/sf
 - Generate artifacts in the configured order (default: proposal → specs → [ui-design] → design → tasks)
 - Skip any artifacts listed in the `artifacts.skip` configuration
 
-Use OpenSpec-style artifact roles:
+Use OpenSpec-style artifact roles (all under `.flow-engine/sflow/`):
 
-- `proposal.md` defines why and scope
-- `specs/` define required behavior
-- `ui-design.md` defines UI aesthetics direction, design tokens, and anti-pattern checklist
-- `design.md` defines how and why at the architecture level
-- `tasks.md` defines dependency-aware implementation steps
+- `.flow-engine/sflow/proposal.md` defines why and scope
+- `.flow-engine/sflow/specs/` define required behavior
+- `.flow-engine/sflow/ui-design.md` defines UI aesthetics direction, design tokens, and anti-pattern checklist
+- `.flow-engine/sflow/design.md` defines how and why at the architecture level
+- `.flow-engine/sflow/tasks.md` defines dependency-aware implementation steps
 
 ## Working Rules
 
@@ -70,22 +79,22 @@ Use OpenSpec-style artifact roles:
 
 See [references/artifact-templates.md](references/artifact-templates.md) for detailed structure requirements for each artifact type.
 
-**Quick reference**:
-- `proposal.md` — Problem, changes, capabilities, impact, scope
-- `specs/` — Testable requirements with SHALL/MUST and scenarios
-- `ui-design.md` — Visual direction, design tokens, component architecture, anti-AI-slop checklist
-- `design.md` — Context, goals, decisions, trade-offs
-- `tasks.md` — File structure, interfaces, numbered tasks with TDD phases
+**Quick reference** (all under `.flow-engine/sflow/`):
+- `.flow-engine/sflow/proposal.md` — Problem, changes, capabilities, impact, scope
+- `.flow-engine/sflow/specs/` — Testable requirements with SHALL/MUST and scenarios
+- `.flow-engine/sflow/ui-design.md` — Visual direction, design tokens, component architecture, anti-AI-slop checklist
+- `.flow-engine/sflow/design.md` — Context, goals, decisions, trade-offs
+- `.flow-engine/sflow/tasks.md` — File structure, interfaces, numbered tasks with TDD phases
 
 ## Quality Bar
 
-The artifact set must be internally aligned:
+The artifact set must be internally aligned (all under `.flow-engine/sflow/`):
 
-- `proposal.md` sets scope
-- `specs/` define observable behavior
-- `ui-design.md` (frontend) defines visual decisions and tokens
-- `design.md` explains the chosen technical shape
-- `tasks.md` converts that shape into execution order
+- `.flow-engine/sflow/proposal.md` sets scope
+- `.flow-engine/sflow/specs/` define observable behavior
+- `.flow-engine/sflow/ui-design.md` (frontend) defines visual decisions and tokens
+- `.flow-engine/sflow/design.md` explains the chosen technical shape
+- `.flow-engine/sflow/tasks.md` converts that shape into execution order
 
 If any artifact cannot support the others, revise before handoff.
 
@@ -114,6 +123,10 @@ Do not start implementation after writing planning artifacts.
 Once the artifacts are stable, validated, and DP-2 is recorded, hand off to `contract-builder`.
 
 **For frontend projects**: After ui-design.md is approved, set `.flow-engine/sflow/state.json` state to `ui-design` if specs are done but design/tasks are not yet started. This will cause the Artifact Preflight Gate to route through the ui-design state properly.
+
+## Task Completion Rule
+
+任务完成后，请在输出末尾使用 [TASK_COMPLETE] 标记结束会话。
 
 ## Output Standard
 

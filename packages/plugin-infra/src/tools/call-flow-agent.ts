@@ -452,12 +452,15 @@ export function createCallFlowAgentTools(
           isNew = true;
         }
 
+        // Wave 1: 注入 Change_Dir 标记
+        const changeDirTag = `<Change_Dir>${changeDir}</Change_Dir>`;
+        let finalPrompt = `${changeDirTag}\n\n${effectivePrompt}`;
+
         // P2: structured 模式下注入 schema hint
-        let finalPrompt = effectivePrompt;
         if (output_mode === 'structured') {
           const hint = getSchemaHint(subagent_type as string);
           if (hint) {
-            finalPrompt = `${effectivePrompt}\n\n${hint}`;
+            finalPrompt = `${finalPrompt}\n\n${hint}`;
           }
         }
 

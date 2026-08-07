@@ -133,7 +133,9 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
 
           // P22: Block transition to closing when tasks are still incomplete
           if (newState === 'closing' || newState === 'abandoned') {
-            const tasksContent = await readFile(changeDir + '/tasks.md').catch(() => null);
+            const tasksNew = await readFile(changeDir + '/.flow-engine/sflow/tasks.md').catch(() => null);
+            const tasksOld = await readFile(changeDir + '/tasks.md').catch(() => null);
+            const tasksContent = tasksNew || tasksOld;
             if (tasksContent) {
               const taskLines = tasksContent.split('\n').filter((line: string) => line.match(/^-\s*\[.\]\s+/));
               const incompleteTasks = taskLines.filter((line: string) => line.match(/^-\s*\[\s\]/));
@@ -201,9 +203,15 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
 
         async inferStateFromArtifacts(changeDir: string): Promise<{ state: string; mode: string }> {
       const state = await detectStateMismatch(changeDir, 'exploring');
-      const hasProposal = await fileExists(changeDir + '/proposal.md');
-      const hasContract = await fileExists(changeDir + '/execution-contract.md');
-      const tasksContent = await readFile(changeDir + '/tasks.md').catch(() => null);
+      const hasProposalNew = await fileExists(changeDir + '/.flow-engine/sflow/proposal.md');
+      const hasProposalOld = await fileExists(changeDir + '/proposal.md');
+      const hasProposal = hasProposalNew || hasProposalOld;
+      const hasContractNew = await fileExists(changeDir + '/.flow-engine/sflow/execution-contract.md');
+      const hasContractOld = await fileExists(changeDir + '/execution-contract.md');
+      const hasContract = hasContractNew || hasContractOld;
+      const tasksNew = await readFile(changeDir + '/.flow-engine/sflow/tasks.md').catch(() => null);
+      const tasksOld = await readFile(changeDir + '/tasks.md').catch(() => null);
+      const tasksContent = tasksNew || tasksOld;
         const taskLines = tasksContent ? tasksContent.split('\n').filter((line: string) => line.match(/^-\s*\[.\]\s+/)) : [];
       const changedFileCount = await countChangedFiles(changeDir);
       const mode = inferModeFromArtifacts(hasProposal, hasContract, changedFileCount, taskLines.length);
