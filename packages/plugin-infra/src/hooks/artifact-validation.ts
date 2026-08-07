@@ -7,7 +7,7 @@ import type { HookHandler, HookContext, HookResult } from './types.js';
 import { sharedValidator } from '@opencode-flow-engine/core';
 import { readFile, listFiles, fileExists } from '@opencode-flow-engine/shared';
 import { applyDeltaToBaselineDetailed } from '../features/spec-publication.js';
-import { readArtifactContent } from '../features/state-manager/artifact-paths.js';
+import { readArtifactContent, listSpecFiles, readSpecContent } from '../features/state-manager/artifact-paths.js';
 
 /**
  * Create the artifact validation hook
@@ -69,8 +69,7 @@ async function validateForSpecifying(changeDir: string): Promise<HookResult> {
 }
 
 async function validateForBridging(changeDir: string): Promise<HookResult> {
-  const specsDir = `${changeDir}/specs`;
-  const specFiles = await listFiles(specsDir, '.md');
+  const specFiles = await listSpecFiles(changeDir);
 
   if (specFiles.length === 0) {
     return {
@@ -83,7 +82,7 @@ async function validateForBridging(changeDir: string): Promise<HookResult> {
 
   // Step 1: Schema validation (delta specs)
   for (const specFile of specFiles) {
-    const specContent = await readFile(`${specsDir}/${specFile}`);
+    const specContent = await readSpecContent(changeDir, specFile);
     if (specContent) {
       // Validate as delta spec (not baseline spec)
       const report = sharedValidator.validateDeltaSpec(specContent, specFile.replace('.md', ''));
@@ -209,9 +208,8 @@ async function preflightDeltaSpec(
   const baselineExists = await fileExists(baselinePath);
   const baselineContent = baselineExists ? (await readFile(baselinePath) || '') : '';
   
-  // Read delta spec
-  const deltaPath = join(changeDir, 'specs', specFile);
-  const deltaContent = await readFile(deltaPath);
+  // Read delta spec with dual-path compatibility
+  const deltaContent = await readSpecContent(changeDir, specFile);
   
   if (!deltaContent) {
     // No delta spec content, skip

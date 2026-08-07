@@ -4,7 +4,7 @@
  */
 
 import { fileExists, readJsonFile, directoryExists, isContractStale as checkContractStale } from "@opencode-flow-engine/shared";
-import { resolveArtifactPath, readArtifactContent } from './artifact-paths.js';
+import { resolveArtifactPath, readArtifactContent, artifactExists, resolveSpecsDir, listSpecFiles } from './artifact-paths.js';
 
 export const BOULDER_STATE_FILE = ".flow-engine/sflow/boulder-state.json";
 
@@ -150,42 +150,23 @@ export async function detectArtifactExistence(changeDir: string): Promise<{
 }> {
   await migrateLegacyArtifacts(changeDir).catch(() => {});
   
-  const [hpNew, hpOld, hdNew, hdOld, htNew, htOld, hcNew, hcOld, huiNew, huiOld, hep] = await Promise.all([
-    fileExists(changeDir + '/.flow-engine/sflow/proposal.md'),
-    fileExists(changeDir + '/proposal.md'),
-    fileExists(changeDir + '/.flow-engine/sflow/design.md'),
-    fileExists(changeDir + '/design.md'),
-    fileExists(changeDir + '/.flow-engine/sflow/tasks.md'),
-    fileExists(changeDir + '/tasks.md'),
-    fileExists(changeDir + '/.flow-engine/sflow/execution-contract.md'),
-    fileExists(changeDir + '/execution-contract.md'),
-    fileExists(changeDir + '/.flow-engine/sflow/ui-design.md'),
-    fileExists(changeDir + '/ui-design.md'),
+  const [proposal, design, tasks, contract, uiDesign, executionPlan] = await Promise.all([
+    artifactExists(changeDir, 'proposal.md'),
+    artifactExists(changeDir, 'design.md'),
+    artifactExists(changeDir, 'tasks.md'),
+    artifactExists(changeDir, 'execution-contract.md'),
+    artifactExists(changeDir, 'ui-design.md'),
     fileExists(changeDir + '/.flow-engine/sflow/execution-plan.json'),
   ]);
   
-  const hp = hpNew || hpOld;
-  const hd = hdNew || hdOld;
-  const ht = htNew || htOld;
-  const hc = hcNew || hcOld;
-  const hui = huiNew || huiOld;
-  
-  const specsDirNew = await directoryExists(changeDir + '/.flow-engine/sflow/specs');
-  const specsDirOld = await directoryExists(changeDir + '/specs');
-  const specsDir = specsDirNew || specsDirOld;
-  const specsDirPath = specsDirNew 
-    ? changeDir + '/.flow-engine/sflow/specs'
-    : changeDir + '/specs';
-  
-  const specsFileCount = specsDir
-    ? (await (await import('node:fs/promises')).readdir(specsDirPath)).filter(n => n.endsWith('.md')).length
-    : 0;
+  const specFiles = await listSpecFiles(changeDir);
+  const specsFileCount = specFiles.length;
   
   return {
-    proposal: hp, design: hd, tasks: ht,
-    specs: specsDir && specsFileCount > 0,
-    specsFileCount, contract: hc, uiDesign: hui,
-    executionPlan: hep,
+    proposal, design, tasks,
+    specs: specsFileCount > 0,
+    specsFileCount, contract, uiDesign,
+    executionPlan,
   };
 }
 

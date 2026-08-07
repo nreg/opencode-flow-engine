@@ -107,3 +107,27 @@ export async function readSpecContent(changeDir: string, specName: string): Prom
   
   return readFile(legacyPath).catch(() => null);
 }
+
+/**
+ * Check if directory artifact exists with dual-path compatibility.
+ * For specs/ directory, checks if it exists and contains .md files.
+ * Priority: .flow-engine/sflow/specs (new) → specs (legacy)
+ */
+export async function directoryArtifactExists(changeDir: string, artifactName: string): Promise<boolean> {
+  // Normalize artifact name (remove trailing slash)
+  const normalizedArtifact = artifactName.replace(/\/$/, '');
+  
+  if (normalizedArtifact === 'specs') {
+    const files = await listSpecFiles(changeDir);
+    return files.length > 0;
+  }
+  
+  // For other directory artifacts, check both paths
+  const newPath = `${changeDir}/.flow-engine/sflow/${normalizedArtifact}`;
+  const legacyPath = `${changeDir}/${normalizedArtifact}`;
+  
+  const newExists = await directoryExists(newPath);
+  if (newExists) return true;
+  
+  return directoryExists(legacyPath);
+}

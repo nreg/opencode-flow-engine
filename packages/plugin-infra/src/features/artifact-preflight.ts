@@ -11,7 +11,7 @@
 import { ARTIFACT_PREFLIGHT, isDirectoryArtifact } from '@opencode-flow-engine/core';
 import { listFiles, caches } from '@opencode-flow-engine/shared';
 import { detectFrontend } from './workflow-manager.js';
-import { artifactExists } from './state-manager/artifact-paths.js';
+import { artifactExists, directoryArtifactExists } from './state-manager/artifact-paths.js';
 
 export interface PreflightCheckParams {
   changeDir: string;
@@ -48,16 +48,11 @@ export async function checkArtifactPreflight(
   const missing: string[] = [];
   const existence: Record<string, boolean> = {};
   for (const artifact of gate.required) {
-    const p = changeDir + '/' + artifact;
     let exists: boolean;
     if (isDirectoryArtifact(artifact)) {
-      exists = await directoryExists(p);
-      if (exists && artifact.endsWith('/')) {
-        const specFiles = await listFiles(p, '.md');
-        exists = specFiles.length > 0;
-      }
+      exists = await directoryArtifactExists(changeDir, artifact);
     } else {
-      exists = await fileExists(p);
+      exists = await artifactExists(changeDir, artifact);
     }
     existence[artifact] = exists;
     if (!exists) missing.push(artifact);
