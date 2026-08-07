@@ -4,7 +4,8 @@
 
 import type { ToolDefinition, ToolContext, ToolResult } from './types.js';
 import { sharedValidator } from '@opencode-flow-engine/core';
-import { readFile, listFiles } from '@opencode-flow-engine/shared';
+import { resolveChangeDir } from '../helpers/resolve-change-dir.js';
+import { readArtifactContent, listSpecFiles, readSpecContent } from '../features/state-manager/artifact-paths.js';
 
 /**
  * Create the artifact inspector tool
@@ -30,14 +31,14 @@ export function createArtifactInspectorTool(): ToolDefinition {
         changeDir?: string;
         artifactType?: string;
       };
-      const resolvedDir = changeDir || context.directory;
+      const resolvedDir = resolveChangeDir(changeDir, context.directory);
 
       try {
         const results: Record<string, unknown> = {};
 
         // Inspect proposal (also validates as change content)
         if (!artifactType || artifactType === 'proposal') {
-          const proposalContent = await readFile(`${resolvedDir}/proposal.md`);
+          const proposalContent = await readArtifactContent(resolvedDir, 'proposal.md');
           if (proposalContent) {
             results.proposal = sharedValidator.validateChangeContent('proposal', proposalContent);
           } else {
@@ -47,12 +48,11 @@ export function createArtifactInspectorTool(): ToolDefinition {
 
         // Inspect specs (block-level validation)
         if (!artifactType || artifactType === 'specs') {
-          const specsDir = `${resolvedDir}/specs`;
-          const specFiles = await listFiles(specsDir, '.md');
+          const specFiles = await listSpecFiles(resolvedDir);
           results.specs = {};
 
           for (const specFile of specFiles) {
-            const specContent = await readFile(`${specsDir}/${specFile}`);
+            const specContent = await readSpecContent(resolvedDir, specFile);
             if (specContent) {
               (results.specs as Record<string, unknown>)[specFile] = sharedValidator.validateSpecContent(
                 specFile.replace('.md', ''),
@@ -64,7 +64,7 @@ export function createArtifactInspectorTool(): ToolDefinition {
 
         // Inspect design
         if (!artifactType || artifactType === 'design') {
-          const designContent = await readFile(`${resolvedDir}/design.md`);
+          const designContent = await readArtifactContent(resolvedDir, 'design.md');
           if (designContent) {
             results.design = sharedValidator.validateDesign(designContent);
           } else {
@@ -74,7 +74,7 @@ export function createArtifactInspectorTool(): ToolDefinition {
 
         // Inspect tasks
         if (!artifactType || artifactType === 'tasks') {
-          const tasksContent = await readFile(`${resolvedDir}/tasks.md`);
+          const tasksContent = await readArtifactContent(resolvedDir, 'tasks.md');
           if (tasksContent) {
             results.tasks = sharedValidator.validateTasks(tasksContent);
           } else {
@@ -84,7 +84,7 @@ export function createArtifactInspectorTool(): ToolDefinition {
 
         // Inspect ui-design (frontend projects only)
         if (!artifactType || artifactType === 'ui-design') {
-          const uiDesignContent = await readFile(`${resolvedDir}/ui-design.md`);
+          const uiDesignContent = await readArtifactContent(resolvedDir, 'ui-design.md');
           if (uiDesignContent) {
             results['ui-design'] = validateUiDesign(uiDesignContent);
           } else {

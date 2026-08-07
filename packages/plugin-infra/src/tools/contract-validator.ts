@@ -5,6 +5,7 @@
 import type { ToolDefinition, ToolContext, ToolResult } from "./types.js";
 import { sharedValidator } from "@opencode-flow-engine/core";
 import { readFile, isContractStale } from "@opencode-flow-engine/shared";
+import { resolveChangeDir } from "../helpers/resolve-change-dir.js";
 import { readArtifactContent } from "../features/state-manager/artifact-paths.js";
 
 /**
@@ -22,7 +23,7 @@ export function createContractValidatorTool(): ToolDefinition {
       },
     },
     execute: async (params, context) => {
-      const changeDir = (params as { changeDir?: string }).changeDir || context.directory;
+      const changeDir = resolveChangeDir((params as { changeDir?: string }).changeDir, context.directory);
 
       try {
         const contractContent = await readArtifactContent(changeDir, 'execution-contract.md');
