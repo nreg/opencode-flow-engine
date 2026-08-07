@@ -139,8 +139,11 @@ export async function writeStateFile(changeDir: string, newState: string, extra?
     state.state = newState;
     state.updatedAt = now;
 
-    // Apply extra fields (before AFK/DP logic to allow override)
-    if (extra) Object.assign(state, extra);
+    // Apply extra fields (excluding decisionPoints/decisionPoint to prevent override)
+    if (extra) {
+      const { decisionPoints: _ignoredDPs, decisionPoint: _ignoredDP, ...safeExtra } = extra;
+      Object.assign(state, safeExtra);
+    }
 
     // Apply AFK deactivation on terminal states
     applyAfkDeactivation(state, newState);

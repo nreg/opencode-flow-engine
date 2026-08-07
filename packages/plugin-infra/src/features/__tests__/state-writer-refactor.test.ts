@@ -793,3 +793,99 @@ describe('writeStateFile — End-to-End DP persistence (E2E)', () => {
     expect((state!.decisionPoints as any[])[0].rationale).toBe('updated');
   });
 });
+
+// =============================================================================
+// P0 Fix: decisionPoints field protection in writeStateFile
+// =============================================================================
+describe('writeStateFile — decisionPoints field protection (P0 fix)', () => {
+  const dir = tempDir('state-writer-dp-protection');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await ensureDir(dir + '/.flow-engine/sflow');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should NOT overwrite existing decisionPoints when extra.decisionPoints is provided', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({
+        state: 'exploring',
+        mode: 'full',
+        decisionPoints: [
+          {
+            id: 'dp-0',
+            name: 'Existing DP',
+            timestamp: '2025-01-01T00:00:00.000Z',
+          },
+        ],
+      })
+    );
+
+    await writeStateFile(dir, 'specifying', {
+      decisionPoints: [],
+      mode: 'tweak',
+    });
+
+    const state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    expect(Array.isArray(state!.decisionPoints)).toBe(true);
+    const dps = state!.decisionPoints as Array<Record<string, unknown>>;
+    expect(dps).toHaveLength(1);
+    expect(dps[0].id).toBe('dp-0');
+    expect(state!.mode).toBe('tweak');
+  });
+
+  it('should NOT pollute state top-level with decisionPoint from extra', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({ state: 'exploring', mode: 'full' })
+    );
+
+    await writeStateFile(dir, 'specifying', {
+      decisionPoint: {
+        id: 'dp-1',
+        name: 'Test DP',
+        rationale: 'test',
+      },
+    });
+
+    const state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    expect(state!.decisionPoint).toBeUndefined();
+    expect(Array.isArray(state!.decisionPoints)).toBe(true);
+    const dps = state!.decisionPoints as Array<Record<string, unknown>>;
+    expect(dps).toHaveLength(1);
+    expect(dps[0].id).toBe('dp-1');
+  });
+
+  it('should allow normal extra fields to override state', async () => {
+    await writeFile(
+      dir + '/.flow-engine/sflow/state.json',
+      JSON.stringify({
+        state: 'exploring',
+        mode: 'full',
+        afk: false,
+        afkTier: 0,
+      })
+    );
+
+    await writeStateFile(dir, 'specifying', {
+      mode: 'hotfix',
+      afk: true,
+      afkTier: 2,
+      customField: 'custom value',
+    });
+
+    const state = await readStateJson(dir);
+    expect(state).not.toBeNull();
+    expect(state!.mode).toBe('hotfix');
+    expect(state!.afk).toBe(true);
+    expect(state!.afkTier).toBe(2);
+    expect(state!.customField).toBe('custom value');
+  });
+});
