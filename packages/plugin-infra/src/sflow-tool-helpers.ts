@@ -1,7 +1,8 @@
 import { sharedValidator } from '@opencode-flow-engine/core';
-import { readFile as sflowReadFile, isContractStale } from '@opencode-flow-engine/shared';
+import { isContractStale } from '@opencode-flow-engine/shared';
 import { readJsonFile } from '@opencode-flow-engine/shared';
 import { getStateFilePath } from './features/state-manager.js';
+import { readArtifactContent, listSpecFiles, readSpecContent } from './features/state-manager/artifact-paths.js';
 
 export async function getCurrentWorkflowState(changeDir: string): Promise<string | null> {
   const state = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
@@ -9,7 +10,7 @@ export async function getCurrentWorkflowState(changeDir: string): Promise<string
 }
 
 export async function executeContractValidator(changeDir: string) {
-  const contractContent = await sflowReadFile(`${changeDir}/execution-contract.md`);
+  const contractContent = await readArtifactContent(changeDir, 'execution-contract.md');
   if (!contractContent) {
     return {
       validation: { valid: false, issues: [], summary: { errors: 0, warnings: 0, info: 0 } },
@@ -32,40 +33,33 @@ export async function executeContractValidator(changeDir: string) {
 export async function executeArtifactInspector(changeDir: string) {
   const results: Record<string, unknown> = {};
 
-  const proposalContent = await sflowReadFile(`${changeDir}/proposal.md`);
+  const proposalContent = await readArtifactContent(changeDir, 'proposal.md');
   if (proposalContent) {
     results.proposal = sharedValidator.validateChangeContent('proposal', proposalContent);
   } else {
     results.proposal = { valid: false, error: 'File not found', issues: [], summary: { errors: 1, warnings: 0, info: 0 } };
   }
 
-  const specsDir = `${changeDir}/specs`;
-  const { readdir } = await import('fs/promises');
-  try {
-    const specEntries = await readdir(specsDir, { withFileTypes: true });
-    const specFiles = specEntries.filter(e => e.isFile() && e.name.endsWith('.md')).map(e => e.name);
-    results.specs = {};
-    for (const specFile of specFiles) {
-      const specContent = await sflowReadFile(`${specsDir}/${specFile}`);
-      if (specContent) {
-        (results.specs as Record<string, unknown>)[specFile] = sharedValidator.validateSpecContent(
-          specFile.replace('.md', ''),
-          specContent,
-        );
-      }
+  const specFiles = await listSpecFiles(changeDir);
+  results.specs = {};
+  for (const specFile of specFiles) {
+    const specContent = await readSpecContent(changeDir, specFile);
+    if (specContent) {
+      (results.specs as Record<string, unknown>)[specFile] = sharedValidator.validateSpecContent(
+        specFile.replace('.md', ''),
+        specContent,
+      );
     }
-  } catch {
-    results.specs = {};
   }
 
-  const designContent = await sflowReadFile(`${changeDir}/design.md`);
+  const designContent = await readArtifactContent(changeDir, 'design.md');
   if (designContent) {
     results.design = sharedValidator.validateDesign(designContent);
   } else {
     results.design = { valid: false, error: 'File not found', issues: [], summary: { errors: 1, warnings: 0, info: 0 } };
   }
 
-  const tasksContent = await sflowReadFile(`${changeDir}/tasks.md`);
+  const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
   if (tasksContent) {
     results.tasks = sharedValidator.validateTasks(tasksContent);
   } else {

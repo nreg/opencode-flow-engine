@@ -7,6 +7,7 @@ import { fileExists, directoryExists, readJsonFile, isContractStale } from "@ope
 import { detectFrontend } from "../features/workflow-manager.js";
 import { detectWorkflowState, writeStateFile } from "../features/state-manager.js";
 import { resolveChangeDir } from "../helpers/resolve-change-dir.js";
+import { artifactExists } from "../features/state-manager/artifact-paths.js";
 
 /**
  * Shared agent names that are not bound to any workflow state.
@@ -264,7 +265,7 @@ async function findActiveChangeDir(changeDir: string, fsDirectory: string): Prom
     for (const entry of entries) {
       const candidate = changesRoot + '/' + entry;
       const hasState = await fileExists(candidate + '/.flow-engine/sflow/state.json').catch(() => false);
-      const hasProposal = await fileExists(candidate + '/proposal.md').catch(() => false);
+      const hasProposal = await artifactExists(candidate, 'proposal.md').catch(() => false);
       if (hasState || hasProposal) {
         return candidate;
       }

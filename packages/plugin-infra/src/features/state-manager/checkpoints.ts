@@ -6,6 +6,7 @@ import {
 } from '../plan-scoped-paths.js';
 import { readExecutionPlan } from '../execution-plan.js';
 import { simpleHash } from './state-detection.js';
+import { readArtifactContent } from './artifact-paths.js';
 
 // ─── Checkpoint Types ──────────────────────────────────────────────────────
 
@@ -92,8 +93,7 @@ export async function readCheckpoint(changeDir: string, taskId: string, includeS
 }
 
 export async function detectStaleCheckpoints(changeDir: string): Promise<string[]> {
-  const contractPath = changeDir + '/execution-contract.md';
-  const contractContent = await readFile(contractPath);
+  const contractContent = await readArtifactContent(changeDir, 'execution-contract.md');
   if (!contractContent) return [];
 
   const currentHash = await simpleHash(contractContent);

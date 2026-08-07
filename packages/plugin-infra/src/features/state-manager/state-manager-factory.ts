@@ -9,6 +9,7 @@ import { fileExists, readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir
 import { parseLessonsMd, formatLessonEntry, searchLessonsInFile } from './lessons.js';
 import { writeProgressFile, readProgressFile, detectProgressAntiRepeat } from './progress.js';
 import { BOULDER_STATE_FILE, detectStateMismatch } from './state-detection.js';
+import { artifactExists } from './artifact-paths.js';
 
 type WorkflowManager = ReturnType<typeof createWorkflowManager>;
 
@@ -491,11 +492,10 @@ export function createStateManager(
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
-async isContractStale(changeDir: string): Promise<FeatureResult> {
+    async isContractStale(changeDir: string): Promise<FeatureResult> {
       try {
         const stateExists = await fileExists(`${changeDir}/.flow-engine/sflow/state.json`);
-        const contractPath = `${changeDir}/execution-contract.md`;
-        const contractExists = await fileExists(contractPath);
+        const contractExists = await artifactExists(changeDir, 'execution-contract.md');
 
         if (!stateExists || !contractExists) {
           return { success: true, data: { stale: false } };

@@ -6,6 +6,7 @@
  */
 
 import { readFile, fileExists } from '@opencode-flow-engine/shared';
+import { readArtifactContent } from './state-manager/artifact-paths.js';
 
 /**
  * 语言类型：中文或英文
@@ -110,24 +111,21 @@ export async function resolveArtifactLanguage(
   }
 
   // Level 3: proposal.md 检测（在项目根目录）
-  const proposalPath = `${projectRoot}/proposal.md`;
-  const proposalLang = await detectFileLanguage(proposalPath);
-  if (proposalLang) {
-    return proposalLang;
+  const proposalContent = await readArtifactContent(projectRoot, 'proposal.md');
+  if (proposalContent && proposalContent.trim().length > 0) {
+    return detectTextLanguage(proposalContent);
   }
 
   // Level 4: design.md 检测（在项目根目录）
-  const designPath = `${projectRoot}/design.md`;
-  const designLang = await detectFileLanguage(designPath);
-  if (designLang) {
-    return designLang;
+  const designContent = await readArtifactContent(projectRoot, 'design.md');
+  if (designContent && designContent.trim().length > 0) {
+    return detectTextLanguage(designContent);
   }
 
   // Level 5: tasks.md 检测（在项目根目录）
-  const tasksPath = `${projectRoot}/tasks.md`;
-  const tasksLang = await detectFileLanguage(tasksPath);
-  if (tasksLang) {
-    return tasksLang;
+  const tasksContent = await readArtifactContent(projectRoot, 'tasks.md');
+  if (tasksContent && tasksContent.trim().length > 0) {
+    return detectTextLanguage(tasksContent);
   }
 
   // Level 6: 默认 'en'
