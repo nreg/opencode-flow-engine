@@ -159,6 +159,7 @@ export function hasCompletionSignal(output: string): boolean {
  * 2. OR has substantial length (>= 200 characters)
  *
  * Returns false for empty, whitespace-only, or very short outputs.
+ * Also returns false if output contains explicit error patterns (error:, failed:, ❌, FAIL, Error:).
  *
  * @param output - The raw output text from the subagent
  * @returns true if output is substantial, false otherwise
@@ -170,6 +171,19 @@ export function hasSubstantialOutput(output: string): boolean {
   }
 
   const trimmed = output.trim();
+
+  const errorPatterns = [
+    /^error:/im,
+    /^failed:/im,
+    /^❌/m,
+    /^FAIL:/im,
+    /^Error:/m,
+  ];
+
+  const hasErrorPattern = errorPatterns.some(pattern => pattern.test(trimmed));
+  if (hasErrorPattern) {
+    return false;
+  }
 
   // Check for report keywords (case-insensitive)
   const reportKeywords = [

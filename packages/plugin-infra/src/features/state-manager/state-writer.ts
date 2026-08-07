@@ -139,7 +139,9 @@ export async function writeStateFile(changeDir: string, newState: string, extra?
     state.state = newState;
     state.updatedAt = now;
 
-    // Apply extra fields (excluding decisionPoints/decisionPoint to prevent override)
+    // Apply extra fields (excluding decisionPoints/decisionPoint)
+    // These fields are managed exclusively by appendDecisionPoint via upsert logic.
+    // Object.assign would overwrite existing decision points or pollute the top-level state.
     if (extra) {
       const { decisionPoints: _ignoredDPs, decisionPoint: _ignoredDP, ...safeExtra } = extra;
       Object.assign(state, safeExtra);

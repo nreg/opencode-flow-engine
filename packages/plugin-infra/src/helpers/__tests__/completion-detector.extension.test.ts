@@ -353,6 +353,97 @@ describe('hasSubstantialOutput', () => {
     const output = 'Working on the task...';
     expect(hasSubstantialOutput(output)).toBe(false);
   });
+
+  it('should return false for long error message with "error:" at line start (>= 200 chars)', () => {
+    const output = `error: Build failed with multiple issues
+
+Detailed error report:
+- TypeScript compilation failed
+- Missing dependencies detected
+- Type errors in src/utils/helper.ts
+
+Please fix these issues before proceeding.`;
+    expect(output.length).toBeGreaterThanOrEqual(200);
+    expect(hasSubstantialOutput(output)).toBe(false);
+  });
+
+  it('should return false for long error message with "failed:" at line start', () => {
+    const output = `failed: Test suite execution failed
+
+Test Results:
+- 15 tests failed
+- 0 tests passed
+- Execution time: 5.2s
+
+All tests have failed. Please review the test output for details.
+Check the logs for more information about the failures.`;
+    expect(output.length).toBeGreaterThanOrEqual(200);
+    expect(hasSubstantialOutput(output)).toBe(false);
+  });
+
+  it('should return false for long error message with "❌" emoji', () => {
+    const output = `❌ Critical error detected
+
+The build process encountered a critical error and cannot proceed.
+Multiple files have syntax errors that need to be fixed.
+
+Error details:
+- Syntax error in src/index.ts
+- Missing closing brace in config.ts`;
+    expect(output.length).toBeGreaterThanOrEqual(200);
+    expect(hasSubstantialOutput(output)).toBe(false);
+  });
+
+  it('should return false for long error message with "FAIL" marker', () => {
+    const output = `FAIL: Integration test suite failed
+
+Test suite: User Authentication
+- Login flow: FAIL
+- Token refresh: FAIL
+- Session management: FAIL
+
+All integration tests have failed. Please check the test logs.`;
+    expect(output.length).toBeGreaterThanOrEqual(200);
+    expect(hasSubstantialOutput(output)).toBe(false);
+  });
+
+  it('should return false for long error message with "Error:" at line start', () => {
+    const output = `Error: Cannot resolve module dependency
+
+The module 'some-module' cannot be found in the project.
+Please ensure all dependencies are installed correctly.
+
+Run 'npm install' to install missing dependencies.`;
+    expect(output.length).toBeGreaterThanOrEqual(200);
+    expect(hasSubstantialOutput(output)).toBe(false);
+  });
+
+  it('should still return true for successful report with "Test Results: all pass"', () => {
+    const output = `Summary: All tasks completed successfully
+
+Batch Status: Completed 3/3 tasks
+
+Test Results: all pass
+
+Files modified: src/a.ts, src/b.ts`;
+    expect(hasSubstantialOutput(output)).toBe(true);
+  });
+
+  it('should still return true for successful report with "Summary:" keyword', () => {
+    const output = `Summary: Build completed successfully
+
+All tests passed. No errors encountered.
+Files modified: 5 files changed.`;
+    expect(hasSubstantialOutput(output)).toBe(true);
+  });
+
+  it('should NOT false positive on "error" word in successful context', () => {
+    const output = `Summary: No error found in the codebase
+
+Test Results: all pass
+All validation checks passed successfully.`;
+    expect(hasSubstantialOutput(output)).toBe(true);
+  });
 });
 
 // ─── Loose Completion Detection for Execution Agents ──────────────────────────

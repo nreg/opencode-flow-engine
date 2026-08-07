@@ -28,17 +28,18 @@ export function resolveChangeDir(
   }
 
   // Priority 3: Fallback to cwd
+  let cwdError: Error | null = null;
   try {
     const cwd = process.cwd();
     if (cwd && cwd.trim().length > 0) {
       return cwd;
     }
   } catch (err) {
-    // cwd not available, will throw below
+    cwdError = err instanceof Error ? err : new Error(String(err));
   }
 
-  // No resolution possible - throw clear error
+  const errorReason = cwdError ? ` (cwd error: ${cwdError.message})` : '';
   throw new Error(
-    'Unable to resolve changeDir: no explicit path, no context directory, and cwd unavailable',
+    `Unable to resolve changeDir: no explicit path, no context directory, and cwd unavailable${errorReason}`,
   );
 }
