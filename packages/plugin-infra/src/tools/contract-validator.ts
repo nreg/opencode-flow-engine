@@ -5,6 +5,7 @@
 import type { ToolDefinition, ToolContext, ToolResult } from "./types.js";
 import { sharedValidator } from "@opencode-flow-engine/core";
 import { readFile, isContractStale } from "@opencode-flow-engine/shared";
+import { readArtifactContent } from "../features/state-manager/artifact-paths.js";
 
 /**
  * Create the contract validator tool
@@ -24,7 +25,7 @@ export function createContractValidatorTool(): ToolDefinition {
       const changeDir = (params as { changeDir?: string }).changeDir || context.directory;
 
       try {
-        const contractContent = await readFile(`${changeDir}/execution-contract.md`);
+        const contractContent = await readArtifactContent(changeDir, 'execution-contract.md');
         if (!contractContent) {
           return {
             title: "Contract Validator",

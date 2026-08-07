@@ -16,6 +16,7 @@ import { z } from 'zod';
 
 import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentModelMap } from './types.js';
 import { SFLOW_TOOLS, IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolError, detectAgnesProvider } from './types.js';
+import { artifactExists } from './features/state-manager/artifact-paths.js';
 
 import { getAgentNames, getAgentMode, createAgent } from './agents/index.js';
 import { createWorkflowRouterTool } from './tools/index.js';
@@ -152,9 +153,7 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
 
         try {
           // REP-2: Validate contract existence (dual-path compatibility)
-          const contractExistsNew = await fileExists(changeDir + '/.flow-engine/sflow/execution-contract.md');
-          const contractExistsOld = await fileExists(changeDir + '/execution-contract.md');
-          const contractExists = contractExistsNew || contractExistsOld;
+          const contractExists = await artifactExists(changeDir, 'execution-contract.md');
           if (!contractExists) {
             return { title: 'Record Execution Plan', output: JSON.stringify({ success: false, error: 'execution-contract.md not found. Create a contract before recording an execution plan.' }, null, 2) };
           }

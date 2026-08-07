@@ -10,6 +10,7 @@ import { getStateFilePath } from "../../../features/state-manager.js";
 import { sharedValidator, HOTFIX_UPGRADE_THRESHOLDS, TWEAK_UPGRADE_THRESHOLDS } from "@opencode-flow-engine/core";
 import { isContractStale, getContractStalenessReport } from "@opencode-flow-engine/shared";
 import { checkIFlowArtifactAndPhaseConsistency } from "../iflow-shared-guards.js";
+import { readArtifactContent, artifactExists } from "../../../features/state-manager/artifact-paths.js";
 
 /**
  * Combined artifact existence + phase consistency check.
@@ -96,7 +97,7 @@ export async function checkPresetUpgrade(changeDir: string, activeWorkflow: 'ifl
     return { success: true };
   }
 
-  const tasksContent = await readFile(`${changeDir}/tasks.md`);
+  const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
   if (!tasksContent) {
     return { success: true };
   }
@@ -159,7 +160,7 @@ export async function checkPresetUpgrade(changeDir: string, activeWorkflow: 'ifl
 export async function checkContractStalenessGuard(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir) return { success: true };
 
-  const hasContract = await fileExists(`${changeDir}/execution-contract.md`);
+  const hasContract = await artifactExists(changeDir, 'execution-contract.md');
   if (!hasContract) return { success: true };
 
   const stale = await isContractStale(changeDir);

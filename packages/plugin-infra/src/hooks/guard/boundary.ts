@@ -6,6 +6,7 @@
  */
 
 import { readFile } from "@opencode-flow-engine/shared";
+import { readArtifactContent } from "../../features/state-manager/artifact-paths.js";
 
 export interface BoundaryCacheEntry {
   contractHash: string;
@@ -210,7 +211,7 @@ export async function getActiveTaskId(changeDir: string): Promise<string | null>
     const planMatch = sp.match(/\*\*Plan task\*\*:\s*(T\d+)/i);
     if (planMatch?.[1]) return planMatch[1].toUpperCase();
   }
-  const tasksContent = await readFile(changeDir + '/tasks.md').catch(() => null);
+  const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
   if (tasksContent) {
     const firstUnchecked = tasksContent.match(/^-\s*\[\s*\]\s*(?:T\d+\s*[—-]?\s*)?(.+)/m);
     if (firstUnchecked) {

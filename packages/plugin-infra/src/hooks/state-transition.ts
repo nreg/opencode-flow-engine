@@ -5,6 +5,7 @@ import { checkArtifactPreflight, findPreflightState } from '../features/artifact
 import { writeStateFile } from '../features/state-manager.js';
 import { recommendExecutionMode } from '../features/execution-plan.js';
 import { resolveArtifactLanguage, checkAndDetectLanguage } from '../features/artifact-language.js';
+import { readArtifactContent } from '../features/state-manager/artifact-paths.js';
 
 const STATE_FILE_PATH = '.flow-engine/sflow/state.json';
 
@@ -66,7 +67,7 @@ export function createStateTransitionHook(): HookHandler {
         const extra: Record<string, unknown> = {};
         if (currentState === 'bridging' && newState === 'approved-for-build') {
           try {
-            const tasksMdContent = await readFile(`${changeDir}/tasks.md`);
+            const tasksMdContent = await readArtifactContent(changeDir, 'tasks.md');
             if (tasksMdContent) {
               const dp4Result = recommendExecutionMode(tasksMdContent);
               extra.dp_4_result = dp4Result;

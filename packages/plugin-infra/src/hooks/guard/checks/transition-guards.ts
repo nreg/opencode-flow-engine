@@ -7,6 +7,7 @@ import type { HookResult } from "../../types.js";
 import { fileExists, readJsonFile, readFile } from "@opencode-flow-engine/shared";
 import { getStateFilePath } from "../../../features/state-manager.js";
 import { readExecutionPlan as readExecutionPlanFeature } from "../../../features/execution-plan.js";
+import { readArtifactContent } from "../../../features/state-manager/artifact-paths.js";
 
 /**
  * Block fast-path transitions when the current workflow mode does not allow them.
@@ -87,7 +88,7 @@ export async function checkTaskCompletion(changeDir: string, activeWorkflow: 'if
   // IFlow uses PLAN.md (GSD-style) rather than SFlow's tasks.md
   if (activeWorkflow === 'iflow') return { success: true };
 
-  const tasksContent = await readFile(`${changeDir}/tasks.md`);
+  const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
   if (!tasksContent) return { success: true };
 
   const taskLines = tasksContent.split("\n").filter((line: string) => line.match(/^-\s*\[.\]\s+/));

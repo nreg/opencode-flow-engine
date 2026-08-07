@@ -9,6 +9,7 @@ import { getStateFilePath } from "../../../features/state-manager.js";
 import { isArtifactPath, isSourceCodePath, simpleContractHash } from "../helpers.js";
 import { parseFileBoundaryPatterns, matchesBoundary, getActiveTaskId, boundaryCache, getBoundaryCacheKey, READ_FILES_WHITELIST } from "../boundary.js";
 import { checkIFlowFileWriteGuard } from "../iflow-shared-guards.js";
+import { readArtifactContent, artifactExists } from "../../../features/state-manager/artifact-paths.js";
 
 /**
  * File-level write guard — consolidated from previously inline logic in index.ts.
@@ -65,7 +66,7 @@ export async function checkFileWriteGuard(changeDir: string, data?: Record<strin
 
     // Illegal phase jump: full mode executing without design.md
     if (stateData.mode === 'full' && currentState === 'executing') {
-      const designExists = await fileExists(`${changeDir}/design.md`);
+      const designExists = await artifactExists(changeDir, 'design.md');
       if (!designExists) {
         return {
           success: false, block: true,
@@ -77,7 +78,7 @@ export async function checkFileWriteGuard(changeDir: string, data?: Record<strin
     // File Boundary Control — applies during executing AND debugging
     if (currentState === 'executing' || currentState === 'debugging') {
       // P16: If no execution-contract.md found, block writes and require regeneration
-      const contractExists = await fileExists(`${changeDir}/execution-contract.md`).catch(() => false);
+      const contractExists = await artifactExists(changeDir, 'execution-contract.md');
       if (!contractExists) {
         return {
           success: false, block: true,
@@ -108,7 +109,7 @@ export async function checkFileWriteGuard(changeDir: string, data?: Record<strin
 export async function checkReadFilesBoundary(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
 
-  const hasContract = await fileExists(`${changeDir}/execution-contract.md`);
+  const hasContract = await artifactExists(changeDir, 'execution-contract.md');
   if (!hasContract) return { success: true };
 
   const toolName = data.toolName as string | undefined;
@@ -163,7 +164,7 @@ export async function checkReadFilesBoundary(changeDir: string, data?: Record<st
 export async function checkGitCommitBoundary(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
 
-  const hasContract = await fileExists(`${changeDir}/execution-contract.md`);
+  const hasContract = await artifactExists(changeDir, 'execution-contract.md');
   if (!hasContract) return { success: true };
 
   const toolName = data.toolName as string | undefined;
@@ -225,7 +226,7 @@ export async function checkGitCommitBoundary(changeDir: string, data?: Record<st
  * Get read_files patterns for the active task from execution-contract.md.
  */
 async function getActiveTaskReadFiles(changeDir: string, taskId: string | null): Promise<string[] | null> {
-  const cc = await readFile(changeDir + '/execution-contract.md');
+  const cc = await readArtifactContent(changeDir, 'execution-contract.md');
   if (!cc) return null;
   const parsed = parseFileBoundaryPatterns(cc);
 
@@ -239,7 +240,7 @@ async function getActiveTaskReadFiles(changeDir: string, taskId: string | null):
  * Get write_files patterns for the active task from execution-contract.md.
  */
 async function getActiveTaskWriteFiles(changeDir: string, taskId: string | null): Promise<string[] | null> {
-  const cc = await readFile(changeDir + '/execution-contract.md');
+  const cc = await readArtifactContent(changeDir, 'execution-contract.md');
   if (!cc) return null;
   const parsed = parseFileBoundaryPatterns(cc);
 
@@ -253,7 +254,7 @@ async function getActiveTaskWriteFiles(changeDir: string, taskId: string | null)
  * Get global write_files patterns from execution-contract.md.
  */
 async function getGlobalWriteFiles(changeDir: string): Promise<string[]> {
-  const cc = await readFile(changeDir + '/execution-contract.md');
+  const cc = await readArtifactContent(changeDir, 'execution-contract.md');
   if (!cc) return [];
   const parsed = parseFileBoundaryPatterns(cc);
   return parsed.globalPatterns;
@@ -263,7 +264,7 @@ async function getGlobalWriteFiles(changeDir: string): Promise<string[]> {
  * File boundary check helper.
  */
 export async function checkFileBoundary(changeDir: string, filePath: string): Promise<HookResult | null> {
-  const cc = await readFile(changeDir + '/execution-contract.md');
+  const cc = await readArtifactContent(changeDir, 'execution-contract.md');
   if (!cc) return null;
 
   const contractHash = simpleContractHash(cc);

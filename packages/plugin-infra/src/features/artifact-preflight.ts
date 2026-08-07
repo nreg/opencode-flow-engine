@@ -11,6 +11,7 @@
 import { ARTIFACT_PREFLIGHT, isDirectoryArtifact } from '@opencode-flow-engine/core';
 import { listFiles, caches } from '@opencode-flow-engine/shared';
 import { detectFrontend } from './workflow-manager.js';
+import { artifactExists } from './state-manager/artifact-paths.js';
 
 export interface PreflightCheckParams {
   changeDir: string;
@@ -77,7 +78,7 @@ export async function checkArtifactPreflight(
     try {
       const isFrontend = await detectFrontend(changeDir);
       if (isFrontend) {
-        const uiOk = await fileExists(changeDir + '/ui-design.md');
+        const uiOk = await artifactExists(changeDir, 'ui-design.md');
         existence['ui-design.md'] = uiOk;
         if (!uiOk && targetState !== 'specifying') {
           const result: PreflightCheckResult = {
