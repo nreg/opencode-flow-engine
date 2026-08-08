@@ -14,6 +14,7 @@ import {
   mergeOverrides,
   generateConfigTemplate,
   USER_CONFIG_FILE,
+  DEFAULT_PROFILE_MODELS,
 } from './config-loader.js';
 import { createAgent, createAllAgents, clearConfigCache } from './agent-builder.js';
 
@@ -304,6 +305,120 @@ describe('Config File Integration with Agent Builder', () => {
     const agents = await createAllAgents();
     expect(agents.sFlow.model).toBe('gpt-5');
     expect(agents['build-executor'].model).toBe('claude-4-opus');
-    expect(agents['code-reviewer'].model).toBe('provider/glm-5.1');
+    expect(agents['code-reviewer'].model).toBe('provider/deepseek-v4-flash');
+  });
+});
+
+// ─── Wave 1: 6-Tier ModelProfileConfig ───────────────────────────────────────
+
+describe('Wave 1: ModelProfileConfig 6-tier structure', () => {
+  it('should accept 6-tier object format with model and fallback_models', () => {
+    const config: import('./config-loader.js').ModelProfileConfig = {
+      free: { model: 'provider/fast-model', fallback_models: [] },
+      quick: { model: 'provider/quick-model', fallback_models: ['provider/fallback1'] },
+      standard: { model: 'provider/standard-model', fallback_models: [] },
+      deep: { model: 'provider/deep-model', fallback_models: ['provider/fallback2'] },
+      ultra: { model: 'provider/ultra-model', fallback_models: [] },
+      review: { model: 'provider/review-model', fallback_models: ['provider/fallback3'] },
+    };
+    expect(config.free?.model).toBe('provider/fast-model');
+    expect(config.quick?.fallback_models).toEqual(['provider/fallback1']);
+    expect(config.standard?.model).toBe('provider/standard-model');
+    expect(config.deep?.fallback_models).toEqual(['provider/fallback2']);
+    expect(config.ultra?.model).toBe('provider/ultra-model');
+    expect(config.review?.fallback_models).toEqual(['provider/fallback3']);
+  });
+
+  it('should allow partial tier config', () => {
+    const config: import('./config-loader.js').ModelProfileConfig = {
+      standard: { model: 'provider/standard-model', fallback_models: [] },
+      deep: { model: 'provider/deep-model', fallback_models: [] },
+    };
+    expect(config.standard?.model).toBe('provider/standard-model');
+    expect(config.free).toBeUndefined();
+    expect(config.quick).toBeUndefined();
+  });
+
+  it('should reject legacy tier names (mechanical, strong) at type level', () => {
+    // This test verifies that the type system rejects legacy tier names
+    // The following would cause TypeScript compilation error if uncommented:
+    // const bad: import('./config-loader.js').ModelProfileConfig = {
+    //   mechanical: 'fast-model', // TS error: property 'mechanical' does not exist
+    //   strong: 'powerful-model', // TS error: property 'strong' does not exist
+    // };
+    // Since we can't test compilation errors at runtime, we just verify the new structure
+    const good: import('./config-loader.js').ModelProfileConfig = {
+      free: { model: 'provider/model', fallback_models: [] },
+    };
+    expect(good.free?.model).toBe('provider/model');
+  });
+});
+
+describe('Wave 1: DEFAULT_PROFILE_MODELS constant', () => {
+  it('should export DEFAULT_PROFILE_MODELS with all 6 tiers', () => {
+    expect(DEFAULT_PROFILE_MODELS).toBeDefined();
+    expect(DEFAULT_PROFILE_MODELS.free).toBeDefined();
+    expect(DEFAULT_PROFILE_MODELS.quick).toBeDefined();
+    expect(DEFAULT_PROFILE_MODELS.standard).toBeDefined();
+    expect(DEFAULT_PROFILE_MODELS.deep).toBeDefined();
+    expect(DEFAULT_PROFILE_MODELS.ultra).toBeDefined();
+    expect(DEFAULT_PROFILE_MODELS.review).toBeDefined();
+  });
+
+  it('should have { model, fallback_models } structure for each tier', () => {
+    const tiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
+    for (const tier of tiers) {
+      expect(DEFAULT_PROFILE_MODELS[tier]).toBeDefined();
+      expect(DEFAULT_PROFILE_MODELS[tier].model).toBeDefined();
+      expect(typeof DEFAULT_PROFILE_MODELS[tier].model).toBe('string');
+      expect(DEFAULT_PROFILE_MODELS[tier].fallback_models).toBeDefined();
+      expect(Array.isArray(DEFAULT_PROFILE_MODELS[tier].fallback_models)).toBe(true);
+    }
+  });
+
+  it('should use provider/ prefix format for model identifiers', () => {
+    const tiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
+    for (const tier of tiers) {
+      expect(DEFAULT_PROFILE_MODELS[tier].model).toMatch(/^provider\//);
+    }
+  });
+
+  it('should have empty fallback_models arrays initially', () => {
+    const tiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
+    for (const tier of tiers) {
+      expect(DEFAULT_PROFILE_MODELS[tier].fallback_models).toEqual([]);
+    }
+  });
+});
+
+describe('Wave 1: generateConfigTemplate with 6-tier modelProfiles', () => {
+  it('should emit 6-tier object format in modelProfiles', () => {
+    const template = generateConfigTemplate();
+    expect(template.modelProfiles).toBeDefined();
+    expect(template.modelProfiles?.free).toBeDefined();
+    expect(template.modelProfiles?.quick).toBeDefined();
+    expect(template.modelProfiles?.standard).toBeDefined();
+    expect(template.modelProfiles?.deep).toBeDefined();
+    expect(template.modelProfiles?.ultra).toBeDefined();
+    expect(template.modelProfiles?.review).toBeDefined();
+  });
+
+  it('should have { model, fallback_models } structure for each tier in template', () => {
+    const template = generateConfigTemplate();
+    const tiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
+    for (const tier of tiers) {
+      const tierConfig = template.modelProfiles?.[tier];
+      expect(tierConfig).toBeDefined();
+      expect(tierConfig?.model).toBeDefined();
+      expect(typeof tierConfig?.model).toBe('string');
+      expect(tierConfig?.fallback_models).toBeDefined();
+      expect(Array.isArray(tierConfig?.fallback_models)).toBe(true);
+    }
+  });
+
+  it('should not have legacy tier names (mechanical, strong) in template', () => {
+    const template = generateConfigTemplate();
+    expect(template.modelProfiles).not.toHaveProperty('mechanical');
+    expect(template.modelProfiles).not.toHaveProperty('strong');
   });
 });

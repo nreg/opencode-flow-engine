@@ -51,7 +51,11 @@ const AGENT_MODEL_MAP: AgentModelMap = {};
 
 // ─── Combined tool definitions (SFlow + IFlow) ────────────────────────────────
 
-function createCombinedTools(client: SFlowClient): Record<string, LocalToolDefinition> {
+function createCombinedTools(
+  client: SFlowClient,
+  modelProfiles?: import('./agents/config-loader.js').ModelProfileConfig,
+  configOverrides?: import('./agents/types.js').AgentOverrides,
+): Record<string, LocalToolDefinition> {
   const callFlowAgentTools = createCallFlowAgentTools({
     client,
     backgroundTaskRegistry,
@@ -72,6 +76,8 @@ function createCombinedTools(client: SFlowClient): Record<string, LocalToolDefin
       return 'WF';
     },
     workflowName: 'workflow',
+    modelProfiles,
+    configOverrides,
     validateAgent: async (subagentType, context) => {
       const changeDir = resolveChangeDir(undefined, context.directory as string);
 
@@ -198,7 +204,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
   const readFilePaths = new Map<string, string>();
 
   // Build combined tool definitions
-  const tools = createCombinedTools(sflowClient);
+  const tools = createCombinedTools(sflowClient, cascadedConfig.modelProfiles, configOverrides);
   const validatorTools = createValidatorTools();
   const workflowTools = createWorkflowTools();
   Object.assign(tools, validatorTools, workflowTools);

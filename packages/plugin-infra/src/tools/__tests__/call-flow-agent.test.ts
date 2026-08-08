@@ -12,6 +12,7 @@
 import { beforeEach, describe, expect, it, mock, afterEach } from 'bun:test';
 import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
 import { createCallFlowAgentTools, resetRunningSubagentCounts } from '../call-flow-agent.js';
+import { DEFAULT_PROFILE_MODELS } from '../../agents/config-loader.js';
 
 // ─── Test helpers ──────────────────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ function createMockClient(options: {
 function createTestOptions(client: ReturnType<typeof createMockClient>) {
   const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
   const backgroundTaskCounter = { value: 0 };
-  const agentModelMap: AgentModelMap = { 'build-executor': 'test-model' };
+  const agentModelMap: AgentModelMap = { 'build-executor': 'provider/test-model' };
 
   return {
     client: client as unknown as import('../../types.js').SFlowClient,
@@ -445,7 +446,7 @@ describe('NH-3: structured 提取失败 warning 传播', () => {
 
     const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
     const backgroundTaskCounter = { value: 0 };
-    const agentModelMap: AgentModelMap = { 'spec-writer': 'test-model' };
+    const agentModelMap: AgentModelMap = { 'spec-writer': 'provider/test-model' };
 
     const options = {
       client: client as unknown as import('../../types.js').SFlowClient,
@@ -1697,5 +1698,460 @@ describe('Wave 1: Change_Dir 标记注入', () => {
     const changeDirMatch = promptText.match(/<Change_Dir>(.*?)<\/Change_Dir>/);
     expect(changeDirMatch).not.toBeNull();
     expect(changeDirMatch![1]).toBe(testDirectory);
+  });
+});
+
+// ─── Wave 4: model_type Parameter Tests ─────────────────────────────────────
+
+describe('Wave 4: model_type parameter', () => {
+  let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
+
+  beforeEach(() => {
+    promptCalls = [];
+    currentTools = null;
+  });
+
+  describe('Task 4.1: Zod schema accepts model_type', () => {
+    it('should accept valid model_type values in schema', async () => {
+      const client = createMockClient({
+        pollOutputs: ['Task completed [TASK_COMPLETE]'],
+        promptCalls,
+      });
+
+      const options = createTestOptions(client);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Test each valid tier
+      const validTiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'];
+      
+      for (const tier of validTiers) {
+        const result = await tools.call_flow_agent.execute(
+          {
+            description: `test ${tier}`,
+            prompt: 'Test prompt',
+            subagent_type: 'build-executor',
+            run_in_background: false,
+            model_type: tier,
+          },
+          { sessionID: 'parent-session', directory: '/test' },
+        );
+
+        // Should not return error for valid model_type
+        const output = JSON.parse((result as { output: string }).output);
+        expect(output.success).toBe(true);
+      }
+    });
+  });
+
+  describe('Task 4.2: model_type resolution', () => {
+    it('sync mode: should route to ultra tier when model_type=ultra', async () => {
+      const client = createMockClient({
+        pollOutputs: ['Task completed [TASK_COMPLETE]'],
+        promptCalls,
+      });
+
+      const options = createTestOptions(client);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      await tools.call_flow_agent.execute(
+        {
+          description: 'ultra task',
+          prompt: 'Complex task',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+          model_type: 'ultra',
+        },
+        { sessionID: 'parent-session', directory: '/test' },
+      );
+
+      // Verify prompt was called
+      expect(promptCalls.length).toBeGreaterThan(0);
+      
+      // Verify body.model was injected with ultra tier model
+      const promptCall = promptCalls[0];
+      expect(promptCall.body.model).toBeDefined();
+      
+      // The model should be from ultra tier: 'provider/glm-5'
+      const expectedModel = DEFAULT_PROFILE_MODELS.ultra.model;
+      const [providerID, modelID] = expectedModel.split('/');
+      expect(promptCall.body.model).toEqual({ providerID, modelID });
+    });
+
+    it('async mode: should route to deep tier when model_type=deep', async () => {
+      const client = createMockClient({
+        pollOutputs: ['Task running'],
+        promptCalls,
+      });
+
+      const options = createTestOptions(client);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      const result = await tools.call_flow_agent.execute(
+        {
+          description: 'deep task',
+          prompt: 'Deep reasoning task',
+          subagent_type: 'spec-writer',
+          run_in_background: true,
+          model_type: 'deep',
+        },
+        { sessionID: 'parent-session', directory: '/test' },
+      );
+
+      // Verify async mode returns task_id
+      const output = JSON.parse((result as { output: string }).output);
+      expect(output.success).toBe(true);
+      expect(output.task_id).toBeDefined();
+
+      // Verify prompt was called
+      expect(promptCalls.length).toBeGreaterThan(0);
+      
+      // Verify body.model was injected with deep tier model
+      const promptCall = promptCalls[0];
+      expect(promptCall.body.model).toBeDefined();
+      
+      // The model should be from deep tier: 'provider/glm-5.1'
+      const expectedModel = DEFAULT_PROFILE_MODELS.deep.model;
+      const [providerID, modelID] = expectedModel.split('/');
+      expect(promptCall.body.model).toEqual({ providerID, modelID });
+    });
+
+    it('should fallback to AGENT_PROFILES when model_type is not provided', async () => {
+      const client = createMockClient({
+        pollOutputs: ['Task completed [TASK_COMPLETE]'],
+        promptCalls,
+      });
+
+      const options = createTestOptions(client);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Call without model_type - should use agentModelMap
+      await tools.call_flow_agent.execute(
+        {
+          description: 'standard task',
+          prompt: 'Standard task',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+        },
+        { sessionID: 'parent-session', directory: '/test' },
+      );
+
+      // Verify prompt was called
+      expect(promptCalls.length).toBeGreaterThan(0);
+      
+      // Verify body.model was injected
+      const promptCall = promptCalls[0];
+      expect(promptCall.body.model).toBeDefined();
+      
+      // Should use the model from agentModelMap (provider/test-model in test setup)
+      // Model is now in object format { providerID, modelID }
+      expect(promptCall.body.model).toEqual({ providerID: 'provider', modelID: 'test-model' });
+    });
+  });
+
+  describe('Task 4.3: body.model injection', () => {
+    it('should inject model in correct format (provider/modelID)', async () => {
+      const client = createMockClient({
+        pollOutputs: ['Task completed [TASK_COMPLETE]'],
+        promptCalls,
+      });
+
+      const options = createTestOptions(client);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      await tools.call_flow_agent.execute(
+        {
+          description: 'test injection',
+          prompt: 'Test prompt',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+          model_type: 'standard',
+        },
+        { sessionID: 'parent-session', directory: '/test' },
+      );
+
+      // Verify body.model was injected
+      expect(promptCalls.length).toBeGreaterThan(0);
+      const promptCall = promptCalls[0];
+      expect(promptCall.body.model).toBeDefined();
+      
+      // Verify format is object { providerID, modelID }
+      const model = promptCall.body.model as { providerID: string; modelID: string };
+      expect(typeof model).toBe('object');
+      expect(model.providerID).toBeDefined();
+      expect(model.modelID).toBeDefined();
+    });
+
+    it('should inject resolved model from resolveModelWithFallback', async () => {
+      const client = createMockClient({
+        pollOutputs: ['Task completed [TASK_COMPLETE]'],
+        promptCalls,
+      });
+
+      const options = createTestOptions(client);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Use ultra tier
+      await tools.call_flow_agent.execute(
+        {
+          description: 'ultra test',
+          prompt: 'Ultra complex task',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+          model_type: 'ultra',
+        },
+        { sessionID: 'parent-session', directory: '/test' },
+      );
+
+      // Verify the injected model matches resolveModelWithFallback result
+      const promptCall = promptCalls[0];
+      const injectedModel = promptCall.body.model as { providerID: string; modelID: string };
+      
+      // The model should be from ultra tier
+      const expectedModel = DEFAULT_PROFILE_MODELS.ultra.model;
+      const [providerID, modelID] = expectedModel.split('/');
+      expect(injectedModel).toEqual({ providerID, modelID });
+    });
+  });
+
+  describe('Task 4.4: invalid model_type validation', () => {
+    it('should return error for invalid model_type', async () => {
+      const client = createMockClient({
+        pollOutputs: ['Task completed'],
+        promptCalls,
+      });
+
+      const options = createTestOptions(client);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      const result = await tools.call_flow_agent.execute(
+        {
+          description: 'invalid test',
+          prompt: 'Test prompt',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+          model_type: 'invalid-tier',
+        },
+        { sessionID: 'parent-session', directory: '/test' },
+      );
+
+      // Should return error
+      const output = (result as { output: string }).output;
+      expect(output).toContain('invalid-tier');
+      expect(output).toContain('valid');
+      expect(output).toContain('free');
+      expect(output).toContain('quick');
+      expect(output).toContain('standard');
+      expect(output).toContain('deep');
+      expect(output).toContain('ultra');
+      expect(output).toContain('review');
+    });
+
+    it('should list all valid tiers in error message', async () => {
+      const client = createMockClient({
+        pollOutputs: ['Task completed'],
+        promptCalls,
+      });
+
+      const options = createTestOptions(client);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      const result = await tools.call_flow_agent.execute(
+        {
+          description: 'test',
+          prompt: 'Test',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+          model_type: 'nonexistent',
+        },
+        { sessionID: 'parent-session', directory: '/test' },
+      );
+
+      const output = (result as { output: string }).output;
+      // Verify all 6 tiers are mentioned
+      const validTiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'];
+      for (const tier of validTiers) {
+        expect(output).toContain(tier);
+      }
+    });
+  });
+});
+
+// ─── P0: model_type 路由优先级链测试 ─────────────────────────────────────────
+
+describe('P0: model_type routing priority chain', () => {
+  let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
+
+  beforeEach(() => {
+    promptCalls = [];
+  });
+
+  it('P0-1: should use user-configured modelProfiles when model_type is specified', async () => {
+    // 测试：当 model_type='deep' 时，应该优先使用 modelProfiles.deep.model
+    // 而不是直接使用 DEFAULT_PROFILE_MODELS.deep.model
+    const client = createMockClient({
+      pollOutputs: ['Task completed [TASK_COMPLETE]'],
+      promptCalls,
+    });
+
+    // 用户配置的 modelProfiles
+    const userModelProfiles = {
+      deep: { model: 'provider/user-custom-deep-model', fallback_models: [] },
+    };
+
+    const options = createTestOptions(client);
+    // 添加 modelProfiles 到选项中（这是我们需要添加的功能）
+    (options as any).modelProfiles = userModelProfiles;
+    (options as any).configOverrides = {};
+
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test deep tier',
+        prompt: 'Test prompt',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+        model_type: 'deep',
+      },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    // 验证使用了用户配置的模型
+    expect(promptCalls.length).toBeGreaterThan(0);
+    const lastCall = promptCalls[promptCalls.length - 1];
+    expect(lastCall.body.model).toEqual({
+      providerID: 'provider',
+      modelID: 'user-custom-deep-model',
+    });
+  });
+
+  it('P0-2: should use fallback chain when primary model is unavailable', async () => {
+    // 测试：当 tier model 不可用时，应该使用 fallback_models 链
+    const client = createMockClient({
+      pollOutputs: ['Task completed [TASK_COMPLETE]'],
+      promptCalls,
+    });
+
+    // 配置 primary model 不可用，但有 fallback
+    const userModelProfiles = {
+      deep: {
+        model: 'provider/unavailable-primary-model',
+        fallback_models: ['provider/fallback-model-1', 'provider/fallback-model-2'],
+      },
+    };
+
+    const options = createTestOptions(client);
+    (options as any).modelProfiles = userModelProfiles;
+    (options as any).configOverrides = {};
+
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    // 标记 primary model 为不可用
+    const { markModelUnavailable } = await import('../../agents/agent-builder.js');
+    markModelUnavailable('provider/unavailable-primary-model');
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test fallback',
+        prompt: 'Test prompt',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+        model_type: 'deep',
+      },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    // 验证使用了 fallback model
+    expect(promptCalls.length).toBeGreaterThan(0);
+    const lastCall = promptCalls[promptCalls.length - 1];
+    // 应该使用 fallback-model-1 或 fallback-model-2，而不是 unavailable-primary-model
+    const usedModel = lastCall.body.model as { providerID: string; modelID: string };
+    expect(usedModel.modelID).not.toContain('unavailable-primary-model');
+  });
+
+  it('P0-3: should use resolveModelWithFallback for model resolution', async () => {
+    // 测试：call_flow_agent 应该调用 resolveModelWithFallback
+    // 而不是直接读取 DEFAULT_PROFILE_MODELS
+    const client = createMockClient({
+      pollOutputs: ['Task completed [TASK_COMPLETE]'],
+      promptCalls,
+    });
+
+    const options = createTestOptions(client);
+    (options as any).modelProfiles = {};
+    (options as any).configOverrides = {};
+
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    // 使用 model_type='deep'
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test resolveModelWithFallback',
+        prompt: 'Test prompt',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+        model_type: 'deep',
+      },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    // 验证使用了 DEFAULT_PROFILE_MODELS.deep.model（因为没有用户配置）
+    expect(promptCalls.length).toBeGreaterThan(0);
+    const lastCall = promptCalls[promptCalls.length - 1];
+    const expectedModel = DEFAULT_PROFILE_MODELS.deep.model;
+    expect(lastCall.body.model).toEqual({
+      providerID: expectedModel.split('/')[0],
+      modelID: expectedModel.split('/')[1],
+    });
+  });
+
+  it('P0: should respect model_type over per-agent override', async () => {
+    // 测试：model_type 应该优先于 per-agent override
+    const client = createMockClient({
+      pollOutputs: ['Task completed [TASK_COMPLETE]'],
+      promptCalls,
+    });
+
+    const options = createTestOptions(client);
+    (options as any).modelProfiles = {
+      deep: { model: 'provider/tier-deep-model', fallback_models: [] },
+    };
+    // per-agent override (lower priority than model_type)
+    (options as any).configOverrides = {
+      'build-executor': { model: 'provider/per-agent-override-model' },
+    };
+
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test model_type priority',
+        prompt: 'Test prompt',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+        model_type: 'deep',
+      },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    // 验证使用了 model_type 指定的 tier model，而不是 per-agent override
+    expect(promptCalls.length).toBeGreaterThan(0);
+    const lastCall = promptCalls[promptCalls.length - 1];
+    expect(lastCall.body.model).toEqual({
+      providerID: 'provider',
+      modelID: 'tier-deep-model',
+    });
   });
 });

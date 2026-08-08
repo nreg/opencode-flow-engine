@@ -22,3 +22,8 @@ bin-release/
 /packages/shared/dist/
 *.tsbuildinfo
 /archive/
+
+# Runtime workflow state (subagent notifications, state files)
+.flow-engine/
+**/.flow-engine/
+

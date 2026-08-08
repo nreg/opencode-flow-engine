@@ -56,6 +56,28 @@ let backgroundTaskCounter = { value: 0 };
 
 // ─── Agent model map (populated during config hook) ───────────────────────────
 
+/**
+ * AGENT_MODEL_MAP stores the resolved model for each agent.
+ * 
+ * Population logic (during config hook):
+ * 1. For each agent, call resolveModelWithFallback with full priority chain:
+ *    - configOverrides per-agent override (highest priority)
+ *    - AGENT_PROFILES static binding → tier resolution
+ *    - modelProfiles user-configured tier model
+ *    - DEFAULT_PROFILE_MODELS tier model
+ *    - Fallback chain (per-agent → tier → DEFAULT_PROFILE_MODELS → DEFAULT_FALLBACKS)
+ * 2. Store the resolved model in AGENT_MODEL_MAP[agentName]
+ * 
+ * Usage:
+ * - call_flow_agent uses AGENT_MODEL_MAP when model_type is NOT specified
+ * - When model_type IS specified, call_flow_agent calls resolveModelWithFallback directly
+ *   to respect the per-call model_type override
+ * 
+ * This ensures:
+ * - Consistency: All agents use the same resolution logic
+ * - Traceability: Model resolution happens once during config, not per-call
+ * - Flexibility: Per-call model_type override is still supported
+ */
 const AGENT_MODEL_MAP: AgentModelMap = {};
 
 // ─── SFlow tool sub-factories ──────────────────────────────────────────────
@@ -313,7 +335,11 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
 
 // ─── SFlow tool definitions ──────────────────────────────────────────────────
 
-export function createSFlowTools(client: SFlowClient): Record<string, LocalToolDefinition> {
+export function createSFlowTools(
+  client: SFlowClient,
+  modelProfiles?: import('./agents/config-loader.js').ModelProfileConfig,
+  configOverrides?: import('./agents/types.js').AgentOverrides,
+): Record<string, LocalToolDefinition> {
   // createCallFlowAgentTools returns Record<string, ToolDefinition> (zod v4 types)
   // We need Record<string, LocalToolDefinition> (zod v3 compatible)
   // The double assertion is necessary because ToolDefinition and LocalToolDefinition
@@ -326,6 +352,8 @@ export function createSFlowTools(client: SFlowClient): Record<string, LocalToolD
     agentModelMap: AGENT_MODEL_MAP,
     sessionLabelPrefix: 'sFlow',
     workflowName: 'SFlow',
+    modelProfiles,
+    configOverrides,
     validateAgent: (subagentType) => {
       const sharedNames = SHARED_AGENT_NAMES as readonly string[];
       if (sharedNames.includes(subagentType as string)) return null;
@@ -377,7 +405,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
       const readFilePaths = new Map<string, string>();
 
       // Build tool definitions using @opencode-ai/plugin format
-      const tools = createSFlowTools(sflowClient);
+      const tools = createSFlowTools(sflowClient, cascadedConfig.modelProfiles, configOverrides);
       const validatorTools = createValidatorTools();
       const workflowTools = createWorkflowTools();
       Object.assign(tools, validatorTools, workflowTools);

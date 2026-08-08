@@ -300,7 +300,8 @@ export function createWorkflowRouterTool(): ToolDefinition {
     },
     execute: async (params, context) => {
       const p = params as { changeDir?: string; intent?: string };
-      const changeDir = await findActiveChangeDir(p.changeDir, resolveChangeDir(undefined, context.directory));
+      const fallbackDir = resolveChangeDir(undefined, context.directory);
+      const changeDir = await findActiveChangeDir(p.changeDir || fallbackDir || context.directory, fallbackDir || context.directory);
       const userIntent = p.intent || '';
 
       // Phase 0: Horizontal command detection

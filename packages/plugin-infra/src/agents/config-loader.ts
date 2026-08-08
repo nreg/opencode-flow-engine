@@ -15,11 +15,22 @@ export interface AgentConfigEntry {
 }
 
 export interface ModelProfileConfig {
-  mechanical?: string;
-  standard?: string;
-  strong?: string;
-  review?: string;
+  free?: { model: string; fallback_models: string[] };
+  quick?: { model: string; fallback_models: string[] };
+  standard?: { model: string; fallback_models: string[] };
+  deep?: { model: string; fallback_models: string[] };
+  ultra?: { model: string; fallback_models: string[] };
+  review?: { model: string; fallback_models: string[] };
 }
+
+export const DEFAULT_PROFILE_MODELS: Required<ModelProfileConfig> = {
+  free: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
+  quick: { model: 'provider/mimo-v2.5', fallback_models: [] },
+  standard: { model: 'provider/kimi-k2.6', fallback_models: [] },
+  deep: { model: 'provider/glm-5.1', fallback_models: [] },
+  ultra: { model: 'provider/glm-5', fallback_models: [] },
+  review: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
+};
 
 export interface SFlowConfig {
   version?: string;
@@ -91,12 +102,33 @@ export async function loadCascadedSFlowConfig(projectDir?: string): Promise<SFlo
   const user = await loadUserSFlowConfig();
   const project = await loadSFlowConfig(projectDir);
 
-  if (Object.keys(project).length === 0) return user;
+  const merged = Object.keys(project).length === 0
+    ? user
+    : deepMerge(
+        user as Record<string, unknown>,
+        project as Record<string, unknown>,
+      ) as SFlowConfig;
 
-  return deepMerge(
-    user as Record<string, unknown>,
-    project as Record<string, unknown>,
-  ) as SFlowConfig;
+  // Legacy format detection (Spec R2)
+  // The 4-tier system (mechanical/standard/strong/review) has been replaced by
+  // 6-tier (free/quick/standard/deep/ultra/review)
+  if (merged.modelProfiles) {
+    const legacyTiers = ['mechanical', 'strong'];
+    for (const tier of legacyTiers) {
+      if (tier in merged.modelProfiles) {
+        console.warn(
+          `[sflow] Legacy tier "${tier}" detected in modelProfiles. ` +
+          `The 4-tier system (mechanical/standard/strong/review) has been replaced by ` +
+          `6-tier (free/quick/standard/deep/ultra/review). ` +
+          `Please update your config. Falling back to DEFAULT_PROFILE_MODELS for this tier.`,
+        );
+        // Remove legacy key to prevent usage
+        delete (merged.modelProfiles as Record<string, unknown>)[tier];
+      }
+    }
+  }
+
+  return merged;
 }
 
 /**
@@ -284,10 +316,12 @@ export function generateConfigTemplate(): SFlowConfig {
       artifact_inspector: true,
     },
     modelProfiles: {
-      mechanical: 'fast-cheap-model',
-      standard: 'balanced-model',
-      strong: 'powerful-model',
-      review: 'review-specialized-model',
+      free: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
+      quick: { model: 'provider/mimo-v2.5', fallback_models: [] },
+      standard: { model: 'provider/kimi-k2.6', fallback_models: [] },
+      deep: { model: 'provider/glm-5.1', fallback_models: [] },
+      ultra: { model: 'provider/glm-5', fallback_models: [] },
+      review: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
     },
   };
 }

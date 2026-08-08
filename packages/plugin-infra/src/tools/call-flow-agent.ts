@@ -29,9 +29,34 @@ import type {
 } from '../types.js';
 import { formatToolError, generateTaskId } from '../types.js';
 import type { ToolDefinition } from './types.js';
+import { DEFAULT_PROFILE_MODELS } from '../agents/config-loader.js';
+import { resolveModelWithFallback } from '../agents/agent-builder.js';
+import type { BuiltinAgentName } from '../agents/types.js';
 
 /** Maximum concurrent subagent sessions of the same type */
 const MAX_CONCURRENT_SUBAGENTS = 3;
+
+/**
+ * Parse model string 'provider/modelID' into SDK v1 format { providerID, modelID }
+ * Returns null if the string is not in expected format, with warning logged
+ */
+function parseModelString(modelString: string): { providerID: string; modelID: string } | null {
+  const parts = modelString.split('/');
+  if (parts.length !== 2) {
+    console.warn(
+      `[parseModelString] Invalid model format: "${modelString}". Expected "provider/modelID" (exactly one '/' separator)`,
+    );
+    return null;
+  }
+  const [providerID, modelID] = parts;
+  if (!providerID || !modelID) {
+    console.warn(
+      `[parseModelString] Empty provider or modelID: "${modelString}". Both parts must be non-empty`,
+    );
+    return null;
+  }
+  return { providerID, modelID };
+}
 
 /** Tracks running subagent count per subagent type */
 const runningSubagentCounts = new Map<string, number>();
@@ -286,6 +311,10 @@ export interface CallFlowAgentOptions {
   ) => Promise<string | null> | string | null;
   /** Tool description prefix for the call_flow_agent tool */
   workflowName: string;
+  /** Model profiles configuration (for tier-based model resolution) */
+  modelProfiles?: import('./../agents/config-loader.js').ModelProfileConfig;
+  /** Per-agent configuration overrides */
+  configOverrides?: import('./../agents/types.js').AgentOverrides;
 }
 
 /**
@@ -305,6 +334,8 @@ export function createCallFlowAgentTools(
     sessionLabelPrefix,
     validateAgent,
     workflowName,
+    modelProfiles,
+    configOverrides,
   } = options;
 
   // Resolve session label: support both static string and dynamic function
@@ -345,6 +376,12 @@ export function createCallFlowAgentTools(
         .describe(
           'Output mode: last_message (default, return raw text) or structured (extract JSON block from output)',
         ),
+      model_type: z
+        .string()
+        .optional()
+        .describe(
+          'Model tier to use for this call (free/quick/standard/deep/ultra/review). Overrides agent static binding.',
+        ),
     } as Record<string, unknown>,
     execute: async (args, context) => {
       const changeDir = resolveChangeDir(undefined, context.directory);
@@ -356,6 +393,7 @@ export function createCallFlowAgentTools(
         description,
         agent_id,
         output_mode,
+        model_type,
       } = args;
 
       // Validate agent name
@@ -365,6 +403,13 @@ export function createCallFlowAgentTools(
       );
       if (validationError) {
         return await formatToolError(validationError);
+      }
+
+      const validTiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'];
+      if (model_type && !validTiers.includes(model_type as string)) {
+        return await formatToolError(
+          `Invalid model_type "${model_type}". Valid tiers are: ${validTiers.join(', ')}`,
+        );
       }
 
       // Detect multi-wave packing in build-executor prompts (constraint violation)
@@ -403,6 +448,38 @@ export function createCallFlowAgentTools(
         let isNew = false;
         let effectivePrompt = prompt as string;
         let resolvedAgentId = agent_id as string | undefined;
+        
+        // Model resolution strategy:
+        // - If model_type is specified: use resolveModelWithFallback to respect the full priority chain
+        // - Otherwise: use agentModelMap (pre-resolved during config hook)
+        let subagentModel: string;
+        if (model_type) {
+          // Use resolveModelWithFallback for model_type routing
+          // This ensures model_type routing respects the full priority chain:
+          // 1. configOverrides per-agent override (highest priority)
+          // 2. model_type explicit parameter (tier signal)
+          // 3. modelProfiles user-configured tier model
+          // 4. DEFAULT_PROFILE_MODELS tier model
+          // 5. Fallback chain (per-agent → tier → DEFAULT_PROFILE_MODELS → DEFAULT_FALLBACKS)
+          const result = resolveModelWithFallback(
+            subagent_type as BuiltinAgentName,
+            undefined,
+            configOverrides,
+            undefined,
+            { modelProfiles, activeWorkflow: 'sflow' },
+            model_type as string | undefined,
+          );
+          subagentModel = result.model;
+        } else {
+          // Use pre-resolved model from agentModelMap (populated during config hook)
+          const modelFromMap = agentModelMap[subagent_type as string];
+          if (!modelFromMap) {
+            return await formatToolError(
+              `No model configured for subagent "${subagent_type}". Available agents: ${Object.keys(agentModelMap).join(', ')}`,
+            );
+          }
+          subagentModel = modelFromMap;
+        }
 
         // P1: Resume 模式 — 传入 agent_id 时从 subagent-store 恢复上下文
         if (agent_id) {
@@ -424,12 +501,6 @@ export function createCallFlowAgentTools(
           }
           sessionID = session_id as string;
         } else {
-          const subagentModel = agentModelMap[subagent_type as string];
-          if (!subagentModel) {
-            return await formatToolError(
-              `No model configured for subagent "${subagent_type}". Available agents: ${Object.keys(agentModelMap).join(', ')}`,
-            );
-          }
 
           const createResult = await (
             client.session.create as (args: {
@@ -464,6 +535,14 @@ export function createCallFlowAgentTools(
           }
         }
 
+        // Parse model string and validate format
+        const parsedModel = parseModelString(subagentModel);
+        if (!parsedModel) {
+          return await formatToolError(
+            `Invalid model format: "${subagentModel}". Expected "provider/modelID" (e.g., "provider/glm-5")`,
+          );
+        }
+
         await (
           client.session.prompt as (args: {
             path: { id: string };
@@ -474,6 +553,7 @@ export function createCallFlowAgentTools(
           body: {
             agent: subagent_type as string,
             parts: [{ type: 'text', text: finalPrompt }],
+            model: parsedModel,
           },
         }).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
@@ -512,6 +592,8 @@ export function createCallFlowAgentTools(
             createdAt: Date.now(),
             output_mode: output_mode as 'last_message' | 'structured' | undefined,
             changeDir,
+            resolvedModel: subagentModel,
+            modelType: model_type as string | undefined,
           });
 
           // P1: 追加 started 事件
@@ -595,6 +677,7 @@ export function createCallFlowAgentTools(
               body: {
                 agent: subagent_type as string,
                 parts: REMINDER_MESSAGE.parts,
+                model: parseModelString(subagentModel),
               },
             });
           },

@@ -239,7 +239,7 @@ The `validate_ui_design` tool checks ui-design.md for 7 quality gates:
 | Tool | Description |
 |------|-------------|
 | `workflow_router` / `iflow_router` | State detection and subagent routing |
-| `call_flow_agent` | **Core**: delegates tasks to subagents (sync/async). Supports `output_mode` (last_message \| structured) for JSON extraction and `agent_id` for resume from subagent store |
+| `call_flow_agent` | **Core**: delegates tasks to subagents (sync/async). Supports `output_mode` (last_message \| structured) for JSON extraction, `agent_id` for resume from subagent store, and optional `model_type` (free/quick/standard/deep/ultra/review) for per-call dynamic model tier routing |
 | `flowagent_output` / `flowagent_cancel` | Async task management |
 | `contract_validator` / `artifact_inspector` | Artifact validation |
 | `record_decision_point` | Decision point recording (DP-0 to DP-5) |
@@ -391,14 +391,18 @@ AFK (Away From Keyboard) mode enables automated workflow execution without user 
 
 ### Model Profiles
 
-4-layer model resolution: `override → config → profile → fallback → default`
+6-tier model resolution: `override → model → model_type → config → profile → fallback → default`
 
-| Profile | Purpose | Typical Agents |
-|---------|---------|----------------|
-| `mechanical` | Fast, cheap | release-archivist |
-| `standard` | Balanced | sFlow, need-explorer, ui-implementer |
-| `strong` | Powerful | spec-writer, contract-builder, build-executor |
-| `review` | Specialized | code-reviewer |
+| Tier | Purpose | Typical Agents |
+|------|---------|----------------|
+| `free` | Single-line fixes / trivial edits (dynamic routing target) | — |
+| `quick` | Mechanical execution (archive/format), explore | release-archivist |
+| `standard` | General orchestration / exploration | sFlow, need-explorer, ui-director, spec-merger, ui-implementer, flow-intel, flow-evolve |
+| `deep` | Strongest code capability | spec-writer, contract-builder, build-executor, bug-investigator, ui-implementer, flow-architect, flow-restyle |
+| `ultra` | Complex wave tasks / long context 512K-1M (dynamic routing target) | — |
+| `review` | Review-specialized (role tier) | code-reviewer, test-engineer, review-engineer, flow-health |
+
+`free` and `ultra` have no static agent binding — they are dynamic routing targets selected via the optional `model_type` parameter of `call_flow_agent`. Primary agents (sFlow/iFlow) bypass tier resolution and use per-agent `agents` config only.
 
 ---
 
@@ -448,10 +452,12 @@ sflow init --user
     "iflow-shipper": { "model": "your-provider/glm-5.1", "temperature": 0.6 }
   },
   "modelProfiles": {
-    "mechanical": "your-provider/step-3.7-flash",
-    "standard": "your-provider/glm-5.1",
-    "strong": "your-provider/glm-5.1",
-    "review": "your-provider/glm-5.1"
+    "free": { "model": "your-provider/step-3.7-flash", "fallback_models": [] },
+    "quick": { "model": "your-provider/deepseek-v4-flash", "fallback_models": [] },
+    "standard": { "model": "your-provider/glm-5.1", "fallback_models": [] },
+    "deep": { "model": "your-provider/glm-5.1", "fallback_models": [] },
+    "ultra": { "model": "your-provider/long-context-model", "fallback_models": [] },
+    "review": { "model": "your-provider/glm-5.1", "fallback_models": [] }
   }
 }
 ```

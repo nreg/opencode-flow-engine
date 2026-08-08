@@ -239,7 +239,7 @@ Step 7: 反 AI-slop 检查  → 8 类 42 条规则
 | 工具 | 说明 |
 |------|------|
 | `workflow_router` / `iflow_router` | 状态检测和子智能体路由 |
-| `call_flow_agent` | **核心**：向子智能体委派任务（同步/异步）。支持 `output_mode`（last_message \| structured）JSON 提取和 `agent_id` resume 恢复 |
+| `call_flow_agent` | **核心**：向子智能体委派任务（同步/异步）。支持 `output_mode`（last_message \| structured）JSON 提取、`agent_id` resume 恢复，以及可选 `model_type`（free/quick/standard/deep/ultra/review）实现 per-call 动态模型档位路由 |
 | `flowagent_output` / `flowagent_cancel` | 异步任务管理 |
 | `contract_validator` / `artifact_inspector` | 产物校验 |
 | `record_decision_point` | 决策点记录（DP-0 至 DP-5） |
@@ -391,14 +391,18 @@ AFK (Away From Keyboard) 模式允许工作流自动推进，无需用户手动�
 
 ### 模型 Profile
 
-4 层模型解析：`override → config → profile → fallback → default`
+6 层模型解析：`override → model → model_type → config → profile → fallback → default`
 
-| Profile | 用途 | 典型智能体 |
-|---------|------|-----------|
-| `mechanical` | 快速廉价 | release-archivist |
-| `standard` | 均衡 | sFlow, need-explorer, ui-implementer |
-| `strong` | 强力 | spec-writer, contract-builder, build-executor |
-| `review` | 审查专用 | code-reviewer |
+| 档位 | 用途 | 典型智能体 |
+|------|------|-----------|
+| `free` | 单行修复/零散小改（动态路由目标） | — |
+| `quick` | 机械性执行（归档/格式化）、explore 探索 | release-archivist |
+| `standard` | 通用编排/探索 | sFlow, need-explorer, ui-director, spec-merger, ui-implementer, flow-intel, flow-evolve |
+| `deep` | 最强代码能力 | spec-writer, contract-builder, build-executor, bug-investigator, ui-implementer, flow-architect, flow-restyle |
+| `ultra` | 复杂波次任务/长上下文 512K-1M（动态路由目标） | — |
+| `review` | 审查专用（角色档） | code-reviewer, test-engineer, review-engineer, flow-health |
+
+`free` 和 `ultra` 无静态智能体绑定——它们是动态路由目标，通过 `call_flow_agent` 的可选 `model_type` 参数选择。主智能体（sFlow/iFlow）绕过档位解析，仅使用 `agents` 配置。
 
 ---
 
@@ -448,10 +452,12 @@ sflow init --user
     "iflow-shipper": { "model": "your-provider/glm-5.1", "temperature": 0.6 }
   },
   "modelProfiles": {
-    "mechanical": "your-provider/step-3.7-flash",
-    "standard": "your-provider/glm-5.1",
-    "strong": "your-provider/glm-5.1",
-    "review": "your-provider/glm-5.1"
+    "free": { "model": "your-provider/step-3.7-flash", "fallback_models": [] },
+    "quick": { "model": "your-provider/deepseek-v4-flash", "fallback_models": [] },
+    "standard": { "model": "your-provider/glm-5.1", "fallback_models": [] },
+    "deep": { "model": "your-provider/glm-5.1", "fallback_models": [] },
+    "ultra": { "model": "your-provider/long-context-model", "fallback_models": [] },
+    "review": { "model": "your-provider/glm-5.1", "fallback_models": [] }
   }
 }
 ```

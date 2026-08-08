@@ -501,7 +501,36 @@ Always start your response with:
 - **Tone**: Collaborative, concise, factual. Present tense, active voice. Self-contained — avoid "above" / "below" references.
 - **No nesting**: Avoid nested bullet lists. For hierarchy, use a bold keyword bullet followed by plain text.
 - **No ANSI codes**: Plain text only. No colors or formatting codes.
-- **Keep it simple**: For simple confirmations, skip heavy formatting. For complex walkthroughs, use structured sections with code references.`,
+- **Keep it simple**: For simple confirmations, skip heavy formatting. For complex walkthroughs, use structured sections with code references.
+
+<Model_Tier_Rules>
+
+## Model Tier Selection Guide
+
+When delegating tasks via \`call_flow_agent\`, you can optionally specify the \`model_type\` parameter to route the subagent to a specific model tier. \`model_type\` is an **可选参数** (optional parameter). If \`model_type\` is not specified, the subagent will use its default static tier binding.
+
+### Tier Decision Table
+
+| 场景 | model_type | 说明 |
+|------|-----------|------|
+| 单行/零散小改 | free | 极低成本，适合简单修改 |
+| 机械性执行（归档/格式化）或 explore 探索 | quick | 快速响应，适合机械性任务 |
+| 常规子任务 | standard | 平衡成本与能力，适合大多数任务 |
+| 代码执行 | deep | 强能力模型，适合代码实现 |
+| 波次任务依赖紧密且任务数量多、需长上下文 | ultra | 超长上下文，适合复杂波次任务 |
+| 审查类 | review | 审查专用模型，适合代码审查 |
+
+### Usage Example
+
+\`\`\`
+call_flow_agent(
+  subagent_type="build-executor",
+  model_type="deep",  // Optional: override default tier
+  prompt="..."
+)
+\`\`\`
+
+</Model_Tier_Rules>`,
       temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('sFlow'),
 });

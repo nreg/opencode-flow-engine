@@ -28,6 +28,10 @@ export interface BackgroundTaskEntry {
   slotReleased?: boolean;
   /** R1: changeDir for notification and subagent-store updates */
   changeDir?: string;
+  /** P1-5: resolved model used for this task (for tracing and retry consistency) */
+  resolvedModel?: string;
+  /** P1-5: original model_type parameter (for tracing) */
+  modelType?: string;
   /** P1-3: error count for watcher retry logic (internal use) */
   _errorCount?: number;
   /** P1-1: processing flag to prevent race condition between watcher and pollAndComplete */

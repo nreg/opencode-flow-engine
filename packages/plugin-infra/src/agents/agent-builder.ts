@@ -6,6 +6,16 @@
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory, AgentMode, BuiltinAgentName, AgentOverrides } from './types.js';
 import type { SFlowConfig, ModelProfileConfig } from './config-loader.js';
+
+/**
+ * Model tier names (6-tier system)
+ */
+export type ModelTier = 'free' | 'quick' | 'standard' | 'deep' | 'ultra' | 'review';
+
+/**
+ * Valid model tier set for validation
+ */
+export const VALID_MODEL_TIERS: Set<ModelTier> = new Set(['free', 'quick', 'standard', 'deep', 'ultra', 'review']);
 import {
   createSFlowAgent,
   createNeedExplorerAgent,
@@ -40,6 +50,7 @@ import {
   loadCascadedSFlowConfig,
   agentOverridesFromConfig,
   mergeOverrides,
+  DEFAULT_PROFILE_MODELS,
 } from './config-loader.js';
 
 /**
@@ -150,31 +161,39 @@ const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
 /**
  * Agent profile mappings — maps each agent to its default model profile.
  * Used by resolveModelWithFallback to resolve model via modelProfiles config.
+ * 
+ * 6-tier system: free, quick, standard, deep, ultra, review
+ * - free, ultra: dynamic routing targets, no static binding
+ * - quick, standard, deep, review: static agent bindings
+ * - sFlow, iFlow: primary agents, NOT in AGENT_PROFILES (bypass tier resolution)
  */
-export type AGENT_PROFILES_TYPE = Record<string, 'mechanical' | 'standard' | 'strong' | 'review'>;
+export type AGENT_PROFILES_TYPE = Record<string, 'free' | 'quick' | 'standard' | 'deep' | 'ultra' | 'review'>;
 
 export const AGENT_PROFILES: AGENT_PROFILES_TYPE = {
-  // SFlow
-  sFlow: 'standard',
+  // quick tier - mechanical execution, archive, explore
+  'release-archivist': 'quick',
+  
+  // standard tier - regular subtasks
   'need-explorer': 'standard',
-  'spec-writer': 'strong',
-  'contract-builder': 'strong',
-  'build-executor': 'strong',
-  'bug-investigator': 'strong',
-  'code-reviewer': 'review',
-  'release-archivist': 'mechanical',
+  'ui-director': 'standard',
   'spec-merger': 'standard',
-  'ui-director': 'strong',
-  'ui-implementer': 'standard',
-  // Shared (cross-workflow)
+  'flow-intel': 'standard',
+  'flow-evolve': 'standard',
+  
+  // deep tier - code execution, complex tasks
+  'spec-writer': 'deep',
+  'contract-builder': 'deep',
+  'build-executor': 'deep',
+  'bug-investigator': 'deep',
+  'ui-implementer': 'deep',
+  'flow-architect': 'deep',
+  'flow-restyle': 'deep',
+  
+  // review tier - review tasks
+  'code-reviewer': 'review',
   'test-engineer': 'review',
   'review-engineer': 'review',
-  // Horizontal commands
-  'flow-intel': 'standard',
-  'flow-architect': 'strong',
-  'flow-evolve': 'standard',
   'flow-health': 'review',
-  'flow-restyle': 'strong',
 };
 
 /**
@@ -301,9 +320,46 @@ export interface ProfileResolutionOptions {
 }
 
 /**
+ * Build fallback chain in R9 order: per-agent → user tier → default tier → DEFAULT_FALLBACKS
+ */
+function buildFallbackChain(
+  configFallbackList: string[],
+  userTierFallbacks: string[],
+  defaultTierFallbacks: string[],
+  defaultFallbackList: string[],
+): string[] {
+  return [...configFallbackList, ...userTierFallbacks, ...defaultTierFallbacks, ...defaultFallbackList];
+}
+
+/**
+ * Try fallback chain and return first available model.
+ */
+function tryFallbackChain(
+  primaryModel: string,
+  fallbacks: string[],
+): { model: string; attempted: string[] } | null {
+  const attempted: string[] = [primaryModel];
+  for (const fbModel of fallbacks) {
+    attempted.push(fbModel);
+    if (isModelAvailable(fbModel)) {
+      return { model: fbModel, attempted };
+    }
+  }
+  return null;
+}
+
+/**
  * Resolve model with fallback chain and provenance tracking.
  *
- * Priority: override.model > model param > configModel > profile > fallback > DEFAULT_MODELS[name]
+ * Priority chain (from highest to lowest):
+ * 1. Programmatic override (overrides?.[name]?.model) → 'override'
+ * 2. model parameter → 'override'
+ * 3. modelType explicit parameter → use tier model resolution
+ * 4. configModel (configOverrides?.[name]?.model) → 'config-override' (skip tier resolution)
+ * 5. AGENT_PROFILES[name] static binding → tier model → 'profile'
+ * 6. Fallback chain (per-agent → tier → DEFAULT_PROFILE_MODELS → DEFAULT_FALLBACKS)
+ * 7. DEFAULT_MODELS[name] → 'system-default'
+ *
  * Provenance is tracked to help diagnose model selection issues.
  */
 export function resolveModelWithFallback(
@@ -312,48 +368,116 @@ export function resolveModelWithFallback(
   configOverrides?: AgentOverrides,
   overrides?: AgentOverrides,
   profileOptions?: ProfileResolutionOptions,
+  modelType?: string,
 ): ModelResolutionResult {
   const programmaticModel = overrides?.[name]?.model;
   const configModel = configOverrides?.[name]?.model;
 
+  // Priority 1: Programmatic override
   if (programmaticModel) {
     return { model: programmaticModel, provenance: 'override' };
   }
 
+  // Priority 2: model parameter
   if (model) {
     return { model, provenance: 'override' };
   }
 
+  // Priority 3: modelType parameter (highest priority tier signal)
+  // When modelType is specified, it overrides per-agent config and AGENT_PROFILES
+  if (modelType && VALID_MODEL_TIERS.has(modelType as ModelTier)) {
+    const tier = modelType as ModelTier;
+    const tierConfig = profileOptions?.modelProfiles?.[tier] ?? DEFAULT_PROFILE_MODELS[tier];
+    if (tierConfig?.model) {
+      if (isModelAvailable(tierConfig.model)) {
+        return { model: tierConfig.model, provenance: 'profile' };
+      }
+      // Build complete fallback chain for modelType tier
+      const userTierFallbacks = tierConfig.fallback_models || [];
+      const defaultTierFallbacks = DEFAULT_PROFILE_MODELS[tier]?.fallback_models || [];
+      const configFallbackList = normalizeFallbackList(configOverrides?.[name]?.fallback_models);
+      const defaultFallbackList = DEFAULT_FALLBACKS[name] || [];
+
+      const fallbacks = buildFallbackChain(configFallbackList, userTierFallbacks, defaultTierFallbacks, defaultFallbackList);
+      const result = tryFallbackChain(tierConfig.model, fallbacks);
+      
+      if (result) {
+        return { model: result.model, provenance: 'provider-fallback', fallbackAttempted: result.attempted };
+      }
+      // All fallbacks exhausted, return system default
+      const systemDefault = DEFAULT_MODELS[name];
+      return {
+        model: systemDefault,
+        provenance: 'system-default',
+        fallbackAttempted: [tierConfig.model, ...fallbacks],
+      };
+    }
+  }
+
+  // Priority 4: configModel (per-agent override, used when no modelType specified)
   if (configModel) {
     if (isModelAvailable(configModel)) {
       return { model: configModel, provenance: 'config-override' };
     }
+    // configModel unavailable, try per-agent fallbacks first
+    const configFallbackList = normalizeFallbackList(configOverrides?.[name]?.fallback_models);
+    const attempted: string[] = [configModel];
+    for (const fbModel of configFallbackList) {
+      attempted.push(fbModel);
+      if (isModelAvailable(fbModel)) {
+        return { model: fbModel, provenance: 'provider-fallback', fallbackAttempted: attempted };
+      }
+    }
+    // per-agent fallbacks exhausted, continue to tier resolution
   }
 
-  // Profile resolution step: only when activeWorkflow is sflow
-  if (profileOptions?.activeWorkflow === 'sflow' && profileOptions?.modelProfiles) {
-    const agentProfile = AGENT_PROFILES[name];
-    if (agentProfile && profileOptions.modelProfiles[agentProfile]) {
-      const profileModel = profileOptions.modelProfiles[agentProfile]!;
-      if (isModelAvailable(profileModel)) {
-        return { model: profileModel, provenance: 'profile' };
+  // Priority 5: AGENT_PROFILES static binding → tier resolution
+  let primaryModel: string | undefined;
+  const agentProfile = AGENT_PROFILES[name];
+  if (profileOptions?.activeWorkflow === 'sflow' && agentProfile) {
+    const tierConfig = profileOptions?.modelProfiles?.[agentProfile] ?? DEFAULT_PROFILE_MODELS[agentProfile];
+    if (tierConfig?.model) {
+      if (isModelAvailable(tierConfig.model)) {
+        return { model: tierConfig.model, provenance: 'profile' };
+      }
+      primaryModel = tierConfig.model; // Remember for fallback chain
+    }
+  }
+
+  // Priority 6: Fallback chain
+  // Build fallback chain in order: per-agent → user tier → default tier → DEFAULT_FALLBACKS
+  const configFallback = configOverrides?.[name]?.fallback_models;
+  const configFallbackList = normalizeFallbackList(configFallback);
+
+  // Add tier-level fallbacks (if agent has a profile)
+  let tierFallbackList: string[] = [];
+  if (agentProfile) {
+    const userTierFallbacks = profileOptions?.modelProfiles?.[agentProfile]?.fallback_models || [];
+    const defaultTierFallbacks = DEFAULT_PROFILE_MODELS[agentProfile]?.fallback_models || [];
+    tierFallbackList = [...userTierFallbacks, ...defaultTierFallbacks];
+  }
+
+  const defaultFallbackList = DEFAULT_FALLBACKS[name] || [];
+  const fallbacks = buildFallbackChain(configFallbackList, tierFallbackList, [], defaultFallbackList);
+
+  let attempted: string[] = [];
+  if (primaryModel) {
+    const result = tryFallbackChain(primaryModel, fallbacks);
+    if (result) {
+      return { model: result.model, provenance: 'provider-fallback', fallbackAttempted: result.attempted };
+    }
+    attempted = [primaryModel, ...fallbacks];
+  } else {
+    // No primary model, try fallbacks directly
+    for (const fbModel of fallbacks) {
+      attempted.push(fbModel);
+      if (isModelAvailable(fbModel)) {
+        return { model: fbModel, provenance: 'provider-fallback', fallbackAttempted: attempted };
       }
     }
   }
 
-  const configFallback = configOverrides?.[name]?.fallback_models;
-  const configFallbackList = normalizeFallbackList(configFallback);
-  const defaultFallbackList = DEFAULT_FALLBACKS[name] || [];
-  const fallbacks = [...configFallbackList, ...defaultFallbackList];
-
-  const attempted: string[] = [];
-  for (const fbModel of fallbacks) {
-    attempted.push(fbModel);
-    if (isModelAvailable(fbModel)) {
-      return { model: fbModel, provenance: 'provider-fallback', fallbackAttempted: attempted };
-    }
-  }
-
+  // Priority 7: System default
   const systemDefault = DEFAULT_MODELS[name];
   return {
     model: systemDefault,

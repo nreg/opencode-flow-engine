@@ -46,7 +46,11 @@ const AGENT_MODEL_MAP: AgentModelMap = {};
 
 // ─── IFlow tool definitions ──────────────────────────────────────────────────
 
-function createIFlowTools(client: SFlowClient): Record<string, LocalToolDefinition> {
+function createIFlowTools(
+  client: SFlowClient,
+  modelProfiles?: import('./agents/config-loader.js').ModelProfileConfig,
+  configOverrides?: import('./agents/types.js').AgentOverrides,
+): Record<string, LocalToolDefinition> {
   const sharedTools = createCallFlowAgentTools({
     client,
     backgroundTaskRegistry,
@@ -54,6 +58,8 @@ function createIFlowTools(client: SFlowClient): Record<string, LocalToolDefiniti
     agentModelMap: AGENT_MODEL_MAP,
     sessionLabelPrefix: 'iFlow',
     workflowName: 'IFlow',
+    modelProfiles,
+    configOverrides,
     validateAgent: (subagentType) => {
       const sharedNames = SHARED_AGENT_NAMES as readonly string[];
       if (sharedNames.includes(subagentType as string)) return null;
@@ -96,7 +102,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
     const taskTracker = createTaskTracker(undefined, '.flow-engine/iflow/subagent-tracker.json');
 
     // Build IFlow tool definitions
-    const tools = createIFlowTools(sflowClient);
+    const tools = createIFlowTools(sflowClient, cascadedConfig.modelProfiles, configOverrides);
 
     return {
       dispose: async () => {

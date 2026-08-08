@@ -5,6 +5,56 @@ describe('SFlow Agent - Routing Logic (Batch 3)', () => {
   const agent = createSFlowAgent('test-model');
   const instructions = String(agent.instructions);
 
+  describe('Model Tier Rules (Wave 5)', () => {
+    it('should contain <Model_Tier_Rules> block in instructions', () => {
+      expect(instructions).toContain('<Model_Tier_Rules>');
+      expect(instructions).toContain('</Model_Tier_Rules>');
+    });
+
+    it('should include all 6 tiers in the tier rules table', () => {
+      // Verify all 6 tiers are mentioned in the rules
+      expect(instructions).toContain('free');
+      expect(instructions).toContain('quick');
+      expect(instructions).toContain('standard');
+      expect(instructions).toContain('deep');
+      expect(instructions).toContain('ultra');
+      expect(instructions).toContain('review');
+    });
+
+    it('should NOT contain legacy tier names (mechanical, strong)', () => {
+      expect(instructions).not.toContain('mechanical');
+      expect(instructions).not.toContain('strong');
+    });
+
+    it('should have a markdown table with scenario-to-tier mappings', () => {
+      // Check for table structure with | separators
+      const tablePattern = /\|.*场景.*\|.*model_type.*\|/;
+      expect(instructions).toMatch(tablePattern);
+    });
+
+    it('should explain call_flow_agent supports optional model_type parameter', () => {
+      expect(instructions).toContain('call_flow_agent');
+      expect(instructions).toContain('model_type');
+      expect(instructions).toMatch(/可选.*model_type|model_type.*可选/);
+    });
+
+    it('should map single-line fixes to free tier', () => {
+      expect(instructions).toMatch(/单行.*free|free.*单行/);
+    });
+
+    it('should map mechanical execution to quick tier', () => {
+      expect(instructions).toMatch(/机械.*quick|quick.*机械/);
+    });
+
+    it('should map code execution to deep tier', () => {
+      expect(instructions).toMatch(/代码执行.*deep|deep.*代码执行/);
+    });
+
+    it('should map review tasks to review tier', () => {
+      expect(instructions).toMatch(/审查.*review|review.*审查/);
+    });
+  });
+
   describe('Workflow State Table', () => {
     it('should have ui-design (frontend only) as state #3 with ui-director subagent', () => {
       // Row 3 should be: | 3 | ui-design (frontend only) | ui-director | ui-design.md | UI tokens validated |

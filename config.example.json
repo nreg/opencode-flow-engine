@@ -63,9 +63,11 @@
     "artifact_inspector": true
   },
   "modelProfiles": {
-    "mechanical": "step-3.7-flash",
-    "standard": "glm-5.1",
-    "strong": "glm-5.1",
-    "review": "glm-5.1"
+    "free": { "model": "step-3.7-flash", "fallback_models": [] },
+    "quick": { "model": "deepseek-v4-flash", "fallback_models": [] },
+    "standard": { "model": "glm-5.1", "fallback_models": [] },
+    "deep": { "model": "glm-5.1", "fallback_models": [] },
+    "ultra": { "model": "glm-5.1", "fallback_models": [] },
+    "review": { "model": "glm-5.1", "fallback_models": [] }
   }
 }
