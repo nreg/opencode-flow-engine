@@ -3,10 +3,11 @@
  * 
  * 验证 sFlow 主智能体的波次编排约束：
  * 1. 不得将多个 Wave 打包进单个 build-executor prompt
- * 2. Wave 完成后必须检查 Review Gate 才委派下一波
+ * 2. Wave 完成后必须检查 Review Gate 才委派下一波（当 reviewGate=true）
  */
 
 import { describe, it, expect } from 'bun:test';
+import { buildWaveOrchestrationConstraints } from '../../../../../workflows/sflow/agents/spec-flow.js';
 
 describe('Wave Orchestration Constraints', () => {
   describe('Constraint 1: Single Wave per build-executor call', () => {
@@ -64,63 +65,123 @@ Tasks:
   });
 
   describe('Constraint 2: Review Gate between Waves', () => {
-    it('should require Review Gate check after each Wave', () => {
-      /**
-       * 场景：Wave 1 完成，sFlow 准备委派 Wave 2
-       * 期望：必须先检查 Review Gate 状态
-       */
-      
-      // 模拟 Wave 完成状态
-      const waveCompletion = {
-        waveId: 'W1',
-        status: 'completed',
-        reviewGateStatus: 'pending', // 尚未检查
-      };
+    describe('when reviewGate is enabled (reviewGate=true)', () => {
+      it('should include Review Gate constraints in wave orchestration', () => {
+        /**
+         * 场景：reviewGate=true 时，buildWaveOrchestrationConstraints 应包含 Constraint 2-5
+         * 期望：约束文本包含 "Review Gate Between Waves" 等内容
+         */
+        const constraints = buildWaveOrchestrationConstraints(true);
+        
+        expect(constraints).toContain('### 2. Review Gate Between Waves');
+        expect(constraints).toContain('### 3. Cross-Wave Review Responsibility');
+        expect(constraints).toContain('### 4. Wave Completion Tracking');
+        expect(constraints).toContain('### 5. Gate Failure Recovery');
+      });
 
-      // 约束：Review Gate 未检查时，不得委派下一波
-      const canDispatchNextWave = waveCompletion.reviewGateStatus === 'passed';
-      
-      expect(canDispatchNextWave).toBe(false);
+      it('should require Review Gate check after each Wave', () => {
+        /**
+         * 场景：Wave 1 完成，sFlow 准备委派 Wave 2
+         * 期望：必须先检查 Review Gate 状态
+         */
+        
+        // 模拟 Wave 完成状态
+        const waveCompletion = {
+          waveId: 'W1',
+          status: 'completed',
+          reviewGateStatus: 'pending', // 尚未检查
+        };
+
+        // 约束：Review Gate 未检查时，不得委派下一波
+        const canDispatchNextWave = waveCompletion.reviewGateStatus === 'passed';
+        
+        expect(canDispatchNextWave).toBe(false);
+      });
+
+      it('should allow next Wave dispatch only after Review Gate passes', () => {
+        /**
+         * 场景：Wave 1 完成且 Review Gate 通过
+         * 期望：可以委派 Wave 2
+         */
+        
+        const waveCompletion = {
+          waveId: 'W1',
+          status: 'completed',
+          reviewGateStatus: 'passed',
+        };
+
+        const canDispatchNextWave = 
+          waveCompletion.status === 'completed' && 
+          waveCompletion.reviewGateStatus === 'passed';
+        
+        expect(canDispatchNextWave).toBe(true);
+      });
+
+      it('should block next Wave dispatch if Review Gate fails', () => {
+        /**
+         * 场景：Wave 1 完成但 Review Gate 不通过
+         * 期望：不得委派 Wave 2，应反馈审查意见
+         */
+        
+        const waveCompletion = {
+          waveId: 'W1',
+          status: 'completed',
+          reviewGateStatus: 'failed',
+          reviewFeedback: 'Tests failed: 2 test cases broken',
+        };
+
+        const canDispatchNextWave = 
+          waveCompletion.status === 'completed' && 
+          waveCompletion.reviewGateStatus === 'passed';
+        
+        expect(canDispatchNextWave).toBe(false);
+        expect(waveCompletion.reviewFeedback).toBeDefined();
+      });
     });
 
-    it('should allow next Wave dispatch only after Review Gate passes', () => {
-      /**
-       * 场景：Wave 1 完成且 Review Gate 通过
-       * 期望：可以委派 Wave 2
-       */
-      
-      const waveCompletion = {
-        waveId: 'W1',
-        status: 'completed',
-        reviewGateStatus: 'passed',
-      };
+    describe('when reviewGate is disabled (reviewGate=false)', () => {
+      it('should NOT include Review Gate constraints in wave orchestration', () => {
+        /**
+         * 场景：reviewGate=false 时，buildWaveOrchestrationConstraints 不应包含 Constraint 2-5
+         * 期望：约束文本不包含 "Review Gate Between Waves" 等内容
+         */
+        const constraints = buildWaveOrchestrationConstraints(false);
+        
+        expect(constraints).not.toContain('### 2. Review Gate Between Waves');
+        expect(constraints).not.toContain('### 3. Cross-Wave Review Responsibility');
+        expect(constraints).not.toContain('### 4. Wave Completion Tracking');
+        expect(constraints).not.toContain('### 5. Gate Failure Recovery');
+      });
 
-      const canDispatchNextWave = 
-        waveCompletion.status === 'completed' && 
-        waveCompletion.reviewGateStatus === 'passed';
-      
-      expect(canDispatchNextWave).toBe(true);
-    });
+      it('should still include base constraints (Constraint 1 and 6)', () => {
+        /**
+         * 场景：即使 reviewGate=false，基础约束仍应存在
+         * 期望：约束文本包含 Constraint 1 和 6
+         */
+        const constraints = buildWaveOrchestrationConstraints(false);
+        
+        expect(constraints).toContain('### 1. Single Wave per build-executor Call');
+        expect(constraints).toContain('### 6. Execution Contract Wave Structure');
+      });
 
-    it('should block next Wave dispatch if Review Gate fails', () => {
-      /**
-       * 场景：Wave 1 完成但 Review Gate 不通过
-       * 期望：不得委派 Wave 2，应反馈审查意见
-       */
-      
-      const waveCompletion = {
-        waveId: 'W1',
-        status: 'completed',
-        reviewGateStatus: 'failed',
-        reviewFeedback: 'Tests failed: 2 test cases broken',
-      };
+      it('should not require Review Gate check after Wave completion', () => {
+        /**
+         * 场景：Wave 1 完成，reviewGate=false
+         * 期望：不要求检查 Review Gate，但仍需遵守单波次约束
+         */
+        
+        const waveCompletion = {
+          waveId: 'W1',
+          status: 'completed',
+          reviewGateEnabled: false,
+        };
 
-      const canDispatchNextWave = 
-        waveCompletion.status === 'completed' && 
-        waveCompletion.reviewGateStatus === 'passed';
-      
-      expect(canDispatchNextWave).toBe(false);
-      expect(waveCompletion.reviewFeedback).toBeDefined();
+        // 当 reviewGate=false 时，不要求 Review Gate 检查
+        // 但单波次约束（Constraint 1）仍生效
+        const canDispatchNextWave = waveCompletion.status === 'completed';
+        
+        expect(canDispatchNextWave).toBe(true);
+      });
     });
   });
 
@@ -150,39 +211,68 @@ Tasks:
 });
 
 describe('Wave Orchestration Integration', () => {
-  it('should enforce wave-by-wave execution sequence', () => {
-    /**
-     * 场景：完整的 Wave 执行序列
-     * 期望：W1 → Gate → W2 → Gate → W3 → Gate → ...
-     */
-    
-    const executionSequence = [
-      { action: 'dispatch', waveId: 'W1' },
-      { action: 'wait_completion', waveId: 'W1' },
-      { action: 'check_gate', waveId: 'W1', result: 'passed' },
-      { action: 'dispatch', waveId: 'W2' },
-      { action: 'wait_completion', waveId: 'W2' },
-      { action: 'check_gate', waveId: 'W2', result: 'passed' },
-      { action: 'dispatch', waveId: 'W3' },
-    ];
-
-    // 验证序列中的每个 Wave 前都有 Gate 检查（除了第一个）
-    let previousWaveCompleted = false;
-    let gateChecked = false;
-
-    for (let i = 0; i < executionSequence.length; i++) {
-      const step = executionSequence[i];
+  describe('when reviewGate is enabled', () => {
+    it('should enforce wave-by-wave execution sequence with Review Gates', () => {
+      /**
+       * 场景：完整的 Wave 执行序列（reviewGate=true）
+       * 期望：W1 → Gate → W2 → Gate → W3 → Gate → ...
+       */
       
-      if (step.action === 'dispatch' && i > 0) {
-        // 不是第一个 Wave，前面必须有 Gate 检查
-        expect(gateChecked).toBe(true);
-        gateChecked = false; // 重置
+      const executionSequence = [
+        { action: 'dispatch', waveId: 'W1' },
+        { action: 'wait_completion', waveId: 'W1' },
+        { action: 'check_gate', waveId: 'W1', result: 'passed' },
+        { action: 'dispatch', waveId: 'W2' },
+        { action: 'wait_completion', waveId: 'W2' },
+        { action: 'check_gate', waveId: 'W2', result: 'passed' },
+        { action: 'dispatch', waveId: 'W3' },
+      ];
+
+      let gateChecked = false;
+
+      for (let i = 0; i < executionSequence.length; i++) {
+        const step = executionSequence[i];
+        
+        if (step.action === 'dispatch' && i > 0) {
+          expect(gateChecked).toBe(true);
+          gateChecked = false;
+        }
+        
+        if (step.action === 'check_gate') {
+          gateChecked = true;
+        }
       }
+    });
+  });
+
+  describe('when reviewGate is disabled', () => {
+    it('should enforce wave-by-wave execution without Review Gates', () => {
+      /**
+       * 场景：完整的 Wave 执行序列（reviewGate=false）
+       * 期望：W1 → W2 → W3 → ...（无 Gate 检查，但仍逐波执行）
+       */
       
-      if (step.action === 'check_gate') {
-        gateChecked = true;
+      const executionSequence = [
+        { action: 'dispatch', waveId: 'W1' },
+        { action: 'wait_completion', waveId: 'W1' },
+        { action: 'dispatch', waveId: 'W2' },
+        { action: 'wait_completion', waveId: 'W2' },
+        { action: 'dispatch', waveId: 'W3' },
+      ];
+
+      // 验证序列仍然是逐波执行，没有 Gate 检查
+      for (let i = 0; i < executionSequence.length; i++) {
+        const step = executionSequence[i];
+        
+        if (step.action === 'dispatch') {
+          expect(step.waveId).toBeDefined();
+        }
+        
+        if (step.action === 'wait_completion') {
+          expect(step.waveId).toBeDefined();
+        }
       }
-    }
+    });
   });
 });
 

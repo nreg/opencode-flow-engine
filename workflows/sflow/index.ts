@@ -3,7 +3,7 @@
  * OpenSpec planning engine + Superpowers execution discipline
  */
 
-export { createSFlowAgent } from './agents/spec-flow.js';
+export { createSFlowAgent, buildWaveOrchestrationConstraints } from './agents/spec-flow.js';
 export { createNeedExplorerAgent } from './agents/need-explorer.js';
 export { createSpecWriterAgent } from './agents/spec-writer.js';
 export { createContractBuilderAgent } from './agents/contract-builder.js';

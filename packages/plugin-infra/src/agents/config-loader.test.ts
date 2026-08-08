@@ -216,6 +216,55 @@ describe('Config Loader', () => {
       expect(tmpl.tools).toBeDefined();
     });
   });
+
+  describe('features.reviewGate configuration', () => {
+    it('should load features.reviewGate from config', async () => {
+      writeTestConfig({
+        features: {
+          reviewGate: true,
+        },
+      });
+      const config = await loadSFlowConfig(TEST_DIR);
+      expect(config.features?.reviewGate).toBe(true);
+    });
+
+    it('should return undefined for features.reviewGate when not configured', async () => {
+      writeTestConfig({
+        agents: { sFlow: { model: 'gpt-4o' } },
+      });
+      const config = await loadSFlowConfig(TEST_DIR);
+      expect(config.features?.reviewGate).toBeUndefined();
+    });
+
+    it('should support features.reviewGate=false explicitly', async () => {
+      writeTestConfig({
+        features: {
+          reviewGate: false,
+        },
+      });
+      const config = await loadSFlowConfig(TEST_DIR);
+      expect(config.features?.reviewGate).toBe(false);
+    });
+
+    it('should cascade features.reviewGate from user config to project config', async () => {
+      const { dir, file } = createTempUserConfigDir();
+      writeFileSync(file, JSON.stringify({
+        features: { reviewGate: true },
+      }));
+      process.env.FLOW_ENGINE_USER_CONFIG_FILE = file;
+      try {
+        writeTestConfig({
+          features: { reviewGate: false },
+        });
+        const config = await loadCascadedSFlowConfig(TEST_DIR);
+        // Project config should override user config
+        expect(config.features?.reviewGate).toBe(false);
+      } finally {
+        delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
 });
 
 describe('Config File Integration with Agent Builder', () => {
