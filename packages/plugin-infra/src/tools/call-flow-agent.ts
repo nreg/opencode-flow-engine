@@ -794,7 +794,7 @@ export function createCallFlowAgentTools(
 
   const flowagentOutputTool: ToolDefinition = {
     name: 'flowagent_output' as never,
-    description: `Retrieve results from a background ${workflowName} subagent task (call_flow_agent async mode). Call this when a <system-reminder> notifies you that a background task completed. Use block=true to wait for completion (timeout: 120s).`,
+    description: `Retrieve results from a background ${workflowName} subagent task (call_flow_agent async mode). Poll with block=true to wait for completion (timeout: 120s); the tool returns immediately with current status when block=false. Call this after dispatching an async task to fetch its result.`,
     parameters: {
       task_id: z
         .string()

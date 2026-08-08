@@ -484,7 +484,7 @@ To delegate, use the \`call_flow_agent\` tool with:
 
 The tool supports three modes:
 1. **Sync mode** (\`run_in_background=false\`): Creates a child session, dispatches the task, waits for the first response, returns the agent output. Use for short tasks that the orchestrator should wait on.
-2. **Async mode** (\`run_in_background=true\`): Dispatches the task and returns a \`task_id\` immediately. Complete when you receive a <system-reminder> notification. Use \`flowagent_output(task_id=...)\` to retrieve results. Use \`flowagent_cancel(taskId=...)\` to cancel a running task.
+2. **Async mode** (\`run_in_background=true\`): Dispatches the task and returns a \`task_id\` immediately. Actively poll with \`flowagent_output(task_id=..., block=true)\` (timeout 120s) until status is \`completed\` or \`error\` — do NOT wait for any notification. Use \`flowagent_cancel(taskId=...)\` to cancel a running task.
 3. **Interactive mode** (sync + \`session_id\`): For multi-round conversations with subagents like \`need-explorer\`. Call \`call_flow_agent\` with \`run_in_background=false\` and the \`session_id\` from a previous call to continue the same session. See "Interactive Subagent Protocol" above for details.
 
 **IMPORTANT**: In SDD (Subagent-Driven Development) mode, prefer async dispatch with \`run_in_background=true\` to enable concurrent task execution. In inline mode, use sync dispatch (\`run_in_background=false\`).
