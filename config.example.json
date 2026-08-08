@@ -50,7 +50,8 @@
   },
   "features": {
     "workflow_manager": true,
-    "state_manager": true
+    "state_manager": true,
+    "reviewGate": true
   },
   "hooks": {
     "state_transition": true,
