@@ -4,6 +4,7 @@
  */
 
 import type { AgentConfig } from '@opencode-ai/sdk';
+import type { SFlowConfig } from './config-loader.js';
 
 /**
  * Agent mode determines UI model selection behavior
@@ -15,7 +16,11 @@ export type AgentMode = 'primary' | 'subagent' | 'all';
  * Mode is managed by AGENT_MODES registry in agent-builder.ts,
  * not as a static property on the function object.
  */
-export type AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }) => AgentConfig;
+export type AgentFactory = (model: string, options?: { 
+  temperature?: number; 
+  skillContent?: string;
+  config?: SFlowConfig;
+}) => AgentConfig;
 
 /**
  * Built-in agent names for sFlow
