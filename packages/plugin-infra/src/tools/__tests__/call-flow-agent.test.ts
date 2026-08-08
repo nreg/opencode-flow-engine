@@ -2155,3 +2155,193 @@ describe('P0: model_type routing priority chain', () => {
     });
   });
 });
+
+// ─── F2: Watcher Probe Mode Tests ────────────────────────────────────────────
+
+describe('F2: Watcher probe mode (1s timeout bug fix)', () => {
+  let _backgroundTaskRegistry: BackgroundTaskRegistry;
+  let _backgroundTaskCounter: { value: number };
+  let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
+
+  beforeEach(() => {
+    _backgroundTaskRegistry = new Map();
+    _backgroundTaskCounter = { value: 0 };
+    promptCalls = [];
+    currentTools = null;
+  });
+
+  it('watcher should keep task running when session is busy (not completed yet)', async () => {
+    // Arrange: create a client that returns busy status
+    let statusCallCount = 0;
+    const client = {
+      session: {
+        create: mock(async () => {
+          return { data: { id: 'test-session-001' } };
+        }),
+        prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+          promptCalls.push({ id: args.path.id, body: args.body });
+        }),
+        messages: mock(async () => {
+          return {
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              { parts: [{ type: 'text', text: 'partial output' }] }, // intermediate output
+            ],
+          };
+        }),
+        status: mock(async () => {
+          statusCallCount++;
+          // Always return busy (task not completed)
+          return { data: { 'test-session-001': { type: 'busy' } } };
+        }),
+        abort: mock(async () => {}),
+      },
+    };
+
+    const options = createTestOptions(client as any);
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    // Act: Start async task
+    const startResult = await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: true,
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+
+    const startData = JSON.parse(startResult.output);
+    expect(startData.success).toBe(true);
+    const taskId = startData.task_id;
+
+    // Wait for watcher to scan (200ms interval, wait 500ms to ensure at least 2 scans)
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Assert: Task should still be running (not marked completed/error)
+    const task = options.backgroundTaskRegistry.get(taskId);
+    expect(task).toBeDefined();
+    expect(task?.status).toBe('running'); // Critical: should NOT be marked completed
+    expect(statusCallCount).toBeGreaterThan(0); // Watcher did check status
+  });
+
+  it('watcher should mark task completed when session becomes idle', async () => {
+    // Arrange: create a client that transitions from busy to idle
+    const startTime = Date.now();
+    const client = {
+      session: {
+        create: mock(async () => {
+          return { data: { id: 'test-session-001' } };
+        }),
+        prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+          promptCalls.push({ id: args.path.id, body: args.body });
+        }),
+        messages: mock(async () => {
+          return {
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              { parts: [{ type: 'text', text: 'Task completed [TASK_COMPLETE]' }] },
+            ],
+          };
+        }),
+        status: mock(async () => {
+          // Return busy for first 600ms, then idle
+          const elapsed = Date.now() - startTime;
+          if (elapsed < 600) {
+            return { data: { 'test-session-001': { type: 'busy' } } };
+          }
+          return { data: { 'test-session-001': { type: 'idle' } } };
+        }),
+        abort: mock(async () => {}),
+      },
+    };
+
+    const options = createTestOptions(client as any);
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    // Act: Start async task
+    const startResult = await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: true,
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+
+    const startData = JSON.parse(startResult.output);
+    const taskId = startData.task_id;
+
+    // Wait for watcher to detect idle (600ms busy + multiple scans)
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Assert: Task should be completed
+    const task = options.backgroundTaskRegistry.get(taskId);
+    expect(task).toBeDefined();
+    expect(task?.status).toBe('completed');
+    expect(task?.result).toContain('Task completed');
+  });
+
+  it('watcher should NOT mark completed on 1s timeout with intermediate output (bug fix)', async () => {
+    // Arrange: This is the exact bug scenario - session busy, pollSessionCompletion times out after 1s
+    // Before fix: would return intermediate output and mark completed
+    // After fix: probe mode returns PROBE_PENDING, task stays running
+    let statusCallCount = 0;
+    const client = {
+      session: {
+        create: mock(async () => {
+          return { data: { id: 'test-session-001' } };
+        }),
+        prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+          promptCalls.push({ id: args.path.id, body: args.body });
+        }),
+        messages: mock(async () => {
+          // Return intermediate output (not final)
+          return {
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              { parts: [{ type: 'text', text: 'I am still thinking...' }] }, // intermediate
+            ],
+          };
+        }),
+        status: mock(async () => {
+          statusCallCount++;
+          // Always busy - task is still running
+          return { data: { 'test-session-001': { type: 'busy' } } };
+        }),
+        abort: mock(async () => {}),
+      },
+    };
+
+    const options = createTestOptions(client as any);
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    // Act: Start async task
+    const startResult = await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: true,
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+
+    const startData = JSON.parse(startResult.output);
+    const taskId = startData.task_id;
+
+    // Wait for multiple watcher cycles (each with 1s probe timeout)
+    await new Promise(resolve => setTimeout(resolve, 600));
+
+    // Assert: Task should STILL be running (bug fix verification)
+    const task = options.backgroundTaskRegistry.get(taskId);
+    expect(task).toBeDefined();
+    expect(task?.status).toBe('running'); // Critical: NOT marked completed with intermediate output
+    expect(task?.result).toBeUndefined(); // No result yet
+  });
+});

@@ -2,6 +2,7 @@
  * Shared session polling utilities for sFlow subagent communication.
  */
 import { sleep } from '@opencode-flow-engine/shared';
+import { PROBE_PENDING, type ProbePending } from '../types.js';
 
 /** Default max wait time for async/background polling (120s) */
 export const DEFAULT_MAX_WAIT_MS = 120_000;
@@ -28,19 +29,32 @@ export interface SFlowClientSession {
  *   session-disappearance handling via readSessionLastMessage.
  * - isNew sessions have a max-polls safety cap (60) to avoid infinite loop
  *   when status never flips to idle.
+ * - Probe mode (probeMode: true): only checks status, returns PROBE_PENDING if busy/retry,
+ *   returns last message if idle, returns null if retry error.
  */
 export async function pollSessionCompletion(
   client: { session: SFlowClientSession },
   sessionID: string,
-  options: { maxWaitMs?: number; pollIntervalMs?: number; isNew?: boolean } = {},
-): Promise<string | null> {
+  options: { maxWaitMs?: number; pollIntervalMs?: number; isNew?: boolean; probeMode?: boolean } = {},
+): Promise<string | null | ProbePending> {
   const MAX_WAIT = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const POLL_INTERVAL = options.pollIntervalMs ?? 200; // 200ms default (was 500ms, reduced for faster detection)
   const RETRY_WAIT_BUFFER = 2000; // Task 1.5: 2s buffer accounts for clock skew and polling delay when checking retry next field expiration
   const startTime = Date.now();
   let consecutiveFailures = 0;
   const isNew = options.isNew ?? false;
+  const probeMode = options.probeMode ?? false;
   const MAX_POLLS_FOR_NEW = 120; // 120 * 200ms = 24s max for new sessions
+
+  // F1: Entry log
+  console.log(`[Polling] session=${sessionID} start polling (maxWaitMs=${MAX_WAIT}, isNew=${isNew}, probeMode=${probeMode})`);
+
+  // F1: Exit log helper
+  function logExit(reason: string, result: string | null | ProbePending): string | null | ProbePending {
+    const elapsed = Date.now() - startTime;
+    console.log(`[Polling] session=${sessionID} completed reason=${reason} elapsed=${elapsed}ms`);
+    return result;
+  }
 
   // Capture the initial message count so we can distinguish
   // the user's prompt from the subagent's response.
@@ -132,12 +146,18 @@ export async function pollSessionCompletion(
     }
 
     if (isIdle) {
-      return readSessionLastMessage(client, sessionID);
+      const result = await readSessionLastMessage(client, sessionID);
+      return logExit('idle', result);
     }
 
     // Task 1.2: If retry is determined to be an error, return null
     if (isRetryError) {
-      return null;
+      return logExit('retry_error', null);
+    }
+
+    // F2: Probe mode - if not idle and not retry error, return pending marker
+    if (probeMode) {
+      return logExit('probe_pending', PROBE_PENDING);
     }
 
     // ⸺⸺ Messages check: return immediately when assistant responds ⸺⸺
@@ -192,30 +212,33 @@ export async function pollSessionCompletion(
           }
         }
         if (currentMsgCount >= minDetectCount) {
-          return lastMessage;
+          return logExit('messages', lastMessage);
         }
       }
     } catch {
       messagesFailed = true;
     }
 
-    // 鈹€鈹€ Session disappearance: both status and messages failed 鈹€鈹€
+    // ⸺⸺ Session disappearance: both status and messages failed ⸺⸺
     if (statusFailed && messagesFailed) {
       consecutiveFailures++;
       if (consecutiveFailures >= 2) {
-        return readSessionLastMessage(client, sessionID);
+        const result = await readSessionLastMessage(client, sessionID);
+        return logExit('failure', result);
       }
     } else {
       consecutiveFailures = 0;
     }
 
-    // 鈹€鈹€ isNew safety cap: avoid infinite loop when status never flips to idle 鈹€鈹€
+    // ⸺⸺ isNew safety cap: avoid infinite loop when status never flips to idle ⸺⸺
     if (isNew && pollCount >= MAX_POLLS_FOR_NEW) {
-      return readSessionLastMessage(client, sessionID);
+      const result = await readSessionLastMessage(client, sessionID);
+      return logExit('max_polls', result);
     }
   }
 
-  return readSessionLastMessage(client, sessionID);
+  const result = await readSessionLastMessage(client, sessionID);
+  return logExit('timeout', result);
 }
 
 export async function readSessionLastMessage(

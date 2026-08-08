@@ -96,6 +96,10 @@ export const AGENT_COLORS: Record<string, string> = {
 /** Promise-based sleep (cross-runtime compatible) */
 export const sleep = crossSleep;
 
+/** Probe mode pending marker (F2: watcher 1s timeout bug fix) */
+export const PROBE_PENDING = { __PROBE__: 'pending' } as const;
+export type ProbePending = typeof PROBE_PENDING;
+
 /** Generate a unique task ID for background task registry */
 export function generateTaskId(counter: { value: number }): string {
   counter.value++;

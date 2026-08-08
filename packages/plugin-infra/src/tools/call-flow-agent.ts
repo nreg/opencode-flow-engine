@@ -27,7 +27,7 @@ import type {
   BackgroundTaskRegistry,
   SFlowClient,
 } from '../types.js';
-import { formatToolError, generateTaskId } from '../types.js';
+import { formatToolError, generateTaskId, PROBE_PENDING } from '../types.js';
 import type { ToolDefinition } from './types.js';
 import { DEFAULT_PROFILE_MODELS } from '../agents/config-loader.js';
 import { resolveModelWithFallback } from '../agents/agent-builder.js';
@@ -131,13 +131,21 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
       registry.set(taskId, currentTask);
 
       try {
-        const output = await pollSessionCompletion(
+        // F2: Use probe mode to detect session status without waiting for intermediate output
+        const probeResult = await pollSessionCompletion(
           client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
           task.sessionID,
-          { maxWaitMs: 1000 },
+          { maxWaitMs: 1000, probeMode: true },
         );
 
-        if (output === null) {
+        // F2: If still pending, keep running and skip this cycle
+        if (probeResult === PROBE_PENDING) {
+          currentTask._processing = false;
+          registry.set(taskId, currentTask);
+          continue;
+        }
+
+        if (probeResult === null) {
           const now = Date.now();
           const updated: BackgroundTaskEntry = {
             ...task,
@@ -181,8 +189,11 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
             }
           } catch (err) {
             console.warn('[BackgroundTaskWatcher] 更新 subagent-store 失败:', err);
-          }
-        } else if (output !== null) {
+           }
+        } else {
+          // probeResult is string (session idle, task completed)
+          // Type guard: at this point probeResult is guaranteed to be string
+          const output = probeResult as string;
           const asyncHasSignal = hasCompletionSignal(output);
           const now = Date.now();
           const updated: BackgroundTaskEntry = {
@@ -663,8 +674,10 @@ export function createCallFlowAgentTools(
         }
 
         // P3: 同步模式完成检测与重试
+        // Type guard: in sync mode (no probeMode), lastOutput is string | null
+        const syncOutput = lastOutput as string | null;
         const retryResult = await performCompletionRetry(
-          lastOutput || '',
+          syncOutput || '',
           // injectReminder: 注入 system reminder 到 session
           async () => {
             await (
@@ -683,11 +696,13 @@ export function createCallFlowAgentTools(
           },
           // pollOutput: 重新轮询子 agent 输出
           async () => {
-            return await pollSessionCompletion(
+            const result = await pollSessionCompletion(
               client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
               sessionID,
               { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS },
             );
+            // Type guard: in sync mode (no probeMode), result is string | null
+            return result as string | null;
           },
           undefined,
           subagent_type as string, // 传入 agent 类型，豁免列表中的 agent 跳过重试
@@ -887,8 +902,10 @@ export function createCallFlowAgentTools(
             return updated;
           }
 
-          const asyncHasSignal = hasCompletionSignal(output);
-          const finalOutput = output || '(no output)';
+          // Type guard: in pollAndComplete (no probeMode), output is string
+          const asyncOutput = output as string;
+          const asyncHasSignal = hasCompletionSignal(asyncOutput);
+          const finalOutput = asyncOutput || '(no output)';
           updated = {
             ...task,
             status: 'completed',
@@ -912,7 +929,7 @@ export function createCallFlowAgentTools(
               subagent: task.subagentType,
               task_id,
               session_id: task.sessionID,
-              summary: finalOutput.slice(0, 200),
+              summary: asyncOutput.slice(0, 200),
               has_completion_signal: asyncHasSignal,
             });
           } catch (err) {

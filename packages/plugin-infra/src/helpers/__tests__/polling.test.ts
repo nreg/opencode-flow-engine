@@ -779,3 +779,174 @@ describe('P1-1: attempt threshold boundary tests', () => {
     expect(result).toBeNull();
   });
 });
+
+// ─── Probe Mode Tests (F2: watcher 1s timeout bug fix) ───────────────────────
+
+describe('Probe Mode (F2: watcher 1s timeout bug fix)', () => {
+  let mockClient: { session: SFlowClientSession };
+  let mockSession: {
+    status: ReturnType<typeof vi.fn>;
+    messages: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    mockSession = {
+      status: vi.fn(),
+      messages: vi.fn(),
+    };
+    mockClient = { session: mockSession as unknown as SFlowClientSession };
+  });
+
+  it('probeMode=true and session idle → should return last message', async () => {
+    // Arrange: session is idle
+    mockSession.status.mockResolvedValue({
+      data: [{ id: 'test-session', type: 'idle' }],
+    });
+    mockSession.messages.mockResolvedValue({
+      data: [
+        { parts: [{ type: 'text', text: 'user prompt' }] },
+        { parts: [{ type: 'text', text: 'assistant response' }] },
+      ],
+    });
+
+    // Act
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      maxWaitMs: 1000,
+      probeMode: true,
+    });
+
+    // Assert: should return the last message
+    expect(result).toBe('assistant response');
+  });
+
+  it('probeMode=true and session busy → should return pending marker', async () => {
+    // Arrange: session is busy (not idle, not retry error)
+    mockSession.status.mockResolvedValue({
+      data: [{ id: 'test-session', type: 'busy' }],
+    });
+    mockSession.messages.mockResolvedValue({
+      data: [
+        { parts: [{ type: 'text', text: 'user prompt' }] },
+        { parts: [{ type: 'text', text: 'partial output' }] }, // intermediate output
+      ],
+    });
+
+    // Act
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      maxWaitMs: 1000,
+      probeMode: true,
+    });
+
+    // Assert: should return pending marker, NOT intermediate output
+    expect(result).toEqual({ __PROBE__: 'pending' });
+    expect(result).not.toBe('partial output'); // critical: should NOT return intermediate output
+  });
+
+  it('probeMode=true and retry error → should return null', async () => {
+    // Arrange: session in retry error state
+    mockSession.status.mockResolvedValue({
+      data: [
+        {
+          id: 'test-session',
+          type: 'retry',
+          attempt: 5, // max retries exceeded
+          message: 'Max retries exceeded',
+          next: Date.now() - 5000, // expired
+        },
+      ],
+    });
+    mockSession.messages.mockResolvedValue({
+      data: [
+        { parts: [{ type: 'text', text: 'user prompt' }] },
+        { parts: [{ type: 'retry', error: { message: 'API error', code: 500 }, time: Date.now() }] },
+      ],
+    });
+
+    // Act
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      maxWaitMs: 1000,
+      probeMode: true,
+    });
+
+    // Assert: should return null (error case)
+    expect(result).toBeNull();
+  });
+
+  it('probeMode=true and retry in progress → should return pending marker', async () => {
+    // Arrange: session in retry state (not error yet)
+    mockSession.status.mockResolvedValue({
+      data: [
+        {
+          id: 'test-session',
+          type: 'retry',
+          attempt: 2, // within retry limit
+          message: 'Retrying...',
+          next: Date.now() + 5000, // next retry in future
+        },
+      ],
+    });
+    mockSession.messages.mockResolvedValue({
+      data: [
+        { parts: [{ type: 'text', text: 'user prompt' }] },
+        { parts: [{ type: 'retry', error: { message: 'Temporary error', code: 500 }, time: Date.now() }] },
+      ],
+    });
+
+    // Act
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      maxWaitMs: 1000,
+      probeMode: true,
+    });
+
+    // Assert: should return pending marker (retry in progress, not error)
+    expect(result).toEqual({ __PROBE__: 'pending' });
+  });
+
+  it('default mode (no probeMode) behavior unchanged - idle', async () => {
+    // Arrange: session idle
+    mockSession.status.mockResolvedValue({
+      data: [{ id: 'test-session', type: 'idle' }],
+    });
+    mockSession.messages.mockResolvedValue({
+      data: [
+        { parts: [{ type: 'text', text: 'user prompt' }] },
+        { parts: [{ type: 'text', text: 'response' }] },
+      ],
+    });
+
+    // Act: no probeMode (default behavior)
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      maxWaitMs: 1000,
+      pollIntervalMs: 100,
+    });
+
+    // Assert: should return message (backward compatibility)
+    expect(result).toBe('response');
+  });
+
+  it('default mode (no probeMode) behavior unchanged - busy then idle', async () => {
+    // Arrange: busy then idle
+    mockSession.status
+      .mockResolvedValueOnce({
+        data: [{ id: 'test-session', type: 'busy' }],
+      })
+      .mockResolvedValue({
+        data: [{ id: 'test-session', type: 'idle' }],
+      });
+    mockSession.messages.mockResolvedValue({
+      data: [
+        { parts: [{ type: 'text', text: 'user prompt' }] },
+        { parts: [{ type: 'text', text: 'response' }] },
+      ],
+    });
+
+    // Act: no probeMode (default behavior)
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      maxWaitMs: 2000,
+      pollIntervalMs: 100,
+    });
+
+    // Assert: should wait and return message (backward compatibility)
+    expect(result).toBe('response');
+  });
+});
