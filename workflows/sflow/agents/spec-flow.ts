@@ -5,6 +5,7 @@
 
 import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory } from '../../../packages/plugin-infra/src/agents/types.js';
+import type { SFlowConfig } from '../../../packages/plugin-infra/src/agents/config-loader.js';
 import { getAgentTools } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
 
 /**
@@ -94,14 +95,26 @@ If Review Gate fails:
 4. Repeat until Gate passes or max retries reached (default: 3)
 ` : '';
 
-  const contractStructure = `
+  const contractStructure = reviewGateEnabled ? `
 ### 6. Execution Contract Wave Structure
 
 The execution contract defines Waves in order:
 \`\`\`
-Wave 1 (Batch 1) → Review Gate → 
-Wave 2 (Batch 2) → Review Gate → 
-Wave 3 (Batch 3) → Review Gate → 
+Wave 1 (Batch 1) → Review Gate →
+Wave 2 (Batch 2) → Review Gate →
+Wave 3 (Batch 3) → Review Gate →
+...
+\`\`\`
+
+**You MUST execute Waves in the order defined by the contract.** Do not skip, reorder, or merge Waves.
+` : `
+### 6. Execution Contract Wave Structure
+
+The execution contract defines Waves in order:
+\`\`\`
+Wave 1 (Batch 1) →
+Wave 2 (Batch 2) →
+Wave 3 (Batch 3) →
 ...
 \`\`\`
 
@@ -111,7 +124,7 @@ Wave 3 (Batch 3) → Review Gate →
   return baseConstraints + reviewGateConstraints + contractStructure;
 }
 
-export const createSFlowAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string; config?: any }): AgentConfig => {
+export const createSFlowAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string; config?: SFlowConfig }): AgentConfig => {
   const reviewGateEnabled = options?.config?.features?.reviewGate ?? false;
   const waveConstraints = buildWaveOrchestrationConstraints(reviewGateEnabled);
   

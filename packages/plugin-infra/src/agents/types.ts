@@ -15,6 +15,10 @@ export type AgentMode = 'primary' | 'subagent' | 'all';
  * Agent factory function.
  * Mode is managed by AGENT_MODES registry in agent-builder.ts,
  * not as a static property on the function object.
+ *
+ * Note: The `config` parameter is only used by agents that need dynamic configuration
+ * (e.g., sFlow agent for reviewGate feature flag). Other agents can omit this parameter
+ * as it is optional.
  */
 export type AgentFactory = (model: string, options?: { 
   temperature?: number; 

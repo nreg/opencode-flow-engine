@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { createSFlowAgent, buildWaveOrchestrationConstraints } from './spec-flow.js';
+import type { SFlowConfig } from '../../../packages/plugin-infra/src/agents/config-loader.js';
 
 describe('SFlow Agent - Routing Logic (Batch 3)', () => {
   const agent = createSFlowAgent('test-model');
@@ -191,11 +192,11 @@ describe('Wave 2 - Dynamic Prompt Assembly', () => {
 
   describe('createSFlowAgent with config', () => {
     it('should include Review Gate constraints when config.features.reviewGate is true', () => {
-      const config = {
+      const config: SFlowConfig = {
         features: {
           reviewGate: true,
         },
-      } as any;
+      };
       const agent = createSFlowAgent('test-model', { config });
       const instructions = String(agent.instructions);
       expect(instructions).toContain('Review Gate Between Waves');
@@ -205,11 +206,11 @@ describe('Wave 2 - Dynamic Prompt Assembly', () => {
     });
 
     it('should NOT include Review Gate constraints when config.features.reviewGate is false', () => {
-      const config = {
+      const config: SFlowConfig = {
         features: {
           reviewGate: false,
         },
-      } as any;
+      };
       const agent = createSFlowAgent('test-model', { config });
       const instructions = String(agent.instructions);
       expect(instructions).not.toContain('Review Gate Between Waves');
@@ -226,15 +227,15 @@ describe('Wave 2 - Dynamic Prompt Assembly', () => {
     });
 
     it('should NOT include Review Gate constraints when config.features is undefined', () => {
-      const config = {} as any;
+      const config: SFlowConfig = {};
       const agent = createSFlowAgent('test-model', { config });
       const instructions = String(agent.instructions);
       expect(instructions).not.toContain('Review Gate Between Waves');
     });
 
     it('should always include Constraint 1 and Constraint 6 regardless of reviewGate', () => {
-      const configWithReview = { features: { reviewGate: true } } as any;
-      const configWithoutReview = { features: { reviewGate: false } } as any;
+      const configWithReview: SFlowConfig = { features: { reviewGate: true } };
+      const configWithoutReview: SFlowConfig = { features: { reviewGate: false } };
       
       const agentWithReview = createSFlowAgent('test-model', { config: configWithReview });
       const agentWithoutReview = createSFlowAgent('test-model', { config: configWithoutReview });
