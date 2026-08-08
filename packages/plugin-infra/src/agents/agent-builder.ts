@@ -523,7 +523,7 @@ export async function createAgent(
 
   // Resolve temperature: override > config > factory default
   const resolvedTemperature = agentOverride?.temperature ?? configOverrides?.[name]?.temperature ?? undefined;
-  let agentConfig = factory(resolved.model, { temperature: resolvedTemperature, skillContent });
+  let agentConfig = factory(resolved.model, { temperature: resolvedTemperature, skillContent, config });
 
   if (agentOverride) {
     return {
@@ -566,7 +566,7 @@ const resolved = resolveModelWithFallback(name, model, configOverrides, override
     const merged = mergeOverrides(configOverrides, overrides || {});
     const agentOverride = merged[name];
     const resolvedTemperature = agentOverride?.temperature ?? configOverrides?.[name]?.temperature ?? undefined;
-    const agentConfig = factory(resolved.model, { temperature: resolvedTemperature, skillContent: content });
+    const agentConfig = factory(resolved.model, { temperature: resolvedTemperature, skillContent: content, config });
 
     if (agentOverride) {
       agents[name] = {

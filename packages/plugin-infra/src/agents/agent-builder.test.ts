@@ -459,4 +459,20 @@ describe('Agent Builder', () => {
       expect(typeof agent.tools).toBe('object');
     });
   });
+
+  describe('Wave 2 - Config Passing', () => {
+    it('should pass config to sFlow agent factory', async () => {
+      const agent = await createAgent('sFlow');
+      expect(agent).toBeDefined();
+      expect(agent.id).toBe('sFlow');
+      expect(agent.instructions).toBeDefined();
+    });
+
+    it('should include Review Gate constraints when config.features.reviewGate is true', async () => {
+      const agent = await createAgent('sFlow');
+      const instructions = String(agent.instructions);
+      expect(instructions).toContain('Single Wave per build-executor Call');
+      expect(instructions).toContain('Execution Contract Wave Structure');
+    });
+  });
 });

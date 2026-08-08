@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { createSFlowAgent } from './spec-flow.js';
+import { createSFlowAgent, buildWaveOrchestrationConstraints } from './spec-flow.js';
 
 describe('SFlow Agent - Routing Logic (Batch 3)', () => {
   const agent = createSFlowAgent('test-model');
@@ -127,6 +127,128 @@ describe('SFlow Agent - Routing Logic (Batch 3)', () => {
 
     it('should explain non-frontend projects skip ui-design and go directly to bridging', () => {
       expect(instructions).toMatch(/non-frontend|skip.*ui-design|directly.*bridging/i);
+    });
+  });
+});
+
+describe('Wave 2 - Dynamic Prompt Assembly', () => {
+  describe('buildWaveOrchestrationConstraints', () => {
+    it('should include Constraint 1 (Single Wave) when reviewGate is false', () => {
+      const constraints = buildWaveOrchestrationConstraints(false);
+      expect(constraints).toContain('Single Wave per build-executor Call');
+      expect(constraints).toContain('FORBIDDEN');
+      expect(constraints).toContain('Packing multiple Waves');
+    });
+
+    it('should include Constraint 6 (Contract Wave Structure) when reviewGate is false', () => {
+      const constraints = buildWaveOrchestrationConstraints(false);
+      expect(constraints).toContain('Execution Contract Wave Structure');
+      expect(constraints).toContain('Wave 1 (Batch 1)');
+      expect(constraints).toContain('You MUST execute Waves in the order defined by the contract');
+    });
+
+    it('should NOT include Review Gate constraints when reviewGate is false', () => {
+      const constraints = buildWaveOrchestrationConstraints(false);
+      expect(constraints).not.toContain('Review Gate Between Waves');
+      expect(constraints).not.toContain('Cross-Wave Review Responsibility');
+      expect(constraints).not.toContain('Wave Completion Tracking');
+      expect(constraints).not.toContain('Gate Failure Recovery');
+    });
+
+    it('should include all constraints when reviewGate is true', () => {
+      const constraints = buildWaveOrchestrationConstraints(true);
+      // Constraint 1
+      expect(constraints).toContain('Single Wave per build-executor Call');
+      // Constraint 2
+      expect(constraints).toContain('Review Gate Between Waves');
+      expect(constraints).toContain('After each Wave completes, you **MUST** check the Review Gate');
+      // Constraint 3
+      expect(constraints).toContain('Cross-Wave Review Responsibility');
+      expect(constraints).toContain('code-reviewer');
+      // Constraint 4
+      expect(constraints).toContain('Wave Completion Tracking');
+      expect(constraints).toContain('waveStatus');
+      // Constraint 5
+      expect(constraints).toContain('Gate Failure Recovery');
+      expect(constraints).toContain('max retries reached');
+      // Constraint 6
+      expect(constraints).toContain('Execution Contract Wave Structure');
+    });
+
+    it('should return a non-empty string', () => {
+      const constraintsFalse = buildWaveOrchestrationConstraints(false);
+      const constraintsTrue = buildWaveOrchestrationConstraints(true);
+      expect(constraintsFalse.length).toBeGreaterThan(0);
+      expect(constraintsTrue.length).toBeGreaterThan(0);
+    });
+
+    it('should have more content when reviewGate is true than false', () => {
+      const constraintsFalse = buildWaveOrchestrationConstraints(false);
+      const constraintsTrue = buildWaveOrchestrationConstraints(true);
+      expect(constraintsTrue.length).toBeGreaterThan(constraintsFalse.length);
+    });
+  });
+
+  describe('createSFlowAgent with config', () => {
+    it('should include Review Gate constraints when config.features.reviewGate is true', () => {
+      const config = {
+        features: {
+          reviewGate: true,
+        },
+      } as any;
+      const agent = createSFlowAgent('test-model', { config });
+      const instructions = String(agent.instructions);
+      expect(instructions).toContain('Review Gate Between Waves');
+      expect(instructions).toContain('Cross-Wave Review Responsibility');
+      expect(instructions).toContain('Wave Completion Tracking');
+      expect(instructions).toContain('Gate Failure Recovery');
+    });
+
+    it('should NOT include Review Gate constraints when config.features.reviewGate is false', () => {
+      const config = {
+        features: {
+          reviewGate: false,
+        },
+      } as any;
+      const agent = createSFlowAgent('test-model', { config });
+      const instructions = String(agent.instructions);
+      expect(instructions).not.toContain('Review Gate Between Waves');
+      expect(instructions).not.toContain('Cross-Wave Review Responsibility');
+      expect(instructions).not.toContain('Wave Completion Tracking');
+      expect(instructions).not.toContain('Gate Failure Recovery');
+    });
+
+    it('should NOT include Review Gate constraints when config is undefined', () => {
+      const agent = createSFlowAgent('test-model');
+      const instructions = String(agent.instructions);
+      expect(instructions).not.toContain('Review Gate Between Waves');
+      expect(instructions).not.toContain('Cross-Wave Review Responsibility');
+    });
+
+    it('should NOT include Review Gate constraints when config.features is undefined', () => {
+      const config = {} as any;
+      const agent = createSFlowAgent('test-model', { config });
+      const instructions = String(agent.instructions);
+      expect(instructions).not.toContain('Review Gate Between Waves');
+    });
+
+    it('should always include Constraint 1 and Constraint 6 regardless of reviewGate', () => {
+      const configWithReview = { features: { reviewGate: true } } as any;
+      const configWithoutReview = { features: { reviewGate: false } } as any;
+      
+      const agentWithReview = createSFlowAgent('test-model', { config: configWithReview });
+      const agentWithoutReview = createSFlowAgent('test-model', { config: configWithoutReview });
+      
+      const instructionsWithReview = String(agentWithReview.instructions);
+      const instructionsWithoutReview = String(agentWithoutReview.instructions);
+      
+      // Both should have Constraint 1
+      expect(instructionsWithReview).toContain('Single Wave per build-executor Call');
+      expect(instructionsWithoutReview).toContain('Single Wave per build-executor Call');
+      
+      // Both should have Constraint 6
+      expect(instructionsWithReview).toContain('Execution Contract Wave Structure');
+      expect(instructionsWithoutReview).toContain('Execution Contract Wave Structure');
     });
   });
 });

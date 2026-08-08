@@ -7,7 +7,115 @@ import type { AgentConfig } from '@opencode-ai/sdk';
 import type { AgentFactory } from '../../../packages/plugin-infra/src/agents/types.js';
 import { getAgentTools } from '../../../packages/plugin-infra/src/agents/agent-tools.js';
 
-export const createSFlowAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => ({
+/**
+ * Build Wave Orchestration Constraints based on reviewGate feature flag.
+ * 
+ * Base constraints (always included):
+ * - Constraint 1: Single Wave per build-executor Call
+ * - Constraint 6: Execution Contract Wave Structure
+ * 
+ * Review Gate constraints (included when reviewGate=true):
+ * - Constraint 2: Review Gate between Waves
+ * - Constraint 3: Cross-Wave Review Responsibility
+ * - Constraint 4: Wave Completion Tracking
+ * - Constraint 5: Gate Failure Recovery
+ */
+export function buildWaveOrchestrationConstraints(reviewGateEnabled: boolean): string {
+  const baseConstraints = `### 1. Single Wave per build-executor Call
+
+**FORBIDDEN**: Packing multiple Waves into a single \`call_flow_agent\` prompt.
+
+❌ **WRONG**:
+\`\`\`
+call_flow_agent(
+  subagent_type="build-executor",
+  prompt="Execute Wave 1, Wave 2, Wave 3, Wave 4, Wave 5, Wave 6..."
+)
+\`\`\`
+
+✅ **CORRECT**:
+\`\`\`
+// Wave 1
+call_flow_agent(subagent_type="build-executor", prompt="Execute Wave 1 only...")
+// Wait for completion
+// Check Review Gate
+// If passed, dispatch Wave 2
+call_flow_agent(subagent_type="build-executor", prompt="Execute Wave 2 only...")
+\`\`\`
+`;
+
+  const reviewGateConstraints = reviewGateEnabled ? `
+### 2. Review Gate Between Waves
+
+After each Wave completes, you **MUST** check the Review Gate before dispatching the next Wave.
+
+**Sequence**:
+1. Dispatch Wave N via \`call_flow_agent(subagent_type="build-executor", prompt="Execute Wave N...")\`
+2. Wait for build-executor to return structured completion signal
+3. **Check Review Gate**: Dispatch \`code-reviewer\` to review the batch
+   \`\`\`
+   call_flow_agent(subagent_type="code-reviewer", prompt="Review Wave N implementation...")
+   \`\`\`
+4. **Gate Decision**:
+   - ✅ Gate passes → Record Wave N completion, dispatch Wave N+1
+   - ❌ Gate fails → Feed review feedback back to build-executor, request fixes, re-check Gate
+
+**FORBIDDEN**: Dispatching Wave N+1 without checking Wave N's Review Gate.
+
+### 3. Cross-Wave Review Responsibility
+
+**You (sFlow)** are responsible for orchestrating cross-wave code reviews, NOT build-executor.
+
+- ✅ sFlow explicitly calls \`code-reviewer\` after each Wave
+- ❌ build-executor does NOT embed code-reviewer calls in its prompt
+
+### 4. Wave Completion Tracking
+
+Track Wave completion status in the workflow state:
+
+\`\`\`
+{
+  "state": "executing",
+  "currentWave": "W2",
+  "waveStatus": {
+    "W1": { "status": "completed", "gate": "passed" },
+    "W2": { "status": "running", "gate": "pending" },
+    "W3": { "status": "pending", "gate": "pending" }
+  }
+}
+\`\`\`
+
+### 5. Gate Failure Recovery
+
+If Review Gate fails:
+1. Extract review feedback from \`code-reviewer\` output
+2. Dispatch \`build-executor\` with fix request: "Wave N Review Gate failed. Issues: [list]. Fix and re-run tests."
+3. Re-check Review Gate after fixes
+4. Repeat until Gate passes or max retries reached (default: 3)
+` : '';
+
+  const contractStructure = `
+### 6. Execution Contract Wave Structure
+
+The execution contract defines Waves in order:
+\`\`\`
+Wave 1 (Batch 1) → Review Gate → 
+Wave 2 (Batch 2) → Review Gate → 
+Wave 3 (Batch 3) → Review Gate → 
+...
+\`\`\`
+
+**You MUST execute Waves in the order defined by the contract.** Do not skip, reorder, or merge Waves.
+`;
+
+  return baseConstraints + reviewGateConstraints + contractStructure;
+}
+
+export const createSFlowAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string; config?: any }): AgentConfig => {
+  const reviewGateEnabled = options?.config?.features?.reviewGate ?? false;
+  const waveConstraints = buildWaveOrchestrationConstraints(reviewGateEnabled);
+  
+  return {
   id: 'sFlow',
   name: 'SFlow',
   model,
@@ -308,87 +416,7 @@ Before routing, inspect the working directory's .flow-engine/sflow/ directory fo
 
 When executing an approved execution contract with multiple Waves, you **MUST** follow these constraints:
 
-### 1. Single Wave per build-executor Call
-
-**FORBIDDEN**: Packing multiple Waves into a single \`call_flow_agent\` prompt.
-
-❌ **WRONG**:
-\`\`\`
-call_flow_agent(
-  subagent_type="build-executor",
-  prompt="Execute Wave 1, Wave 2, Wave 3, Wave 4, Wave 5, Wave 6..."
-)
-\`\`\`
-
-✅ **CORRECT**:
-\`\`\`
-// Wave 1
-call_flow_agent(subagent_type="build-executor", prompt="Execute Wave 1 only...")
-// Wait for completion
-// Check Review Gate
-// If passed, dispatch Wave 2
-call_flow_agent(subagent_type="build-executor", prompt="Execute Wave 2 only...")
-\`\`\`
-
-### 2. Review Gate Between Waves
-
-After each Wave completes, you **MUST** check the Review Gate before dispatching the next Wave.
-
-**Sequence**:
-1. Dispatch Wave N via \`call_flow_agent(subagent_type="build-executor", prompt="Execute Wave N...")\`
-2. Wait for build-executor to return structured completion signal
-3. **Check Review Gate**: Dispatch \`code-reviewer\` to review the batch
-   \`\`\`
-   call_flow_agent(subagent_type="code-reviewer", prompt="Review Wave N implementation...")
-   \`\`\`
-4. **Gate Decision**:
-   - ✅ Gate passes → Record Wave N completion, dispatch Wave N+1
-   - ❌ Gate fails → Feed review feedback back to build-executor, request fixes, re-check Gate
-
-**FORBIDDEN**: Dispatching Wave N+1 without checking Wave N's Review Gate.
-
-### 3. Cross-Wave Review Responsibility
-
-**You (sFlow)** are responsible for orchestrating cross-wave code reviews, NOT build-executor.
-
-- ✅ sFlow explicitly calls \`code-reviewer\` after each Wave
-- ❌ build-executor does NOT embed code-reviewer calls in its prompt
-
-### 4. Wave Completion Tracking
-
-Track Wave completion status in the workflow state:
-
-\`\`\`
-{
-  "state": "executing",
-  "currentWave": "W2",
-  "waveStatus": {
-    "W1": { "status": "completed", "gate": "passed" },
-    "W2": { "status": "running", "gate": "pending" },
-    "W3": { "status": "pending", "gate": "pending" }
-  }
-}
-\`\`\`
-
-### 5. Gate Failure Recovery
-
-If Review Gate fails:
-1. Extract review feedback from \`code-reviewer\` output
-2. Dispatch \`build-executor\` with fix request: "Wave N Review Gate failed. Issues: [list]. Fix and re-run tests."
-3. Re-check Review Gate after fixes
-4. Repeat until Gate passes or max retries reached (default: 3)
-
-### 6. Execution Contract Wave Structure
-
-The execution contract defines Waves in order:
-\`\`\`
-Wave 1 (Batch 1) → Review Gate → 
-Wave 2 (Batch 2) → Review Gate → 
-Wave 3 (Batch 3) → Review Gate → 
-...
-\`\`\`
-
-**You MUST execute Waves in the order defined by the contract.** Do not skip, reorder, or merge Waves.
+${waveConstraints}
 
 ## Guardrails
 
@@ -533,4 +561,5 @@ call_flow_agent(
 </Model_Tier_Rules>`,
       temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('sFlow'),
-});
+  };
+};
