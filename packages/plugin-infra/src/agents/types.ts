@@ -16,9 +16,30 @@ export type AgentMode = 'primary' | 'subagent' | 'all';
  * Mode is managed by AGENT_MODES registry in agent-builder.ts,
  * not as a static property on the function object.
  *
- * Note: The `config` parameter is only used by agents that need dynamic configuration
- * (e.g., sFlow agent for reviewGate feature flag). Other agents can omit this parameter
- * as it is optional.
+ * @param model - The model identifier (required). Specifies which AI model to use.
+ * @param options - Optional configuration object.
+ * @param options.temperature - Temperature setting for model responses (0.0-1.0).
+ * @param options.skillContent - Skill-specific prompt content to append to agent instructions.
+ * @param options.config - SFlowConfig for agents that support dynamic configuration.
+ *                         Only used by agents that need runtime feature flags (e.g., sFlow agent
+ *                         for reviewGate feature). Other agents can omit this parameter.
+ *                         When omitted, the agent uses default behavior.
+ *
+ * @returns AgentConfig for the agent.
+ *
+ * @example
+ * // Agent without config
+ * const agentConfig = createNeedExplorerAgent('gpt-4', { temperature: 0.7 });
+ *
+ * @example
+ * // Agent with config (sFlow)
+ * const sflowConfig = { features: { reviewGate: true } };
+ * const sflowAgentConfig = createSFlowAgent('gpt-4', { config: sflowConfig });
+ *
+ * @remarks
+ * Backward Compatibility: The `config` parameter is optional. Existing agent factories
+ * that do not accept a config parameter remain compatible. When a caller passes config
+ * to an agent that does not use it, the parameter is simply ignored.
  */
 export type AgentFactory = (model: string, options?: { 
   temperature?: number; 

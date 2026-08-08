@@ -125,6 +125,8 @@ Wave 3 (Batch 3) →
 }
 
 export const createSFlowAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string; config?: SFlowConfig }): AgentConfig => {
+  // Read from cascaded config (features.reviewGate). Defaults to false when unspecified.
+  // This is a static configuration value, not a runtime state.
   const reviewGateEnabled = options?.config?.features?.reviewGate ?? false;
   const waveConstraints = buildWaveOrchestrationConstraints(reviewGateEnabled);
   
