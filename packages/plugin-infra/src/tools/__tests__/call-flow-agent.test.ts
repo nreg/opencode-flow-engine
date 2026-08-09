@@ -2376,11 +2376,19 @@ describe('Batch 5: Event-driven integration', () => {
           abort: mock(async () => {}),
         },
         event: {
-          subscribe: mock(() => {
+          subscribe: mock(async () => {
             eventSubscribeCalled = true;
-            return {
-              on: mock(() => ({ unsubscribe: mock(() => {}) })),
-            };
+            // Create AsyncGenerator that yields session.idle event
+            async function* eventStream() {
+              yield {
+                directory: '',
+                payload: {
+                  type: 'session.idle',
+                  properties: { sessionID: 'test-session-001' },
+                },
+              };
+            }
+            return { stream: eventStream() };
           }),
         },
       };
@@ -2425,11 +2433,19 @@ describe('Batch 5: Event-driven integration', () => {
           abort: mock(async () => {}),
         },
         event: {
-          subscribe: mock(() => {
+          subscribe: mock(async () => {
             eventSubscribeCalled = true;
-            return {
-              on: mock(() => ({ unsubscribe: mock(() => {}) })),
-            };
+            // Create AsyncGenerator that yields session.idle event
+            async function* eventStream() {
+              yield {
+                directory: '',
+                payload: {
+                  type: 'session.idle',
+                  properties: { sessionID: 'test-session-001' },
+                },
+              };
+            }
+            return { stream: eventStream() };
           }),
         },
       };
@@ -2482,11 +2498,19 @@ describe('Batch 5: Event-driven integration', () => {
           abort: mock(async () => {}),
         },
         event: {
-          subscribe: mock(() => {
+          subscribe: mock(async () => {
             eventSubscribeCalled = true;
-            return {
-              on: mock(() => ({ unsubscribe: mock(() => {}) })),
-            };
+            // Create AsyncGenerator that yields session.idle event
+            async function* eventStream() {
+              yield {
+                directory: '',
+                payload: {
+                  type: 'session.idle',
+                  properties: { sessionID: 'test-session-001' },
+                },
+              };
+            }
+            return { stream: eventStream() };
           }),
         },
       };
@@ -2604,22 +2628,13 @@ describe('Batch 5: Event-driven integration', () => {
 
   describe('Task 5.3: Performance and cleanup', () => {
     it('should cleanup event subscription after completion', async () => {
-      // Arrange: Create mock client with subscription tracking
-      let unsubscribeCalled = false;
-      const eventHandlers: Array<(e: unknown) => void> = [];
-      let eventEmitted = false;
+      // Arrange: Create mock client with subscription tracking (AsyncGenerator-based)
+      let streamReturnCalled = false;
       const client = {
         session: {
           create: mock(async () => ({ data: { id: 'test-session-001' } })),
           prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
             promptCalls.push({ id: args.path.id, body: args.body });
-            // Emit session.idle event after a short delay (simulating event-driven completion)
-            setTimeout(() => {
-              eventEmitted = true;
-              eventHandlers.forEach(handler => {
-                handler({ type: 'session.idle', properties: { sessionID: 'test-session-001', time: Date.now() } });
-              });
-            }, 50);
           }),
           messages: mock(async () => ({
             data: [
@@ -2627,25 +2642,29 @@ describe('Batch 5: Event-driven integration', () => {
               { parts: [{ type: 'text', text: 'Task completed [TASK_COMPLETE]' }] },
             ],
           })),
-          // Return busy initially, then idle after event emission
-          status: mock(async () => ({ data: { 'test-session-001': { type: eventEmitted ? 'idle' : 'busy' } } })),
+          status: mock(async () => ({ data: [{ id: 'test-session-001', type: 'idle' }] })),
           abort: mock(async () => {}),
         },
         event: {
-          subscribe: mock(() => {
-            const eventStream = {
-              on: mock((event: string, handler: (e: unknown) => void) => {
-                if (event === 'data') {
-                  eventHandlers.push(handler);
-                }
-                return {
-                  unsubscribe: mock(() => {
-                    unsubscribeCalled = true;
-                  }),
-                };
-              }),
+          subscribe: mock(async () => {
+            // Create AsyncGenerator that yields session.idle event
+            async function* eventStream() {
+              yield {
+                directory: '',
+                payload: {
+                  type: 'session.idle',
+                  properties: { sessionID: 'test-session-001' },
+                },
+              };
+            }
+            const stream = eventStream();
+            // Wrap stream.return to track cleanup
+            const originalReturn = stream.return.bind(stream);
+            stream.return = (value?: unknown) => {
+              streamReturnCalled = true;
+              return originalReturn(value);
             };
-            return eventStream;
+            return { stream };
           }),
         },
       };
@@ -2665,24 +2684,17 @@ describe('Batch 5: Event-driven integration', () => {
         { sessionID: 'parent-session', directory: '' },
       );
 
-      // Assert: Event subscription should be cleaned up
-      expect(unsubscribeCalled).toBe(true);
+      // Assert: Event subscription should be cleaned up (stream.return called)
+      expect(streamReturnCalled).toBe(true);
     });
 
     it('should respond faster with event-driven polling (performance test)', async () => {
-      // Arrange: Create mock client that emits session.idle event quickly
-      const eventHandlers: Array<(e: unknown) => void> = [];
+      // Arrange: Create mock client that emits session.idle event quickly via AsyncGenerator
       const client = {
         session: {
           create: mock(async () => ({ data: { id: 'test-session-001' } })),
           prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
             promptCalls.push({ id: args.path.id, body: args.body });
-            // Emit session.idle event after 50ms (simulating fast event response)
-            setTimeout(() => {
-              eventHandlers.forEach(handler => {
-                handler({ type: 'session.idle', properties: { sessionID: 'test-session-001' } });
-              });
-            }, 50);
           }),
           messages: mock(async () => ({
             data: [
@@ -2690,18 +2702,24 @@ describe('Batch 5: Event-driven integration', () => {
               { parts: [{ type: 'text', text: 'Task completed [TASK_COMPLETE]' }] },
             ],
           })),
-          status: mock(async () => ({ data: { 'test-session-001': { type: 'idle' } } })),
+          status: mock(async () => ({ data: [{ id: 'test-session-001', type: 'idle' }] })),
           abort: mock(async () => {}),
         },
         event: {
-          subscribe: mock(() => ({
-            on: mock((event: string, handler: (e: unknown) => void) => {
-              if (event === 'data') {
-                eventHandlers.push(handler);
-              }
-              return { unsubscribe: mock(() => {}) };
-            }),
-          })),
+          subscribe: mock(async () => {
+            // Create AsyncGenerator that yields session.idle event after 50ms
+            async function* eventStream() {
+              await new Promise(resolve => setTimeout(resolve, 50));
+              yield {
+                directory: '',
+                payload: {
+                  type: 'session.idle',
+                  properties: { sessionID: 'test-session-001' },
+                },
+              };
+            }
+            return { stream: eventStream() };
+          }),
         },
       };
 

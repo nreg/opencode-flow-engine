@@ -243,30 +243,83 @@ if (agent_id) {
 
 **原理：** 订阅 SDK 的 `session.idle` SSE 事件，子 agent 完成时即时唤醒父 agent。
 
-**关键代码（polling.ts:64-90）：**
+**关键代码（polling.ts:74-123）：**
 
 ```typescript
-let eventSubscription: { unsubscribe: () => void } | null = null;
+let eventSubscription: EventSubscription | null = null;
 let eventReceived = false;
 let wakeUp: (() => void) | null = null;
 
 if (eventDriven && client.event && typeof client.event.subscribe === 'function') {
-  const eventStream = client.event.subscribe({ query: {} });
-  const subscription = eventStream.on('data', (event: unknown) => {
-    // P0-1: 检查订阅是否仍然活跃（防止迟到事件）
-    if (eventSubscription !== subscription) return;
-    
-    const e = event as { type: string; properties?: { sessionID?: string } };
-    if (e.type === 'session.idle' && e.properties?.sessionID === sessionID) {
-      eventReceived = true;
-      // F1: 即时唤醒（<50ms）
-      if (wakeUp) wakeUp();
-    }
-  });
-  eventSubscription = subscription;
-  eventDrivenActive = true;
+  try {
+    // 订阅事件流，返回 Promise<{ stream: AsyncGenerator }>
+    const abortController = new AbortController();
+    const { stream } = await client.event.subscribe({ query: {} });
+
+    // 异步消费事件流
+    const consumeStream = async () => {
+      try {
+        for await (const event of stream) {
+          // 检查取消信号
+          if (abortController.signal.aborted) break;
+
+          const payload = event.payload;
+          // 检测 session.idle 事件
+          if (
+            payload.type === 'session.idle' &&
+            payload.properties &&
+            'sessionID' in payload.properties &&
+            payload.properties.sessionID === sessionID
+          ) {
+            eventReceived = true;
+            // 即时唤醒（<50ms）
+            if (wakeUp) wakeUp();
+          }
+        }
+      } catch (error) {
+        // 事件流错误：记录日志，继续轮询（不重连）
+        if (!abortController.signal.aborted) {
+          await logger.log(sessionID, 'event stream error', {
+            error: error instanceof Error ? error.message : String(error),
+            fallback: 'continue polling',
+          });
+        }
+      }
+    };
+
+    consumeStream();
+
+    // 创建取消订阅句柄
+    eventSubscription = {
+      cancel: () => {
+        abortController.abort();
+        if (stream && typeof stream.return === 'function') {
+          stream.return(undefined);
+        }
+      },
+    };
+    eventDrivenActive = true;
+  } catch (error) {
+    // 订阅失败：记录日志，降级到纯轮询
+    await logger.log(sessionID, 'event subscription failed', {
+      error: error instanceof Error ? error.message : String(error),
+      fallback: 'pure polling',
+    });
+    eventDrivenActive = false;
+  }
 }
 ```
+
+**事件订阅机制：**
+- `client.event.subscribe()` 返回 `Promise<{ stream: AsyncGenerator }>`
+- 通过 `for await (const event of stream)` 消费事件流
+- 使用 `AbortController` 控制取消和清理
+- 事件类型：`{ payload: { type: 'session.idle', properties: { sessionID: string } } }`
+
+**错误处理：**
+- 订阅失败：记录日志，立即降级到纯轮询
+- 流中断/异常：记录日志，继续轮询（不尝试重连）
+- 取消订阅：调用 `abortController.abort()` + `stream.return(undefined)` 清理资源
 
 **性能提升：**
 - 事件到达时立即返回，无需等待轮询间隔
@@ -281,18 +334,18 @@ if (eventDriven && client.event && typeof client.event.subscribe === 'function')
 - 事件订阅失败（SDK 不支持或网络错误）
 - 事件流超时（超过 `fallbackThreshold`，默认 25s）
 
-**降级逻辑（polling.ts:122-132）：**
+**降级逻辑（polling.ts:125-133）：**
 
 ```typescript
-const elapsed = Date.now() - startTime;
-if (eventSubscription && !eventReceived && elapsed > fallbackThreshold) {
-  await logger.log(sessionID, 'fallback to polling', {
-    reason: 'event not received within threshold',
-    elapsed: `${elapsed}ms`,
-    threshold: `${fallbackThreshold}ms`,
-  });
-  eventSubscription.unsubscribe();
-  eventSubscription = null;
+async function logExit(reason: string, result: string | null | ProbePending): Promise<string | null | ProbePending> {
+  const elapsed = Date.now() - startTime;
+  await logger.log(sessionID, 'completed', { reason, elapsed: `${elapsed}ms` });
+  // 取消事件订阅并清理资源
+  if (eventSubscription) {
+    eventSubscription.cancel();
+    eventSubscription = null;
+  }
+  return result;
 }
 ```
 

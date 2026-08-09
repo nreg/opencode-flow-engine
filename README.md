@@ -393,8 +393,18 @@ AFK (Away From Keyboard) mode enables automated workflow execution without user 
 
 Subagent completion detection uses a hybrid event-driven + polling fallback mechanism:
 
-- **Event-driven mode** (default): Subscribes to SSE `session.idle` events for instant completion detection (< 1s)
-- **Polling fallback**: If event subscription fails or no event received within `fallbackThreshold` (default 25s), switches to pure polling (200ms interval)
+- **Event-driven mode** (default):
+  - Calls `client.event.subscribe({ query: {} })` which returns `Promise<{ stream: AsyncGenerator }>`
+  - Consumes events via `for await (const event of stream)` loop
+  - Detects `session.idle` events with `payload.properties.sessionID` matching the target session
+  - Uses `AbortController` to cancel subscription and cleanup stream
+  - Instant completion detection (< 50ms after subagent finishes)
+- **Event stream failure handling**:
+  - On subscription failure: logs error, falls back to pure polling immediately
+  - On stream error/interruption: logs error, continues polling (no reconnection attempt)
+- **Polling fallback**:
+  - If event subscription fails or no event received within `fallbackThreshold` (default 25s), switches to pure polling (200ms interval)
+  - Pure polling uses `status()` and `messages()` APIs to detect completion
 - **Logging**: All polling events are logged to `.flow-engine/sflow/polling.log` with structured format:
   ```
   [ISO-timestamp] [INFO] [sessionID] message | metadata

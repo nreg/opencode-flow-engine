@@ -120,6 +120,49 @@ export interface PollingOptions {
   fallbackThreshold?: number;
 }
 
+// ─── Event subscription types (Batch 2: AsyncGenerator interface) ───────────────
+
+/**
+ * GlobalEvent structure from SDK
+ * @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts
+ */
+export interface GlobalEvent {
+  directory: string;
+  payload: Event;
+}
+
+/**
+ * Event union type from SDK
+ */
+export type Event = {
+  type: string;
+  properties?: Record<string, unknown>;
+};
+
+/**
+ * EventSessionIdle structure
+ */
+export interface EventSessionIdle {
+  type: 'session.idle';
+  properties: {
+    sessionID: string;
+  };
+}
+
+/**
+ * Result of event.subscribe() - contains AsyncGenerator stream
+ */
+export interface EventSubscribeResult {
+  stream: AsyncGenerator<GlobalEvent>;
+}
+
+/**
+ * Event subscription interface (for cleanup)
+ */
+export interface EventSubscription {
+  cancel: () => void;
+}
+
 /** Format a tool output response */
 export function formatToolOutput(
   title: string,

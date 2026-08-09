@@ -2,7 +2,14 @@
  * Shared session polling utilities for sFlow subagent communication.
  */
 import { sleep } from '@opencode-flow-engine/shared';
-import { PROBE_PENDING, type ProbePending, type PollingOptions } from '../types.js';
+import {
+  PROBE_PENDING,
+  type ProbePending,
+  type PollingOptions,
+  type GlobalEvent,
+  type EventSubscribeResult,
+  type EventSubscription,
+} from '../types.js';
 import { PollingLogger } from '../features/polling-logger.js';
 
 const logger = new PollingLogger();
@@ -37,7 +44,10 @@ export interface SFlowClientSession {
  * - Event-driven mode (eventDriven: true): subscribes to SSE events for faster detection.
  */
 export async function pollSessionCompletion(
-  client: { session: SFlowClientSession; event?: { subscribe: (args: { query?: { directory?: string } }) => { on: (event: string, handler: (e: unknown) => void) => { unsubscribe: () => void } } } },
+  client: {
+    session: SFlowClientSession;
+    event?: { subscribe: (args?: { query?: { directory?: string } }) => Promise<EventSubscribeResult> };
+  },
   sessionID: string,
   options: { maxWaitMs?: number; pollIntervalMs?: number; isNew?: boolean; probeMode?: boolean } & PollingOptions = {},
 ): Promise<string | null | ProbePending> {
@@ -56,47 +66,68 @@ export async function pollSessionCompletion(
   await logger.log(sessionID, 'start polling', { maxWaitMs: MAX_WAIT, isNew, probeMode, eventDriven, fallbackThreshold });
 
   // Batch 2: Event-driven subscription setup
-  let eventSubscription: { unsubscribe: () => void } | null = null;
+  let eventSubscription: EventSubscription | null = null;
   let eventReceived = false;
-  let eventDrivenActive = false; // P0-3: Track whether event subscription is actually active
-  let wakeUp: (() => void) | null = null; // F1: Wake-up function for immediate return
-  
-  // P0-1 & P0-3: Subscribe to events
-  // F1: Event arrival sets eventReceived flag AND calls wakeUp() for immediate return
-  // P1-1: Check both event object and subscribe method existence
+  let eventDrivenActive = false;
+  let wakeUp: (() => void) | null = null;
+
   if (eventDriven && client.event && typeof client.event.subscribe === 'function') {
     try {
-      const eventStream = client.event.subscribe({ query: {} });
-      const subscription = eventStream.on('data', (event: unknown) => {
-        // P0-1: Check if subscription is still active (race condition defense)
-        if (eventSubscription !== subscription) return; // Already cleaned up, ignore late event
-        const e = event as { type: string; properties?: { sessionID?: string } };
-        if (e.type === 'session.idle' && e.properties?.sessionID === sessionID) {
-          eventReceived = true;
-          // F1: Wake up immediately on event arrival
-          if (wakeUp) wakeUp();
+      const abortController = new AbortController();
+      const { stream } = await client.event.subscribe({ query: {} });
+
+      const consumeStream = async () => {
+        try {
+          for await (const event of stream) {
+            if (abortController.signal.aborted) break;
+
+            const payload = event.payload;
+            if (
+              payload.type === 'session.idle' &&
+              payload.properties &&
+              'sessionID' in payload.properties &&
+              payload.properties.sessionID === sessionID
+            ) {
+              eventReceived = true;
+              if (wakeUp) wakeUp();
+            }
+          }
+        } catch (error) {
+          if (!abortController.signal.aborted) {
+            await logger.log(sessionID, 'event stream error', {
+              error: error instanceof Error ? error.message : String(error),
+              fallback: 'continue polling',
+            });
+          }
         }
-      });
-      eventSubscription = subscription;
-      eventDrivenActive = true; // P0-3: Mark as active only after successful subscription
+      };
+
+      consumeStream();
+
+      eventSubscription = {
+        cancel: () => {
+          abortController.abort();
+          if (stream && typeof stream.return === 'function') {
+            stream.return(undefined);
+          }
+        },
+      };
+      eventDrivenActive = true;
     } catch (error) {
-      // P1-1: Log event subscription failure
       await logger.log(sessionID, 'event subscription failed', {
         error: error instanceof Error ? error.message : String(error),
         fallback: 'pure polling',
       });
-      eventDrivenActive = false; // P0-3: Mark as inactive on failure
+      eventDrivenActive = false;
     }
   }
 
-  // F1: Exit log helper
   async function logExit(reason: string, result: string | null | ProbePending): Promise<string | null | ProbePending> {
     const elapsed = Date.now() - startTime;
     await logger.log(sessionID, 'completed', { reason, elapsed: `${elapsed}ms` });
-    // Batch 2: Cleanup event subscription on exit
     if (eventSubscription) {
-      eventSubscription.unsubscribe();
-      eventSubscription = null; // P0-1: Mark as cleaned immediately
+      eventSubscription.cancel();
+      eventSubscription = null;
     }
     return result;
   }
@@ -119,7 +150,6 @@ export async function pollSessionCompletion(
   let pollCount = 0;
 
   while (Date.now() - startTime < MAX_WAIT) {
-    // P0-2: Fallback check at loop START (before sleep) to avoid 200ms delay
     const elapsed = Date.now() - startTime;
     if (eventSubscription && !eventReceived && elapsed > fallbackThreshold) {
       await logger.log(sessionID, 'fallback to polling', {
@@ -127,17 +157,15 @@ export async function pollSessionCompletion(
         elapsed: `${elapsed}ms`,
         threshold: `${fallbackThreshold}ms`,
       });
-      eventSubscription.unsubscribe();
-      eventSubscription = null; // P0-1: Mark as cleaned immediately
+      eventSubscription.cancel();
+      eventSubscription = null;
     }
 
-    // F1: Use Promise.race to allow immediate wake-up on event arrival
-    // Event arrival calls wakeUp() to interrupt sleep and return immediately
     await new Promise<void>((resolve) => {
-      wakeUp = resolve; // Store resolve function for wake-up
+      wakeUp = resolve;
       sleep(POLL_INTERVAL).then(resolve);
     });
-    wakeUp = null; // Reset after each iteration
+    wakeUp = null;
     pollCount++;
 
     // P0-3: If event received, return directly without status confirmation
