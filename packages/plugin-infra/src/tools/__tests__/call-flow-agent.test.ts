@@ -2345,3 +2345,386 @@ describe('F2: Watcher probe mode (1s timeout bug fix)', () => {
     expect(task?.result).toBeUndefined(); // No result yet
   });
 });
+
+// ─── Batch 5: Event-Driven Integration ───────────────────────────────────────
+
+describe('Batch 5: Event-driven integration', () => {
+  let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
+
+  beforeEach(() => {
+    promptCalls = [];
+    currentTools = null;
+  });
+
+  describe('Task 5.1: Event subscription verification', () => {
+    it('should use event-driven polling in sync mode by default', async () => {
+      // Arrange: Create mock client with event subscription tracking
+      let eventSubscribeCalled = false;
+      const client = {
+        session: {
+          create: mock(async () => ({ data: { id: 'test-session-001' } })),
+          prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+            promptCalls.push({ id: args.path.id, body: args.body });
+          }),
+          messages: mock(async () => ({
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              { parts: [{ type: 'text', text: 'Task completed [TASK_COMPLETE]' }] },
+            ],
+          })),
+          status: mock(async () => ({ data: { 'test-session-001': { type: 'idle' } } })),
+          abort: mock(async () => {}),
+        },
+        event: {
+          subscribe: mock(() => {
+            eventSubscribeCalled = true;
+            return {
+              on: mock(() => ({ unsubscribe: mock(() => {}) })),
+            };
+          }),
+        },
+      };
+
+      const options = createTestOptions(client as any);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Act: Execute sync call
+      const result = await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+        },
+        { sessionID: 'parent-session', directory: '' },
+      );
+
+      // Assert: Event subscription should be called (eventDriven defaults to true)
+      expect(eventSubscribeCalled).toBe(true);
+      const data = JSON.parse(result.output);
+      expect(data.success).toBe(true);
+    });
+
+    it('should use event-driven polling in async pollAndComplete by default', async () => {
+      // Arrange: Create mock client with event subscription tracking
+      let eventSubscribeCalled = false;
+      const client = {
+        session: {
+          create: mock(async () => ({ data: { id: 'test-session-001' } })),
+          prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+            promptCalls.push({ id: args.path.id, body: args.body });
+          }),
+          messages: mock(async () => ({
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              { parts: [{ type: 'text', text: 'Task completed [TASK_COMPLETE]' }] },
+            ],
+          })),
+          status: mock(async () => ({ data: { 'test-session-001': { type: 'idle' } } })),
+          abort: mock(async () => {}),
+        },
+        event: {
+          subscribe: mock(() => {
+            eventSubscribeCalled = true;
+            return {
+              on: mock(() => ({ unsubscribe: mock(() => {}) })),
+            };
+          }),
+        },
+      };
+
+      const options = createTestOptions(client as any);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Act: Start async task and poll with block=true
+      const startResult = await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: true,
+        },
+        { sessionID: 'parent-session', directory: '' },
+      );
+
+      const startData = JSON.parse(startResult.output);
+      const taskId = startData.task_id;
+
+      const outputResult = await tools.flowagent_output.execute(
+        { task_id: taskId, block: true },
+        { sessionID: 'parent-session', directory: '' },
+      );
+
+      // Assert: Event subscription should be called in pollAndComplete
+      expect(eventSubscribeCalled).toBe(true);
+      const outputData = JSON.parse(outputResult.output);
+      expect(outputData.success).toBe(true);
+    });
+
+    it('should use event-driven polling in watcher probeMode by default', async () => {
+      // Arrange: Create mock client with event subscription tracking
+      let eventSubscribeCalled = false;
+      const client = {
+        session: {
+          create: mock(async () => ({ data: { id: 'test-session-001' } })),
+          prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+            promptCalls.push({ id: args.path.id, body: args.body });
+          }),
+          messages: mock(async () => ({
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              { parts: [{ type: 'text', text: 'Processing...' }] },
+            ],
+          })),
+          status: mock(async () => ({ data: { 'test-session-001': { type: 'busy' } } })),
+          abort: mock(async () => {}),
+        },
+        event: {
+          subscribe: mock(() => {
+            eventSubscribeCalled = true;
+            return {
+              on: mock(() => ({ unsubscribe: mock(() => {}) })),
+            };
+          }),
+        },
+      };
+
+      const options = createTestOptions(client as any);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Act: Start async task (watcher will probe with probeMode=true)
+      const startResult = await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: true,
+        },
+        { sessionID: 'parent-session', directory: '' },
+      );
+
+      // Wait for watcher to run at least one cycle (pollIntervalMs=200ms)
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Assert: Event subscription should be called even in probeMode
+      expect(eventSubscribeCalled).toBe(true);
+    });
+  });
+
+  describe('Task 5.2: Backward compatibility', () => {
+    it('should maintain backward compatibility when event subscription fails', async () => {
+      // Arrange: Create mock client where event.subscribe throws
+      const client = {
+        session: {
+          create: mock(async () => ({ data: { id: 'test-session-001' } })),
+          prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+            promptCalls.push({ id: args.path.id, body: args.body });
+          }),
+          messages: mock(async () => ({
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              { parts: [{ type: 'text', text: 'Task completed [TASK_COMPLETE]' }] },
+            ],
+          })),
+          status: mock(async () => ({ data: { 'test-session-001': { type: 'idle' } } })),
+          abort: mock(async () => {}),
+        },
+        event: {
+          subscribe: mock(() => {
+            throw new Error('Event subscription not available');
+          }),
+        },
+      };
+
+      const options = createTestOptions(client as any);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Act: Execute sync call (should fallback to pure polling)
+      const result = await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+        },
+        { sessionID: 'parent-session', directory: '' },
+      );
+
+      // Assert: Should still succeed with pure polling fallback
+      const data = JSON.parse(result.output);
+      expect(data.success).toBe(true);
+      expect(data.output).toContain('Task completed');
+    });
+
+    it('should maintain backward compatibility when client.event is undefined', async () => {
+      // Arrange: Create mock client without event property (legacy client)
+      const client = {
+        session: {
+          create: mock(async () => ({ data: { id: 'test-session-001' } })),
+          prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+            promptCalls.push({ id: args.path.id, body: args.body });
+          }),
+          messages: mock(async () => ({
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              { parts: [{ type: 'text', text: 'Task completed [TASK_COMPLETE]' }] },
+            ],
+          })),
+          status: mock(async () => ({ data: { 'test-session-001': { type: 'idle' } } })),
+          abort: mock(async () => {}),
+        },
+        // No event property
+      };
+
+      const options = createTestOptions(client as any);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Act: Execute sync call
+      const result = await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+        },
+        { sessionID: 'parent-session', directory: '' },
+      );
+
+      // Assert: Should succeed with pure polling
+      const data = JSON.parse(result.output);
+      expect(data.success).toBe(true);
+      expect(data.output).toContain('Task completed');
+    });
+  });
+
+  describe('Task 5.3: Performance and cleanup', () => {
+    it('should cleanup event subscription after completion', async () => {
+      // Arrange: Create mock client with subscription tracking
+      let unsubscribeCalled = false;
+      const eventHandlers: Array<(e: unknown) => void> = [];
+      let eventEmitted = false;
+      const client = {
+        session: {
+          create: mock(async () => ({ data: { id: 'test-session-001' } })),
+          prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+            promptCalls.push({ id: args.path.id, body: args.body });
+            // Emit session.idle event after a short delay (simulating event-driven completion)
+            setTimeout(() => {
+              eventEmitted = true;
+              eventHandlers.forEach(handler => {
+                handler({ type: 'session.idle', properties: { sessionID: 'test-session-001', time: Date.now() } });
+              });
+            }, 50);
+          }),
+          messages: mock(async () => ({
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              { parts: [{ type: 'text', text: 'Task completed [TASK_COMPLETE]' }] },
+            ],
+          })),
+          // Return busy initially, then idle after event emission
+          status: mock(async () => ({ data: { 'test-session-001': { type: eventEmitted ? 'idle' : 'busy' } } })),
+          abort: mock(async () => {}),
+        },
+        event: {
+          subscribe: mock(() => {
+            const eventStream = {
+              on: mock((event: string, handler: (e: unknown) => void) => {
+                if (event === 'data') {
+                  eventHandlers.push(handler);
+                }
+                return {
+                  unsubscribe: mock(() => {
+                    unsubscribeCalled = true;
+                  }),
+                };
+              }),
+            };
+            return eventStream;
+          }),
+        },
+      };
+
+      const options = createTestOptions(client as any);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Act: Execute sync call
+      await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+        },
+        { sessionID: 'parent-session', directory: '' },
+      );
+
+      // Assert: Event subscription should be cleaned up
+      expect(unsubscribeCalled).toBe(true);
+    });
+
+    it('should respond faster with event-driven polling (performance test)', async () => {
+      // Arrange: Create mock client that emits session.idle event quickly
+      const eventHandlers: Array<(e: unknown) => void> = [];
+      const client = {
+        session: {
+          create: mock(async () => ({ data: { id: 'test-session-001' } })),
+          prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+            promptCalls.push({ id: args.path.id, body: args.body });
+            // Emit session.idle event after 50ms (simulating fast event response)
+            setTimeout(() => {
+              eventHandlers.forEach(handler => {
+                handler({ type: 'session.idle', properties: { sessionID: 'test-session-001' } });
+              });
+            }, 50);
+          }),
+          messages: mock(async () => ({
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              { parts: [{ type: 'text', text: 'Task completed [TASK_COMPLETE]' }] },
+            ],
+          })),
+          status: mock(async () => ({ data: { 'test-session-001': { type: 'idle' } } })),
+          abort: mock(async () => {}),
+        },
+        event: {
+          subscribe: mock(() => ({
+            on: mock((event: string, handler: (e: unknown) => void) => {
+              if (event === 'data') {
+                eventHandlers.push(handler);
+              }
+              return { unsubscribe: mock(() => {}) };
+            }),
+          })),
+        },
+      };
+
+      const options = createTestOptions(client as any);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Act: Execute sync call and measure time
+      const startTime = Date.now();
+      await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+        },
+        { sessionID: 'parent-session', directory: '' },
+      );
+      const elapsed = Date.now() - startTime;
+
+      // Assert: Should respond quickly (event-driven response < polling interval)
+      // Allow up to 250ms to account for timing variance
+      expect(elapsed).toBeLessThan(250);
+    });
+  });
+});

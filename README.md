@@ -389,6 +389,18 @@ AFK (Away From Keyboard) mode enables automated workflow execution without user 
 - **Lifecycle**: Activated at workflow start, automatically deactivates on `closing`/`abandoned` — no manual exit needed
 - **Safety**: Falls back to user input when subagent output lacks structured recommendations; ignores non-AFK messages during automation
 
+### Polling Mechanism
+
+Subagent completion detection uses a hybrid event-driven + polling fallback mechanism:
+
+- **Event-driven mode** (default): Subscribes to SSE `session.idle` events for instant completion detection (< 1s)
+- **Polling fallback**: If event subscription fails or no event received within `fallbackThreshold` (default 25s), switches to pure polling (200ms interval)
+- **Logging**: All polling events are logged to `.flow-engine/sflow/polling.log` with structured format:
+  ```
+  [ISO-timestamp] [INFO] [sessionID] message | metadata
+  ```
+- **Safety caps**: Max 120 polls for new sessions (24s), max wait 120s for async mode
+
 ### Model Profiles
 
 6-tier model resolution: `override → model → model_type → config → profile → fallback → default`

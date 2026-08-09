@@ -106,6 +106,20 @@ export function generateTaskId(counter: { value: number }): string {
   return `sf_${Date.now()}_${counter.value}`;
 }
 
+// ─── Polling options (Batch 2: event-driven polling) ────────────────────────────
+
+/**
+ * Options for event-driven session polling.
+ * - eventDriven: Enable SSE event subscription for faster completion detection (default: true)
+ * - fallbackThreshold: Fall back to pure polling if event subscription takes longer than this (default: 25000ms)
+ */
+export interface PollingOptions {
+  /** Enable event-driven polling via SSE subscription (default: true) */
+  eventDriven?: boolean;
+  /** Fallback to pure polling if event subscription exceeds this duration (default: 25000ms) */
+  fallbackThreshold?: number;
+}
+
 /** Format a tool output response */
 export function formatToolOutput(
   title: string,

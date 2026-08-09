@@ -2,7 +2,10 @@
  * Shared session polling utilities for sFlow subagent communication.
  */
 import { sleep } from '@opencode-flow-engine/shared';
-import { PROBE_PENDING, type ProbePending } from '../types.js';
+import { PROBE_PENDING, type ProbePending, type PollingOptions } from '../types.js';
+import { PollingLogger } from '../features/polling-logger.js';
+
+const logger = new PollingLogger();
 
 /** Default max wait time for async/background polling (120s) */
 export const DEFAULT_MAX_WAIT_MS = 120_000;
@@ -31,11 +34,12 @@ export interface SFlowClientSession {
  *   when status never flips to idle.
  * - Probe mode (probeMode: true): only checks status, returns PROBE_PENDING if busy/retry,
  *   returns last message if idle, returns null if retry error.
+ * - Event-driven mode (eventDriven: true): subscribes to SSE events for faster detection.
  */
 export async function pollSessionCompletion(
-  client: { session: SFlowClientSession },
+  client: { session: SFlowClientSession; event?: { subscribe: (args: { query?: { directory?: string } }) => { on: (event: string, handler: (e: unknown) => void) => { unsubscribe: () => void } } } },
   sessionID: string,
-  options: { maxWaitMs?: number; pollIntervalMs?: number; isNew?: boolean; probeMode?: boolean } = {},
+  options: { maxWaitMs?: number; pollIntervalMs?: number; isNew?: boolean; probeMode?: boolean } & PollingOptions = {},
 ): Promise<string | null | ProbePending> {
   const MAX_WAIT = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const POLL_INTERVAL = options.pollIntervalMs ?? 200; // 200ms default (was 500ms, reduced for faster detection)
@@ -45,14 +49,55 @@ export async function pollSessionCompletion(
   const isNew = options.isNew ?? false;
   const probeMode = options.probeMode ?? false;
   const MAX_POLLS_FOR_NEW = 120; // 120 * 200ms = 24s max for new sessions
+  const eventDriven = options.eventDriven ?? true; // Batch 2: event-driven by default
+  const fallbackThreshold = options.fallbackThreshold ?? 25_000; // Batch 3: fallback to pure polling after 25s (default)
 
   // F1: Entry log
-  console.log(`[Polling] session=${sessionID} start polling (maxWaitMs=${MAX_WAIT}, isNew=${isNew}, probeMode=${probeMode})`);
+  await logger.log(sessionID, 'start polling', { maxWaitMs: MAX_WAIT, isNew, probeMode, eventDriven, fallbackThreshold });
+
+  // Batch 2: Event-driven subscription setup
+  let eventSubscription: { unsubscribe: () => void } | null = null;
+  let eventReceived = false;
+  let eventDrivenActive = false; // P0-3: Track whether event subscription is actually active
+  let wakeUp: (() => void) | null = null; // F1: Wake-up function for immediate return
+  
+  // P0-1 & P0-3: Subscribe to events
+  // F1: Event arrival sets eventReceived flag AND calls wakeUp() for immediate return
+  // P1-1: Check both event object and subscribe method existence
+  if (eventDriven && client.event && typeof client.event.subscribe === 'function') {
+    try {
+      const eventStream = client.event.subscribe({ query: {} });
+      const subscription = eventStream.on('data', (event: unknown) => {
+        // P0-1: Check if subscription is still active (race condition defense)
+        if (eventSubscription !== subscription) return; // Already cleaned up, ignore late event
+        const e = event as { type: string; properties?: { sessionID?: string } };
+        if (e.type === 'session.idle' && e.properties?.sessionID === sessionID) {
+          eventReceived = true;
+          // F1: Wake up immediately on event arrival
+          if (wakeUp) wakeUp();
+        }
+      });
+      eventSubscription = subscription;
+      eventDrivenActive = true; // P0-3: Mark as active only after successful subscription
+    } catch (error) {
+      // P1-1: Log event subscription failure
+      await logger.log(sessionID, 'event subscription failed', {
+        error: error instanceof Error ? error.message : String(error),
+        fallback: 'pure polling',
+      });
+      eventDrivenActive = false; // P0-3: Mark as inactive on failure
+    }
+  }
 
   // F1: Exit log helper
-  function logExit(reason: string, result: string | null | ProbePending): string | null | ProbePending {
+  async function logExit(reason: string, result: string | null | ProbePending): Promise<string | null | ProbePending> {
     const elapsed = Date.now() - startTime;
-    console.log(`[Polling] session=${sessionID} completed reason=${reason} elapsed=${elapsed}ms`);
+    await logger.log(sessionID, 'completed', { reason, elapsed: `${elapsed}ms` });
+    // Batch 2: Cleanup event subscription on exit
+    if (eventSubscription) {
+      eventSubscription.unsubscribe();
+      eventSubscription = null; // P0-1: Mark as cleaned immediately
+    }
     return result;
   }
 
@@ -74,8 +119,32 @@ export async function pollSessionCompletion(
   let pollCount = 0;
 
   while (Date.now() - startTime < MAX_WAIT) {
-    await sleep(POLL_INTERVAL);
+    // P0-2: Fallback check at loop START (before sleep) to avoid 200ms delay
+    const elapsed = Date.now() - startTime;
+    if (eventSubscription && !eventReceived && elapsed > fallbackThreshold) {
+      await logger.log(sessionID, 'fallback to polling', {
+        reason: 'event not received within threshold',
+        elapsed: `${elapsed}ms`,
+        threshold: `${fallbackThreshold}ms`,
+      });
+      eventSubscription.unsubscribe();
+      eventSubscription = null; // P0-1: Mark as cleaned immediately
+    }
+
+    // F1: Use Promise.race to allow immediate wake-up on event arrival
+    // Event arrival calls wakeUp() to interrupt sleep and return immediately
+    await new Promise<void>((resolve) => {
+      wakeUp = resolve; // Store resolve function for wake-up
+      sleep(POLL_INTERVAL).then(resolve);
+    });
+    wakeUp = null; // Reset after each iteration
     pollCount++;
+
+    // P0-3: If event received, return directly without status confirmation
+    if (eventReceived) {
+      const result = await readSessionLastMessage(client, sessionID);
+      return await logExit('event_idle', result);
+    }
 
     // ⸺⸺ Status check: session idle/retry → handle accordingly ⸺⸺
     let isIdle = false;
@@ -147,17 +216,17 @@ export async function pollSessionCompletion(
 
     if (isIdle) {
       const result = await readSessionLastMessage(client, sessionID);
-      return logExit('idle', result);
+      return await logExit('idle', result);
     }
 
     // Task 1.2: If retry is determined to be an error, return null
     if (isRetryError) {
-      return logExit('retry_error', null);
+      return await logExit('retry_error', null);
     }
 
     // F2: Probe mode - if not idle and not retry error, return pending marker
     if (probeMode) {
-      return logExit('probe_pending', PROBE_PENDING);
+      return await logExit('probe_pending', PROBE_PENDING);
     }
 
     // ⸺⸺ Messages check: return immediately when assistant responds ⸺⸺
@@ -177,42 +246,10 @@ export async function pollSessionCompletion(
         | undefined;
       if (Array.isArray(msgs)) {
         currentMsgCount = msgs.length;
-        // Task 1.3: Parse messages including retry parts
-        // P0-1: Extract error information from retry parts
-        // Process messages in reverse order to get the latest content first
-        for (let i = msgs.length - 1; i >= 0; i--) {
-          const msg = msgs[i];
-          if (!msg) continue;
-          if (msg.parts) {
-            let hasTextPart = false;
-            let retryError: string | null = null;
-            
-            // Check parts in this message
-            for (const part of msg.parts) {
-              if (part.type === 'text' && part.text) {
-                lastMessage = part.text;
-                hasTextPart = true;
-                break; // Found text, use it
-              } else if (part.type === 'retry' && part.error) {
-                const { message, code } = part.error;
-                retryError = `Error: ${message} (code: ${code})`;
-              }
-            }
-            
-            // If this message has no text but has retry error, use it
-            if (!hasTextPart && retryError) {
-              lastMessage = retryError;
-              break; // Found error in latest message, use it
-            }
-            
-            // If we found text in this message, stop searching
-            if (hasTextPart) {
-              break;
-            }
-          }
-        }
+        // F2: Use shared extractLatestMessage function
+        lastMessage = extractLatestMessage(msgs);
         if (currentMsgCount >= minDetectCount) {
-          return logExit('messages', lastMessage);
+          return await logExit('messages', lastMessage);
         }
       }
     } catch {
@@ -224,7 +261,7 @@ export async function pollSessionCompletion(
       consecutiveFailures++;
       if (consecutiveFailures >= 2) {
         const result = await readSessionLastMessage(client, sessionID);
-        return logExit('failure', result);
+        return await logExit('failure', result);
       }
     } else {
       consecutiveFailures = 0;
@@ -233,12 +270,12 @@ export async function pollSessionCompletion(
     // ⸺⸺ isNew safety cap: avoid infinite loop when status never flips to idle ⸺⸺
     if (isNew && pollCount >= MAX_POLLS_FOR_NEW) {
       const result = await readSessionLastMessage(client, sessionID);
-      return logExit('max_polls', result);
+      return await logExit('max_polls', result);
     }
   }
 
   const result = await readSessionLastMessage(client, sessionID);
-  return logExit('timeout', result);
+  return await logExit('timeout', result);
 }
 
 export async function readSessionLastMessage(
@@ -257,40 +294,63 @@ export async function readSessionLastMessage(
           }>;
         }>
       | undefined;
-    let lastOutput: string | null = null;
-    if (messages) {
-      // P0-1: Process messages in reverse order to get the latest content first
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i];
-        if (!msg) continue;
-        if (msg.parts) {
-          let hasTextPart = false;
-          let retryError: string | null = null;
-
-          for (const part of msg.parts) {
-            if (part.type === 'text' && part.text) {
-              lastOutput = part.text;
-              hasTextPart = true;
-              break;
-            } else if (part.type === 'retry' && part.error) {
-              const { message, code } = part.error;
-              retryError = `Error: ${message} (code: ${code})`;
-            }
-          }
-
-          if (!hasTextPart && retryError) {
-            lastOutput = retryError;
-            break;
-          }
-
-          if (hasTextPart) {
-            break;
-          }
-        }
-      }
-    }
-    return lastOutput;
+    return extractLatestMessage(messages);
   } catch {
     return null;
   }
+}
+
+/**
+ * F2: Extract the latest message content from an array of messages.
+ * Processes messages in reverse order to get the most recent content first.
+ * Handles both text parts and retry error parts.
+ * 
+ * @param messages - Array of message objects with parts
+ * @returns The latest text content, error message, or null if no valid content found
+ */
+export function extractLatestMessage(
+  messages:
+    | Array<{
+        parts: Array<{
+          type: string;
+          text?: string;
+          error?: { message: string; code: number };
+          time?: number;
+        }>;
+      }>
+    | undefined,
+): string | null {
+  if (!messages) return null;
+  
+  let lastOutput: string | null = null;
+  // P0-1: Process messages in reverse order to get the latest content first
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (!msg) continue;
+    if (msg.parts) {
+      let hasTextPart = false;
+      let retryError: string | null = null;
+
+      for (const part of msg.parts) {
+        if (part.type === 'text' && part.text) {
+          lastOutput = part.text;
+          hasTextPart = true;
+          break;
+        } else if (part.type === 'retry' && part.error) {
+          const { message, code } = part.error;
+          retryError = `Error: ${message} (code: ${code})`;
+        }
+      }
+
+      if (!hasTextPart && retryError) {
+        lastOutput = retryError;
+        break;
+      }
+
+      if (hasTextPart) {
+        break;
+      }
+    }
+  }
+  return lastOutput;
 }
