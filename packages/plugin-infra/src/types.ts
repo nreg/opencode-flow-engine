@@ -123,7 +123,26 @@ export interface PollingOptions {
 // ─── Event subscription types (Batch 2: AsyncGenerator interface) ───────────────
 
 /**
+ * Event union type from SDK
+ * 
+ * P0-1: Inlined from @opencode-ai/sdk because direct import from '@opencode-ai/sdk'
+ * caused module resolution issues in test environment. Structure matches SDK exactly.
+ * 
+ * This is a bare object with type and properties fields - NO payload wrapper.
+ * @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:602 (union type)
+ * @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:413-418 (EventSessionIdle example)
+ */
+export type Event = {
+  type: string;
+  properties?: Record<string, unknown>;
+};
+
+/**
  * GlobalEvent structure from SDK
+ * 
+ * NOTE: This is used by client.global.event(), NOT by client.event.subscribe().
+ * client.event.subscribe() returns bare Event objects directly.
+ * 
  * @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts
  */
 export interface GlobalEvent {
@@ -132,15 +151,10 @@ export interface GlobalEvent {
 }
 
 /**
- * Event union type from SDK
- */
-export type Event = {
-  type: string;
-  properties?: Record<string, unknown>;
-};
-
-/**
  * EventSessionIdle structure
+ * 
+ * P0-1: Bare object structure (no payload wrapper).
+ * @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:413-418
  */
 export interface EventSessionIdle {
   type: 'session.idle';
@@ -151,9 +165,13 @@ export interface EventSessionIdle {
 
 /**
  * Result of event.subscribe() - contains AsyncGenerator stream
+ * 
+ * P0-1 Fix: Returns AsyncGenerator<Event>, not AsyncGenerator<GlobalEvent>.
+ * Real SDK returns bare Event objects, not GlobalEvent with payload wrapper.
+ * @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:3374-3379
  */
 export interface EventSubscribeResult {
-  stream: AsyncGenerator<GlobalEvent>;
+  stream: AsyncGenerator<Event>;
 }
 
 /**

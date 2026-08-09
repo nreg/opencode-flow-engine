@@ -81,12 +81,14 @@ export async function pollSessionCompletion(
           for await (const event of stream) {
             if (abortController.signal.aborted) break;
 
-            const payload = event.payload;
+            // P0-1 Fix: event is a bare Event object (no payload wrapper)
+            // Real SDK returns { type: 'session.idle', properties: { sessionID } }
+            // @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:3374-3379
             if (
-              payload.type === 'session.idle' &&
-              payload.properties &&
-              'sessionID' in payload.properties &&
-              payload.properties.sessionID === sessionID
+              event.type === 'session.idle' &&
+              event.properties &&
+              'sessionID' in event.properties &&
+              event.properties.sessionID === sessionID
             ) {
               eventReceived = true;
               if (wakeUp) wakeUp();
@@ -102,7 +104,14 @@ export async function pollSessionCompletion(
         }
       };
 
-      consumeStream();
+      // P1-1: fire-and-forget with defensive catch
+      // consumeStream() already has try/catch inside, but if logger.log itself throws,
+      // this outer catch prevents unhandled rejection
+      void consumeStream().catch((err) => {
+        if (!abortController.signal.aborted) {
+          console.warn('[Polling] consumeStream error:', err);
+        }
+      });
 
       eventSubscription = {
         cancel: () => {

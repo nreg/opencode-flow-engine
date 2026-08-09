@@ -175,50 +175,36 @@ describe('SSE Mock Helpers', () => {
   });
 
   describe('Event creation helpers', () => {
-    it('should create valid EventSessionIdle event', () => {
-      const event = createSessionIdleEvent('test-session', '/project');
-      
-      expect(event).toEqual({
-        directory: '/project',
-        payload: {
-          type: 'session.idle',
-          properties: { sessionID: 'test-session' },
-        },
-      });
-    });
-
-    it('should create valid EventSessionStatus event', () => {
-      const event = createSessionStatusEvent('test-session', 'busy', '/project');
-      
-      expect(event).toEqual({
-        directory: '/project',
-        payload: {
-          type: 'session.status',
-          properties: { sessionID: 'test-session', status: 'busy' },
-        },
-      });
-    });
-
-    it('should create valid other event type', () => {
-      const event = createOtherEvent('/project');
-      
-      expect(event).toEqual({
-        directory: '/project',
-        payload: {
-          type: 'message.updated',
-          properties: {},
-        },
-      });
-    });
-
-    it('should use default directory if not specified', () => {
+    it('should create valid EventSessionIdle event (P0-1: bare object, no payload wrapper)', () => {
       const event = createSessionIdleEvent('test-session');
-      expect(event.directory).toBe('/test');
+      
+      expect(event).toEqual({
+        type: 'session.idle',
+        properties: { sessionID: 'test-session' },
+      });
+    });
+
+    it('should create valid EventSessionStatus event (P0-1: bare object, no payload wrapper)', () => {
+      const event = createSessionStatusEvent('test-session', 'busy');
+      
+      expect(event).toEqual({
+        type: 'session.status',
+        properties: { sessionID: 'test-session', status: 'busy' },
+      });
+    });
+
+    it('should create valid other event type (P0-1: bare object, no payload wrapper)', () => {
+      const event = createOtherEvent();
+      
+      expect(event).toEqual({
+        type: 'message.updated',
+        properties: {},
+      });
     });
   });
 
   describe('Real-world usage scenarios', () => {
-    it('should simulate session.idle event arrival (matching sessionID)', async () => {
+    it('should simulate session.idle event arrival (matching sessionID) - P0-1: bare event access', async () => {
       const targetSessionID = 'target-session';
       const events = [createSessionIdleEvent(targetSessionID)];
       
@@ -227,17 +213,18 @@ describe('SSE Mock Helpers', () => {
       
       let receivedEvent = null;
       for await (const event of stream) {
-        if (event.payload.type === 'session.idle' && 
-            event.payload.properties.sessionID === targetSessionID) {
+        // P0-1: Access event.type and event.properties directly (no payload wrapper)
+        if (event.type === 'session.idle' && 
+            event.properties?.sessionID === targetSessionID) {
           receivedEvent = event;
         }
       }
       
       expect(receivedEvent).not.toBeNull();
-      expect(receivedEvent?.payload.type).toBe('session.idle');
+      expect(receivedEvent?.type).toBe('session.idle');
     });
 
-    it('should simulate session.idle event arrival (non-matching sessionID)', async () => {
+    it('should simulate session.idle event arrival (non-matching sessionID) - P0-1: bare event access', async () => {
       const targetSessionID = 'target-session';
       const otherSessionID = 'other-session';
       const events = [createSessionIdleEvent(otherSessionID)];
@@ -247,8 +234,9 @@ describe('SSE Mock Helpers', () => {
       
       let receivedEvent = null;
       for await (const event of stream) {
-        if (event.payload.type === 'session.idle' && 
-            event.payload.properties.sessionID === targetSessionID) {
+        // P0-1: Access event.type and event.properties directly (no payload wrapper)
+        if (event.type === 'session.idle' && 
+            event.properties?.sessionID === targetSessionID) {
           receivedEvent = event;
         }
       }

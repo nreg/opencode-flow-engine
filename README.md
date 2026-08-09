@@ -394,9 +394,9 @@ AFK (Away From Keyboard) mode enables automated workflow execution without user 
 Subagent completion detection uses a hybrid event-driven + polling fallback mechanism:
 
 - **Event-driven mode** (default):
-  - Calls `client.event.subscribe({ query: {} })` which returns `Promise<{ stream: AsyncGenerator }>`
+  - Calls `client.event.subscribe({ query: {} })` which returns `Promise<{ stream: AsyncGenerator<Event> }>`
   - Consumes events via `for await (const event of stream)` loop
-  - Detects `session.idle` events with `payload.properties.sessionID` matching the target session
+  - Detects `session.idle` events with `event.properties.sessionID` matching the target session (P0-1: bare Event object, no payload wrapper)
   - Uses `AbortController` to cancel subscription and cleanup stream
   - Instant completion detection (< 50ms after subagent finishes)
 - **Event stream failure handling**:

@@ -263,13 +263,14 @@ if (eventDriven && client.event && typeof client.event.subscribe === 'function')
           // 检查取消信号
           if (abortController.signal.aborted) break;
 
-          const payload = event.payload;
-          // 检测 session.idle 事件
+          // P0-1 Fix: event is a bare Event object (no payload wrapper)
+          // Real SDK returns { type: 'session.idle', properties: { sessionID } }
+          // @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:3374-3379
           if (
-            payload.type === 'session.idle' &&
-            payload.properties &&
-            'sessionID' in payload.properties &&
-            payload.properties.sessionID === sessionID
+            event.type === 'session.idle' &&
+            event.properties &&
+            'sessionID' in event.properties &&
+            event.properties.sessionID === sessionID
           ) {
             eventReceived = true;
             // 即时唤醒（<50ms）
@@ -311,10 +312,10 @@ if (eventDriven && client.event && typeof client.event.subscribe === 'function')
 ```
 
 **事件订阅机制：**
-- `client.event.subscribe()` 返回 `Promise<{ stream: AsyncGenerator }>`
+- `client.event.subscribe()` 返回 `Promise<{ stream: AsyncGenerator<Event> }>`
 - 通过 `for await (const event of stream)` 消费事件流
 - 使用 `AbortController` 控制取消和清理
-- 事件类型：`{ payload: { type: 'session.idle', properties: { sessionID: string } } }`
+- 事件类型（P0-1 修正）：`{ type: 'session.idle', properties: { sessionID: string } }`（裸 Event 对象，无 payload 包装）
 
 **错误处理：**
 - 订阅失败：记录日志，立即降级到纯轮询

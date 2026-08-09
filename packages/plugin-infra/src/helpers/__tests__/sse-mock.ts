@@ -3,19 +3,30 @@
  * 
  * Simulates the real SDK behavior:
  * - client.event.subscribe() returns Promise<{ stream: AsyncGenerator }>
- * - stream yields GlobalEvent objects
+ * - stream yields Event objects (bare objects with type and properties)
  * - stream can end normally or throw errors
+ * 
+ * P0-1 Fix: Real SDK returns bare Event objects, not GlobalEvent with payload wrapper.
+ * @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:3374-3379
  */
 
 /**
  * Inlined types from @opencode-ai/sdk for test mock purposes.
  * This avoids module resolution issues in test environment.
+ * 
+ * P0-1: Event is a bare object with type and properties fields.
+ * @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:602 (union type)
+ * @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:413-418 (EventSessionIdle)
  */
 export type Event = {
   type: string;
-  properties: Record<string, unknown>;
+  properties?: Record<string, unknown>;
 };
 
+/**
+ * GlobalEvent is used by client.global.event(), NOT by client.event.subscribe()
+ * Kept for reference but not used in event.subscribe() mocks.
+ */
 export type GlobalEvent = {
   directory: string;
   payload: Event;
@@ -26,7 +37,7 @@ export type GlobalEvent = {
  */
 export interface MockEventStreamOptions {
   /** Events to yield (in order). If empty, stream ends immediately. */
-  events?: GlobalEvent[];
+  events?: Event[];
   /** Delay between events in milliseconds (default: 0) */
   eventDelay?: number;
   /** Error to throw during iteration (simulates network error) */
@@ -39,11 +50,11 @@ export interface MockEventStreamOptions {
  * Create a mock AsyncGenerator that yields events
  * 
  * @param options Configuration for the mock stream
- * @returns AsyncGenerator<GlobalEvent>
+ * @returns AsyncGenerator<Event> (bare Event objects, no payload wrapper)
  */
 export async function* createMockEventStream(
   options: MockEventStreamOptions = {}
-): AsyncGenerator<GlobalEvent> {
+): AsyncGenerator<Event> {
   const { events = [], eventDelay = 0, error, errorAfterEvents = 0 } = options;
   
   let eventCount = 0;
@@ -75,8 +86,10 @@ export async function* createMockEventStream(
  * 
  * This matches the real SDK interface:
  * ```typescript
- * client.event.subscribe(args: { query?: { directory?: string } }): Promise<{ stream: AsyncGenerator<GlobalEvent> }>
+ * client.event.subscribe(args: { query?: { directory?: string } }): Promise<{ stream: AsyncGenerator<Event> }>
  * ```
+ * 
+ * P0-1: Returns bare Event objects, not GlobalEvent with payload wrapper.
  * 
  * @param options Configuration for the mock stream
  * @returns Mock subscribe function
@@ -90,45 +103,42 @@ export function createMockEventSubscribe(options: MockEventStreamOptions = {}) {
 }
 
 /**
- * Helper to create a GlobalEvent with EventSessionIdle payload
+ * Helper to create a bare EventSessionIdle object
+ * 
+ * P0-1: Returns bare Event object (no payload wrapper).
+ * @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:413-418
  */
-export function createSessionIdleEvent(sessionID: string, directory: string = '/test'): GlobalEvent {
+export function createSessionIdleEvent(sessionID: string): Event {
   return {
-    directory,
-    payload: {
-      type: 'session.idle',
-      properties: { sessionID },
-    } as Event,
+    type: 'session.idle',
+    properties: { sessionID },
   };
 }
 
 /**
- * Helper to create a GlobalEvent with EventSessionStatus payload
+ * Helper to create a bare EventSessionStatus object
+ * 
+ * P0-1: Returns bare Event object (no payload wrapper).
  */
 export function createSessionStatusEvent(
   sessionID: string,
-  status: 'busy' | 'idle' | 'error',
-  directory: string = '/test'
-): GlobalEvent {
+  status: 'busy' | 'idle' | 'error'
+): Event {
   return {
-    directory,
-    payload: {
-      type: 'session.status',
-      properties: { sessionID, status },
-    } as Event,
+    type: 'session.status',
+    properties: { sessionID, status },
   };
 }
 
 /**
- * Helper to create a GlobalEvent with a different event type (for filtering tests)
+ * Helper to create a bare Event with a different type (for filtering tests)
+ * 
+ * P0-1: Returns bare Event object (no payload wrapper).
  */
-export function createOtherEvent(directory: string = '/test'): GlobalEvent {
+export function createOtherEvent(): Event {
   return {
-    directory,
-    payload: {
-      type: 'message.updated',
-      properties: {},
-    } as Event,
+    type: 'message.updated',
+    properties: {},
   };
 }
 

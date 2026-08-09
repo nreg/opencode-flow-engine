@@ -1005,11 +1005,11 @@ describe('pollSessionCompletion - Batch 2: AsyncGenerator event subscription', (
       expect(result).toBe('assistant response');
     });
 
-    it('should parse GlobalEvent structure correctly (directory + payload)', async () => {
-      // Arrange: event has { directory, payload } structure
+    it('should parse EventSessionIdle from bare Event object (no payload wrapper)', async () => {
+      // Arrange: event is bare Event object with type and properties
       const targetSessionID = 'test-session-456';
       const mockSubscribe = createMockEventSubscribe({
-        events: [createSessionIdleEvent(targetSessionID, '/custom/dir')],
+        events: [createSessionIdleEvent(targetSessionID)],
       });
 
       mockClient.event = { subscribe: mockSubscribe };
@@ -1507,6 +1507,80 @@ describe('pollSessionCompletion - Batch 3: Boundary tests (R3)', () => {
 
       // Assert: ignored mismatched sessionID
       expect(result).toBe('sessionID filtered response');
+    });
+  });
+
+  // P1-2: 边界测试 - event properties 字段缺失防护
+  describe('P1-2: boundary tests - event properties guard', () => {
+    it('should NOT trigger eventReceived when event has no properties field', async () => {
+      // Arrange: event with type 'session.idle' but NO properties field
+      const targetSessionID = 'session-no-properties';
+      const eventWithoutProperties = {
+        type: 'session.idle',
+        // NO properties field
+      };
+
+      const mockSubscribe = createMockEventSubscribe({
+        events: [
+          eventWithoutProperties as any, // malformed event
+          createSessionIdleEvent(targetSessionID), // valid event
+        ],
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'guarded response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+      });
+
+      // Assert: ignored malformed event, matched valid event
+      expect(result).toBe('guarded response');
+    });
+
+    it('should NOT trigger eventReceived when properties exists but has no sessionID key', async () => {
+      // Arrange: event with properties but NO sessionID key
+      const targetSessionID = 'session-no-sessionid';
+      const eventWithoutSessionID = {
+        type: 'session.idle',
+        properties: {
+          // NO sessionID key
+          otherField: 'some-value',
+        },
+      };
+
+      const mockSubscribe = createMockEventSubscribe({
+        events: [
+          eventWithoutSessionID as any, // malformed event
+          createSessionIdleEvent(targetSessionID), // valid event
+        ],
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'sessionid guarded response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+      });
+
+      // Assert: ignored malformed event, matched valid event
+      expect(result).toBe('sessionid guarded response');
     });
   });
 });
