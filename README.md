@@ -394,9 +394,20 @@ AFK (Away From Keyboard) mode enables automated workflow execution without user 
 Subagent completion detection uses a hybrid event-driven + polling fallback mechanism:
 
 - **Event-driven mode** (default):
-  - Calls `client.event.subscribe({ query: {} })` which returns `Promise<{ stream: AsyncGenerator<Event> }>`
+  - **Dual-path subscription** (F1 fix):
+    - **Main path**: `client.event.subscribe({ query })` where `query = options.directory ? { directory } : {}`
+      - Returns `Promise<{ stream: AsyncGenerator<Event> }>` for consuming events
+      - Events are bare Event objects: `{ type: 'session.idle', properties: { sessionID } }`
+      - Directory filtering is server-side (assumption, not confirmed by SDK docs)
+    - **Backup path**: `client.global.event()`
+      - Returns `Promise<{ stream: AsyncGenerator<GlobalEvent> }>` where `GlobalEvent = { directory: string, payload: Event }`
+      - Each event carries directory field, client-side filtering applied
+      - **P0-1 fix**: Filters by directory when `options.directory` is set (`!options.directory || globalEvent.directory === options.directory`)
+      - **Backward compatible**: No directory filtering when `options.directory` is undefined
+      - Subscribes immediately, but delays event usage: activated immediately if main path fails, or after 5s if main path has no events
+    - **Strategy**: Both paths subscribe immediately and process events concurrently; first matching event wins, no duplicate processing
   - Consumes events via `for await (const event of stream)` loop
-  - Detects `session.idle` events with `event.properties.sessionID` matching the target session (P0-1: bare Event object, no payload wrapper)
+  - Detects `session.idle` events with `event.properties.sessionID` matching the target session
   - Uses `AbortController` to cancel subscription and cleanup stream
   - Instant completion detection (< 50ms after subagent finishes)
 - **Event stream failure handling**:

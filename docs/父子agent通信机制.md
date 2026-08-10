@@ -239,46 +239,76 @@ if (agent_id) {
 
 ## 3. 完成检测机制（核心）
 
-### 3.1 事件驱动优先（Batch 2 改造）
+### 3.1 事件驱动优先（Batch 2 改造 + F1 双路订阅）
 
-**原理：** 订阅 SDK 的 `session.idle` SSE 事件，子 agent 完成时即时唤醒父 agent。
+**原理：** 订阅 SDK 的 `session.idle` SSE 事件，子 agent 完成时即时唤醒父 agent。采用双路订阅策略增强可靠性。
 
-**关键代码（polling.ts:74-123）：**
+**双路订阅策略（F1 修复）：**
+
+1. **主路径**：`client.event.subscribe({ query: { directory } })`
+   - 返回 `Promise<{ stream: AsyncGenerator<Event> }>`，事件为裸 Event 对象
+   - Directory 过滤是服务器端行为（假设，SDK 文档未确认）
+   - 更快，直接订阅
+
+2. **备选路径**：`client.global.event()`
+   - 返回 `Promise<{ stream: AsyncGenerator<GlobalEvent> }>`，其中 `GlobalEvent = { directory: string, payload: Event }`
+   - 每个事件携带 directory 字段，客户端可过滤
+   - **立即订阅**，但**延迟使用事件**：主路径失败时立即激活，或主路径 5s 无事件时激活
+   - **P0-1 修复**：支持 directory 过滤（`!options.directory || globalEvent.directory === options.directory`），与主路径行为一致
+
+3. **策略**：两路同时订阅并处理事件，首个匹配事件胜出，无重复处理
+
+**备选路径激活条件（F1 语义澄清）：**
+
+备选路径在以下任一条件满足时激活：
+- 主路径订阅失败（`!eventSubscription`）
+- 主路径订阅成功但超过 `BACKUP_DELAY_MS`（5s）未收到任何事件（`elapsed >= BACKUP_DELAY_MS`）
+- **主路径未收到目标 session 的 session.idle 事件**（`!mainPathReceivedTargetEvent`）
+
+**关键语义澄清（F1）：**
+- `mainPathReceivedTargetEvent` 标志仅在主路径收到**目标 session 的 session.idle 事件**时置位（条件：`event.properties.sessionID === sessionID`）
+- 主路径收到**非目标 session 的事件**不会置位该标志，备选路径仍可激活
+- 这确保备选路径在主路径收到无关事件时仍能接管目标 session 的事件处理
+
+**关键代码（polling.ts:70-215）：**
 
 ```typescript
+// F1: Dual-path subscription (event.subscribe + global.event backup)
 let eventSubscription: EventSubscription | null = null;
+let globalEventSubscription: EventSubscription | null = null;
 let eventReceived = false;
 let wakeUp: (() => void) | null = null;
+const BACKUP_DELAY_MS = 5000; // F1: switch to global.event after 5s if no events
+// F1: Track if main path received TARGET session's session.idle event (not any event)
+let mainPathReceivedTargetEvent = false;
 
+// F1: Main path - event.subscribe (bare Event objects)
 if (eventDriven && client.event && typeof client.event.subscribe === 'function') {
   try {
-    // 订阅事件流，返回 Promise<{ stream: AsyncGenerator }>
     const abortController = new AbortController();
-    const { stream } = await client.event.subscribe({ query: {} });
+    const query = options.directory ? { directory: options.directory } : {};
+    const { stream } = await client.event.subscribe({ query });
 
-    // 异步消费事件流
     const consumeStream = async () => {
       try {
         for await (const event of stream) {
-          // 检查取消信号
           if (abortController.signal.aborted) break;
 
           // P0-1 Fix: event is a bare Event object (no payload wrapper)
-          // Real SDK returns { type: 'session.idle', properties: { sessionID } }
-          // @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:3374-3379
           if (
             event.type === 'session.idle' &&
             event.properties &&
             'sessionID' in event.properties &&
             event.properties.sessionID === sessionID
           ) {
+            // F1: Set flag when main path receives TARGET session's idle event
+            mainPathReceivedTargetEvent = true;
             eventReceived = true;
-            // 即时唤醒（<50ms）
             if (wakeUp) wakeUp();
           }
         }
       } catch (error) {
-        // 事件流错误：记录日志，继续轮询（不重连）
+        // 事件流错误：记录日志，继续轮询
         if (!abortController.signal.aborted) {
           await logger.log(sessionID, 'event stream error', {
             error: error instanceof Error ? error.message : String(error),
@@ -288,9 +318,12 @@ if (eventDriven && client.event && typeof client.event.subscribe === 'function')
       }
     };
 
-    consumeStream();
+    void consumeStream().catch((err) => {
+      if (!abortController.signal.aborted) {
+        console.warn('[Polling] consumeStream error:', err);
+      }
+    });
 
-    // 创建取消订阅句柄
     eventSubscription = {
       cancel: () => {
         abortController.abort();
@@ -301,7 +334,6 @@ if (eventDriven && client.event && typeof client.event.subscribe === 'function')
     };
     eventDrivenActive = true;
   } catch (error) {
-    // 订阅失败：记录日志，降级到纯轮询
     await logger.log(sessionID, 'event subscription failed', {
       error: error instanceof Error ? error.message : String(error),
       fallback: 'pure polling',
@@ -309,23 +341,97 @@ if (eventDriven && client.event && typeof client.event.subscribe === 'function')
     eventDrivenActive = false;
   }
 }
+
+// F1: Backup path - global.event (GlobalEvent with directory + payload wrapper)
+if (eventDriven && client.global && typeof client.global.event === 'function') {
+  try {
+    const abortController = new AbortController();
+    const { stream } = await client.global.event();
+
+    const consumeGlobalStream = async () => {
+      try {
+        for await (const globalEvent of stream) {
+          if (abortController.signal.aborted) break;
+
+          // F1: GlobalEvent structure: { directory: string, payload: Event }
+          // P0-1: Filter by directory (if provided) and sessionID in payload
+          if (
+            (!options.directory || globalEvent.directory === options.directory) &&
+            globalEvent.payload.type === 'session.idle' &&
+            globalEvent.payload.properties &&
+            'sessionID' in globalEvent.payload.properties &&
+            globalEvent.payload.properties.sessionID === sessionID
+          ) {
+            const elapsed = Date.now() - startTime;
+            const shouldUseBackup = !eventSubscription || 
+                                    elapsed >= BACKUP_DELAY_MS || 
+                                    !mainPathReceivedTargetEvent;
+            
+            if (shouldUseBackup && !eventReceived) {
+              eventReceived = true;
+              if (wakeUp) wakeUp();
+              await logger.log(sessionID, 'global.event backup activated', {
+                elapsed: `${elapsed}ms`,
+                reason: eventSubscription ? 'main path delayed' : 'main path unavailable',
+              });
+            }
+          }
+        }
+      } catch (error) {
+        if (!abortController.signal.aborted) {
+          await logger.log(sessionID, 'global event stream error', {
+            error: error instanceof Error ? error.message : String(error),
+            fallback: 'continue polling',
+          });
+        }
+      }
+    };
+
+    void consumeGlobalStream().catch((err) => {
+      if (!abortController.signal.aborted) {
+        console.warn('[Polling] consumeGlobalStream error:', err);
+      }
+    });
+
+    globalEventSubscription = {
+      cancel: () => {
+        abortController.abort();
+        if (stream && typeof stream.return === 'function') {
+          stream.return(undefined);
+        }
+      },
+    };
+  } catch (error) {
+    await logger.log(sessionID, 'global event subscription failed', {
+      error: error instanceof Error ? error.message : String(error),
+      fallback: 'main path only',
+    });
+  }
+}
 ```
 
 **事件订阅机制：**
-- `client.event.subscribe()` 返回 `Promise<{ stream: AsyncGenerator<Event> }>`
-- 通过 `for await (const event of stream)` 消费事件流
+- **主路径**：`client.event.subscribe({ query })` 接收 query 参数，其中 `query = options.directory ? { directory } : {}`
+  - 当 `options.directory` 存在时，事件订阅通过 `query.directory` 限定订阅范围，只接收特定目录下的 session 事件
+  - 返回 `Promise<{ stream: AsyncGenerator<Event> }>`，通过 `for await (const event of stream)` 消费事件流
+  - 事件类型（P0-1 修正）：`{ type: 'session.idle', properties: { sessionID: string } }`（裸 Event 对象，无 payload 包装）
+- **备选路径**：`client.global.event()`
+  - 返回 `Promise<{ stream: AsyncGenerator<GlobalEvent> }>`
+  - 事件类型：`{ directory: string, payload: Event }`（GlobalEvent 对象，payload 包裹）
+  - **P0-1 修复**：客户端按 `(!options.directory || globalEvent.directory === options.directory) && globalEvent.payload.type === 'session.idle' && globalEvent.payload.properties?.sessionID === sessionID` 过滤
+  - **向后兼容**：当 `options.directory` 未设置时，不进行 directory 过滤（仅过滤 sessionID）
 - 使用 `AbortController` 控制取消和清理
-- 事件类型（P0-1 修正）：`{ type: 'session.idle', properties: { sessionID: string } }`（裸 Event 对象，无 payload 包装）
 
 **错误处理：**
-- 订阅失败：记录日志，立即降级到纯轮询
+- 订阅失败：记录日志，立即降级到纯轮询（主路径失败时备选路径仍可用）
 - 流中断/异常：记录日志，继续轮询（不尝试重连）
-- 取消订阅：调用 `abortController.abort()` + `stream.return(undefined)` 清理资源
+- 取消订阅：调用 `abortController.abort()` + `stream.return(undefined)` 清理资源（两路都清理）
 
 **性能提升：**
 - 事件到达时立即返回，无需等待轮询间隔
 - 唤醒延迟 < 50ms（原轮询间隔 200ms）
 - 解决了 30s 超时问题（事件驱动 + 轮询降级双保险）
+- 双路订阅增强了事件源可靠性（主路径不可用时备选路径接管）
 
 ---
 
@@ -907,6 +1013,7 @@ async log(sessionId: string, message: string, metadata?: Record<string, unknown>
 
 ---
 
-**文档版本：** v1.0.0  
-**最后更新：** 2024-01-15  
-**基于代码版本：** opencode-flow-engine main branch
+**文档版本：** v1.1.0  
+**最后更新：** 2026-08-11  
+**基于代码版本：** opencode-flow-engine main branch  
+**更新内容：** F1 双路订阅（event.subscribe + global.event 备选）

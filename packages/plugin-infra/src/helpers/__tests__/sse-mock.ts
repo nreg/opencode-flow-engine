@@ -142,5 +142,116 @@ export function createOtherEvent(): Event {
   };
 }
 
+// ─── GlobalEvent mock helpers (F1: dual-path subscription) ───────────────────────
+
+/**
+ * Options for creating a mock global event stream
+ */
+export interface MockGlobalEventStreamOptions {
+  /** GlobalEvents to yield (in order). If empty, stream ends immediately. */
+  events?: GlobalEvent[];
+  /** Delay between events in milliseconds (default: 0) */
+  eventDelay?: number;
+  /** Error to throw during iteration (simulates network error) */
+  error?: Error;
+  /** After how many events to throw the error (default: throw on first iteration) */
+  errorAfterEvents?: number;
+}
+
+/**
+ * Create a mock AsyncGenerator that yields GlobalEvent objects
+ * 
+ * F1: Used by client.global.event() backup subscription path.
+ * 
+ * @param options Configuration for the mock stream
+ * @returns AsyncGenerator<GlobalEvent> (each event has directory + payload wrapper)
+ */
+export async function* createMockGlobalEventStream(
+  options: MockGlobalEventStreamOptions = {}
+): AsyncGenerator<GlobalEvent> {
+  const { events = [], eventDelay = 0, error, errorAfterEvents = 0 } = options;
+  
+  let eventCount = 0;
+  
+  for (const event of events) {
+    // Check if we should throw an error
+    if (error && eventCount >= errorAfterEvents) {
+      throw error;
+    }
+    
+    // Yield the event
+    yield event;
+    eventCount++;
+    
+    // Delay before next event (if specified)
+    if (eventDelay > 0) {
+      await new Promise(resolve => setTimeout(resolve, eventDelay));
+    }
+  }
+  
+  // If error is set and we haven't thrown yet, throw after all events
+  if (error && eventCount >= errorAfterEvents) {
+    throw error;
+  }
+}
+
+/**
+ * Create a mock global.event function that returns Promise<{ stream: AsyncGenerator }>
+ * 
+ * This matches the real SDK interface:
+ * ```typescript
+ * client.global.event(): Promise<{ stream: AsyncGenerator<GlobalEvent> }>
+ * ```
+ * 
+ * F1: Returns GlobalEvent objects with directory + payload wrapper.
+ * 
+ * @param options Configuration for the mock stream
+ * @returns Mock global.event function
+ */
+export function createMockGlobalEvent(options: MockGlobalEventStreamOptions = {}) {
+  return vi.fn().mockImplementation(() => {
+    return Promise.resolve({
+      stream: createMockGlobalEventStream(options),
+    });
+  });
+}
+
+/**
+ * Helper to create a GlobalEvent with session.idle payload
+ * 
+ * F1: Returns GlobalEvent (directory + payload wrapper).
+ * 
+ * @param directory Target directory
+ * @param sessionID Session ID
+ * @returns GlobalEvent with session.idle payload
+ */
+export function createGlobalSessionIdleEvent(directory: string, sessionID: string): GlobalEvent {
+  return {
+    directory,
+    payload: {
+      type: 'session.idle',
+      properties: { sessionID },
+    },
+  };
+}
+
+/**
+ * Helper to create a GlobalEvent with a different payload type (for filtering tests)
+ * 
+ * F1: Returns GlobalEvent (directory + payload wrapper).
+ * 
+ * @param directory Target directory
+ * @returns GlobalEvent with non-session.idle payload
+ */
+export function createGlobalOtherEvent(directory: string): GlobalEvent {
+  return {
+    directory,
+    payload: {
+      type: 'message.updated',
+      properties: {},
+    },
+  };
+}
+
 // Import vi for mocking from bun:test
 import { vi } from 'bun:test';

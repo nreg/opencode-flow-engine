@@ -2746,3 +2746,197 @@ describe('Batch 5: Event-driven integration', () => {
     });
   });
 });
+
+// ─── Batch 3: directory parameter passing (TO-4/TO-5/TO-6/TO-7) ───────────────
+
+/** Create a mock SFlowClient with subscribe tracking for directory tests */
+function createMockClientWithSubscribeTracking(options: {
+  pollOutputs: string[];
+  targetDirectory?: string;
+}) {
+  let pollIndex = 0;
+  const subscribeCalls: Array<{ query?: { directory?: string } }> = [];
+
+  return {
+    client: {
+      session: {
+        create: mock(async () => ({ data: { id: 'test-session-001' } })),
+        prompt: mock(async () => {}),
+        messages: mock(async () => {
+          const output = options.pollOutputs[Math.min(pollIndex, options.pollOutputs.length - 1)];
+          pollIndex++;
+          return {
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              { parts: [{ type: 'text', text: output }] },
+            ],
+          };
+        }),
+        status: mock(async () => ({ data: [{ id: 'test-session-001', type: 'idle' }] })),
+        abort: mock(async () => {}),
+      },
+      event: {
+        subscribe: mock(async (args?: { query?: { directory?: string } }) => {
+          // Record the call arguments
+          subscribeCalls.push(args ?? {});
+          
+          // Create AsyncGenerator that yields session.idle event
+          async function* eventStream() {
+            await new Promise(resolve => setTimeout(resolve, 10));
+            yield {
+              type: 'session.idle',
+              properties: { sessionID: 'test-session-001' },
+            };
+          }
+          return { stream: eventStream() };
+        }),
+      },
+    },
+    subscribeCalls,
+  };
+}
+
+describe('Batch 3: directory parameter passing (TO-4/TO-5/TO-6/TO-7)', () => {
+  const testDirectory = '/test/project/path';
+
+  describe('TO-4: 同步模式调用传入 directory', () => {
+    it('should pass directory to pollSessionCompletion in sync mode (line 641)', async () => {
+      // Arrange
+      const { client, subscribeCalls } = createMockClientWithSubscribeTracking({
+        pollOutputs: ['Task completed [TASK_COMPLETE]'],
+      });
+
+      const options = createTestOptions(client);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Act: Execute sync call with directory
+      await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+        },
+        { sessionID: 'parent-session', directory: testDirectory },
+      );
+
+      // Assert: subscribe was called with correct directory
+      expect(subscribeCalls.length).toBeGreaterThan(0);
+      expect(subscribeCalls[0].query).toBeDefined();
+      expect(subscribeCalls[0].query!.directory).toBe(testDirectory);
+    });
+  });
+
+  describe('TO-5: 异步模式 pollAndComplete 传入 directory', () => {
+    it('should pass directory to pollSessionCompletion in pollAndComplete (line 848)', async () => {
+      // Arrange
+      const { client, subscribeCalls } = createMockClientWithSubscribeTracking({
+        pollOutputs: ['Task completed [TASK_COMPLETE]'],
+      });
+
+      const options = createTestOptions(client);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Act 1: Start async task
+      const asyncResult = await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: true,
+        },
+        { sessionID: 'parent-session', directory: testDirectory },
+      );
+
+      const asyncData = JSON.parse(asyncResult.output);
+      expect(asyncData.task_id).toBeDefined();
+
+      // Act 2: Poll for result (triggers pollAndComplete)
+      await tools.flowagent_output.execute(
+        { task_id: asyncData.task_id, block: true },
+        { sessionID: 'parent-session', directory: testDirectory },
+      );
+
+      // Assert: subscribe was called with correct directory
+      expect(subscribeCalls.length).toBeGreaterThan(0);
+      const lastCall = subscribeCalls[subscribeCalls.length - 1];
+      expect(lastCall.query).toBeDefined();
+      expect(lastCall.query!.directory).toBe(testDirectory);
+    });
+  });
+
+  describe('TO-6: watcher 探测模式传入 directory', () => {
+    it('should pass directory to pollSessionCompletion in watcher probe mode (line 135)', async () => {
+      // Arrange
+      const { client, subscribeCalls } = createMockClientWithSubscribeTracking({
+        pollOutputs: ['Task completed [TASK_COMPLETE]'],
+      });
+
+      const options = createTestOptions(client);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Act 1: Start async task
+      const asyncResult = await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: true,
+        },
+        { sessionID: 'parent-session', directory: testDirectory },
+      );
+
+      const asyncData = JSON.parse(asyncResult.output);
+
+      // Act 2: Wait for watcher to process (it runs every 200ms)
+      // The watcher will call pollSessionCompletion with probeMode=true
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Assert: subscribe was called (by watcher)
+      // Note: watcher uses task.changeDir from BackgroundTaskEntry
+      expect(subscribeCalls.length).toBeGreaterThan(0);
+      const watcherCall = subscribeCalls.find(call => 
+        call.query && call.query.directory === testDirectory
+      );
+      expect(watcherCall).toBeDefined();
+    });
+  });
+
+  describe('TO-7: 同步重试 pollOutput 传入 directory', () => {
+    it('should pass directory to pollSessionCompletion in retry pollOutput (line 699)', async () => {
+      // Arrange: Create output that triggers retry (no completion signal)
+      const { client, subscribeCalls } = createMockClientWithSubscribeTracking({
+        pollOutputs: [
+          'Working on it...', // No completion signal → triggers retry
+          'Task completed [TASK_COMPLETE]', // Second attempt has signal
+        ],
+      });
+
+      const options = createTestOptions(client);
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      // Act: Execute sync call (will trigger retry logic)
+      await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+        },
+        { sessionID: 'parent-session', directory: testDirectory },
+      );
+
+      // Assert: subscribe was called multiple times (initial + retry)
+      expect(subscribeCalls.length).toBeGreaterThan(0);
+      // All calls should have the correct directory
+      for (const call of subscribeCalls) {
+        expect(call.query).toBeDefined();
+        expect(call.query!.directory).toBe(testDirectory);
+      }
+    });
+  });
+});

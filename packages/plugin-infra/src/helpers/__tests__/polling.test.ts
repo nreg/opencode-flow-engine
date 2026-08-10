@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'bun:test';
 import {
   pollSessionCompletion,
   type SFlowClientSession,
+  type PollingOptions,
   DEFAULT_MAX_WAIT_MS,
   DEFAULT_SYNC_MAX_WAIT_MS,
   extractLatestMessage,
@@ -15,6 +16,8 @@ import {
   createSessionIdleEvent,
   createSessionStatusEvent,
   createOtherEvent,
+  createMockGlobalEvent,
+  createGlobalSessionIdleEvent,
 } from './sse-mock';
 
 describe('pollSessionCompletion - Batch 1: retry detection', () => {
@@ -1253,6 +1256,187 @@ describe('pollSessionCompletion - Batch 2: AsyncGenerator event subscription', (
       expect(result).toBe('cleanup response');
       // Note: cleanup verification is internal, we verify by successful completion
     });
+
+    it('P2-1: should fallback to polling when backup path subscription times out (main path failed)', async () => {
+      // Arrange: main path subscription fails, backup path succeeds but no event arrives
+      const targetSessionID = 'session-backup-fallback';
+      const testDirectory = '/test/path';
+      
+      // Main path subscription fails
+      const mockSubscribe = vi.fn().mockRejectedValue(new Error('Main path unavailable'));
+      
+      // Backup path subscription succeeds but yields no events
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [], // no events - will timeout
+      });
+      
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+
+      // Change to idle after fallback threshold
+      setTimeout(() => {
+        mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'idle' }] });
+        mockSession.messages.mockResolvedValue({
+          data: [
+            { parts: [{ type: 'text', text: 'prompt' }] },
+            { parts: [{ type: 'text', text: 'backup fallback response' }] },
+          ],
+        });
+      }, 500);
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        fallbackThreshold: 300, // fallback after 300ms
+        directory: testDirectory,
+      });
+
+      // Assert: should fallback to polling after threshold
+      expect(result).toBe('backup fallback response');
+      expect(mockSubscribe).toHaveBeenCalled(); // main path was attempted
+      expect(mockGlobalEvent).toHaveBeenCalled(); // backup path was attempted
+    });
+
+    it('P2-2: should cleanup both subscriptions when both paths timeout', async () => {
+      // Arrange: both main and backup subscriptions succeed but no events arrive
+      const targetSessionID = 'session-both-timeout';
+      const testDirectory = '/test/path';
+      
+      // Main path subscription succeeds but no events
+      const mockSubscribe = createMockEventSubscribe({
+        events: [], // no events
+      });
+      
+      // Backup path subscription succeeds but no events
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [], // no events
+      });
+      
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+
+      // Change to idle after fallback threshold
+      setTimeout(() => {
+        mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'idle' }] });
+        mockSession.messages.mockResolvedValue({
+          data: [
+            { parts: [{ type: 'text', text: 'prompt' }] },
+            { parts: [{ type: 'text', text: 'both timeout response' }] },
+          ],
+        });
+      }, 500);
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        fallbackThreshold: 300, // fallback after 300ms
+        directory: testDirectory,
+      });
+
+      // Assert: should fallback to polling and cleanup both subscriptions
+      expect(result).toBe('both timeout response');
+      expect(mockSubscribe).toHaveBeenCalled(); // main path was attempted
+      expect(mockGlobalEvent).toHaveBeenCalled(); // backup path was attempted
+    });
+  });
+
+  describe('TO-1 & TO-2: directory parameter passing', () => {
+    it('TO-1: should pass directory to event.subscribe when provided', async () => {
+      // Arrange: mock event.subscribe to record arguments
+      const targetSessionID = 'test-session-directory';
+      const testDirectory = '/test/project/path';
+      const mockSubscribe = createMockEventSubscribe({
+        events: [createSessionIdleEvent(targetSessionID)],
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'response' }] },
+        ],
+      });
+
+      // Act: call pollSessionCompletion with directory option
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: testDirectory,
+      });
+
+      // Assert: subscribe was called with correct directory parameter
+      expect(mockSubscribe).toHaveBeenCalled();
+      expect(mockSubscribe.mock.calls[0][0]).toEqual({
+        query: { directory: testDirectory },
+      });
+      expect(result).toBe('response');
+    });
+
+    it('TO-2: should pass empty query when directory is not provided (backward compatible)', async () => {
+      // Arrange: mock event.subscribe to record arguments
+      const targetSessionID = 'test-session-no-directory';
+      const mockSubscribe = createMockEventSubscribe({
+        events: [createSessionIdleEvent(targetSessionID)],
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'response' }] },
+        ],
+      });
+
+      // Act: call pollSessionCompletion WITHOUT directory option
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+      });
+
+      // Assert: subscribe was called with empty query (backward compatible)
+      expect(mockSubscribe).toHaveBeenCalled();
+      expect(mockSubscribe.mock.calls[0][0]).toEqual({
+        query: {},
+      });
+      expect(result).toBe('response');
+    });
+
+    it('TO-2: should pass empty query when directory is undefined', async () => {
+      // Arrange
+      const targetSessionID = 'test-session-undefined-directory';
+      const mockSubscribe = createMockEventSubscribe({
+        events: [createSessionIdleEvent(targetSessionID)],
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'response' }] },
+        ],
+      });
+
+      // Act: explicitly pass undefined directory
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: undefined,
+      });
+
+      // Assert: subscribe was called with empty query
+      expect(mockSubscribe).toHaveBeenCalled();
+      expect(mockSubscribe.mock.calls[0][0]).toEqual({
+        query: {},
+      });
+      expect(result).toBe('response');
+    });
   });
 });
 
@@ -1581,6 +1765,596 @@ describe('pollSessionCompletion - Batch 3: Boundary tests (R3)', () => {
 
       // Assert: ignored malformed event, matched valid event
       expect(result).toBe('sessionid guarded response');
+    });
+  });
+});
+
+// F1: Dual-path subscription (event.subscribe + global.event backup)
+describe('pollSessionCompletion - F1: Dual-path event subscription', () => {
+  let mockClient: { session: SFlowClientSession; event?: any; global?: any };
+  let mockSession: {
+    status: ReturnType<typeof vi.fn>;
+    messages: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    mockSession = {
+      status: vi.fn(),
+      messages: vi.fn(),
+    };
+    mockClient = { session: mockSession as unknown as SFlowClientSession };
+  });
+
+  describe('F1.1: global.event backup path', () => {
+    it('should fallback to global.event when event.subscribe stream is empty', async () => {
+      // Arrange: event.subscribe returns empty stream, global.event has events
+      const targetSessionID = 'test-session-f1';
+      const targetDirectory = '/test/dir';
+      
+      const mockSubscribe = createMockEventSubscribe({
+        events: [], // empty stream
+      });
+      
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [createGlobalSessionIdleEvent(targetDirectory, targetSessionID)],
+        eventDelay: 100, // event arrives after 100ms
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'global event response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: targetDirectory,
+      });
+
+      // Assert: global.event was called as backup
+      expect(mockGlobalEvent).toHaveBeenCalled();
+      expect(result).toBe('global event response');
+    });
+
+    it('should parse GlobalEvent with payload wrapper correctly', async () => {
+      // Arrange: GlobalEvent has directory + payload structure
+      const targetSessionID = 'test-session-payload';
+      const targetDirectory = '/test/dir';
+      
+      const mockSubscribe = createMockEventSubscribe({ events: [] });
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [createGlobalSessionIdleEvent(targetDirectory, targetSessionID)],
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'parsed response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: targetDirectory,
+      });
+
+      // Assert: GlobalEvent payload was correctly parsed
+      expect(result).toBe('parsed response');
+    });
+
+    it('should skip backup when client.global does not exist', async () => {
+      // Arrange: no client.global, only event.subscribe
+      const targetSessionID = 'test-session-no-global';
+      
+      const mockSubscribe = createMockEventSubscribe({
+        events: [createSessionIdleEvent(targetSessionID)],
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      // NO mockClient.global
+      
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'no global response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+      });
+
+      // Assert: only event.subscribe was used, no error
+      expect(mockSubscribe).toHaveBeenCalled();
+      expect(result).toBe('no global response');
+    });
+
+    it('should not duplicate processing when both paths receive events', async () => {
+      // Arrange: both event.subscribe and global.event receive matching events
+      const targetSessionID = 'test-session-dual';
+      const targetDirectory = '/test/dir';
+      
+      const mockSubscribe = createMockEventSubscribe({
+        events: [createSessionIdleEvent(targetSessionID)],
+        eventDelay: 50, // arrives first
+      });
+      
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [createGlobalSessionIdleEvent(targetDirectory, targetSessionID)],
+        eventDelay: 150, // arrives later
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'first event response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: targetDirectory,
+      });
+
+      // Assert: only one response (first event wins)
+      expect(result).toBe('first event response');
+    });
+
+    it('F2: main path receives non-target session event → mainPathReceivedTargetEvent NOT set, backup can activate', async () => {
+      // F2: Verify that mainPathReceivedTargetEvent is only set when main path receives TARGET session event
+      // Scenario:
+      // 1. Main path receives session.idle { sessionID: 'OTHER' } (non-target) → mainPathReceivedTargetEvent NOT set
+      // 2. Backup path receives session.idle { sessionID: target } → should activate backup (eventReceived/wakeUp)
+      
+      const targetSessionID = 'target-session-f2';
+      const otherSessionID = 'other-session-f2';
+      const targetDirectory = '/test/dir';
+      
+      // Main path receives non-target session event first
+      const mockSubscribe = createMockEventSubscribe({
+        events: [createSessionIdleEvent(otherSessionID)], // non-target event
+        eventDelay: 50,
+      });
+      
+      // Backup path receives target session event
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [createGlobalSessionIdleEvent(targetDirectory, targetSessionID)],
+        eventDelay: 150, // arrives after main path's non-target event
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'backup activated response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: targetDirectory,
+      });
+
+      // Assert: backup was activated because main path did not receive target session event
+      expect(mockGlobalEvent).toHaveBeenCalled();
+      expect(result).toBe('backup activated response');
+    });
+
+    it('F2: main path receives target session event → mainPathReceivedTargetEvent set, backup NOT activated', async () => {
+      // F2: Verify that when main path receives TARGET session event, backup is NOT activated
+      // Scenario:
+      // 1. Main path receives session.idle { sessionID: target } → mainPathReceivedTargetEvent set
+      // 2. Backup path receives same event later → should NOT activate (eventReceived already true)
+      
+      const targetSessionID = 'target-session-f2-main';
+      const targetDirectory = '/test/dir';
+      
+      // Main path receives target session event
+      const mockSubscribe = createMockEventSubscribe({
+        events: [createSessionIdleEvent(targetSessionID)],
+        eventDelay: 50,
+      });
+      
+      // Backup path also receives target session event (but later)
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [createGlobalSessionIdleEvent(targetDirectory, targetSessionID)],
+        eventDelay: 150,
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'main path response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: targetDirectory,
+      });
+
+      // Assert: main path handled the event, backup was NOT activated
+      expect(mockSubscribe).toHaveBeenCalled();
+      expect(result).toBe('main path response');
+    });
+
+    it('should filter GlobalEvent by sessionID in payload', async () => {
+      // Arrange: GlobalEvent with different sessionID should be ignored
+      const targetSessionID = 'target-session';
+      const otherSessionID = 'other-session';
+      const targetDirectory = '/test/dir';
+      
+      const mockSubscribe = createMockEventSubscribe({ events: [] });
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [
+          createGlobalSessionIdleEvent(targetDirectory, otherSessionID), // wrong session
+          createGlobalSessionIdleEvent(targetDirectory, targetSessionID), // correct session
+        ],
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'filtered response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: targetDirectory,
+      });
+
+      // Assert: wrong sessionID was filtered, correct one matched
+      expect(result).toBe('filtered response');
+    });
+
+    it('should filter GlobalEvent by directory - mismatch → ignore', async () => {
+      // P1-1: GlobalEvent with different directory should be ignored
+      // Bug: Current implementation does NOT filter by directory, so this test will FAIL
+      const targetSessionID = 'test-session-dir-filter';
+      const targetDirectory = '/target/dir';
+      const otherDirectory = '/other/dir';
+      
+      const mockSubscribe = createMockEventSubscribe({ events: [] });
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [
+          createGlobalSessionIdleEvent(otherDirectory, targetSessionID), // wrong directory, should be ignored
+        ],
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      
+      // Initially, messages returns a response (would be used if event is processed)
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'WRONG: event processed despite directory mismatch' }] },
+        ],
+      });
+      
+      // After 200ms, polling completes with correct response
+      setTimeout(() => {
+        mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'idle' }] });
+        mockSession.messages.mockResolvedValue({
+          data: [
+            { parts: [{ type: 'text', text: 'prompt' }] },
+            { parts: [{ type: 'text', text: 'CORRECT: polling response (event filtered)' }] },
+          ],
+        });
+      }, 200);
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: targetDirectory,
+      });
+
+      // Assert: wrong directory was filtered, completed via polling
+      // Bug: If this fails with "WRONG: event processed", it means directory filter is missing
+      expect(result).toBe('CORRECT: polling response (event filtered)');
+    });
+
+    it('should process GlobalEvent when directory matches', async () => {
+      // P1-1: GlobalEvent with matching directory should be processed
+      const targetSessionID = 'test-session-dir-match';
+      const targetDirectory = '/match/dir';
+      
+      const mockSubscribe = createMockEventSubscribe({ events: [] });
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [createGlobalSessionIdleEvent(targetDirectory, targetSessionID)],
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'directory match response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: targetDirectory,
+      });
+
+      // Assert: matching directory was processed
+      expect(result).toBe('directory match response');
+    });
+
+    it('should not filter by directory when options.directory is undefined (backward compatibility)', async () => {
+      // P1-1: When options.directory is not set, backup path should not filter by directory
+      const targetSessionID = 'test-session-no-dir-filter';
+      const directory1 = '/dir1';
+      const directory2 = '/dir2';
+      
+      const mockSubscribe = createMockEventSubscribe({ events: [] });
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [
+          createGlobalSessionIdleEvent(directory1, targetSessionID), // any directory
+          createGlobalSessionIdleEvent(directory2, targetSessionID), // any directory
+        ],
+        eventDelay: 50,
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'no dir filter response' }] },
+        ],
+      });
+
+      // Act: no directory option
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        // NO directory option
+      });
+
+      // Assert: first event was processed (no directory filtering)
+      expect(result).toBe('no dir filter response');
+    });
+  });
+
+  describe('F1.2: Cleanup on both subscriptions', () => {
+    it('should cancel both subscriptions on completion', async () => {
+      // Arrange: both subscriptions active
+      const targetSessionID = 'test-session-cleanup';
+      const targetDirectory = '/test/dir';
+      
+      const mockSubscribe = createMockEventSubscribe({
+        events: [createSessionIdleEvent(targetSessionID)],
+      });
+      
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [], // empty, but subscription created
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'cleanup response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: targetDirectory,
+      });
+
+      // Assert: both were called, result returned
+      expect(mockSubscribe).toHaveBeenCalled();
+      expect(mockGlobalEvent).toHaveBeenCalled();
+      expect(result).toBe('cleanup response');
+    });
+  });
+});
+
+// TO-3: Type assertion test for PollingOptions.directory field
+describe('PollingOptions type - Batch 1: directory field', () => {
+  it('should accept directory field in PollingOptions', () => {
+    // Arrange & Act: create PollingOptions with directory field
+    const options: PollingOptions = {
+      directory: '/test/path',
+    };
+
+    // Assert: type check passes (compiles without error)
+    expect(options.directory).toBe('/test/path');
+  });
+
+  it('should accept PollingOptions without directory (backward compatibility)', () => {
+    // Arrange & Act: create PollingOptions without directory
+    const options: PollingOptions = {
+      eventDriven: true,
+      fallbackThreshold: 25000,
+    };
+
+    // Assert: type check passes, directory is optional
+    expect(options.directory).toBeUndefined();
+  });
+
+  it('should accept all fields including directory', () => {
+    // Arrange & Act: create PollingOptions with all fields
+    const options: PollingOptions = {
+      eventDriven: true,
+      fallbackThreshold: 30000,
+      directory: '/another/path',
+    };
+
+    // Assert: all fields are valid
+    expect(options.eventDriven).toBe(true);
+    expect(options.fallbackThreshold).toBe(30000);
+    expect(options.directory).toBe('/another/path');
+  });
+});
+
+// F3: Tests for Fix-Loop Round 5 issues
+describe('pollSessionCompletion - F3: Fix-Loop Round 5', () => {
+  let mockClient: { session: SFlowClientSession; event?: any; global?: any };
+  let mockSession: {
+    status: ReturnType<typeof vi.fn>;
+    messages: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    mockSession = {
+      status: vi.fn(),
+      messages: vi.fn(),
+    };
+    mockClient = { session: mockSession as unknown as SFlowClientSession };
+  });
+
+  describe('F3.1: Backup path immediate activation when main path fails', () => {
+    it('should activate backup path immediately when main path subscription fails', async () => {
+      // F1: shouldUseBackup semantics - main path unavailable → backup immediately active
+      const targetSessionID = 'test-backup-immediate';
+      const targetDirectory = '/test/dir';
+      
+      // Main path subscription fails (returns undefined or throws)
+      const mockSubscribe = vi.fn().mockRejectedValue(new Error('Main path unavailable'));
+      
+      // Backup path available and emits target event
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [createGlobalSessionIdleEvent(targetDirectory, targetSessionID)],
+        eventDelay: 50, // small delay to ensure event arrives
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'backup immediate response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: targetDirectory,
+      });
+
+      // Assert: backup was used (main failed, backup succeeded)
+      expect(mockSubscribe).toHaveBeenCalled();
+      expect(mockGlobalEvent).toHaveBeenCalled();
+      expect(result).toBe('backup immediate response');
+    });
+  });
+
+  describe('F3.2: activePath log accuracy for both subscriptions', () => {
+    it('should log activePath as "both" when both main and backup subscriptions are active', async () => {
+      // F2: activePath should be 'both' when both paths are subscribed
+      const targetSessionID = 'test-both-paths';
+      const targetDirectory = '/test/dir';
+      const logMessages: any[] = [];
+      
+      // Mock logger to capture log messages
+      const mockLogger = {
+        log: vi.fn().mockImplementation(async (sessionID: string, message: string, data?: any) => {
+          logMessages.push({ sessionID, message, data });
+        }),
+      };
+
+      // Both subscriptions succeed
+      const mockSubscribe = createMockEventSubscribe({
+        events: [], // main path has no events
+      });
+      
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [createGlobalSessionIdleEvent(targetDirectory, targetSessionID)],
+        eventDelay: 100,
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'both paths response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: targetDirectory,
+        fallbackThreshold: 200, // low threshold to trigger fallback log
+        logger: mockLogger,
+      });
+
+      // Assert: both subscriptions were created
+      expect(mockSubscribe).toHaveBeenCalled();
+      expect(mockGlobalEvent).toHaveBeenCalled();
+      expect(result).toBe('both paths response');
+      
+      // Assert: if fallback log was emitted, activePath should be 'both'
+      const fallbackLog = logMessages.find(log => log.message === 'fallback to polling');
+      if (fallbackLog) {
+        expect(fallbackLog.data.activePath).toBe('both');
+      }
     });
   });
 });

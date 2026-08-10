@@ -292,4 +292,60 @@ describe('SSE Mock Helpers', () => {
       expect(results).toHaveLength(1); // Got 1 event before error
     });
   });
+
+  // TO-8: Mock 支持目录断言
+  describe('TO-8: Mock call argument recording for directory assertion', () => {
+    it('should record query.directory parameter in mock.calls', async () => {
+      // Arrange
+      const mockSubscribe = createMockEventSubscribe();
+
+      // Act: call subscribe with directory parameter
+      await mockSubscribe({ query: { directory: '/test/path' } });
+
+      // Assert: mock.calls should record the argument
+      expect(mockSubscribe).toHaveBeenCalled();
+      expect(mockSubscribe.mock.calls).toHaveLength(1);
+      expect(mockSubscribe.mock.calls[0][0]).toEqual({ query: { directory: '/test/path' } });
+    });
+
+    it('should record empty query when directory is not provided', async () => {
+      // Arrange
+      const mockSubscribe = createMockEventSubscribe();
+
+      // Act: call subscribe without directory
+      await mockSubscribe({ query: {} });
+
+      // Assert: mock.calls should record empty query
+      expect(mockSubscribe.mock.calls[0][0]).toEqual({ query: {} });
+    });
+
+    it('should record multiple calls with different directories', async () => {
+      // Arrange
+      const mockSubscribe = createMockEventSubscribe();
+
+      // Act: call subscribe multiple times
+      await mockSubscribe({ query: { directory: '/path/one' } });
+      await mockSubscribe({ query: { directory: '/path/two' } });
+
+      // Assert: both calls should be recorded
+      expect(mockSubscribe.mock.calls).toHaveLength(2);
+      expect(mockSubscribe.mock.calls[0][0]).toEqual({ query: { directory: '/path/one' } });
+      expect(mockSubscribe.mock.calls[1][0]).toEqual({ query: { directory: '/path/two' } });
+    });
+
+    it('should support asserting directory in real-world polling scenario', async () => {
+      // Arrange: simulate polling.ts calling subscribe with directory
+      const targetDirectory = '/project/root';
+      const mockSubscribe = createMockEventSubscribe({
+        events: [createSessionIdleEvent('test-session')],
+      });
+
+      // Act: simulate what polling.ts does
+      const query = targetDirectory ? { directory: targetDirectory } : {};
+      await mockSubscribe({ query });
+
+      // Assert: can verify directory was passed correctly
+      expect(mockSubscribe.mock.calls[0][0].query?.directory).toBe(targetDirectory);
+    });
+  });
 });

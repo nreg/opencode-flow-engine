@@ -112,12 +112,15 @@ export function generateTaskId(counter: { value: number }): string {
  * Options for event-driven session polling.
  * - eventDriven: Enable SSE event subscription for faster completion detection (default: true)
  * - fallbackThreshold: Fall back to pure polling if event subscription takes longer than this (default: 25000ms)
+ * - directory: Target directory for event subscription filtering (optional, passed to SDK's event.subscribe query)
  */
 export interface PollingOptions {
   /** Enable event-driven polling via SSE subscription (default: true) */
   eventDriven?: boolean;
   /** Fallback to pure polling if event subscription exceeds this duration (default: 25000ms) */
   fallbackThreshold?: number;
+  /** Target directory for event subscription filtering (optional, passed to SDK's event.subscribe query) */
+  directory?: string;
 }
 
 // ─── Event subscription types (Batch 2: AsyncGenerator interface) ───────────────

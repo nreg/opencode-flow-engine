@@ -135,7 +135,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
         const probeResult = await pollSessionCompletion(
           client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
           task.sessionID,
-          { maxWaitMs: 1000, probeMode: true },
+          { maxWaitMs: 1000, probeMode: true, directory: task.changeDir },
         );
 
         // F2: If still pending, keep running and skip this cycle
@@ -641,7 +641,7 @@ export function createCallFlowAgentTools(
         let lastOutput = await pollSessionCompletion(
           client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
           sessionID,
-          { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS },
+          { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS, directory: changeDir },
         );
 
         // Task 3.2: Handle null output (retry exhausted) in sync mode
@@ -699,7 +699,7 @@ export function createCallFlowAgentTools(
             const result = await pollSessionCompletion(
               client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
               sessionID,
-              { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS },
+              { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS, directory: changeDir },
             );
             // Type guard: in sync mode (no probeMode), result is string | null
             return result as string | null;
@@ -848,7 +848,7 @@ export function createCallFlowAgentTools(
           const output = await pollSessionCompletion(
             client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
             task.sessionID,
-            { maxWaitMs: DEFAULT_MAX_WAIT_MS },
+            { maxWaitMs: DEFAULT_MAX_WAIT_MS, directory: changeDir },
           );
 
           const now = Date.now();
