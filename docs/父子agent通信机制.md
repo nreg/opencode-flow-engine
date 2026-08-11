@@ -46,6 +46,8 @@
 |------|---------|------|
 | `call_flow_agent` | `tools/call-flow-agent.ts` | 子 agent 调用入口，支持同步/异步/交互模式 |
 | `pollSessionCompletion` | `helpers/polling.ts` | 完成检测核心，事件驱动 + 轮询降级 |
+| **`EventBus`** | `features/event-bus.ts` | 全局事件总线，Map<sessionID, listener> 模式 |
+| **`handleSessionIdleEvent`** | `features/event-hook-handler.ts` | 共享 hook 处理函数，处理 session.idle/status 事件 |
 | `BackgroundTaskWatcher` | `tools/call-flow-agent.ts` | 集中式后台任务监控器 |
 | `NotificationManager` | `features/notification-manager.ts` | 子 agent 完成通知管理 |
 | `SubagentStore` | `features/subagent-store.ts` | 子 agent 状态持久化与恢复 |
@@ -239,226 +241,231 @@ if (agent_id) {
 
 ## 3. 完成检测机制（核心）
 
-### 3.1 事件驱动优先（Batch 2 改造 + F1 双路订阅）
+### 3.1 事件驱动优先（事件总线 + 插件 Hooks.event）
 
-**原理：** 订阅 SDK 的 `session.idle` SSE 事件，子 agent 完成时即时唤醒父 agent。采用双路订阅策略增强可靠性。
+**原理：** 通过全局事件总线 + 插件 `Hooks.event` hook 监听 `session.idle` 和 `session.status` 事件，子 agent 完成时即时唤醒父 agent。
 
-**双路订阅策略（F1 修复）：**
+**架构设计：**
 
-1. **主路径**：`client.event.subscribe({ query: { directory } })`
-   - 返回 `Promise<{ stream: AsyncGenerator<Event> }>`，事件为裸 Event 对象
-   - Directory 过滤是服务器端行为（假设，SDK 文档未确认）
-   - 更快，直接订阅
+1. **全局事件总线**（`features/event-bus.ts`）
+   - 轻量级实现：`Map<sessionID, listener>` 模式
+   - 无外部依赖：无消息队列（Redis/RabbitMQ）、无 EventEmitter、无 RxJS
+   - 全局单例：`getGlobalEventBus()` 返回唯一实例，pollSessionCompletion 与插件 hook 共享
+   - 操作：
+     - `register(sessionID, listener)`: 注册监听器（非幂等，重复注册会覆盖并警告）
+     - `dispatch(sessionID, event)`: 派发事件（幂等，单次 dispatch 只调用一次监听器）
+     - `unregister(sessionID)`: 注销监听器（防泄漏）
 
-2. **备选路径**：`client.global.event()`
-   - 返回 `Promise<{ stream: AsyncGenerator<GlobalEvent> }>`，其中 `GlobalEvent = { directory: string, payload: Event }`
-   - 每个事件携带 directory 字段，客户端可过滤
-   - **立即订阅**，但**延迟使用事件**：主路径失败时立即激活，或主路径 5s 无事件时激活
-   - **P0-1 修复**：支持 directory 过滤（`!options.directory || globalEvent.directory === options.directory`），与主路径行为一致
+2. **插件 Hooks.event 集成**
+   - 插件在 `sflow-plugin-factory.ts` / `iflow-plugin-factory.ts` 注册 `Hooks.event` hook
+   - Hook 监听 OpenCode runtime 的 `session.idle` 和 `session.status` 事件
+   - 使用共享函数 `handleSessionIdleEvent(event, prefix)` 处理事件：
+     - **session.idle 事件**：直接派发到事件总线
+     - **session.status 事件**：检查 `status.type === 'idle'` 时派发（兜底机制）
+   - 派发时调用 `eventBus.dispatch(sessionID, event)`
+   - 事件总线调用已注册的监听器（wakeUp 回调）
 
-3. **策略**：两路同时订阅并处理事件，首个匹配事件胜出，无重复处理
+3. **pollSessionCompletion 注册流程**
+   - 启动时调用 `eventBus.register(sessionID, wakeUp)` 注册回调
+   - 事件到达时，wakeUp 立即中断轮询循环
+   - 无需 status 确认，直接读取最后一条消息并返回
+   - 完成后调用 `eventBus.unregister(sessionID)` 清理
 
-**备选路径激活条件（F1 语义澄清）：**
-
-备选路径在以下任一条件满足时激活：
-- 主路径订阅失败（`!eventSubscription`）
-- 主路径订阅成功但超过 `BACKUP_DELAY_MS`（5s）未收到任何事件（`elapsed >= BACKUP_DELAY_MS`）
-- **主路径未收到目标 session 的 session.idle 事件**（`!mainPathReceivedTargetEvent`）
-
-**关键语义澄清（F1）：**
-- `mainPathReceivedTargetEvent` 标志仅在主路径收到**目标 session 的 session.idle 事件**时置位（条件：`event.properties.sessionID === sessionID`）
-- 主路径收到**非目标 session 的事件**不会置位该标志，备选路径仍可激活
-- 这确保备选路径在主路径收到无关事件时仍能接管目标 session 的事件处理
-
-**关键代码（polling.ts:70-215）：**
+**关键代码（polling.ts:77-125）：**
 
 ```typescript
-// F1: Dual-path subscription (event.subscribe + global.event backup)
-let eventSubscription: EventSubscription | null = null;
-let globalEventSubscription: EventSubscription | null = null;
+// Batch 3: Event bus driven polling
+// R1: Register to global event bus for session.idle event
 let eventReceived = false;
 let wakeUp: (() => void) | null = null;
-const BACKUP_DELAY_MS = 5000; // F1: switch to global.event after 5s if no events
-// F1: Track if main path received TARGET session's session.idle event (not any event)
-let mainPathReceivedTargetEvent = false;
+let eventBusRegistered = false;
 
-// F1: Main path - event.subscribe (bare Event objects)
-if (eventDriven && client.event && typeof client.event.subscribe === 'function') {
-  try {
-    const abortController = new AbortController();
-    const query = options.directory ? { directory: options.directory } : {};
-    const { stream } = await client.event.subscribe({ query });
-
-    const consumeStream = async () => {
-      try {
-        for await (const event of stream) {
-          if (abortController.signal.aborted) break;
-
-          // P0-1 Fix: event is a bare Event object (no payload wrapper)
-          if (
-            event.type === 'session.idle' &&
-            event.properties &&
-            'sessionID' in event.properties &&
-            event.properties.sessionID === sessionID
-          ) {
-            // F1: Set flag when main path receives TARGET session's idle event
-            mainPathReceivedTargetEvent = true;
-            eventReceived = true;
-            if (wakeUp) wakeUp();
-          }
-        }
-      } catch (error) {
-        // 事件流错误：记录日志，继续轮询
-        if (!abortController.signal.aborted) {
-          await logger.log(sessionID, 'event stream error', {
-            error: error instanceof Error ? error.message : String(error),
-            fallback: 'continue polling',
-          });
-        }
-      }
-    };
-
-    void consumeStream().catch((err) => {
-      if (!abortController.signal.aborted) {
-        console.warn('[Polling] consumeStream error:', err);
-      }
-    });
-
-    eventSubscription = {
-      cancel: () => {
-        abortController.abort();
-        if (stream && typeof stream.return === 'function') {
-          stream.return(undefined);
-        }
-      },
-    };
-    eventDrivenActive = true;
-  } catch (error) {
-    await logger.log(sessionID, 'event subscription failed', {
-      error: error instanceof Error ? error.message : String(error),
-      fallback: 'pure polling',
-    });
-    eventDrivenActive = false;
-  }
+if (eventDriven) {
+  // R1: Register to global event bus
+  const eventBus = getGlobalEventBus();
+  eventBus.register(sessionID, (event: Event) => {
+    // R1: Check if event is session.idle for this session
+    if (
+      event.type === 'session.idle' &&
+      event.properties &&
+      'sessionID' in event.properties &&
+      event.properties.sessionID === sessionID
+    ) {
+      eventReceived = true;
+      if (wakeUp) wakeUp();
+      
+      // R1: Log event arrival
+      void activeLogger.log(sessionID, 'event received', {
+        source: 'event.hook',
+        type: event.type,
+        eventSessionID: event.properties.sessionID,
+        targetSessionID: sessionID,
+        matched: true,
+      });
+    }
+  });
+  eventBusRegistered = true;
 }
 
-// F1: Backup path - global.event (GlobalEvent with directory + payload wrapper)
-if (eventDriven && client.global && typeof client.global.event === 'function') {
-  try {
-    const abortController = new AbortController();
-    const { stream } = await client.global.event();
+async function logExit(reason: string, result: string | null | ProbePending): Promise<string | null | ProbePending> {
+  const elapsed = Date.now() - startTime;
+  await activeLogger.log(sessionID, 'completed', { reason, elapsed: `${elapsed}ms` });
+  
+  // R1: Unregister from event bus (防泄漏)
+  if (eventBusRegistered) {
+    const eventBus = getGlobalEventBus();
+    eventBus.unregister(sessionID);
+    eventBusRegistered = false;
+  }
+  
+  return result;
+}
+```
 
-    const consumeGlobalStream = async () => {
-      try {
-        for await (const globalEvent of stream) {
-          if (abortController.signal.aborted) break;
+**插件 Hook 注册（sflow-plugin-factory.ts:432-476）：**
 
-          // F1: GlobalEvent structure: { directory: string, payload: Event }
-          // P0-1: Filter by directory (if provided) and sessionID in payload
-          if (
-            (!options.directory || globalEvent.directory === options.directory) &&
-            globalEvent.payload.type === 'session.idle' &&
-            globalEvent.payload.properties &&
-            'sessionID' in globalEvent.payload.properties &&
-            globalEvent.payload.properties.sessionID === sessionID
-          ) {
-            const elapsed = Date.now() - startTime;
-            const shouldUseBackup = !eventSubscription || 
-                                    elapsed >= BACKUP_DELAY_MS || 
-                                    !mainPathReceivedTargetEvent;
-            
-            if (shouldUseBackup && !eventReceived) {
-              eventReceived = true;
-              if (wakeUp) wakeUp();
-              await logger.log(sessionID, 'global.event backup activated', {
-                elapsed: `${elapsed}ms`,
-                reason: eventSubscription ? 'main path delayed' : 'main path unavailable',
-              });
-            }
-          }
-        }
-      } catch (error) {
-        if (!abortController.signal.aborted) {
-          await logger.log(sessionID, 'global event stream error', {
-            error: error instanceof Error ? error.message : String(error),
-            fallback: 'continue polling',
-          });
-        }
-      }
-    };
+```typescript
+event: async (input) => {
+  const event = input.event;
+  // P0-1: 诊断日志 - 记录所有收到的事件类型
+  console.log(`[sFlow] event hook received: type=${event.type}`);
 
-    void consumeGlobalStream().catch((err) => {
-      if (!abortController.signal.aborted) {
-        console.warn('[Polling] consumeGlobalStream error:', err);
-      }
-    });
-
-    globalEventSubscription = {
-      cancel: () => {
-        abortController.abort();
-        if (stream && typeof stream.return === 'function') {
-          stream.return(undefined);
-        }
-      },
-    };
-  } catch (error) {
-    await logger.log(sessionID, 'global event subscription failed', {
-      error: error instanceof Error ? error.message : String(error),
-      fallback: 'main path only',
-    });
+  if (event.type === 'session.created') {
+    // 主 agent 启动时消费未读通知
+    // ...
+  } else if (event.type === 'session.deleted') {
+    // session 结束处理
+    // ...
+  } else {
+    // P1-2: 使用共享函数处理 session.idle 和 session.status 事件
+    const handled = handleSessionIdleEvent(event, 'sFlow');
+    if (handled) {
+      console.log('[sFlow] session.idle/status event handled and dispatched to event bus');
+    }
   }
 }
 ```
 
-**事件订阅机制：**
-- **主路径**：`client.event.subscribe({ query })` 接收 query 参数，其中 `query = options.directory ? { directory } : {}`
-  - 当 `options.directory` 存在时，事件订阅通过 `query.directory` 限定订阅范围，只接收特定目录下的 session 事件
-  - 返回 `Promise<{ stream: AsyncGenerator<Event> }>`，通过 `for await (const event of stream)` 消费事件流
-  - 事件类型（P0-1 修正）：`{ type: 'session.idle', properties: { sessionID: string } }`（裸 Event 对象，无 payload 包装）
-- **备选路径**：`client.global.event()`
-  - 返回 `Promise<{ stream: AsyncGenerator<GlobalEvent> }>`
-  - 事件类型：`{ directory: string, payload: Event }`（GlobalEvent 对象，payload 包裹）
-  - **P0-1 修复**：客户端按 `(!options.directory || globalEvent.directory === options.directory) && globalEvent.payload.type === 'session.idle' && globalEvent.payload.properties?.sessionID === sessionID` 过滤
-  - **向后兼容**：当 `options.directory` 未设置时，不进行 directory 过滤（仅过滤 sessionID）
-- 使用 `AbortController` 控制取消和清理
+**共享 Hook 处理函数（event-hook-handler.ts:37-82）：**
 
-**错误处理：**
-- 订阅失败：记录日志，立即降级到纯轮询（主路径失败时备选路径仍可用）
-- 流中断/异常：记录日志，继续轮询（不尝试重连）
-- 取消订阅：调用 `abortController.abort()` + `stream.return(undefined)` 清理资源（两路都清理）
+```typescript
+export function handleSessionIdleEvent(event: Event, prefix: string): boolean {
+  if (event.type === 'session.idle') {
+    // Batch 2 Task 2.1: 监听 session.idle 事件并派发到事件总线
+    const properties = event.properties as { sessionID?: string } | undefined;
+    if (properties?.sessionID) {
+      console.log(`[${prefix}] event hook received session.idle: sessionID=${properties.sessionID}`);
+      const eventBus = getGlobalEventBus();
+      const matched = eventBus.dispatch(properties.sessionID, event);
+      console.log(`[${prefix}] eventBus.dispatch result: matched=${matched}`);
+      return matched;
+    }
+    return false;
+  } else if (event.type === 'session.status') {
+    // P0-2: 兜底监听 session.status 事件（当插件不推送独立的 session.idle 时）
+    const statusData = event.properties as { sessionID?: string; status?: { type?: string } };
+    if (statusData.status?.type === 'idle' && statusData.sessionID) {
+      console.log(`[${prefix}] event hook received session.status idle: sessionID=${statusData.sessionID}`);
+      const eventBus = getGlobalEventBus();
+      const idleEvent = { type: 'session.idle', properties: { sessionID: statusData.sessionID } };
+      const matched = eventBus.dispatch(statusData.sessionID, idleEvent);
+      console.log(`[${prefix}] eventBus.dispatch (from session.status) result: matched=${matched}`);
+      return matched;
+    }
+    return false;
+  }
+  return false;
+}
+```
+
+**事件总线实现（event-bus.ts）：**
+
+```typescript
+export function createEventBus(): EventBus {
+  const listeners = new Map<string, EventBusListener>();
+  const logger = new PollingLogger();
+
+  return {
+    register(sessionID: string, onComplete: EventBusListener): void {
+      listeners.set(sessionID, onComplete);
+      void logger.log(sessionID, 'event-bus register', {
+        action: 'register',
+        listenerCount: listeners.size,
+      });
+    },
+
+    dispatch(sessionID: string, event: Event): boolean {
+      const listener = listeners.get(sessionID);
+      const matched = listener !== undefined;
+
+      if (matched) {
+        listener(event);
+      }
+
+      void logger.log(sessionID, 'event-bus dispatch', {
+        action: 'dispatch',
+        eventType: event.type,
+        matched,
+        listenerCount: listeners.size,
+      });
+
+      return matched;
+    },
+
+    unregister(sessionID: string): void {
+      const existed = listeners.has(sessionID);
+      listeners.delete(sessionID);
+      void logger.log(sessionID, 'event-bus unregister', {
+        action: 'unregister',
+        existed,
+        listenerCount: listeners.size,
+      });
+    },
+  };
+}
+```
 
 **性能提升：**
 - 事件到达时立即返回，无需等待轮询间隔
 - 唤醒延迟 < 50ms（原轮询间隔 200ms）
 - 解决了 30s 超时问题（事件驱动 + 轮询降级双保险）
-- 双路订阅增强了事件源可靠性（主路径不可用时备选路径接管）
+- 无外部依赖，轻量级实现
 
 ---
 
 ### 3.2 轮询降级机制
 
 **触发条件：**
-- 事件订阅失败（SDK 不支持或网络错误）
-- 事件流超时（超过 `fallbackThreshold`，默认 25s）
+- 事件未在阈值时间内到达（超过 `fallbackThreshold`，默认 25s）
 
-**降级逻辑（polling.ts:125-133）：**
+**降级逻辑（polling.ts:147-162）：**
 
 ```typescript
-async function logExit(reason: string, result: string | null | ProbePending): Promise<string | null | ProbePending> {
-  const elapsed = Date.now() - startTime;
-  await logger.log(sessionID, 'completed', { reason, elapsed: `${elapsed}ms` });
-  // 取消事件订阅并清理资源
-  if (eventSubscription) {
-    eventSubscription.cancel();
-    eventSubscription = null;
+// Batch 3: Fallback to pure polling if event not received within threshold
+if (eventBusRegistered && !eventReceived && elapsed > fallbackThreshold) {
+  await activeLogger.log(sessionID, 'fallback to polling', {
+    reason: 'event not received within threshold',
+    elapsed: `${elapsed}ms`,
+    threshold: `${fallbackThreshold}ms`,
+  });
+
+  // P1-2: Unregister from event bus (no longer needed)
+  // Check eventReceived again to avoid race condition (event arrived just before unregister)
+  if (!eventReceived) {
+    const eventBus = getGlobalEventBus();
+    eventBus.unregister(sessionID);
+    eventBusRegistered = false;
   }
-  return result;
 }
 ```
 
 **降级后行为：**
+- 注销事件总线监听器（防泄漏）
 - 纯轮询模式，间隔 200ms
 - 通过 `status()` 和 `messages()` 检测完成
+
+**竞态条件保护：**
+- 在注销前再次检查 `eventReceived`，避免事件刚到达就被注销（事件到达 → 注销 → 丢失）
 
 ---
 
@@ -513,19 +520,39 @@ return await logExit('timeout', result);
 
 ---
 
-### 3.5 迟到事件忽略
+### 3.5 事件到达检测与即时返回
 
-**问题：** 事件订阅已取消后，可能收到迟到的事件（网络延迟）。
-
-**解决方案（polling.ts:72）：**
+**检测逻辑（polling.ts:164-185）：**
 
 ```typescript
-const subscription = eventStream.on('data', (event: unknown) => {
-  // P0-1: 检查订阅是否仍然活跃
-  if (eventSubscription !== subscription) return; // 已清理，忽略迟到事件
-  // ...
+// P0-2: Check eventReceived before sleep to detect events that arrived
+// after register but before wakeUp assignment.
+// Scenario 1: event after register, before wakeUp → caught here (no 200ms delay)
+// Scenario 2: event during sleep → wakeUp interrupts sleep
+// Scenario 3: event after unregister → polling fallback catches
+if (eventReceived) {
+  const result = await readSessionLastMessage(client, sessionID);
+  return await logExit('event_hook', result);
+}
+
+await new Promise<void>((resolve) => {
+  wakeUp = resolve;
+  sleep(POLL_INTERVAL).then(resolve);
 });
+wakeUp = null;
+pollCount++;
+
+// P0-3: If event received, return directly without status confirmation
+if (eventReceived) {
+  const result = await readSessionLastMessage(client, sessionID);
+  return await logExit('event_hook', result);
+}
 ```
+
+**三种事件到达场景：**
+1. **事件在 register 后、wakeUp 赋值前到达**：在 sleep 前的检查中捕获（无 200ms 延迟）
+2. **事件在 sleep 期间到达**：wakeUp 中断 sleep，立即返回
+3. **事件在 unregister 后到达**：轮询降级模式捕获
 
 ---
 
@@ -791,9 +818,119 @@ async log(sessionId: string, message: string, metadata?: Record<string, unknown>
 
 ---
 
-## 6. 状态流
+## 6. 诊断日志系统
 
-### 6.1 子 agent 生命周期
+### 6.1 事件总线诊断日志
+
+**日志文件：** `.flow-engine/sflow/polling.log`
+
+**事件总线操作日志（event-bus.ts）：**
+
+```typescript
+// register 操作
+await logger.log(sessionID, 'event-bus register', {
+  action: 'register',
+  listenerCount: listeners.size,
+});
+
+// dispatch 操作
+await logger.log(sessionID, 'event-bus dispatch', {
+  action: 'dispatch',
+  eventType: event.type,
+  matched,  // true if listener found
+  listenerCount: listeners.size,
+});
+
+// unregister 操作
+await logger.log(sessionID, 'event-bus unregister', {
+  action: 'unregister',
+  existed,  // true if listener existed
+  listenerCount: listeners.size,
+});
+```
+
+**日志示例：**
+
+```text
+[2024-01-15T10:30:00.000Z] [INFO] [ses_abc123] event-bus register | {"action":"register","listenerCount":1}
+[2024-01-15T10:30:00.050Z] [INFO] [ses_abc123] event-bus dispatch | {"action":"dispatch","eventType":"session.idle","matched":true,"listenerCount":1}
+[2024-01-15T10:30:00.051Z] [INFO] [ses_abc123] event-bus unregister | {"action":"unregister","existed":true,"listenerCount":0}
+```
+
+---
+
+### 6.2 Hook 处理诊断日志
+
+**控制台输出（event-hook-handler.ts）：**
+
+```typescript
+// session.idle 事件
+console.log(`[sFlow] event hook received session.idle: type=${event.type}, sessionID=${properties.sessionID}`);
+console.log(`[sFlow] eventBus.dispatch result: matched=${matched}`);
+
+// session.status 事件（兜底）
+console.log(`[sFlow] event hook received session.status idle: sessionID=${statusData.sessionID}`);
+console.log(`[sFlow] eventBus.dispatch (from session.status) result: matched=${matched}`);
+```
+
+**日志示例：**
+
+```text
+[sFlow] event hook received: type=session.idle
+[sFlow] event hook received session.idle: type=session.idle, sessionID=ses_abc123
+[sFlow] eventBus.dispatch result: matched=true
+[sFlow] session.idle/status event handled and dispatched to event bus
+```
+
+---
+
+### 6.3 轮询诊断日志
+
+**pollSessionCompletion 日志（polling.ts）：**
+
+```typescript
+// 启动日志
+await activeLogger.log(sessionID, 'start polling', {
+  maxWaitMs: MAX_WAIT,
+  isNew,
+  probeMode,
+  eventDriven,
+  fallbackThreshold
+});
+
+// 事件到达日志
+await activeLogger.log(sessionID, 'event received', {
+  source: 'event.hook',
+  type: event.type,
+  eventSessionID: event.properties.sessionID,
+  targetSessionID: sessionID,
+  matched: true,
+});
+
+// 轮询降级日志
+await activeLogger.log(sessionID, 'fallback to polling', {
+  reason: 'event not received within threshold',
+  elapsed: `${elapsed}ms`,
+  threshold: `${fallbackThreshold}ms`,
+});
+
+// 完成日志
+await activeLogger.log(sessionID, 'completed', { reason, elapsed: `${elapsed}ms` });
+```
+
+**日志示例：**
+
+```text
+[2024-01-15T10:30:00.000Z] [INFO] [ses_abc123] start polling | {"maxWaitMs":30000,"isNew":true,"probeMode":false,"eventDriven":true,"fallbackThreshold":25000}
+[2024-01-15T10:30:00.050Z] [INFO] [ses_abc123] event received | {"source":"event.hook","type":"session.idle","eventSessionID":"ses_abc123","targetSessionID":"ses_abc123","matched":true}
+[2024-01-15T10:30:00.051Z] [INFO] [ses_abc123] completed | {"reason":"event_hook","elapsed":"51ms"}
+```
+
+---
+
+## 7. 状态流
+
+### 7.1 子 agent 生命周期
 
 ```text
 创建 session (status: running)
@@ -817,7 +954,7 @@ async log(sessionId: string, message: string, metadata?: Record<string, unknown>
 
 ---
 
-### 6.2 BackgroundTaskEntry 字段说明
+### 7.2 BackgroundTaskEntry 字段说明
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -839,77 +976,84 @@ async log(sessionId: string, message: string, metadata?: Record<string, unknown>
 
 ---
 
-## 7. 时序图
+## 8. 时序图
 
-### 7.1 同步模式时序
+### 8.1 同步模式时序
 
 ```text
-父 Agent                call_flow_agent           子 Session           pollSessionCompletion
-  │                          │                        │                        │
-  ├─ call_flow_agent ───────→│                        │                        │
-  │  (run_in_background=false)│                        │                        │
-  │                          ├─ session.create ──────→│                        │
-  │                          │  (parentID=父sessionID)│                        │
-  │                          │←───── sessionID ───────┤                        │
-  │                          │                        │                        │
-  │                          ├─ session.prompt ──────→│                        │
-  │                          │  (prompt + model)      │                        │
-  │                          │                        │                        │
-  │                          ├─ pollSessionCompletion ───────────────────────→│
-  │                          │                        │                        ├─ event.subscribe (session.idle)
-  │                          │                        │                        │
-  │                          │                        │←─ 执行任务 ─────────────┤
-  │                          │                        │                        │
-  │                          │                        ├─ session.idle event ──→│
-  │                          │                        │                        ├─ wakeUp()
-  │                          │←───────────────────────────────────────────────┤
-  │                          │  (output)              │                        │
-  │                          │                        │                        │
-  │                          ├─ writeNotification ────┤                        │
-  │                          │  (sync_completed)      │                        │
-  │                          │                        │                        │
-  │←───── result ────────────┤                        │                        │
-  │                          │                        │                        │
+父 Agent         call_flow_agent      子 Session    pollSessionCompletion    EventBus    Hooks.event
+  │                    │                  │                 │                  │              │
+  ├─ call_flow_agent ─→│                  │                 │                  │              │
+  │  (run_in_background=false)│            │                 │                  │              │
+  │                    ├─ session.create ─→│                 │                  │              │
+  │                    │  (parentID=父sessionID)│             │                  │              │
+  │                    │←─── sessionID ───┤                 │                  │              │
+  │                    │                  │                 │                  │              │
+  │                    ├─ session.prompt ─→│                 │                  │              │
+  │                    │  (prompt + model)│                 │                  │              │
+  │                    │                  │                 │                  │              │
+  │                    ├─ pollSessionCompletion ───────────→│                  │              │
+  │                    │                  │                 ├─ eventBus.register(sessionID, wakeUp) ─→│
+  │                    │                  │                 │                  │              │
+  │                    │                  │←─ 执行任务 ─────┤                  │              │
+  │                    │                  │                 │                  │              │
+  │                    │                  ├─ session.idle ───────────────────────────────────→│
+  │                    │                  │                 │                  │←─ event ─────┤
+  │                    │                  │                 │                  ├─ dispatch(sessionID, event) ─→│
+  │                    │                  │                 │←─ wakeUp() ──────┤              │
+  │                    │                  │                 ├─ eventBus.unregister(sessionID) ────→│
+  │                    │←─────────────────────────────────┤                  │              │
+  │                    │  (output)        │                 │                  │              │
+  │                    │                  │                 │                  │              │
+  │                    ├─ writeNotification ────────────────┤                  │              │
+  │                    │  (sync_completed)│                 │                  │              │
+  │                    │                  │                 │                  │              │
+  │←───── result ──────┤                  │                 │                  │              │
+  │                    │                  │                 │                  │              │
 ```
 
 ---
 
-### 7.2 异步模式时序（含 Watcher）
+### 8.2 异步模式时序（含 Watcher）
 
 ```text
-父 Agent         call_flow_agent      子 Session      BackgroundTaskWatcher      NotificationManager
-  │                    │                  │                   │                        │
-  ├─ call_flow_agent ─→│                  │                   │                        │
-  │  (run_in_background=true)│             │                   │                        │
-  │                    ├─ session.create ─→│                   │                        │
-  │                    │←─── sessionID ───┤                   │                        │
-  │                    ├─ session.prompt ─→│                   │                        │
-  │                    │                  │                   │                        │
-  │←─── task_id ───────┤                  │                   │                        │
-  │  (立即返回)        │                  │                   │                        │
-  │                    │                  │                   │                        │
-  │  （父 agent 继续执行其他任务）         │                   │                        │
-  │                    │                  │                   │                        │
-  │                    │                  │                   ├─ setInterval(200ms) ──→│
-  │                    │                  │                   │                        │
-  │                    │                  │←─ 执行任务 ────────┤                        │
-  │                    │                  │                   │                        │
-  │                    │                  │                   ├─ pollSessionCompletion │
-  │                    │                  │                   │  (probeMode, 1s)       │
-  │                    │                  │                   │                        │
-  │                    │                  ├─ session.idle ───→│                        │
-  │                    │                  │                   ├─ 检测完成              │
-  │                    │                  │                   │                        │
-  │                    │                  │                   ├─ writeNotification ───→│
-  │                    │                  │                   │  (async_completed)     │
-  │                    │                  │                   │                        │
-  │  （后续通过 flowagent_output 取结果） │                   │                        │
-  │                    │                  │                   │                        │
+父 Agent      call_flow_agent   子 Session   BackgroundTaskWatcher   pollSessionCompletion   EventBus   Hooks.event
+  │                 │               │                │                      │                  │           │
+  ├─ call_flow_agent ─→│             │                │                      │                  │           │
+  │  (run_in_background=true)│        │                │                      │                  │           │
+  │                 ├─ session.create ─→│             │                      │                  │           │
+  │                 │←─── sessionID ───┤             │                      │                  │           │
+  │                 ├─ session.prompt ─→│             │                      │                  │           │
+  │                 │               │                │                      │                  │           │
+  │←─── task_id ────┤               │                │                      │                  │           │
+  │  (立即返回)     │               │                │                      │                  │           │
+  │                 │               │                │                      │                  │           │
+  │  （父 agent 继续执行其他任务）    │                │                      │                  │           │
+  │                 │               │                │                      │                  │           │
+  │                 │               │                ├─ setInterval(200ms) ─→│                  │           │
+  │                 │               │                │                      │                  │           │
+  │                 │               │←─ 执行任务 ────┤                      │                  │           │
+  │                 │               │                │                      │                  │           │
+  │                 │               │                ├─ pollSessionCompletion ─────────────────→│           │
+  │                 │               │                │  (probeMode, 1s)     ├─ eventBus.register ────→│           │
+  │                 │               │                │                      │                  │           │
+  │                 │               ├─ session.idle ─────────────────────────────────────────────────────→│
+  │                 │               │                │                      │                  │←─ event ──┤
+  │                 │               │                │                      │                  ├─ dispatch ─→│
+  │                 │               │                │                      │←─ wakeUp() ──────┤           │
+  │                 │               │                │                      ├─ eventBus.unregister ──→│           │
+  │                 │               │                ├─ 检测完成            │                  │           │
+  │                 │               │                │                      │                  │           │
+  │                 │               │                ├─ writeNotification ────────────────────────→│           │
+  │                 │               │                │  (async_completed)   │                  │           │
+  │                 │               │                │                      │                  │           │
+  │  （后续通过 flowagent_output 取结果）│             │                      │                  │           │
+  │                 │               │                │                      │                  │           │
 ```
 
 ---
 
-### 7.3 交互模式时序
+### 8.3 交互模式时序
 
 ```text
 父 Agent                call_flow_agent           子 Session           pollSessionCompletion
@@ -949,25 +1093,32 @@ async log(sessionId: string, message: string, metadata?: Record<string, unknown>
 
 ---
 
-## 8. 关键改造点总结
+## 9. 关键改造点总结
 
-### 8.1 事件驱动改造（Batch 2）
+### 9.1 事件驱动改造（事件总线 + 插件 Hooks.event）
 
 **问题：** 纯轮询模式下，子 agent 完成后需要等待下一个轮询周期（200ms）才能检测到，导致延迟。
 
 **解决方案：**
-- 订阅 SDK 的 `session.idle` SSE 事件
-- 事件到达时立即唤醒（`wakeUp()`），延迟 < 50ms
-- 事件流故障时自动降级到纯轮询
+- 引入全局事件总线（`features/event-bus.ts`），Map<sessionID, listener> 模式
+- 插件注册 `Hooks.event` hook 监听 OpenCode runtime 的 `session.idle` 和 `session.status` 事件
+- 使用共享函数 `handleSessionIdleEvent(event, prefix)` 处理事件：
+  - **session.idle 事件**：直接派发到事件总线
+  - **session.status 事件**：检查 `status.type === 'idle'` 时派发（兜底机制）
+- 事件到达时通过事件总线派发，立即唤醒 pollSessionCompletion（`wakeUp()`）
+- 超过 `fallbackThreshold`（默认 25s）未收到事件时，自动降级到纯轮询
+- 完成后注销监听器，防止内存泄漏
 
 **影响：**
 - 同步模式响应速度提升 4 倍（200ms → <50ms）
 - 异步模式 watcher 探测更及时
 - 解决了 30s 超时问题（事件驱动 + 轮询降级双保险）
+- 无外部依赖，轻量级实现（无消息队列、无 EventEmitter、无 RxJS）
+- 兜底机制：当插件不推送独立的 `session.idle` 事件时，通过 `session.status` 事件检测
 
 ---
 
-### 8.2 完成检测增强（P3）
+### 9.2 完成检测增强（P3）
 
 **问题：** 子 agent 输出可能不完整（截断、错误），导致父 agent 收到无效结果。
 
@@ -982,7 +1133,7 @@ async log(sessionId: string, message: string, metadata?: Record<string, unknown>
 
 ---
 
-### 8.3 并发保护增强（R1.4, P1-1）
+### 9.3 并发保护增强（R1.4, P1-1）
 
 **问题：**
 - watcher 与 `pollAndComplete` 可能同时处理同一任务（竞争）
@@ -998,13 +1149,15 @@ async log(sessionId: string, message: string, metadata?: Record<string, unknown>
 
 ---
 
-## 9. 文件路径索引
+## 10. 文件路径索引
 
 | 功能 | 文件路径 |
 |------|---------|
 | 子 agent 调用入口 | `packages/plugin-infra/src/tools/call-flow-agent.ts` |
 | 完成检测核心 | `packages/plugin-infra/src/helpers/polling.ts` |
 | 完成信号检测 | `packages/plugin-infra/src/helpers/completion-detector.ts` |
+| **全局事件总线** | `packages/plugin-infra/src/features/event-bus.ts` |
+| **事件 Hook 处理函数** | `packages/plugin-infra/src/features/event-hook-handler.ts` |
 | 通知管理 | `packages/plugin-infra/src/features/notification-manager.ts` |
 | 子 agent 状态存储 | `packages/plugin-infra/src/features/subagent-store.ts` |
 | 轮询日志 | `packages/plugin-infra/src/features/polling-logger.ts` |
@@ -1013,7 +1166,7 @@ async log(sessionId: string, message: string, metadata?: Record<string, unknown>
 
 ---
 
-**文档版本：** v1.1.0  
-**最后更新：** 2026-08-11  
-**基于代码版本：** opencode-flow-engine main branch  
-**更新内容：** F1 双路订阅（event.subscribe + global.event 备选）
+**文档版本：** v1.3.0
+**最后更新：** 2026-08-11
+**基于代码版本：** opencode-flow-engine main branch
+**更新内容：** 补充 session.status 兜底机制、共享 hook 处理函数、竞态条件保护、事件到达检测场景

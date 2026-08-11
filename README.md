@@ -394,32 +394,27 @@ AFK (Away From Keyboard) mode enables automated workflow execution without user 
 Subagent completion detection uses a hybrid event-driven + polling fallback mechanism:
 
 - **Event-driven mode** (default):
-  - **Dual-path subscription** (F1 fix):
-    - **Main path**: `client.event.subscribe({ query })` where `query = options.directory ? { directory } : {}`
-      - Returns `Promise<{ stream: AsyncGenerator<Event> }>` for consuming events
-      - Events are bare Event objects: `{ type: 'session.idle', properties: { sessionID } }`
-      - Directory filtering is server-side (assumption, not confirmed by SDK docs)
-    - **Backup path**: `client.global.event()`
-      - Returns `Promise<{ stream: AsyncGenerator<GlobalEvent> }>` where `GlobalEvent = { directory: string, payload: Event }`
-      - Each event carries directory field, client-side filtering applied
-      - **P0-1 fix**: Filters by directory when `options.directory` is set (`!options.directory || globalEvent.directory === options.directory`)
-      - **Backward compatible**: No directory filtering when `options.directory` is undefined
-      - Subscribes immediately, but delays event usage: activated immediately if main path fails, or after 5s if main path has no events
-    - **Strategy**: Both paths subscribe immediately and process events concurrently; first matching event wins, no duplicate processing
-  - Consumes events via `for await (const event of stream)` loop
-  - Detects `session.idle` events with `event.properties.sessionID` matching the target session
-  - Uses `AbortController` to cancel subscription and cleanup stream
-  - Instant completion detection (< 50ms after subagent finishes)
-- **Event stream failure handling**:
-  - On subscription failure: logs error, falls back to pure polling immediately
-  - On stream error/interruption: logs error, continues polling (no reconnection attempt)
+  - **Global event bus**: Lightweight in-process event bus (Map<sessionID, listener> pattern)
+    - No message queue dependencies (no Redis, no RabbitMQ)
+    - No EventEmitter/RxJS dependencies
+    - Global singleton accessible from both `pollSessionCompletion` and plugin hooks
+  - **Plugin Hooks.event integration**:
+    - Plugin registers `Hooks.event` hook to listen for `session.idle` events from OpenCode runtime
+    - On `session.idle` event, hook dispatches event to global event bus via `eventBus.dispatch(sessionID, event)`
+    - Event bus invokes registered listener (wakeUp callback) for the session
+    - Instant completion detection (< 50ms after subagent finishes)
+  - **pollSessionCompletion registration**:
+    - At start, registers `sessionID → wakeUp` callback to event bus via `eventBus.register(sessionID, callback)`
+    - When event received, immediately reads last message and returns (no status confirmation needed)
+    - On completion, unregisters listener via `eventBus.unregister(sessionID)` to prevent memory leaks
 - **Polling fallback**:
-  - If event subscription fails or no event received within `fallbackThreshold` (default 25s), switches to pure polling (200ms interval)
-  - Pure polling uses `status()` and `messages()` APIs to detect completion
-- **Logging**: All polling events are logged to `.flow-engine/sflow/polling.log` with structured format:
-  ```
-  [ISO-timestamp] [INFO] [sessionID] message | metadata
-  ```
+  - If no event received within `fallbackThreshold` (default 25s), unregisters from event bus and switches to pure polling
+  - Pure polling uses `status()` and `messages()` APIs to detect completion (200ms interval)
+  - Handles status/messages API failures gracefully with consecutive failure tracking
+- **Diagnostic logging**: All polling events logged to `.flow-engine/sflow/polling.log`:
+  - Event bus operations: `event-bus register`, `event-bus dispatch`, `event-bus unregister`
+  - Polling lifecycle: `start polling`, `event received`, `fallback to polling`, `completed`
+  - Structured format: `[ISO-timestamp] [INFO] [sessionID] message | metadata`
 - **Safety caps**: Max 120 polls for new sessions (24s), max wait 120s for async mode
 
 ### Model Profiles

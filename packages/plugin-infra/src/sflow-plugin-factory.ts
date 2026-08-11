@@ -39,6 +39,8 @@ import { clearFrontendCache } from './features/frontend-detector.js';
 import { createTaskTracker } from './features/task-tracker.js';
 import { createNotificationManager } from './features/notification-manager.js';
 import { pollSessionCompletion } from './helpers/polling.js';
+import { getGlobalEventBus } from './features/event-bus.js';
+import { handleSessionIdleEvent } from './features/event-hook-handler.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SFLOW_AGENT_NAMES } from '../../../workflows/sflow/index.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
@@ -429,6 +431,9 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
 
         event: async (input) => {
           const event = input.event;
+          // P0-1: 诊断日志 - 记录所有收到的事件类型
+          console.log(`[sFlow] event hook received: type=${event.type}`);
+
           if (event.type === 'session.created') {
             // P0: 主 agent 启动时消费未读通知
             try {
@@ -460,6 +465,12 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
                 pluginRoot: '',
                 action: 'session.deleted',
               });
+            }
+          } else {
+            // P1-2: 使用共享函数处理 session.idle 和 session.status 事件
+            const handled = handleSessionIdleEvent(event, 'sFlow');
+            if (handled) {
+              console.log('[sFlow] session.idle/status event handled and dispatched to event bus');
             }
           }
         },

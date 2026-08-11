@@ -28,6 +28,8 @@ import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.j
 import { setHasAgnesProvider } from './agents/agent-tools.js';
 import { pollSessionCompletion } from './helpers/polling.js';
 import { resolveChangeDir } from './helpers/resolve-change-dir.js';
+import { getGlobalEventBus } from './features/event-bus.js';
+import { handleSessionIdleEvent } from './features/event-hook-handler.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
 import { createTaskTracker } from './features/task-tracker.js';
@@ -125,6 +127,9 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
       // event hook: session lifecycle events
       event: async (input) => {
         const event = input.event;
+        // P0-1: 诊断日志 - 记录所有收到的事件类型
+        console.log(`[iFlow] event hook received: type=${event.type}`);
+
         if (event.type === 'session.created') {
           const sessionStartHook = hookComposer.getHook('session_start');
           if (sessionStartHook) {
@@ -149,6 +154,12 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
               pluginRoot: '',
               action: 'session.deleted',
             });
+          }
+        } else {
+          // P1-2: 使用共享函数处理 session.idle 和 session.status 事件
+          const handled = handleSessionIdleEvent(event, 'iFlow');
+          if (handled) {
+            console.log('[iFlow] session.idle/status event handled and dispatched to event bus');
           }
         }
       },

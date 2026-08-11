@@ -6,12 +6,10 @@ import {
   PROBE_PENDING,
   type ProbePending,
   type PollingOptions,
-  type GlobalEvent,
-  type EventSubscribeResult,
-  type EventSubscription,
-  type EventSubscribeOptions,
+  type Event,
 } from '../types.js';
 import { PollingLogger } from '../features/polling-logger.js';
+import { getGlobalEventBus } from '../features/event-bus.js';
 
 const logger = new PollingLogger();
 
@@ -50,16 +48,11 @@ export interface SFlowClientSession {
  *   when status never flips to idle.
  * - Probe mode (probeMode: true): only checks status, returns PROBE_PENDING if busy/retry,
  *   returns last message if idle, returns null if retry error.
- * - Event-driven mode (eventDriven: true): subscribes to SSE events for faster detection.
+ * - Event-driven mode (eventDriven: true): registers to global event bus for faster detection.
  */
 export async function pollSessionCompletion(
   client: {
     session: SFlowClientSession;
-    /** D3: Extended to support onSseError/onSseEvent options for connection diagnostics */
-    event?: { subscribe: (args?: EventSubscribeOptions) => Promise<EventSubscribeResult> };
-    /** F1: global.event backup path (returns GlobalEvent with directory + payload wrapper) */
-    /** D3: Extended to support onSseError option for connection diagnostics */
-    global?: { event: (args?: { onSseError?: (error: Error) => void }) => Promise<{ stream: AsyncGenerator<GlobalEvent> }> };
   },
   sessionID: string,
   options: { maxWaitMs?: number; pollIntervalMs?: number; isNew?: boolean; probeMode?: boolean; logger?: DiagnosticLogger } & PollingOptions = {},
@@ -81,240 +74,53 @@ export async function pollSessionCompletion(
   // F1: Entry log
   await activeLogger.log(sessionID, 'start polling', { maxWaitMs: MAX_WAIT, isNew, probeMode, eventDriven, fallbackThreshold });
 
-  // Batch 2: Event-driven subscription setup
-  // F1: Dual-path subscription (event.subscribe + global.event backup)
-  // 
-  // Dual-path strategy:
-  // 1. Main path: client.event.subscribe({ query: { directory } }) → returns bare Event objects
-  //    - Faster, direct subscription
-  //    - Directory filtering is server-side (assumption, not confirmed by SDK docs)
-  // 2. Backup path: client.global.event() → returns GlobalEvent { directory, payload }
-  //    - Each event carries directory field, client-side filtering possible
-  //    - Activated immediately if main path fails, or after BACKUP_DELAY_MS if main path has no events
-  // 3. Both paths are subscribed immediately and process events concurrently
-  // 4. First matching event wins, no duplicate processing
-  //
-  // SDK documentation references:
-  // - EventSubscribeData: node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:3374-3379
-  // - GlobalEventData: node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts (GlobalEvent structure)
-  // - Event structure: bare object with type and properties (no payload wrapper)
-  // - GlobalEvent structure: { directory: string, payload: Event }
-  let eventSubscription: EventSubscription | null = null;
-  let globalEventSubscription: EventSubscription | null = null;
+  // Batch 3: Event bus driven polling
+  // R1: Register to global event bus for session.idle event
+  // - pollSessionCompletion registers sessionID → wakeUp callback
+  // - Hooks.event dispatches session.idle event to event bus
+  // - Event bus calls wakeUp, which interrupts polling loop
   let eventReceived = false;
-  let eventDrivenActive = false;
   let wakeUp: (() => void) | null = null;
-  const BACKUP_DELAY_MS = 5000; // F1: switch to global.event after 5s if no events
-  // F1: Track if main path received TARGET session's session.idle event (not any event)
-  // This flag is set ONLY when event.properties.sessionID === sessionID (line 112-117 condition)
-  // Used for backup path activation decision: if main path already handled target event, backup need not take over
-  let mainPathReceivedTargetEvent = false;
+  let eventBusRegistered = false;
 
-  // F1: Main path - event.subscribe (bare Event objects)
-  if (eventDriven && client.event && typeof client.event.subscribe === 'function') {
-    try {
-      const abortController = new AbortController();
-      // Batch 2: Pass directory parameter to event.subscribe for filtering
-      const query = options.directory ? { directory: options.directory } : {};
-      
-      // D1: SSE connection diagnostics - inject onSseError callback
-      const { stream } = await client.event.subscribe({
-        query,
-        onSseError: (error) => {
-          void activeLogger.log(sessionID, 'event.subscribe SSE error', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        },
-      });
-      
-      // D1: Log successful connection
-      await activeLogger.log(sessionID, 'event.subscribe connected', { query });
-
-      const consumeStream = async () => {
-        try {
-          for await (const event of stream) {
-            if (abortController.signal.aborted) break;
-
-            // D1: Diagnostic logging - record all events received
-            const isMatched = 
-              event.type === 'session.idle' &&
-              event.properties &&
-              'sessionID' in event.properties &&
-              event.properties.sessionID === sessionID;
-
-            await activeLogger.log(sessionID, 'event received', {
-              source: 'event.subscribe',
-              type: event.type,
-              eventSessionID: event.properties && 'sessionID' in event.properties ? event.properties.sessionID : undefined,
-              targetSessionID: sessionID,
-              matched: isMatched,
-            });
-
-            // P0-1 Fix: event is a bare Event object (no payload wrapper)
-            // Real SDK returns { type: 'session.idle', properties: { sessionID } }
-            // @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:3374-3379
-            if (isMatched) {
-              // F1: Set flag when main path receives TARGET session's idle event
-              mainPathReceivedTargetEvent = true;
-              eventReceived = true;
-              if (wakeUp) wakeUp();
-            }
-          }
-        } catch (error) {
-          if (!abortController.signal.aborted) {
-            await activeLogger.log(sessionID, 'event stream error', {
-              error: error instanceof Error ? error.message : String(error),
-              fallback: 'continue polling',
-            });
-          }
-        }
-      };
-
-      // P1-1: fire-and-forget with defensive catch
-      // consumeStream() already has try/catch inside, but if logger.log itself throws,
-      // this outer catch prevents unhandled rejection
-      void consumeStream().catch((err) => {
-        if (!abortController.signal.aborted) {
-          console.warn('[Polling] consumeStream error:', err);
-        }
-      });
-
-      eventSubscription = {
-        cancel: () => {
-          abortController.abort();
-          if (stream && typeof stream.return === 'function') {
-            stream.return(undefined);
-          }
-        },
-      };
-      eventDrivenActive = true;
-    } catch (error) {
-      await activeLogger.log(sessionID, 'event subscription failed', {
-        error: error instanceof Error ? error.message : String(error),
-        fallback: 'pure polling',
-      });
-      eventDrivenActive = false;
-    }
-  }
-
-  // F1: Backup path - global.event (GlobalEvent with directory + payload wrapper)
-  // Subscribe immediately if available, process events but only set eventReceived after delay or if main path failed
-  if (eventDriven && client.global && typeof client.global.event === 'function') {
-    try {
-      const abortController = new AbortController();
-      
-      // D2: SSE connection diagnostics - inject onSseError callback
-      const { stream } = await client.global.event({
-        onSseError: (error) => {
-          void activeLogger.log(sessionID, 'global.event SSE error', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        },
-      });
-      
-      // D2: Log successful connection
-      await activeLogger.log(sessionID, 'global.event connected', {});
-      
-      let backupActivated = false;
-
-      // F1: Lift shouldUseBackup outside the loop to avoid repeated calculation
-      // Initial state: backup is active if main path failed to subscribe
-      let shouldUseBackup = !eventSubscription;
-
-      const consumeGlobalStream = async () => {
-        try {
-          for await (const globalEvent of stream) {
-            if (abortController.signal.aborted) break;
-
-            // D2: Diagnostic logging - record all global events received
-            const isMatched = 
-              (!options.directory || globalEvent.directory === options.directory) &&
-              globalEvent.payload.type === 'session.idle' &&
-              globalEvent.payload.properties &&
-              'sessionID' in globalEvent.payload.properties &&
-              globalEvent.payload.properties.sessionID === sessionID;
-
-            await activeLogger.log(sessionID, 'event received', {
-              source: 'global.event',
-              type: globalEvent.payload.type,
-              eventSessionID: globalEvent.payload.properties && 'sessionID' in globalEvent.payload.properties ? globalEvent.payload.properties.sessionID : undefined,
-              eventDirectory: globalEvent.directory,
-              targetSessionID: sessionID,
-              targetDirectory: options.directory ?? undefined,
-              matched: isMatched,
-            });
-
-            // F1: GlobalEvent structure: { directory: string, payload: Event }
-            // @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts
-            // P0-1: Filter by directory (if provided) and sessionID in payload
-            if (isMatched) {
-              // Update shouldUseBackup when target event arrives:
-              // 1. Main path doesn't exist (failed to subscribe) - already set above
-              // 2. Main path exists but BACKUP_DELAY_MS has passed without any event
-              // 3. Main path hasn't received TARGET session's event yet
-              const elapsed = Date.now() - startTime;
-              shouldUseBackup = !eventSubscription || 
-                                elapsed >= BACKUP_DELAY_MS || 
-                                !mainPathReceivedTargetEvent;
-              
-              if (shouldUseBackup && !eventReceived) {
-                eventReceived = true;
-                if (wakeUp) wakeUp();
-                if (!backupActivated) {
-                  backupActivated = true;
-                  await activeLogger.log(sessionID, 'global.event backup activated', {
-                    elapsed: `${elapsed}ms`,
-                    reason: eventSubscription ? 'main path delayed' : 'main path unavailable',
-                  });
-                }
-              }
-            }
-          }
-        } catch (error) {
-          if (!abortController.signal.aborted) {
-            await activeLogger.log(sessionID, 'global event stream error', {
-              error: error instanceof Error ? error.message : String(error),
-              fallback: 'continue polling',
-            });
-          }
-        }
-      };
-
-      // P1-1: fire-and-forget with defensive catch
-      void consumeGlobalStream().catch((err) => {
-        if (!abortController.signal.aborted) {
-          console.warn('[Polling] consumeGlobalStream error:', err);
-        }
-      });
-
-      globalEventSubscription = {
-        cancel: () => {
-          abortController.abort();
-          if (stream && typeof stream.return === 'function') {
-            stream.return(undefined);
-          }
-        },
-      };
-    } catch (error) {
-      await activeLogger.log(sessionID, 'global event subscription failed', {
-        error: error instanceof Error ? error.message : String(error),
-        fallback: 'main path only',
-      });
-    }
+  if (eventDriven) {
+    // R1: Register to global event bus
+    const eventBus = getGlobalEventBus();
+    eventBus.register(sessionID, (event: Event) => {
+      // R1: Check if event is session.idle for this session
+      if (
+        event.type === 'session.idle' &&
+        event.properties &&
+        'sessionID' in event.properties &&
+        event.properties.sessionID === sessionID
+      ) {
+        eventReceived = true;
+        if (wakeUp) wakeUp();
+        
+        // R1: Log event arrival
+        void activeLogger.log(sessionID, 'event received', {
+          source: 'event.hook',
+          type: event.type,
+          eventSessionID: event.properties.sessionID,
+          targetSessionID: sessionID,
+          matched: true,
+        });
+      }
+    });
+    eventBusRegistered = true;
   }
 
   async function logExit(reason: string, result: string | null | ProbePending): Promise<string | null | ProbePending> {
     const elapsed = Date.now() - startTime;
     await activeLogger.log(sessionID, 'completed', { reason, elapsed: `${elapsed}ms` });
-    // F1: Cancel both subscriptions
-    if (eventSubscription) {
-      eventSubscription.cancel();
-      eventSubscription = null;
+    
+    // R1: Unregister from event bus (防泄漏)
+    if (eventBusRegistered) {
+      const eventBus = getGlobalEventBus();
+      eventBus.unregister(sessionID);
+      eventBusRegistered = false;
     }
-    if (globalEventSubscription) {
-      globalEventSubscription.cancel();
-      globalEventSubscription = null;
-    }
+    
     return result;
   }
 
@@ -329,7 +135,7 @@ export async function pollSessionCompletion(
     /* ignore */
   }
   // For isNew sessions, the prompt was just sent, so initialMsgCount = 1.
-  // We need at least 1 assistant response 鈫?require count >= 2.
+  // We need at least 1 assistant response → require count >= 2.
   const minDetectCount = isNew ? Math.max(initialMsgCount + 1, 2) : initialMsgCount + 1;
 
   let lastMessage: string | null = null;
@@ -337,29 +143,32 @@ export async function pollSessionCompletion(
 
   while (Date.now() - startTime < MAX_WAIT) {
     const elapsed = Date.now() - startTime;
-    // P1: fallbackThreshold covers both main and backup subscription paths
-    const hasActiveSubscription = eventSubscription || globalEventSubscription;
-    if (hasActiveSubscription && !eventReceived && elapsed > fallbackThreshold) {
-      // F2: Accurately reflect active subscription paths
-      const activePath = eventSubscription && globalEventSubscription ? 'both'
-        : eventSubscription ? 'main'
-        : globalEventSubscription ? 'backup'
-        : 'none';
-      
+    
+    // Batch 3: Fallback to pure polling if event not received within threshold
+    if (eventBusRegistered && !eventReceived && elapsed > fallbackThreshold) {
       await activeLogger.log(sessionID, 'fallback to polling', {
         reason: 'event not received within threshold',
         elapsed: `${elapsed}ms`,
         threshold: `${fallbackThreshold}ms`,
-        activePath,
       });
-      if (eventSubscription) {
-        eventSubscription.cancel();
-        eventSubscription = null;
+
+      // P1-2: Unregister from event bus (no longer needed)
+      // Check eventReceived again to avoid race condition (event arrived just before unregister)
+      if (!eventReceived) {
+        const eventBus = getGlobalEventBus();
+        eventBus.unregister(sessionID);
+        eventBusRegistered = false;
       }
-      if (globalEventSubscription) {
-        globalEventSubscription.cancel();
-        globalEventSubscription = null;
-      }
+    }
+
+    // P0-2: Check eventReceived before sleep to detect events that arrived
+    // after register but before wakeUp assignment.
+    // Scenario 1: event after register, before wakeUp → caught here (no 200ms delay)
+    // Scenario 2: event during sleep → wakeUp interrupts sleep
+    // Scenario 3: event after unregister → polling fallback catches
+    if (eventReceived) {
+      const result = await readSessionLastMessage(client, sessionID);
+      return await logExit('event_hook', result);
     }
 
     await new Promise<void>((resolve) => {
@@ -372,7 +181,7 @@ export async function pollSessionCompletion(
     // P0-3: If event received, return directly without status confirmation
     if (eventReceived) {
       const result = await readSessionLastMessage(client, sessionID);
-      return await logExit('event_idle', result);
+      return await logExit('event_hook', result);
     }
 
     // ⸺⸺ Status check: session idle/retry → handle accordingly ⸺⸺

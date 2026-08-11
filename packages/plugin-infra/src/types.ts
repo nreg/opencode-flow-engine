@@ -110,16 +110,16 @@ export function generateTaskId(counter: { value: number }): string {
 
 /**
  * Options for event-driven session polling.
- * - eventDriven: Enable SSE event subscription for faster completion detection (default: true)
- * - fallbackThreshold: Fall back to pure polling if event subscription takes longer than this (default: 25000ms)
- * - directory: Target directory for event subscription filtering (optional, passed to SDK's event.subscribe query)
+ * - eventDriven: Enable event bus for faster completion detection (default: true)
+ * - fallbackThreshold: Fall back to pure polling if event not received within this duration (default: 25000ms)
+ * - directory: Target directory for filtering (optional, currently unused in event bus mode)
  */
 export interface PollingOptions {
-  /** Enable event-driven polling via SSE subscription (default: true) */
+  /** Enable event-driven polling via event bus (default: true) */
   eventDriven?: boolean;
-  /** Fallback to pure polling if event subscription exceeds this duration (default: 25000ms) */
+  /** Fallback to pure polling if event not received within this duration (default: 25000ms) */
   fallbackThreshold?: number;
-  /** Target directory for event subscription filtering (optional, passed to SDK's event.subscribe query) */
+  /** Target directory for filtering (optional, currently unused in event bus mode) */
   directory?: string;
 }
 
@@ -141,19 +141,6 @@ export type Event = {
 };
 
 /**
- * GlobalEvent structure from SDK
- * 
- * NOTE: This is used by client.global.event(), NOT by client.event.subscribe().
- * client.event.subscribe() returns bare Event objects directly.
- * 
- * @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts
- */
-export interface GlobalEvent {
-  directory: string;
-  payload: Event;
-}
-
-/**
  * EventSessionIdle structure
  * 
  * P0-1: Bare object structure (no payload wrapper).
@@ -164,52 +151,6 @@ export interface EventSessionIdle {
   properties: {
     sessionID: string;
   };
-}
-
-/**
- * SSE error callback type
- * Called when SSE connection fails or encounters an error
- */
-export type SseErrorCallback = (error: Error) => void;
-
-/**
- * SSE event callback type
- * Called for each SSE event received
- */
-export type SseEventCallback = (event: Event) => void;
-
-/**
- * Options for event.subscribe() - passed through to createSseClient
- * 
- * D3: Extended to support onSseError and onSseEvent callbacks for connection diagnostics.
- * These options are transparently passed to the SDK's createSseClient.
- * @see node_modules/@opencode-ai/sdk/dist/gen/serverSentEvents.gen.js:105
- */
-export interface EventSubscribeOptions {
-  /** Query parameters for event filtering */
-  query?: { directory?: string };
-  /** Callback for SSE connection errors (D1/D2: connection diagnostics) */
-  onSseError?: SseErrorCallback;
-  /** Callback for each SSE event received (optional, for advanced diagnostics) */
-  onSseEvent?: SseEventCallback;
-}
-
-/**
- * Result of event.subscribe() - contains AsyncGenerator stream
- * 
- * P0-1 Fix: Returns AsyncGenerator<Event>, not AsyncGenerator<GlobalEvent>.
- * Real SDK returns bare Event objects, not GlobalEvent with payload wrapper.
- * @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:3374-3379
- */
-export interface EventSubscribeResult {
-  stream: AsyncGenerator<Event>;
-}
-
-/**
- * Event subscription interface (for cleanup)
- */
-export interface EventSubscription {
-  cancel: () => void;
 }
 
 /** Format a tool output response */
@@ -224,6 +165,53 @@ export function formatToolOutput(
 /** Format a tool error response */
 export function formatToolError(msg: string): { title: string; output: string } {
   return formatToolOutput('Error', false, { error: msg });
+}
+
+// ─── Event Bus types (Batch 1: R1 事件总线机制) ────────────────────────────────
+
+/**
+ * Event bus listener function type
+ * Called when an event is dispatched to a registered session
+ */
+export type EventBusListener = (event: Event) => void;
+
+/**
+ * Event bus interface for session completion detection
+  *
+  * R1: Lightweight event bus using Map<sessionID, resolver> pattern.
+  * No message queue, no EventEmitter, no RxJS dependencies.
+  *
+  * Lifecycle:
+  * 1. register: Poller启动时注册sessionID → 完成回调
+  * 2. dispatch: Hooks.event收到session.idle事件时，按sessionID查找并调用resolver
+  * 3. unregister: Poller完成/超时后移除注册（防泄漏）
+  *
+  * 幂等性说明：
+  * - register: 不是幂等操作。重复注册同一 sessionID 会覆盖旧监听器并触发警告。
+  * - dispatch: 幂等性语义为"单次 dispatch 只调用一次监听器"，而非去重。
+  *             同一 sessionID 的监听器每次 dispatch 都会触发。
+  */
+export interface EventBus {
+  /**
+   * Register a listener for a session
+   * @param sessionID - Session identifier
+   * @param onComplete - Callback when session.idle event is received
+   */
+  register(sessionID: string, onComplete: EventBusListener): void;
+
+  /**
+   * Dispatch an event to a registered session
+   * @param sessionID - Session identifier
+   * @param event - Event to dispatch
+   * @returns true if a listener was found and called, false otherwise
+   */
+  dispatch(sessionID: string, event: Event): boolean;
+
+  /**
+   * Unregister a session listener
+   * @param sessionID - Session identifier
+   */
+  unregister(sessionID: string): void;
 }
 
 // ─── Plugin detection helpers ─────────────────────────────────────────────────

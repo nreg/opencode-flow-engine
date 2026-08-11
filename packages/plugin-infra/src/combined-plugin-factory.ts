@@ -39,6 +39,8 @@ import { createAgnesTools } from './agnes-tools.js';
 import { getCurrentWorkflowState, executeContractValidator, executeArtifactInspector } from './sflow-tool-helpers.js';
 import { applyTokenBudgetToContent } from './features/token-budget-limiter.js';
 import { resolveChangeDir } from './helpers/resolve-change-dir.js';
+import { getGlobalEventBus } from './features/event-bus.js';
+import { handleSessionIdleEvent } from './features/event-hook-handler.js';
 
 // ─── Background task registry (shared for combined plugin) ────────────────────
 
@@ -222,6 +224,9 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
 
     event: async (input) => {
       const event = input.event;
+      // P0-1: 诊断日志 - 记录所有收到的事件类型
+      console.log(`[Combined] event hook received: type=${event.type}`);
+
       if (event.type === 'session.created') {
         const sessionStartHook = hookComposer.getHook('session_start');
         if (sessionStartHook) {
@@ -241,6 +246,12 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
             pluginRoot: '',
             action: 'session.deleted',
           });
+        }
+      } else {
+        // P1-2: 使用共享函数处理 session.idle 和 session.status 事件
+        const handled = handleSessionIdleEvent(event, 'Combined');
+        if (handled) {
+          console.log('[Combined] session.idle/status event handled and dispatched to event bus');
         }
       }
     },
