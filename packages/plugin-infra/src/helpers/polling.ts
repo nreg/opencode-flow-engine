@@ -9,10 +9,19 @@ import {
   type GlobalEvent,
   type EventSubscribeResult,
   type EventSubscription,
+  type EventSubscribeOptions,
 } from '../types.js';
 import { PollingLogger } from '../features/polling-logger.js';
 
 const logger = new PollingLogger();
+
+/**
+ * Logger interface for diagnostic logging
+ * Allows tests to inject mock logger
+ */
+interface DiagnosticLogger {
+  log(sessionId: string, message: string, metadata?: Record<string, unknown>): Promise<void>;
+}
 
 /** Default max wait time for async/background polling (120s) */
 export const DEFAULT_MAX_WAIT_MS = 120_000;
@@ -46,12 +55,14 @@ export interface SFlowClientSession {
 export async function pollSessionCompletion(
   client: {
     session: SFlowClientSession;
-    event?: { subscribe: (args?: { query?: { directory?: string } }) => Promise<EventSubscribeResult> };
+    /** D3: Extended to support onSseError/onSseEvent options for connection diagnostics */
+    event?: { subscribe: (args?: EventSubscribeOptions) => Promise<EventSubscribeResult> };
     /** F1: global.event backup path (returns GlobalEvent with directory + payload wrapper) */
-    global?: { event: () => Promise<{ stream: AsyncGenerator<GlobalEvent> }> };
+    /** D3: Extended to support onSseError option for connection diagnostics */
+    global?: { event: (args?: { onSseError?: (error: Error) => void }) => Promise<{ stream: AsyncGenerator<GlobalEvent> }> };
   },
   sessionID: string,
-  options: { maxWaitMs?: number; pollIntervalMs?: number; isNew?: boolean; probeMode?: boolean } & PollingOptions = {},
+  options: { maxWaitMs?: number; pollIntervalMs?: number; isNew?: boolean; probeMode?: boolean; logger?: DiagnosticLogger } & PollingOptions = {},
 ): Promise<string | null | ProbePending> {
   const MAX_WAIT = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const POLL_INTERVAL = options.pollIntervalMs ?? 200; // 200ms default (was 500ms, reduced for faster detection)
@@ -64,8 +75,11 @@ export async function pollSessionCompletion(
   const eventDriven = options.eventDriven ?? true; // Batch 2: event-driven by default
   const fallbackThreshold = options.fallbackThreshold ?? 25_000; // Batch 3: fallback to pure polling after 25s (default)
 
+  // D3: Use injected logger if provided, otherwise use global logger
+  const activeLogger = options.logger ?? logger;
+
   // F1: Entry log
-  await logger.log(sessionID, 'start polling', { maxWaitMs: MAX_WAIT, isNew, probeMode, eventDriven, fallbackThreshold });
+  await activeLogger.log(sessionID, 'start polling', { maxWaitMs: MAX_WAIT, isNew, probeMode, eventDriven, fallbackThreshold });
 
   // Batch 2: Event-driven subscription setup
   // F1: Dual-path subscription (event.subscribe + global.event backup)
@@ -102,22 +116,44 @@ export async function pollSessionCompletion(
       const abortController = new AbortController();
       // Batch 2: Pass directory parameter to event.subscribe for filtering
       const query = options.directory ? { directory: options.directory } : {};
-      const { stream } = await client.event.subscribe({ query });
+      
+      // D1: SSE connection diagnostics - inject onSseError callback
+      const { stream } = await client.event.subscribe({
+        query,
+        onSseError: (error) => {
+          void activeLogger.log(sessionID, 'event.subscribe SSE error', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        },
+      });
+      
+      // D1: Log successful connection
+      await activeLogger.log(sessionID, 'event.subscribe connected', { query });
 
       const consumeStream = async () => {
         try {
           for await (const event of stream) {
             if (abortController.signal.aborted) break;
 
-            // P0-1 Fix: event is a bare Event object (no payload wrapper)
-            // Real SDK returns { type: 'session.idle', properties: { sessionID } }
-            // @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:3374-3379
-            if (
+            // D1: Diagnostic logging - record all events received
+            const isMatched = 
               event.type === 'session.idle' &&
               event.properties &&
               'sessionID' in event.properties &&
-              event.properties.sessionID === sessionID
-            ) {
+              event.properties.sessionID === sessionID;
+
+            await activeLogger.log(sessionID, 'event received', {
+              source: 'event.subscribe',
+              type: event.type,
+              eventSessionID: event.properties && 'sessionID' in event.properties ? event.properties.sessionID : undefined,
+              targetSessionID: sessionID,
+              matched: isMatched,
+            });
+
+            // P0-1 Fix: event is a bare Event object (no payload wrapper)
+            // Real SDK returns { type: 'session.idle', properties: { sessionID } }
+            // @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:3374-3379
+            if (isMatched) {
               // F1: Set flag when main path receives TARGET session's idle event
               mainPathReceivedTargetEvent = true;
               eventReceived = true;
@@ -126,7 +162,7 @@ export async function pollSessionCompletion(
           }
         } catch (error) {
           if (!abortController.signal.aborted) {
-            await logger.log(sessionID, 'event stream error', {
+            await activeLogger.log(sessionID, 'event stream error', {
               error: error instanceof Error ? error.message : String(error),
               fallback: 'continue polling',
             });
@@ -153,7 +189,7 @@ export async function pollSessionCompletion(
       };
       eventDrivenActive = true;
     } catch (error) {
-      await logger.log(sessionID, 'event subscription failed', {
+      await activeLogger.log(sessionID, 'event subscription failed', {
         error: error instanceof Error ? error.message : String(error),
         fallback: 'pure polling',
       });
@@ -166,7 +202,19 @@ export async function pollSessionCompletion(
   if (eventDriven && client.global && typeof client.global.event === 'function') {
     try {
       const abortController = new AbortController();
-      const { stream } = await client.global.event();
+      
+      // D2: SSE connection diagnostics - inject onSseError callback
+      const { stream } = await client.global.event({
+        onSseError: (error) => {
+          void activeLogger.log(sessionID, 'global.event SSE error', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        },
+      });
+      
+      // D2: Log successful connection
+      await activeLogger.log(sessionID, 'global.event connected', {});
+      
       let backupActivated = false;
 
       // F1: Lift shouldUseBackup outside the loop to avoid repeated calculation
@@ -178,16 +226,28 @@ export async function pollSessionCompletion(
           for await (const globalEvent of stream) {
             if (abortController.signal.aborted) break;
 
-            // F1: GlobalEvent structure: { directory: string, payload: Event }
-            // @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts
-            // P0-1: Filter by directory (if provided) and sessionID in payload
-            if (
+            // D2: Diagnostic logging - record all global events received
+            const isMatched = 
               (!options.directory || globalEvent.directory === options.directory) &&
               globalEvent.payload.type === 'session.idle' &&
               globalEvent.payload.properties &&
               'sessionID' in globalEvent.payload.properties &&
-              globalEvent.payload.properties.sessionID === sessionID
-            ) {
+              globalEvent.payload.properties.sessionID === sessionID;
+
+            await activeLogger.log(sessionID, 'event received', {
+              source: 'global.event',
+              type: globalEvent.payload.type,
+              eventSessionID: globalEvent.payload.properties && 'sessionID' in globalEvent.payload.properties ? globalEvent.payload.properties.sessionID : undefined,
+              eventDirectory: globalEvent.directory,
+              targetSessionID: sessionID,
+              targetDirectory: options.directory ?? undefined,
+              matched: isMatched,
+            });
+
+            // F1: GlobalEvent structure: { directory: string, payload: Event }
+            // @see node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts
+            // P0-1: Filter by directory (if provided) and sessionID in payload
+            if (isMatched) {
               // Update shouldUseBackup when target event arrives:
               // 1. Main path doesn't exist (failed to subscribe) - already set above
               // 2. Main path exists but BACKUP_DELAY_MS has passed without any event
@@ -202,7 +262,7 @@ export async function pollSessionCompletion(
                 if (wakeUp) wakeUp();
                 if (!backupActivated) {
                   backupActivated = true;
-                  await logger.log(sessionID, 'global.event backup activated', {
+                  await activeLogger.log(sessionID, 'global.event backup activated', {
                     elapsed: `${elapsed}ms`,
                     reason: eventSubscription ? 'main path delayed' : 'main path unavailable',
                   });
@@ -212,7 +272,7 @@ export async function pollSessionCompletion(
           }
         } catch (error) {
           if (!abortController.signal.aborted) {
-            await logger.log(sessionID, 'global event stream error', {
+            await activeLogger.log(sessionID, 'global event stream error', {
               error: error instanceof Error ? error.message : String(error),
               fallback: 'continue polling',
             });
@@ -236,7 +296,7 @@ export async function pollSessionCompletion(
         },
       };
     } catch (error) {
-      await logger.log(sessionID, 'global event subscription failed', {
+      await activeLogger.log(sessionID, 'global event subscription failed', {
         error: error instanceof Error ? error.message : String(error),
         fallback: 'main path only',
       });
@@ -245,7 +305,7 @@ export async function pollSessionCompletion(
 
   async function logExit(reason: string, result: string | null | ProbePending): Promise<string | null | ProbePending> {
     const elapsed = Date.now() - startTime;
-    await logger.log(sessionID, 'completed', { reason, elapsed: `${elapsed}ms` });
+    await activeLogger.log(sessionID, 'completed', { reason, elapsed: `${elapsed}ms` });
     // F1: Cancel both subscriptions
     if (eventSubscription) {
       eventSubscription.cancel();
@@ -286,7 +346,7 @@ export async function pollSessionCompletion(
         : globalEventSubscription ? 'backup'
         : 'none';
       
-      await logger.log(sessionID, 'fallback to polling', {
+      await activeLogger.log(sessionID, 'fallback to polling', {
         reason: 'event not received within threshold',
         elapsed: `${elapsed}ms`,
         threshold: `${fallbackThreshold}ms`,

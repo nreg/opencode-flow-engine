@@ -167,6 +167,34 @@ export interface EventSessionIdle {
 }
 
 /**
+ * SSE error callback type
+ * Called when SSE connection fails or encounters an error
+ */
+export type SseErrorCallback = (error: Error) => void;
+
+/**
+ * SSE event callback type
+ * Called for each SSE event received
+ */
+export type SseEventCallback = (event: Event) => void;
+
+/**
+ * Options for event.subscribe() - passed through to createSseClient
+ * 
+ * D3: Extended to support onSseError and onSseEvent callbacks for connection diagnostics.
+ * These options are transparently passed to the SDK's createSseClient.
+ * @see node_modules/@opencode-ai/sdk/dist/gen/serverSentEvents.gen.js:105
+ */
+export interface EventSubscribeOptions {
+  /** Query parameters for event filtering */
+  query?: { directory?: string };
+  /** Callback for SSE connection errors (D1/D2: connection diagnostics) */
+  onSseError?: SseErrorCallback;
+  /** Callback for each SSE event received (optional, for advanced diagnostics) */
+  onSseEvent?: SseEventCallback;
+}
+
+/**
  * Result of event.subscribe() - contains AsyncGenerator stream
  * 
  * P0-1 Fix: Returns AsyncGenerator<Event>, not AsyncGenerator<GlobalEvent>.

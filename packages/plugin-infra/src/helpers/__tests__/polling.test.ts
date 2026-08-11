@@ -1371,9 +1371,8 @@ describe('pollSessionCompletion - Batch 2: AsyncGenerator event subscription', (
 
       // Assert: subscribe was called with correct directory parameter
       expect(mockSubscribe).toHaveBeenCalled();
-      expect(mockSubscribe.mock.calls[0][0]).toEqual({
-        query: { directory: testDirectory },
-      });
+      expect(mockSubscribe.mock.calls[0][0].query).toEqual({ directory: testDirectory });
+      expect(mockSubscribe.mock.calls[0][0].onSseError).toBeDefined();
       expect(result).toBe('response');
     });
 
@@ -1401,9 +1400,8 @@ describe('pollSessionCompletion - Batch 2: AsyncGenerator event subscription', (
 
       // Assert: subscribe was called with empty query (backward compatible)
       expect(mockSubscribe).toHaveBeenCalled();
-      expect(mockSubscribe.mock.calls[0][0]).toEqual({
-        query: {},
-      });
+      expect(mockSubscribe.mock.calls[0][0].query).toEqual({});
+      expect(mockSubscribe.mock.calls[0][0].onSseError).toBeDefined();
       expect(result).toBe('response');
     });
 
@@ -1432,9 +1430,8 @@ describe('pollSessionCompletion - Batch 2: AsyncGenerator event subscription', (
 
       // Assert: subscribe was called with empty query
       expect(mockSubscribe).toHaveBeenCalled();
-      expect(mockSubscribe.mock.calls[0][0]).toEqual({
-        query: {},
-      });
+      expect(mockSubscribe.mock.calls[0][0].query).toEqual({});
+      expect(mockSubscribe.mock.calls[0][0].onSseError).toBeDefined();
       expect(result).toBe('response');
     });
   });
@@ -2355,6 +2352,584 @@ describe('pollSessionCompletion - F3: Fix-Loop Round 5', () => {
       if (fallbackLog) {
         expect(fallbackLog.data.activePath).toBe('both');
       }
+    });
+  });
+});
+
+// D3: Tests for diagnostic logging (event stream diagnosis)
+describe('pollSessionCompletion - D3: Event stream diagnostic logging', () => {
+  let mockClient: { session: SFlowClientSession; event?: any; global?: any };
+  let mockSession: {
+    status: ReturnType<typeof vi.fn>;
+    messages: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    mockSession = {
+      status: vi.fn(),
+      messages: vi.fn(),
+    };
+    mockClient = { session: mockSession as unknown as SFlowClientSession };
+  });
+
+  describe('D3.1: Main path - event received logging', () => {
+    it('should log event received with matched: false when event sessionID differs from target', async () => {
+      // Arrange
+      const targetSessionID = 'target-session-123';
+      const otherSessionID = 'other-session-456';
+      const logMessages: any[] = [];
+
+      // Mock logger to capture log messages
+      const mockLogger = {
+        log: vi.fn().mockImplementation(async (sessionID: string, message: string, data?: any) => {
+          logMessages.push({ sessionID, message, data });
+        }),
+      };
+
+      // Main path emits event for different session
+      const mockSubscribe = createMockEventSubscribe({
+        events: [
+          createSessionIdleEvent(otherSessionID), // non-target event
+          createSessionIdleEvent(targetSessionID), // target event
+        ],
+        eventDelay: 50,
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        eventDriven: true,
+        logger: mockLogger,
+      });
+
+      // Assert: event processing still works
+      expect(result).toBe('response');
+
+      // Assert: diagnostic log was recorded for non-target event
+      const eventLogs = logMessages.filter(log => log.message === 'event received');
+      expect(eventLogs.length).toBeGreaterThan(0);
+
+      // Assert: first event log should have matched: false
+      const nonTargetLog = eventLogs.find(log => log.data?.eventSessionID === otherSessionID);
+      if (nonTargetLog) {
+        expect(nonTargetLog.data.source).toBe('event.subscribe');
+        expect(nonTargetLog.data.type).toBe('session.idle');
+        expect(nonTargetLog.data.matched).toBe(false);
+        expect(nonTargetLog.data.targetSessionID).toBe(targetSessionID);
+      }
+    });
+
+    it('should log event received with matched: true when event sessionID matches target', async () => {
+      // Arrange
+      const targetSessionID = 'target-session-789';
+      const logMessages: any[] = [];
+
+      // Mock logger to capture log messages
+      const mockLogger = {
+        log: vi.fn().mockImplementation(async (sessionID: string, message: string, data?: any) => {
+          logMessages.push({ sessionID, message, data });
+        }),
+      };
+
+      // Main path emits target event
+      const mockSubscribe = createMockEventSubscribe({
+        events: [createSessionIdleEvent(targetSessionID)],
+        eventDelay: 50,
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'target response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        eventDriven: true,
+        logger: mockLogger,
+      });
+
+      // Assert: event processing works
+      expect(result).toBe('target response');
+
+      // Assert: diagnostic log was recorded for target event
+      const eventLogs = logMessages.filter(log => log.message === 'event received');
+      expect(eventLogs.length).toBeGreaterThan(0);
+
+      // Assert: target event log should have matched: true
+      const targetLog = eventLogs.find(log => log.data?.eventSessionID === targetSessionID);
+      if (targetLog) {
+        expect(targetLog.data.source).toBe('event.subscribe');
+        expect(targetLog.data.type).toBe('session.idle');
+        expect(targetLog.data.matched).toBe(true);
+        expect(targetLog.data.targetSessionID).toBe(targetSessionID);
+      }
+    });
+
+    it('should log event received for non-session.idle events', async () => {
+      // Arrange
+      const targetSessionID = 'target-session-other-type';
+      const logMessages: any[] = [];
+
+      // Mock logger to capture log messages
+      const mockLogger = {
+        log: vi.fn().mockImplementation(async (sessionID: string, message: string, data?: any) => {
+          logMessages.push({ sessionID, message, data });
+        }),
+      };
+
+      // Main path emits non-session.idle event first, then target event
+      const mockSubscribe = createMockEventSubscribe({
+        events: [
+          createOtherEvent(), // message.updated event
+          createSessionIdleEvent(targetSessionID),
+        ],
+        eventDelay: 50,
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        eventDriven: true,
+        logger: mockLogger,
+      });
+
+      // Assert: event processing works
+      expect(result).toBe('response');
+
+      // Assert: diagnostic log was recorded for non-session.idle event
+      const eventLogs = logMessages.filter(log => log.message === 'event received');
+      expect(eventLogs.length).toBeGreaterThan(0);
+
+      // Assert: non-session.idle event log should have matched: false
+      const otherEventLog = eventLogs.find(log => log.data?.type === 'message.updated');
+      if (otherEventLog) {
+        expect(otherEventLog.data.source).toBe('event.subscribe');
+        expect(otherEventLog.data.matched).toBe(false);
+      }
+    });
+  });
+
+  describe('D3.2: Backup path - global event received logging', () => {
+    it('should log event received with directory and sessionID for global events', async () => {
+      // Arrange
+      const targetSessionID = 'target-global-session';
+      const targetDirectory = '/test/dir';
+      const logMessages: any[] = [];
+
+      // Mock logger to capture log messages
+      const mockLogger = {
+        log: vi.fn().mockImplementation(async (sessionID: string, message: string, data?: any) => {
+          logMessages.push({ sessionID, message, data });
+        }),
+      };
+
+      // Main path fails, backup path emits target event
+      const mockSubscribe = vi.fn().mockRejectedValue(new Error('Main path unavailable'));
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [createGlobalSessionIdleEvent(targetDirectory, targetSessionID)],
+        eventDelay: 50,
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'global response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: targetDirectory,
+        eventDriven: true,
+        logger: mockLogger,
+      });
+
+      // Assert: event processing works
+      expect(result).toBe('global response');
+
+      // Assert: diagnostic log was recorded for global event
+      const eventLogs = logMessages.filter(log => log.message === 'event received');
+      expect(eventLogs.length).toBeGreaterThan(0);
+
+      // Assert: global event log should have directory and sessionID
+      const globalEventLog = eventLogs.find(log => log.data?.source === 'global.event');
+      if (globalEventLog) {
+        expect(globalEventLog.data.source).toBe('global.event');
+        expect(globalEventLog.data.type).toBe('session.idle');
+        expect(globalEventLog.data.eventDirectory).toBe(targetDirectory);
+        expect(globalEventLog.data.eventSessionID).toBe(targetSessionID);
+        expect(globalEventLog.data.targetDirectory).toBe(targetDirectory);
+        expect(globalEventLog.data.targetSessionID).toBe(targetSessionID);
+        expect(globalEventLog.data.matched).toBe(true);
+      }
+    });
+
+    it('should log event received with matched: false for global event with different directory', async () => {
+      // Arrange
+      const targetSessionID = 'target-global-diff-dir';
+      const targetDirectory = '/target/dir';
+      const otherDirectory = '/other/dir';
+      const logMessages: any[] = [];
+
+      // Mock logger to capture log messages
+      const mockLogger = {
+        log: vi.fn().mockImplementation(async (sessionID: string, message: string, data?: any) => {
+          logMessages.push({ sessionID, message, data });
+        }),
+      };
+
+      // Main path fails, backup path emits events for different directories
+      const mockSubscribe = vi.fn().mockRejectedValue(new Error('Main path unavailable'));
+      const mockGlobalEvent = createMockGlobalEvent({
+        events: [
+          createGlobalSessionIdleEvent(otherDirectory, targetSessionID), // different directory
+          createGlobalSessionIdleEvent(targetDirectory, targetSessionID), // target directory
+        ],
+        eventDelay: 50,
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockClient.global = { event: mockGlobalEvent };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'response' }] },
+        ],
+      });
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: targetDirectory,
+        eventDriven: true,
+        logger: mockLogger,
+      });
+
+      // Assert: event processing works
+      expect(result).toBe('response');
+
+      // Assert: diagnostic log was recorded for global events
+      const eventLogs = logMessages.filter(log => log.message === 'event received');
+      expect(eventLogs.length).toBeGreaterThan(0);
+
+      // Assert: global event with different directory should have matched: false
+      const diffDirLog = eventLogs.find(log => log.data?.eventDirectory === otherDirectory);
+      if (diffDirLog) {
+        expect(diffDirLog.data.source).toBe('global.event');
+        expect(diffDirLog.data.matched).toBe(false);
+      }
+    });
+  });
+
+  describe('D3.3: Diagnostic logging does not block event processing', () => {
+    it('should still trigger eventReceived when diagnostic logging is enabled', async () => {
+      // Arrange
+      const targetSessionID = 'target-no-block';
+      const logMessages: any[] = [];
+
+      // Mock logger to capture log messages
+      const mockLogger = {
+        log: vi.fn().mockImplementation(async (sessionID: string, message: string, data?: any) => {
+          logMessages.push({ sessionID, message, data });
+        }),
+      };
+
+      // Main path emits target event quickly
+      const mockSubscribe = createMockEventSubscribe({
+        events: [createSessionIdleEvent(targetSessionID)],
+        eventDelay: 10, // very quick
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'quick response' }] },
+        ],
+      });
+
+      const startTime = Date.now();
+
+      // Act
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 200, // polling interval is 200ms
+        eventDriven: true,
+        logger: mockLogger,
+      });
+
+      const elapsed = Date.now() - startTime;
+
+      // Assert: event processing works and is fast (event-driven, not polling)
+      expect(result).toBe('quick response');
+      expect(elapsed).toBeLessThan(300); // should be much faster than polling
+
+      // Assert: diagnostic log was recorded
+      const eventLogs = logMessages.filter(log => log.message === 'event received');
+      expect(eventLogs.length).toBeGreaterThan(0);
+    });
+  });
+});
+
+// ─── SSE Connection Diagnostics (D1-D4) ───────────────────────────────────────
+describe('pollSessionCompletion - SSE Connection Diagnostics', () => {
+  let mockClient: { session: SFlowClientSession; event?: any; global?: any };
+  let mockSession: {
+    status: ReturnType<typeof vi.fn>;
+    messages: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    mockSession = {
+      status: vi.fn(),
+      messages: vi.fn(),
+    };
+    mockClient = { session: mockSession as unknown as SFlowClientSession };
+  });
+
+  describe('D4: onSseError callback injection', () => {
+    it('should pass onSseError callback to client.event.subscribe', async () => {
+      // Arrange
+      const targetSessionID = 'sse-error-test';
+      const logMessages: any[] = [];
+
+      const mockLogger = {
+        log: vi.fn().mockImplementation(async (sessionID: string, message: string, data?: any) => {
+          logMessages.push({ sessionID, message, data });
+        }),
+      };
+
+      // Mock subscribe that captures the onSseError parameter
+      let capturedOptions: any = null;
+      const mockSubscribe = vi.fn().mockImplementation((options?: any) => {
+        capturedOptions = options;
+        return Promise.resolve({
+          stream: (async function* () {
+            yield createSessionIdleEvent(targetSessionID);
+          })(),
+        });
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'response' }] },
+        ],
+      });
+
+      // Act
+      await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        logger: mockLogger,
+      });
+
+      // Assert: subscribe was called with onSseError callback
+      expect(mockSubscribe).toHaveBeenCalled();
+      expect(capturedOptions).toBeDefined();
+      expect(capturedOptions.onSseError).toBeDefined();
+      expect(typeof capturedOptions.onSseError).toBe('function');
+    });
+
+    it('should log SSE error when onSseError callback is triggered', async () => {
+      // Arrange
+      const targetSessionID = 'sse-error-trigger';
+      const logMessages: any[] = [];
+
+      const mockLogger = {
+        log: vi.fn().mockImplementation(async (sessionID: string, message: string, data?: any) => {
+          logMessages.push({ sessionID, message, data });
+        }),
+      };
+
+      // Mock subscribe that captures onSseError and triggers it during stream iteration
+      let capturedOnError: ((error: Error) => void) | null = null;
+      const mockSubscribe = vi.fn().mockImplementation((options?: any) => {
+        capturedOnError = options?.onSseError;
+        return Promise.resolve({
+          stream: (async function* () {
+            // Trigger SSE error before yielding event
+            if (capturedOnError) {
+              capturedOnError(new Error('Connection failed'));
+            }
+            yield createSessionIdleEvent(targetSessionID);
+          })(),
+        });
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'response' }] },
+        ],
+      });
+
+      // Act
+      await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        logger: mockLogger,
+      });
+
+      // Assert: SSE error was logged
+      const sseErrorLogs = logMessages.filter(log => log.message === 'event.subscribe SSE error');
+      expect(sseErrorLogs.length).toBeGreaterThan(0);
+      expect(sseErrorLogs[0].data.error).toBe('Connection failed');
+    });
+
+    it('should log connected when subscription succeeds', async () => {
+      // Arrange
+      const targetSessionID = 'sse-connected';
+      const logMessages: any[] = [];
+
+      const mockLogger = {
+        log: vi.fn().mockImplementation(async (sessionID: string, message: string, data?: any) => {
+          logMessages.push({ sessionID, message, data });
+        }),
+      };
+
+      const mockSubscribe = vi.fn().mockImplementation(() => {
+        return Promise.resolve({
+          stream: (async function* () {
+            yield createSessionIdleEvent(targetSessionID);
+          })(),
+        });
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'response' }] },
+        ],
+      });
+
+      // Act
+      await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        logger: mockLogger,
+      });
+
+      // Assert: connected log was recorded
+      const connectedLogs = logMessages.filter(log => log.message === 'event.subscribe connected');
+      expect(connectedLogs.length).toBeGreaterThan(0);
+    });
+
+    it('should pass onSseError callback to client.global.event backup path', async () => {
+      // Arrange
+      const targetSessionID = 'global-sse-error';
+      const logMessages: any[] = [];
+
+      const mockLogger = {
+        log: vi.fn().mockImplementation(async (sessionID: string, message: string, data?: any) => {
+          logMessages.push({ sessionID, message, data });
+        }),
+      };
+
+      // Mock global.event that captures the onSseError parameter
+      let capturedOptions: any = null;
+      const mockGlobalEvent = vi.fn().mockImplementation((options?: any) => {
+        capturedOptions = options;
+        return Promise.resolve({
+          stream: (async function* () {
+            yield createGlobalSessionIdleEvent('/test', targetSessionID);
+          })(),
+        });
+      });
+
+      mockClient.global = { event: mockGlobalEvent };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'response' }] },
+        ],
+      });
+
+      // Act
+      await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        directory: '/test',
+        logger: mockLogger,
+      });
+
+      // Assert: global.event was called with onSseError callback
+      expect(mockGlobalEvent).toHaveBeenCalled();
+      expect(capturedOptions).toBeDefined();
+      expect(capturedOptions.onSseError).toBeDefined();
+      expect(typeof capturedOptions.onSseError).toBe('function');
+    });
+
+    it('should not break existing tests (onSseError is optional)', async () => {
+      // Arrange: mock subscribe without onSseError support (backward compatibility)
+      const targetSessionID = 'backward-compat';
+      const mockSubscribe = vi.fn().mockImplementation(() => {
+        return Promise.resolve({
+          stream: (async function* () {
+            yield createSessionIdleEvent(targetSessionID);
+          })(),
+        });
+      });
+
+      mockClient.event = { subscribe: mockSubscribe };
+      mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      mockSession.messages.mockResolvedValue({
+        data: [
+          { parts: [{ type: 'text', text: 'prompt' }] },
+          { parts: [{ type: 'text', text: 'response' }] },
+        ],
+      });
+
+      // Act: should work even if subscribe doesn't accept options
+      const result = await pollSessionCompletion(mockClient, targetSessionID, {
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+      });
+
+      // Assert: polling completed successfully
+      expect(result).toBe('response');
+      expect(mockSubscribe).toHaveBeenCalled();
     });
   });
 });
