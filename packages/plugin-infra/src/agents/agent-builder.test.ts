@@ -52,6 +52,8 @@ describe('Agent Builder', () => {
       expect(agent).toBeDefined();
       expect(agent.id).toBe('build-executor');
       expect(agent.name).toBe('Build Executor');
+      // Wave 4: Verify platform-layer permission config denies subagent task tool
+      expect(agent.permission?.task?.['*']).toBe('deny');
     });
 
     it('should create bug-investigator agent', async () => {

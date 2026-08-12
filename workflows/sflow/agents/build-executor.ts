@@ -127,6 +127,11 @@ When loading reference files (specs, designs, existing source code, etc.), adher
 `,
   temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('build-executor'),
+  permission: {
+    task: {
+      '*': 'deny',
+    },
+  } as any,
 });
 
 // Mode is managed by AGENT_MODES registry in agent-builder.ts
