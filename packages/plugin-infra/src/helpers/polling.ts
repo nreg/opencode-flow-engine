@@ -66,7 +66,7 @@ export async function pollSessionCompletion(
   const probeMode = options.probeMode ?? false;
   const MAX_POLLS_FOR_NEW = 120; // 120 * 200ms = 24s max for new sessions
   const eventDriven = options.eventDriven ?? true; // Batch 2: event-driven by default
-  const fallbackThreshold = options.fallbackThreshold ?? 25_000; // Batch 3: fallback to pure polling after 25s (default)
+  const fallbackThreshold = options.fallbackThreshold ?? 5_000; // P1-FIX: fallback to pure polling after 5s (event loss → fast fallback)
 
   // D3: Use injected logger if provided, otherwise use global logger
   const activeLogger = options.logger ?? logger;
@@ -124,6 +124,45 @@ export async function pollSessionCompletion(
     return result;
   }
 
+  // P0-FIX: probeMode 下先检查 status，明确 busy 的会话直接返回 PROBE_PENDING
+  //（避免不必要的 messages 调用）。retry 状态必须走主循环的 retry 语义
+  //（attempt>=5 判定为 error），不能在此短路。
+  // 注意：仅在 probeMode 下预查 status——非 probeMode 增加 status 调用会改变
+  // 已有调用序列（顺序计数 mock 测试依赖），且主循环的 status 检查已足够。
+  if (probeMode) {
+    try {
+      const statusResult = await client.session.status();
+      const rawData = statusResult.data;
+      let statusEntry:
+        | { id: string; type: string; attempt?: number; message?: string; next?: number }
+        | undefined;
+
+      if (Array.isArray(rawData)) {
+        statusEntry = (
+          rawData as Array<{
+            id: string;
+            type: string;
+            attempt?: number;
+            message?: string;
+            next?: number;
+          }>
+        ).find((s) => s.id === sessionID);
+      } else if (rawData && typeof rawData === 'object') {
+        const obj = rawData as Record<
+          string,
+          { type: string; attempt?: number; message?: string; next?: number }
+        >;
+        statusEntry = obj[sessionID] ? { id: sessionID, ...obj[sessionID] } : undefined;
+      }
+
+      if (statusEntry && statusEntry.type === 'busy') {
+        return await logExit('probe_pending', PROBE_PENDING);
+      }
+    } catch {
+      // status 检查失败，继续执行后续逻辑
+    }
+  }
+
   // Capture the initial message count so we can distinguish
   // the user's prompt from the subagent's response.
   let initialMsgCount = 0;
@@ -134,8 +173,14 @@ export async function pollSessionCompletion(
   } catch {
     /* ignore */
   }
-  // For isNew sessions, the prompt was just sent, so initialMsgCount = 1.
-  // We need at least 1 assistant response → require count >= 2.
+
+  // P0-FIX: flowagent_output 在子 agent 完成之后才被调用，此时会话已含 assistant 回复，
+  // 而事件驱动（事件已丢失）、status 检测（idle 会话已被服务端从状态表删除）、
+  // 消息计数检测（minDetectCount = initialMsgCount + 1 对已完成会话永不满足）全部失效。
+  // 核心修复：主循环的 messages 检查改为 role-aware（hasAssistantMessage），
+  // 并仅在会话状态未命中 busy/retry（即已完成）时才将 assistant 消息视为完成信号——
+  // 这样 flowagent_output 在第一次轮询迭代（~200ms）即可命中返回，而同步 retry
+  // （注入 reminder 后会话里已有旧 assistant 回复但状态仍 busy）不会被误判提前返回。
   const minDetectCount = isNew ? Math.max(initialMsgCount + 1, 2) : initialMsgCount + 1;
 
   let lastMessage: string | null = null;
@@ -188,12 +233,12 @@ export async function pollSessionCompletion(
     let isIdle = false;
     let isRetryError = false;
     let statusFailed = false;
+    let statusEntry:
+      | { id: string; type: string; attempt?: number; message?: string; next?: number }
+      | undefined;
     try {
       const statusResult = await client.session.status();
       const rawData = statusResult.data;
-      let statusEntry:
-        | { id: string; type: string; attempt?: number; message?: string; next?: number }
-        | undefined;
 
       if (Array.isArray(rawData)) {
         statusEntry = (
@@ -262,8 +307,9 @@ export async function pollSessionCompletion(
       return await logExit('retry_error', null);
     }
 
-    // F2: Probe mode - if not idle and not retry error, return pending marker
-    if (probeMode) {
+    // F2: Probe mode - status 明确 busy/retry 时直接返回 pending；
+    // status 未命中（idle 已被服务端删除）时继续走 messages 检查确认。
+    if (probeMode && statusEntry !== undefined && !statusFailed) {
       return await logExit('probe_pending', PROBE_PENDING);
     }
 
@@ -274,6 +320,7 @@ export async function pollSessionCompletion(
       const mr = await client.session.messages({ path: { id: sessionID } });
       const msgs = mr.data as
         | Array<{
+            info?: { role?: string };
             parts: Array<{
               type: string;
               text?: string;
@@ -286,12 +333,22 @@ export async function pollSessionCompletion(
         currentMsgCount = msgs.length;
         // F2: Use shared extractLatestMessage function
         lastMessage = extractLatestMessage(msgs);
-        if (currentMsgCount >= minDetectCount) {
+        // P0-FIX: role-aware 消息检测，优先使用 hasAssistantMessage。
+        // 守卫：会话状态未命中 busy/retry（即已完成）时，assistant 消息才视为完成信号；
+        // 否则（如同步 retry 注入 reminder 后会话里已存在旧的 assistant 回复）继续轮询等待新输出。
+        const statusNotBusy =
+          statusFailed || !statusEntry || statusEntry.type === 'idle';
+        if (currentMsgCount >= minDetectCount || (statusNotBusy && hasAssistantMessage(msgs))) {
           return await logExit('messages', lastMessage);
         }
       }
     } catch {
       messagesFailed = true;
+    }
+
+    // F2: Probe mode 且 messages 未判定完成 → 返回 pending marker
+    if (probeMode) {
+      return await logExit('probe_pending', PROBE_PENDING);
     }
 
     // ⸺⸺ Session disappearance: both status and messages failed ⸺⸺
@@ -336,6 +393,47 @@ export async function readSessionLastMessage(
   } catch {
     return null;
   }
+}
+
+/**
+ * P0-FIX: 判断消息列表是否已包含 assistant 回复（即子 agent 已响应）。
+ * - 真实 SDK 数据带 info.role，以 role==='assistant' 精确判定；
+ * - 测试 mock 无 info 字段时 fallback：采用更保守的判定防止误判。
+ *
+ * P1-加固：fallback 时验证消息结构，防止 user+user 误判：
+ * - 若最后一条 info.role 明确是 'user'，直接返回 false；
+ * - 若 info.role 缺失，检查最后一条 text 是否与第一条相同（防止重复 user 消息）。
+ */
+function hasAssistantMessage(
+  msgs: Array<{ info?: { role?: string }; parts: Array<{ type: string; text?: string }> }> | undefined,
+): boolean {
+  if (!Array.isArray(msgs) || msgs.length === 0) return false;
+  const last = msgs[msgs.length - 1];
+
+  // 优先使用 info.role 精确判定
+  if (last?.info && typeof last.info.role === 'string') {
+    return last.info.role === 'assistant';
+  }
+
+  // fallback：mock 无 info 时，采用更保守的判定
+  // 1. 必须至少 2 条消息
+  if (msgs.length < 2) return false;
+
+  // 2. 最后一条必须有 text part
+  const lastText = Array.isArray(last?.parts)
+    ? last.parts.find((p) => p.type === 'text' && p.text)?.text
+    : undefined;
+  if (!lastText) return false;
+
+  // 3. 最后一条的 text 不应与第一条完全相同（防止 user+user 误判）
+  const firstText = Array.isArray(msgs[0]?.parts)
+    ? msgs[0].parts.find((p) => p.type === 'text' && p.text)?.text
+    : undefined;
+
+  // 如果第一条和最后一条 text 相同，可能是 user 重复发送，返回 false
+  if (firstText && lastText === firstText) return false;
+
+  return true;
 }
 
 /**

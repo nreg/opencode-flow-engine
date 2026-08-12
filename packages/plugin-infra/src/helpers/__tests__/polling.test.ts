@@ -678,14 +678,22 @@ describe('pollSessionCompletion - Batch 5: Diagnostic logging', () => {
       // Arrange
       const targetSessionID = 'session-event-log';
       mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      // 初始只有 prompt，避免立即返回
       mockSession.messages.mockResolvedValue({
         data: [
           { parts: [{ type: 'text', text: 'prompt' }] },
-          { parts: [{ type: 'text', text: 'response' }] },
         ],
       });
 
-      // Dispatch event after 50ms
+      // Dispatch event after 50ms，同时更新 messages mock
+      setTimeout(() => {
+        mockSession.messages.mockResolvedValue({
+          data: [
+            { parts: [{ type: 'text', text: 'prompt' }] },
+            { parts: [{ type: 'text', text: 'response' }] },
+          ],
+        });
+      }, 40);
       dispatchEventAfterDelay(targetSessionID, createSessionIdleEvent(targetSessionID), 50);
 
       // Act
@@ -713,10 +721,10 @@ describe('pollSessionCompletion - Batch 5: Diagnostic logging', () => {
       // Arrange
       const targetSessionID = 'session-completed-log';
       mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'idle' }] });
+      // 初始只有 prompt，避免立即返回
       mockSession.messages.mockResolvedValue({
         data: [
           { parts: [{ type: 'text', text: 'prompt' }] },
-          { parts: [{ type: 'text', text: 'response' }] },
         ],
       });
 
@@ -741,14 +749,22 @@ describe('pollSessionCompletion - Batch 5: Diagnostic logging', () => {
       // Arrange
       const targetSessionID = 'session-event-completed-log';
       mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      // 初始只有 prompt，避免立即返回
       mockSession.messages.mockResolvedValue({
         data: [
           { parts: [{ type: 'text', text: 'prompt' }] },
-          { parts: [{ type: 'text', text: 'response' }] },
         ],
       });
 
-      // Dispatch event after 50ms
+      // Dispatch event after 50ms，同时更新 messages mock
+      setTimeout(() => {
+        mockSession.messages.mockResolvedValue({
+          data: [
+            { parts: [{ type: 'text', text: 'prompt' }] },
+            { parts: [{ type: 'text', text: 'response' }] },
+          ],
+        });
+      }, 40);
       dispatchEventAfterDelay(targetSessionID, createSessionIdleEvent(targetSessionID), 50);
 
       // Act
@@ -814,10 +830,10 @@ describe('pollSessionCompletion - Batch 5: Diagnostic logging', () => {
       // Arrange
       const targetSessionID = 'session-event-before-wakeup';
       mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
+      // 初始只有 prompt，避免立即返回
       mockSession.messages.mockResolvedValue({
         data: [
           { parts: [{ type: 'text', text: 'prompt' }] },
-          { parts: [{ type: 'text', text: 'response' }] },
         ],
       });
 
@@ -829,6 +845,13 @@ describe('pollSessionCompletion - Batch 5: Diagnostic logging', () => {
       // Use setImmediate to dispatch event right after pollSessionCompletion starts
       // but before the first sleep in the polling loop
       setImmediate(() => {
+        // 同时更新 messages mock
+        mockSession.messages.mockResolvedValue({
+          data: [
+            { parts: [{ type: 'text', text: 'prompt' }] },
+            { parts: [{ type: 'text', text: 'response' }] },
+          ],
+        });
         eventBus.dispatch(targetSessionID, event);
       });
 
@@ -858,5 +881,179 @@ describe('pollSessionCompletion - Batch 5: Diagnostic logging', () => {
         })
       );
     });
+  });
+});
+
+// ─── P0-FIX: 已完成会话立即返回 ───────────────────────────────────────────
+describe('pollSessionCompletion - P0-FIX: Already complete session', () => {
+  let mockClient: { session: SFlowClientSession };
+  let mockSession: {
+    status: ReturnType<typeof vi.fn>;
+    messages: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    resetGlobalEventBus();
+    
+    mockSession = {
+      status: vi.fn(),
+      messages: vi.fn(),
+    };
+    mockClient = { session: mockSession as unknown as SFlowClientSession };
+  });
+
+  afterEach(() => {
+    resetGlobalEventBus();
+  });
+
+  it('flowagent_output 在子 agent 已完成时立即返回', async () => {
+    // Arrange: 模拟子 agent 已完成（消息列表含 assistant 回复）
+    // status 返回空表（idle 会话已被服务端从状态表删除）
+    mockSession.status.mockResolvedValue({ data: {} });
+    // messages 返回 2 条消息（user prompt + assistant response）
+    mockSession.messages.mockResolvedValue({
+      data: [
+        { parts: [{ type: 'text', text: 'user prompt' }] },
+        { parts: [{ type: 'text', text: 'final output' }] },
+      ],
+    });
+
+    // Act: 调用 pollSessionCompletion，isNew=false（子 agent 已派发）
+    const startTime = Date.now();
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      isNew: false,
+      maxWaitMs: 5000,
+      pollIntervalMs: 200,
+    });
+    const elapsed = Date.now() - startTime;
+
+    // Assert: 立即返回最后一条消息，不等待任何事件/轮询
+    expect(result).toBe('final output');
+    // 应该在 500ms 内返回（不等待 30s）
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it('probeMode 下 status 未命中时通过 messages 检测完成', async () => {
+    // Arrange: status 返回空表（idle 会话已被删除）
+    mockSession.status.mockResolvedValue({ data: {} });
+    // messages 返回含 assistant 回复（2 条消息）
+    mockSession.messages.mockResolvedValue({
+      data: [
+        { parts: [{ type: 'text', text: 'user prompt' }] },
+        { parts: [{ type: 'text', text: 'assistant response' }] },
+      ],
+    });
+
+    // Act: probeMode=true
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      probeMode: true,
+      maxWaitMs: 5000,
+      pollIntervalMs: 200,
+    });
+
+    // Assert: 返回最后一条文本而非 PROBE_PENDING
+    expect(result).toBe('assistant response');
+    expect(result).not.toBeSymbol(); // PROBE_PENDING 是 symbol
+  });
+
+  it('probeMode 下 status 明确 busy 时不检查 messages 直接返回 PROBE_PENDING', async () => {
+    // Arrange: status 返回 busy 状态
+    mockSession.status.mockResolvedValue({
+      data: { 'test-session': { type: 'busy' } },
+    });
+    mockSession.messages.mockResolvedValue({
+      data: [
+        { parts: [{ type: 'text', text: 'user prompt' }] },
+        { parts: [{ type: 'text', text: 'assistant response' }] },
+      ],
+    });
+
+    // Act: probeMode=true
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      probeMode: true,
+      maxWaitMs: 5000,
+      pollIntervalMs: 200,
+    });
+
+    // Assert: 返回 PROBE_PENDING（不检查 messages）
+    // PROBE_PENDING 是一个特殊对象 { __PROBE__: "pending" }
+    expect(result).toEqual({ __PROBE__: 'pending' });
+  });
+
+  it('hasAssistantMessage 使用 info.role 精确判定', async () => {
+    // Arrange: 模拟真实 SDK 数据（带 info.role）
+    mockSession.status.mockResolvedValue({ data: {} });
+    mockSession.messages.mockResolvedValue({
+      data: [
+        { info: { role: 'user' }, parts: [{ type: 'text', text: 'user prompt' }] },
+        { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'assistant response' }] },
+      ],
+    });
+
+    // Act
+    const startTime = Date.now();
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      isNew: false,
+      maxWaitMs: 5000,
+      pollIntervalMs: 200,
+    });
+    const elapsed = Date.now() - startTime;
+
+    // Assert: 立即返回（基于 role 判定）
+    expect(result).toBe('assistant response');
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it('同步 retry 场景（会话 busy 但有旧 assistant 回复）不应提前返回', async () => {
+    // Arrange: 模拟同步 retry 场景
+    // - status 返回 busy（注入 reminder 后会话正在处理）
+    // - messages 先返回 2 条（user prompt + 旧 assistant 回复）
+    // - 300ms 后更新为 3 条（user prompt + old output + new output）
+
+    let messageCount = 2;
+    mockSession.status.mockResolvedValue({
+      data: { 'test-session': { type: 'busy' } },
+    });
+
+    mockSession.messages.mockImplementation(async () => {
+      if (messageCount === 2) {
+        return {
+          data: [
+            { parts: [{ type: 'text', text: 'user prompt' }] },
+            { parts: [{ type: 'text', text: 'old output' }] },
+          ],
+        };
+      } else {
+        return {
+          data: [
+            { parts: [{ type: 'text', text: 'user prompt' }] },
+            { parts: [{ type: 'text', text: 'old output' }] },
+            { parts: [{ type: 'text', text: 'new output' }] },
+          ],
+        };
+      }
+    });
+
+    // 300ms 后更新消息数量并切换为 idle
+    setTimeout(() => {
+      messageCount = 3;
+      mockSession.status.mockResolvedValue({
+        data: { 'test-session': { type: 'idle' } },
+      });
+    }, 300);
+
+    // Act: 调用 pollSessionCompletion，isNew=false
+    const startTime = Date.now();
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      isNew: false,
+      maxWaitMs: 5000,
+      pollIntervalMs: 100,
+    });
+    const elapsed = Date.now() - startTime;
+
+    // Assert: 等待到新输出，而不是提前返回旧输出
+    expect(result).toBe('new output');
+    // 应该至少等待 200ms（证明没有提前返回）
+    expect(elapsed).toBeGreaterThanOrEqual(200);
   });
 });
