@@ -41,6 +41,10 @@ import { applyTokenBudgetToContent } from './features/token-budget-limiter.js';
 import { resolveChangeDir } from './helpers/resolve-change-dir.js';
 import { getGlobalEventBus } from './features/event-bus.js';
 import { handleSessionIdleEvent } from './features/event-hook-handler.js';
+import { PollingLogger } from './features/polling-logger.js';
+
+// 全局 PollingLogger 实例（复用 polling.log）
+const globalLogger = new PollingLogger();
 
 // ─── Background task registry (shared for combined plugin) ────────────────────
 
@@ -225,7 +229,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
     event: async (input) => {
       const event = input.event;
       // P0-1: 诊断日志 - 记录所有收到的事件类型
-      console.log(`[Combined] event hook received: type=${event.type}`);
+      await globalLogger.log('Combined', `event hook received: type=${event.type}`);
 
       if (event.type === 'session.created') {
         const sessionStartHook = hookComposer.getHook('session_start');
@@ -249,9 +253,9 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
         }
       } else {
         // P1-2: 使用共享函数处理 session.idle 和 session.status 事件
-        const handled = handleSessionIdleEvent(event, 'Combined');
+        const handled = await handleSessionIdleEvent(event, 'Combined');
         if (handled) {
-          console.log('[Combined] session.idle/status event handled and dispatched to event bus');
+          await globalLogger.log('Combined', 'session.idle/status event handled and dispatched to event bus');
         }
       }
     },

@@ -41,6 +41,10 @@ import { createNotificationManager } from './features/notification-manager.js';
 import { pollSessionCompletion } from './helpers/polling.js';
 import { getGlobalEventBus } from './features/event-bus.js';
 import { handleSessionIdleEvent } from './features/event-hook-handler.js';
+import { PollingLogger } from './features/polling-logger.js';
+
+// 全局 PollingLogger 实例（复用 polling.log）
+const globalLogger = new PollingLogger();
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SFLOW_AGENT_NAMES } from '../../../workflows/sflow/index.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
@@ -432,7 +436,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
         event: async (input) => {
           const event = input.event;
           // P0-1: 诊断日志 - 记录所有收到的事件类型
-          console.log(`[sFlow] event hook received: type=${event.type}`);
+          await globalLogger.log('sFlow', `event hook received: type=${event.type}`);
 
           if (event.type === 'session.created') {
             // P0: 主 agent 启动时消费未读通知
@@ -441,7 +445,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
               const notifications = await nm.consumeNotifications();
               if (notifications.length > 0) {
                 const notifSummary = notifications.map(n => n.formatted).join('\n');
-                console.log(`[sFlow] 消费 ${notifications.length} 条子 agent 通知:\n${notifSummary}`);
+                await globalLogger.log('sFlow', `消费 ${notifications.length} 条子 agent 通知:\n${notifSummary}`);
               }
             } catch {
               // 通知消费失败不阻塞 session 初始化
@@ -468,9 +472,9 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
             }
           } else {
             // P1-2: 使用共享函数处理 session.idle 和 session.status 事件
-            const handled = handleSessionIdleEvent(event, 'sFlow');
+            const handled = await handleSessionIdleEvent(event, 'sFlow');
             if (handled) {
-              console.log('[sFlow] session.idle/status event handled and dispatched to event bus');
+              await globalLogger.log('sFlow', 'session.idle/status event handled and dispatched to event bus');
             }
           }
         },
