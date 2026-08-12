@@ -437,14 +437,6 @@ export function createCallFlowAgentTools(
             `Please delegate waves sequentially: Wave 1 → Review Gate → Wave 2 → Review Gate → ...`
           );
         }
-        
-        if ((prompt as string).toLowerCase().includes('code-reviewer')) {
-          Logger.warn(
-            `[Wave Orchestration] WARNING: build-executor prompt contains 'code-reviewer'. ` +
-            `Cross-wave code review is sFlow's responsibility, not build-executor's. ` +
-            `Consider delegating code-review tasks to sFlow orchestrator instead.`
-          );
-        }
       }
 
       const sessionLabel = resolveSessionLabel(
