@@ -1,5 +1,5 @@
 import { join, dirname } from 'path';
-import { appendFile, mkdir } from 'fs/promises';
+import { appendFile, writeFile, mkdir } from 'fs/promises';
 
 /**
  * PollingLogger - 轮询日志记录器
@@ -10,10 +10,14 @@ import { appendFile, mkdir } from 'fs/promises';
  * - 结构化格式：[ISO-timestamp] [INFO] [sessionID] message | metadata
  * - 写入失败时降级到 console.warn，不抛出异常
  * - 异步写入，不阻塞主线程
+ * - 插件初始化时自动清空旧日志（静态 guard，跑一次）。
  */
 export class PollingLogger {
   private readonly logFilePath: string;
   private writeQueue: Promise<void> = Promise.resolve();
+
+  /** 静态 guard：确保日志文件在插件生命周期内只清空一次 */
+  private static _cleared = false;
 
   /**
    * @param customLogPath - 自定义日志文件路径（用于测试）
@@ -24,6 +28,31 @@ export class PollingLogger {
     } else {
       const logDir = join(process.cwd(), '.flow-engine', 'sflow');
       this.logFilePath = join(logDir, 'polling.log');
+    }
+
+    // 插件初始化时清空旧日志文件，防止无限增长
+    if (!PollingLogger._cleared) {
+      PollingLogger._cleared = true;
+      PollingLogger.clear(this.logFilePath).catch(() => {});
+    }
+  }
+
+  /**
+   * 清空日志文件（覆盖为空内容）。
+   * 静态方法，可在任意位置调用。
+   * @param filePath - 日志文件路径，默认使用 default 构造的路径
+   */
+  static async clear(filePath?: string): Promise<void> {
+    try {
+      const logDir = filePath ? dirname(filePath) : join(process.cwd(), '.flow-engine', 'sflow');
+      const target = filePath ?? join(logDir, 'polling.log');
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, '', 'utf-8');
+    } catch (error) {
+      console.warn(
+        `[PollingLogger] Failed to clear log file:`,
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
 
