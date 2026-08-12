@@ -1006,11 +1006,12 @@ describe('writeStateFile — non-array decisionPoints handling (P1-1 fix)', () =
       })
     );
 
-    // Capture console.warn
+    // Capture Logger.warn
+    const { Logger } = await import('../../utils/logger.js');
     const warnSpy: string[] = [];
-    const originalWarn = console.warn;
-    console.warn = (...args: unknown[]) => {
-      warnSpy.push(args.join(' '));
+    const originalWarn = Logger.warn;
+    Logger.warn = async (message: string) => {
+      warnSpy.push(message);
     };
 
     try {
@@ -1024,7 +1025,7 @@ describe('writeStateFile — non-array decisionPoints handling (P1-1 fix)', () =
       expect(warnSpy.length).toBeGreaterThan(0);
       expect(warnSpy[0]).toContain('decisionPoints is not an array');
     } finally {
-      console.warn = originalWarn;
+      Logger.warn = originalWarn;
     }
   });
 

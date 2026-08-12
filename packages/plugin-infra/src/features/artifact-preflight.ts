@@ -12,6 +12,7 @@ import { ARTIFACT_PREFLIGHT, isDirectoryArtifact } from '@opencode-flow-engine/c
 import { listFiles, caches } from '@opencode-flow-engine/shared';
 import { detectFrontend } from './workflow-manager.js';
 import { artifactExists, directoryArtifactExists } from './state-manager/artifact-paths.js';
+import { Logger } from '../utils/logger.js';
 
 export interface PreflightCheckParams {
   changeDir: string;
@@ -78,7 +79,7 @@ export async function checkArtifactPreflight(
         }
       }
     } catch (err) {
-      console.warn('[SFLOW] detectFrontend() failed during preflight gate:', err instanceof Error ? err.message : String(err));
+      Logger.warn('[SFLOW] detectFrontend() failed during preflight gate: ' + (err instanceof Error ? err.message : String(err)));
       const result: PreflightCheckResult = {
         passed: false, missing: [], existence,
         preflightState: targetState,

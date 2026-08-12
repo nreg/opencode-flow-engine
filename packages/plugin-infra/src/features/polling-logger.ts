@@ -1,5 +1,6 @@
 import { join, dirname } from 'path';
 import { appendFile, writeFile, mkdir } from 'fs/promises';
+import { Logger } from '../utils/logger.js';
 
 /**
  * PollingLogger - 轮询日志记录器
@@ -49,9 +50,8 @@ export class PollingLogger {
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, '', 'utf-8');
     } catch (error) {
-      console.warn(
-        `[PollingLogger] Failed to clear log file:`,
-        error instanceof Error ? error.message : String(error),
+      Logger.warn(
+        `[PollingLogger] Failed to clear log file: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -79,16 +79,14 @@ export class PollingLogger {
 
         await appendFile(this.logFilePath, logLine + '\n', 'utf-8');
       } catch (error) {
-        console.warn(
-          `[PollingLogger] Failed to write log: ${message}`,
-          error instanceof Error ? error.message : String(error)
+        Logger.warn(
+          `[PollingLogger] Failed to write log: ${message} - ${error instanceof Error ? error.message : String(error)}`
         );
       }
     }).catch((error) => {
       // P1-2: Ensure queue never rejects (isolates single write failure)
-      console.warn(
-        `[PollingLogger] Write queue error (isolated):`,
-        error instanceof Error ? error.message : String(error)
+      Logger.warn(
+        `[PollingLogger] Write queue error (isolated): ${error instanceof Error ? error.message : String(error)}`
       );
     });
     return this.writeQueue;

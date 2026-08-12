@@ -8,6 +8,7 @@ import { existsSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
+import { Logger } from '../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -33,7 +34,7 @@ function resolveSkillsDir(givenDir?: string): string {
     if (existsSync(dir)) {
       // 如果是废弃镜像路径，输出警告
       if (dir === join(process.cwd(), 'skills')) {
-        console.warn(
+        Logger.warn(
           `Skills directory '${dir}' appears to be a deprecated mirror. ` +
           `Use 'workflows/sflow/skills/' or 'workflows/iflow/skills/' instead.`
         );
@@ -113,7 +114,7 @@ export class SkillLoader {
     const skills: Skill[] = [];
 
     if (!existsSync(this.skillsDir)) {
-      console.warn(`Skills directory not found: ${this.skillsDir}`);
+      Logger.warn(`Skills directory not found: ${this.skillsDir}`);
       return skills;
     }
 
@@ -141,7 +142,7 @@ export class SkillLoader {
         }
       }
     } catch (error) {
-      console.error(`Error loading skills from ${this.skillsDir}:`, error);
+      Logger.error(`Error loading skills from ${this.skillsDir}: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     return skills;
@@ -174,7 +175,7 @@ export class SkillLoader {
       this.skills.set(name, skill);
       return skill;
     } catch (error) {
-      console.error(`Error loading skill ${name}:`, error);
+      Logger.error(`Error loading skill ${name}: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }
@@ -217,7 +218,7 @@ export class SkillLoader {
       return mergedContent;
     } catch (error) {
       // If error reading references, return original content
-      console.warn(`Error reading references for ${skillDir}:`, error);
+      Logger.warn(`Error reading references for ${skillDir}: ${error instanceof Error ? error.message : String(error)}`);
       return skillContent;
     }
   }

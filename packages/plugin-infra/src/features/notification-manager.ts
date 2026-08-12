@@ -19,6 +19,7 @@ import {
   removeFile,
   writeJsonFile,
 } from '@opencode-flow-engine/shared';
+import { Logger } from '../utils/logger.js';
 
 // ─── 常量 ──────────────────────────────────────────────────────────────────
 
@@ -95,7 +96,7 @@ async function moveFile(src: string, dst: string): Promise<boolean> {
     await unlink(src);
     return true;
   } catch (err) {
-    console.warn('[NotificationManager] 移动文件失败:', err);
+    Logger.warn(`[NotificationManager] 移动文件失败: ${err instanceof Error ? err.message : String(err)}`);
     return false;
   }
 }
@@ -138,7 +139,7 @@ export function createNotificationManager(config: { changeDir: string }): Notifi
       await writeJsonFile(filePath, entry);
     } catch (err) {
       // 通知写入失败不阻塞 agent 结果返回
-      console.warn('[NotificationManager] 写入通知失败:', err);
+      Logger.warn(`[NotificationManager] 写入通知失败: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -168,7 +169,7 @@ export function createNotificationManager(config: { changeDir: string }): Notifi
         .filter((fileName) => consumedSet.has(fileName))
         .map((fileName) =>
           removeFile(join(notificationsDir, fileName)).catch((err) =>
-            console.warn('[NotificationManager] 删除重复通知失败:', err),
+            Logger.warn(`[NotificationManager] 删除重复通知失败: ${err instanceof Error ? err.message : String(err)}`),
           ),
         );
       await Promise.allSettled(dedupTasks);
@@ -197,7 +198,7 @@ export function createNotificationManager(config: { changeDir: string }): Notifi
 
       return results;
     } catch (err) {
-      console.warn('[NotificationManager] 消费通知失败:', err);
+      Logger.warn(`[NotificationManager] 消费通知失败: ${err instanceof Error ? err.message : String(err)}`);
       return [];
     }
   }
@@ -224,7 +225,7 @@ export function createNotificationManager(config: { changeDir: string }): Notifi
 
       return results;
     } catch (err) {
-      console.warn('[NotificationManager] 获取待处理通知失败:', err);
+      Logger.warn(`[NotificationManager] 获取待处理通知失败: ${err instanceof Error ? err.message : String(err)}`);
       return [];
     }
   }

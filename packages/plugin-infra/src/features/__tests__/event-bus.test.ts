@@ -149,7 +149,7 @@ describe('EventBus', () => {
       // 但不会重复注册（内部 Map 保证）
     });
 
-    it('重复注册应该覆盖旧监听器并触发警告', () => {
+    it('重复注册应该覆盖旧监听器并触发警告', async () => {
       const sessionID = 'test-session-duplicate';
       const listener1 = vi.fn();
       const listener2 = vi.fn();
@@ -158,8 +158,9 @@ describe('EventBus', () => {
         properties: { sessionID },
       };
 
-      // 捕获 console.warn
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      // 捕获 Logger.warn
+      const { Logger } = await import('../../utils/logger.js');
+      const warnSpy = vi.spyOn(Logger, 'warn').mockImplementation(async () => {});
 
       // 第一次注册
       eventBus.register(sessionID, listener1);

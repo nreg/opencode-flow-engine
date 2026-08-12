@@ -10,6 +10,7 @@ import { isArtifactPath, isSourceCodePath, simpleContractHash } from "../helpers
 import { parseFileBoundaryPatterns, matchesBoundary, getActiveTaskId, boundaryCache, getBoundaryCacheKey, READ_FILES_WHITELIST } from "../boundary.js";
 import { checkIFlowFileWriteGuard } from "../iflow-shared-guards.js";
 import { readArtifactContent, artifactExists } from "../../../features/state-manager/artifact-paths.js";
+import { Logger } from "../../../utils/logger.js";
 
 /**
  * File-level write guard — consolidated from previously inline logic in index.ts.
@@ -216,7 +217,7 @@ export async function checkGitCommitBoundary(changeDir: string, data?: Record<st
       };
     }
   } catch (err) {
-    console.warn('[SFLOW] P19: git boundary check skipped — ' + (err instanceof Error ? err.message : String(err)));
+    Logger.warn('[SFLOW] P19: git boundary check skipped — ' + (err instanceof Error ? err.message : String(err)));
   }
 
   return { success: true };

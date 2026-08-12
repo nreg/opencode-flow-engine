@@ -32,6 +32,7 @@ import type { ToolDefinition } from './types.js';
 import { DEFAULT_PROFILE_MODELS } from '../agents/config-loader.js';
 import { resolveModelWithFallback } from '../agents/agent-builder.js';
 import type { BuiltinAgentName } from '../agents/types.js';
+import { Logger } from '../utils/logger.js';
 
 /** Maximum concurrent subagent sessions of the same type */
 const MAX_CONCURRENT_SUBAGENTS = 3;
@@ -43,14 +44,14 @@ const MAX_CONCURRENT_SUBAGENTS = 3;
 function parseModelString(modelString: string): { providerID: string; modelID: string } | null {
   const parts = modelString.split('/');
   if (parts.length !== 2) {
-    console.warn(
+    Logger.warn(
       `[parseModelString] Invalid model format: "${modelString}". Expected "provider/modelID" (exactly one '/' separator)`,
     );
     return null;
   }
   const [providerID, modelID] = parts;
   if (!providerID || !modelID) {
-    console.warn(
+    Logger.warn(
       `[parseModelString] Empty provider or modelID: "${modelString}". Both parts must be non-empty`,
     );
     return null;
@@ -172,7 +173,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
               summary: 'Task failed after max retries',
             });
           } catch (err) {
-            console.warn('[BackgroundTaskWatcher] 写入错误通知失败:', err);
+            Logger.warn(`[BackgroundTaskWatcher] 写入错误通知失败: ${err instanceof Error ? err.message : String(err)}`);
           }
 
           try {
@@ -188,7 +189,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
               });
             }
           } catch (err) {
-            console.warn('[BackgroundTaskWatcher] 更新 subagent-store 失败:', err);
+            Logger.warn(`[BackgroundTaskWatcher] 更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
            }
         } else {
           // probeResult is string (session idle, task completed)
@@ -223,7 +224,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
               has_completion_signal: asyncHasSignal,
             });
           } catch (err) {
-            console.warn('[BackgroundTaskWatcher] 写入完成通知失败:', err);
+            Logger.warn(`[BackgroundTaskWatcher] 写入完成通知失败: ${err instanceof Error ? err.message : String(err)}`);
           }
 
           try {
@@ -239,11 +240,11 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
               });
             }
           } catch (err) {
-            console.warn('[BackgroundTaskWatcher] 更新 subagent-store 失败:', err);
+            Logger.warn(`[BackgroundTaskWatcher] 更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
       } catch (err) {
-        console.warn('[BackgroundTaskWatcher] 检查任务失败:', err);
+        Logger.warn(`[BackgroundTaskWatcher] 检查任务失败: ${err instanceof Error ? err.message : String(err)}`);
         const currentTaskForError = registry.get(taskId);
         if (currentTaskForError && currentTaskForError.status === 'running') {
           const now = Date.now();
@@ -438,7 +439,7 @@ export function createCallFlowAgentTools(
         }
         
         if ((prompt as string).toLowerCase().includes('code-reviewer')) {
-          console.warn(
+          Logger.warn(
             `[Wave Orchestration] WARNING: build-executor prompt contains 'code-reviewer'. ` +
             `Cross-wave code review is sFlow's responsibility, not build-executor's. ` +
             `Consider delegating code-review tasks to sFlow orchestrator instead.`
@@ -583,7 +584,7 @@ export function createCallFlowAgentTools(
             });
           } catch (err) {
             // subagent-store 创建失败不阻塞 agent 执行
-            console.warn('[CallFlowAgent] 创建 agent store 失败:', err);
+            Logger.warn(`[CallFlowAgent] 创建 agent store 失败: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
 
@@ -617,7 +618,7 @@ export function createCallFlowAgentTools(
               });
             } catch (err) {
               // 事件追加失败不阻塞
-              console.warn('[CallFlowAgent] 追加事件失败:', err);
+              Logger.warn(`[CallFlowAgent] 追加事件失败: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
 
@@ -736,7 +737,7 @@ export function createCallFlowAgentTools(
           });
         } catch (err) {
           // 通知写入失败不阻塞 agent 结果返回
-          console.warn('[CallFlowAgent] 同步模式写入通知失败:', err);
+          Logger.warn(`[CallFlowAgent] 同步模式写入通知失败: ${err instanceof Error ? err.message : String(err)}`);
         }
 
         // P1: 同步模式完成时更新 subagent-store
@@ -753,7 +754,7 @@ export function createCallFlowAgentTools(
             });
           } catch (err) {
             // subagent-store 更新失败不阻塞 agent 结果返回
-            console.warn('[CallFlowAgent] 同步模式更新 subagent-store 失败:', err);
+            Logger.warn(`[CallFlowAgent] 同步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
 
@@ -880,7 +881,7 @@ export function createCallFlowAgentTools(
                 summary: 'Task failed: session retry exhausted or polling failed',
               });
             } catch (err) {
-              console.warn('[CallFlowAgent] 异步模式写入错误通知失败:', err);
+              Logger.warn(`[CallFlowAgent] 异步模式写入错误通知失败: ${err instanceof Error ? err.message : String(err)}`);
             }
 
             try {
@@ -896,7 +897,7 @@ export function createCallFlowAgentTools(
                 });
               }
             } catch (err) {
-              console.warn('[CallFlowAgent] 异步模式更新 subagent-store 失败:', err);
+              Logger.warn(`[CallFlowAgent] 异步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
             }
 
             return updated;
@@ -933,7 +934,7 @@ export function createCallFlowAgentTools(
               has_completion_signal: asyncHasSignal,
             });
           } catch (err) {
-            console.warn('[CallFlowAgent] 异步模式写入通知失败:', err);
+            Logger.warn(`[CallFlowAgent] 异步模式写入通知失败: ${err instanceof Error ? err.message : String(err)}`);
           }
 
           try {
@@ -952,13 +953,13 @@ export function createCallFlowAgentTools(
               });
             }
           } catch (err) {
-            console.warn('[CallFlowAgent] 异步模式更新 subagent-store 失败:', err);
+            Logger.warn(`[CallFlowAgent] 异步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
           }
 
           return updated;
         } catch (err) {
           // F-1: Handle pollSessionCompletion exceptions (network errors, etc.)
-          console.warn('[CallFlowAgent] pollAndComplete failed:', err);
+          Logger.warn(`[CallFlowAgent] pollAndComplete failed: ${err instanceof Error ? err.message : String(err)}`);
           
           const now = Date.now();
           const errorMessage = err instanceof Error ? err.message : String(err);
@@ -988,7 +989,7 @@ export function createCallFlowAgentTools(
               summary: `Task failed: polling error - ${errorMessage}`,
             });
           } catch (notificationErr) {
-            console.warn('[CallFlowAgent] 异步模式写入错误通知失败:', notificationErr);
+            Logger.warn(`[CallFlowAgent] 异步模式写入错误通知失败: ${notificationErr instanceof Error ? notificationErr.message : String(notificationErr)}`);
           }
 
           try {
@@ -1004,7 +1005,7 @@ export function createCallFlowAgentTools(
               });
             }
           } catch (storeErr) {
-            console.warn('[CallFlowAgent] 异步模式更新 subagent-store 失败:', storeErr);
+            Logger.warn(`[CallFlowAgent] 异步模式更新 subagent-store 失败: ${storeErr instanceof Error ? storeErr.message : String(storeErr)}`);
           }
 
           return updated;
@@ -1117,7 +1118,7 @@ export function createCallFlowAgentTools(
           await client.session.abort({ path: { id: task.sessionID } });
         } catch (err) {
           // session.abort may not be available; mark cancelled anyway
-          console.warn('[CallFlowAgent] 取消 session 失败:', err);
+          Logger.warn(`[CallFlowAgent] 取消 session 失败: ${err instanceof Error ? err.message : String(err)}`);
         }
 
         // P1-A: Check slotReleased to prevent double release

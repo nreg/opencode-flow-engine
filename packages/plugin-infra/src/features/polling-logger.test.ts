@@ -145,8 +145,9 @@ describe('PollingLogger', () => {
   });
 
   describe('Task 1.4: 错误处理测试', () => {
-    it('写入失败时应该降级到 console.warn，不抛出异常', async () => {
-      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('写入失败时应该降级到 Logger.warn，不抛出异常', async () => {
+      const { Logger } = await import('../utils/logger.js');
+      const loggerWarnSpy = vi.spyOn(Logger, 'warn').mockImplementation(async () => {});
 
       const invalidLogger = new PollingLogger('Z:\\nonexistent\\drive\\polling.log');
 
@@ -159,24 +160,24 @@ describe('PollingLogger', () => {
 
       expect(error).toBeNull();
 
-      // 应该调用 console.warn
-      expect(consoleWarnSpy).toHaveBeenCalled();
+      // 应该调用 Logger.warn
+      expect(loggerWarnSpy).toHaveBeenCalled();
 
-      consoleWarnSpy.mockRestore();
+      loggerWarnSpy.mockRestore();
     });
 
-    it('写入失败时应该包含错误信息在 console.warn 中', async () => {
-      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('写入失败时应该包含错误信息在 Logger.warn 中', async () => {
+      const { Logger } = await import('../utils/logger.js');
+      const loggerWarnSpy = vi.spyOn(Logger, 'warn').mockImplementation(async () => {});
 
       const invalidLogger = new PollingLogger('Z:\\nonexistent\\drive\\polling.log');
       await invalidLogger.log('session', 'test message', { key: 'value' });
 
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[PollingLogger] Failed to write log:'),
-        expect.any(String)
+      expect(loggerWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[PollingLogger] Failed to write log:')
       );
 
-      consoleWarnSpy.mockRestore();
+      loggerWarnSpy.mockRestore();
     });
   });
 

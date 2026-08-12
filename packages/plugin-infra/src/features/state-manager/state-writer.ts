@@ -6,6 +6,7 @@
 import { ensureDir, readJsonFile, atomicWriteJsonFile, stateFileMutex } from "@opencode-flow-engine/shared";
 import type { DecisionPoint } from '@opencode-flow-engine/core';
 import { isValidTransition, getValidTransitions } from '@opencode-flow-engine/core';
+import { Logger } from '../../utils/logger.js';
 
 /**
  * Apply AFK auto-deactivation on terminal states.
@@ -76,10 +77,10 @@ function appendDecisionPoint(
   // P1-1: Check if decisionPoints exists but is not an array
   // This check must happen before any decision point processing
   // Note: null is treated as missing (not malformed)
-  if ('decisionPoints' in state && 
-      state.decisionPoints !== null && 
+  if ('decisionPoints' in state &&
+      state.decisionPoints !== null &&
       !Array.isArray(state.decisionPoints)) {
-    console.warn(
+    Logger.warn(
       `state.decisionPoints is not an array (got ${typeof state.decisionPoints}), ` +
       `preserving original value and skipping decision point update`
     );

@@ -7,6 +7,7 @@
 
 import type { HookResult } from "./types.js";
 import { fileExists, directoryExists, readFile, readJsonFile } from "@opencode-flow-engine/shared";
+import { Logger } from "../utils/logger.js";
 
 const IFLOW_STATES = ['discussing', 'researching', 'planning', 'executing', 'verifying', 'shipping'] as const;
 type IFlowState = typeof IFLOW_STATES[number];
@@ -87,14 +88,14 @@ async function checkScopeReductionGuard(changeDir: string, data?: Record<string,
 
   const toolName = (data.toolName as string) || '';
   if (!toolName) {
-    console.warn('[IFlow Guard] checkScopeReductionGuard called without toolName — skipping');
+    Logger.warn('[IFlow Guard] checkScopeReductionGuard called without toolName — skipping');
     return { success: true };
   }
   if (toolName !== 'write' && toolName !== 'edit') return { success: true };
 
   const filePath = (data.filePath as string) || '';
   if (!filePath) {
-    console.warn('[IFlow Guard] checkScopeReductionGuard called without filePath — skipping');
+    Logger.warn('[IFlow Guard] checkScopeReductionGuard called without filePath — skipping');
     return { success: true };
   }
   if (!filePath.includes('PLAN.md')) return { success: true };

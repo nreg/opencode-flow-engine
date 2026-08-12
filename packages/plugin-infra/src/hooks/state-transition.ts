@@ -6,6 +6,7 @@ import { writeStateFile } from '../features/state-manager.js';
 import { recommendExecutionMode } from '../features/execution-plan.js';
 import { resolveArtifactLanguage, checkAndDetectLanguage } from '../features/artifact-language.js';
 import { readArtifactContent } from '../features/state-manager/artifact-paths.js';
+import { Logger } from '../utils/logger.js';
 
 const STATE_FILE_PATH = '.flow-engine/sflow/state.json';
 
@@ -85,7 +86,7 @@ export function createStateTransitionHook(): HookHandler {
           } catch (error) {
             // 检测失败不影响状态转换，使用默认值 'en'
             extra.artifact_language = 'en';
-            console.warn('[T3.5] Artifact language detection failed, using default "en":', error);
+            Logger.warn(`[T3.5] Artifact language detection failed, using default "en": ${error instanceof Error ? error.message : String(error)}`);
           }
         }
 
@@ -101,7 +102,7 @@ export function createStateTransitionHook(): HookHandler {
             }
           } catch (error) {
             // 补检测失败不影响状态转换
-            console.warn('[T3.6] Artifact language backfill detection failed:', error);
+            Logger.warn(`[T3.6] Artifact language backfill detection failed: ${error instanceof Error ? error.message : String(error)}`);
           }
         }
 

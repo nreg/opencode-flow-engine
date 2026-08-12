@@ -9,6 +9,7 @@ import { readExecutionPlan as readExecutionPlanFeature } from "../../../features
 import type { Wave } from "../../../features/execution-plan-types.js";
 import { getStateFilePath } from "../../../features/state-manager.js";
 import { GitRangeValidator } from "./git-range-validator.js";
+import { Logger } from "../../../utils/logger.js";
 
 /**
  * Topological sort using Kahn's algorithm (BFS-based).
@@ -433,7 +434,7 @@ export async function checkSpecsMerged(changeDir: string, activeWorkflow: 'iflow
     for (const capability of receiptCapabilities) {
       const receipt = await readPublicationReceipt(changeDir, capability);
       if (!receipt) {
-        console.warn(`[P1-1] Publication receipt damaged for capability: ${capability}`);
+        Logger.warn(`[P1-1] Publication receipt damaged for capability: ${capability}`);
         continue;
       }
       

@@ -17,6 +17,7 @@
  *     ├── output.md
  *     └── events.log
  */
+import { Logger } from '../utils/logger.js';
 
 import { join } from 'path';
 import {
@@ -154,7 +155,7 @@ function parseEventsLog(content: string): AgentEvent[] {
       try {
         return JSON.parse(line) as AgentEvent;
       } catch (err) {
-        console.warn('[SubagentStore] 解析事件行失败:', err);
+        Logger.warn(`[SubagentStore] 解析事件行失败: ${err instanceof Error ? err.message : String(err)}`);
         return null;
       }
     })

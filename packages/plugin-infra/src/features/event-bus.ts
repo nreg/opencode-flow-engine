@@ -1,5 +1,6 @@
 import type { EventBus, EventBusListener, Event } from '../types.js';
 import { PollingLogger } from './polling-logger.js';
+import { Logger } from '../utils/logger.js';
 
 // ─── 全局事件总线单例 (Task 2.2) ───────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ export function createEventBus(): EventBus {
     register(sessionID: string, onComplete: EventBusListener): void {
       // 若已存在监听器，覆盖并记录警告（重复注册通常是 bug 信号）
       if (listeners.has(sessionID)) {
-        console.warn(`[EventBus] Overwriting existing listener for sessionID: ${sessionID}`);
+        Logger.warn(`[EventBus] Overwriting existing listener for sessionID: ${sessionID}`);
         listeners.delete(sessionID);
       }
 
@@ -88,7 +89,7 @@ export function createEventBus(): EventBus {
         action: 'register',
         listenerCount: listeners.size,
       }).catch((error: unknown) => {
-        console.warn('[EventBus] Failed to log register:', error);
+        Logger.warn(`[EventBus] Failed to log register: ${error instanceof Error ? error.message : String(error)}`);
       });
     },
 
@@ -119,7 +120,7 @@ export function createEventBus(): EventBus {
         matched,
         listenerCount: listeners.size,
       }).catch((error: unknown) => {
-        console.warn('[EventBus] Failed to log dispatch:', error);
+        Logger.warn(`[EventBus] Failed to log dispatch: ${error instanceof Error ? error.message : String(error)}`);
       });
 
       return matched;
@@ -140,7 +141,7 @@ export function createEventBus(): EventBus {
         existed,
         listenerCount: listeners.size,
       }).catch((error: unknown) => {
-        console.warn('[EventBus] Failed to log unregister:', error);
+        Logger.warn(`[EventBus] Failed to log unregister: ${error instanceof Error ? error.message : String(error)}`);
       });
     },
   };

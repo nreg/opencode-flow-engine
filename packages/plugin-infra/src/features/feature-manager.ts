@@ -7,6 +7,7 @@ import { createWorkflowManager } from './workflow-manager.js';
 import { createStateManager } from './state-manager.js';
 import { createSkillLoader, type Skill, type SkillLoader } from './skill-loader.js';
 import { createMcpManager, type McpManager } from './mcp-manager.js';
+import { Logger } from '../utils/logger.js';
 
 export interface FeatureManagerConfig {
   workflowManager?: FeatureConfig;
@@ -37,7 +38,7 @@ export class FeatureManager {
       this.skillLoader = await createSkillLoader(this.config.skillsDir);
       this.initialized = true;
       const loadedSkills = this.skillLoader.getAllSkills();
-      console.log(`Loaded ${loadedSkills.length} skills`);
+      Logger.log(`Loaded ${loadedSkills.length} skills`);
 
       const skillsWithMcp = this.skillLoader.getSkillsWithMcp();
       for (const skill of skillsWithMcp) {

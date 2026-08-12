@@ -31,6 +31,7 @@ import { resolveChangeDir } from './helpers/resolve-change-dir.js';
 import { getGlobalEventBus } from './features/event-bus.js';
 import { handleSessionIdleEvent } from './features/event-hook-handler.js';
 import { PollingLogger } from './features/polling-logger.js';
+import { Logger } from './utils/logger.js';
 
 // 全局 PollingLogger 实例（复用 polling.log）
 const globalLogger = new PollingLogger();
@@ -100,6 +101,8 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
     const configOverrides = agentOverridesFromConfig(cascadedConfig);
 
     const workDir = input.directory;
+    // 初始化 Logger 日志路径（确保日志写入正确的项目目录）
+    Logger.initialize(workDir);
     const sflowClient = input.client;
 
     const hookComposer = createHookComposer();
@@ -116,14 +119,14 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
           try {
             await mcpManager.stopServer(server.name);
           } catch (err) {
-            console.warn(`[iFlow] Failed to stop MCP server ${server.name}: `, err);
+            await Logger.warn(`[iFlow] Failed to stop MCP server ${server.name}: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
         if (taskTracker && taskTracker.dispose) {
           try {
             await taskTracker.dispose();
           } catch (err) {
-            console.warn('[iFlow] Failed to dispose TaskTracker:', err);
+            await Logger.warn(`[iFlow] Failed to dispose TaskTracker: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
       },
@@ -147,7 +150,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
           try {
             await recoverIFlowState(workDir);
           } catch (err) {
-            console.warn('[iFlow] Failed to recover state:', err);
+            await Logger.warn(`[iFlow] Failed to recover state: ${err instanceof Error ? err.message : String(err)}`);
           }
         } else if (event.type === 'session.deleted') {
           const sessionEndHook = hookComposer.getHook('session_end');
@@ -259,8 +262,8 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
                 command: [server.command, ...(server.args || [])],
                 environment: server.env,
               };
-              mcpManager.startServer(server.name, server).catch(err => {
-                console.warn(`[iFlow] Failed to start MCP server ${server.name}: ${err.message}`);
+              mcpManager.startServer(server.name, server).catch(async err => {
+                await Logger.warn(`[iFlow] Failed to start MCP server ${server.name}: ${err.message}`);
                 if (cfg.mcp) delete cfg.mcp[server.name];
               });
             }
@@ -280,8 +283,8 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
             const cmd = Array.isArray(srv.command) ? srv.command[0] : srv.command;
             const cmdArgs = Array.isArray(srv.command) ? srv.command.slice(1) : [];
             if (cmd) {
-              mcpManager.startServer(name, { name, command: cmd, args: cmdArgs, env: srv.environment }).catch(err => {
-                console.warn(`[iFlow] Failed to start project MCP server ${name}: ${err.message}`);
+              mcpManager.startServer(name, { name, command: cmd, args: cmdArgs, env: srv.environment }).catch(async err => {
+                await Logger.warn(`[iFlow] Failed to start project MCP server ${name}: ${err.message}`);
                 if (cfg.mcp) delete cfg.mcp[name];
               });
             }

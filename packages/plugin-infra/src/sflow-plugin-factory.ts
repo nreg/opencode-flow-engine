@@ -42,6 +42,7 @@ import { pollSessionCompletion } from './helpers/polling.js';
 import { getGlobalEventBus } from './features/event-bus.js';
 import { handleSessionIdleEvent } from './features/event-hook-handler.js';
 import { PollingLogger } from './features/polling-logger.js';
+import { Logger } from './utils/logger.js';
 
 // 全局 PollingLogger 实例（复用 polling.log）
 const globalLogger = new PollingLogger();
@@ -400,6 +401,8 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
       const configOverrides = agentOverridesFromConfig(cascadedConfig);
 
       const workDir = resolveChangeDir(undefined, input.directory);
+      // 初始化 Logger 日志路径（确保日志写入正确的项目目录）
+      Logger.initialize(workDir);
       const sflowClient = input.client;
 
       const hookComposer = createHookComposer();
@@ -422,7 +425,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
             try {
               await mcpManager.stopServer(server.name);
             } catch (err) {
-              console.warn(`[sFlow] Failed to stop MCP server ${server.name}: `, err);
+              await Logger.warn(`[sFlow] Failed to stop MCP server ${server.name}: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
           // TaskTracker dispose
@@ -532,8 +535,8 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
                   command: [server.command, ...(server.args || [])],
                   environment: server.env,
                 };
-                mcpManager.startServer(server.name, server).catch(err => {
-                  console.warn(`[sFlow] Failed to start MCP server ${server.name}: ${err.message}`);
+                mcpManager.startServer(server.name, server).catch(async err => {
+                  await Logger.warn(`[sFlow] Failed to start MCP server ${server.name}: ${err.message}`);
                   if (cfg.mcp) delete cfg.mcp[server.name];
                 });
               }
@@ -552,8 +555,8 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
               const cmd = Array.isArray(srv.command) ? srv.command[0] : srv.command;
               const cmdArgs = Array.isArray(srv.command) ? srv.command.slice(1) : [];
               if (cmd) {
-                mcpManager.startServer(name, { name, command: cmd, args: cmdArgs, env: srv.environment }).catch(err => {
-                  console.warn(`[sFlow] Failed to start project MCP server ${name}: ${err.message}`);
+                mcpManager.startServer(name, { name, command: cmd, args: cmdArgs, env: srv.environment }).catch(async err => {
+                  await Logger.warn(`[sFlow] Failed to start project MCP server ${name}: ${err.message}`);
                   if (cfg.mcp) delete cfg.mcp[name];
                 });
               }

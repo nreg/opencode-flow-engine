@@ -7,6 +7,7 @@ import { isValidTransition } from '@opencode-flow-engine/core';
 import { readJsonFile, writeJsonFile, atomicWriteJsonFile, ensureDir, stateFileMutex, fileExists, directoryExists, readFile, listFiles } from '@opencode-flow-engine/shared';
 import { detectStateMismatch } from './state-manager.js';
 import { readArtifactContent, artifactExists } from './state-manager/artifact-paths.js';
+import { Logger } from '../utils/logger.js';
 
 const SFLOW_DIR = '.flow-engine/sflow';
 const STATE_FILE = `${SFLOW_DIR}/state.json`;
@@ -63,7 +64,7 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
         return { success: true, data: { message: 'Workflow manager disabled' } };
       }
 
-      console.log('Workflow manager initialized');
+      Logger.log('Workflow manager initialized');
       return { success: true };
     },
 
@@ -153,7 +154,7 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
           if (newState === 'bridging' && currentState.state !== 'bridging') {
             await migrateSpecMergedToReceipt(changeDir, currentState).catch(err => {
               // 迁移失败不影响状态转换，仅记录警告
-              console.warn('[P1-1] Migration from spec_merged to publication receipt failed:', err);
+              Logger.warn(`[P1-1] Migration from spec_merged to publication receipt failed: ${err instanceof Error ? err.message : String(err)}`);
             });
           }
 
@@ -414,7 +415,7 @@ async function migrateSpecMergedToReceipt(
   }
 
   // 迁移逻辑：为当前所有 specs 生成初始 receipt
-  console.log('[P1-1] Migrating legacy spec_merged=true to publication receipts...');
+  Logger.log('[P1-1] Migrating legacy spec_merged=true to publication receipts...');
 
   const context = resolvePublicationContext(changeDir);
   const { readdir } = await import('node:fs/promises');
@@ -424,7 +425,7 @@ async function migrateSpecMergedToReceipt(
   const specsDir = join(context.projectRoot, 'specs');
   const specsExists = await directoryExists(specsDir);
   if (!specsExists) {
-    console.log('[P1-1] No specs directory found, skipping migration');
+    Logger.log('[P1-1] No specs directory found, skipping migration');
     return;
   }
 
@@ -436,7 +437,7 @@ async function migrateSpecMergedToReceipt(
       .filter(name => !name.startsWith('.')); // 忽略隐藏目录
 
     if (capabilities.length === 0) {
-      console.log('[P1-1] No capabilities found in specs/, skipping migration');
+      Logger.log('[P1-1] No capabilities found in specs/, skipping migration');
       return;
     }
 
@@ -461,12 +462,12 @@ async function migrateSpecMergedToReceipt(
 
       // 保存 receipt
       await savePublicationReceipt(context.projectRoot, receipt);
-      console.log(`[P1-1] Migrated receipt for capability: ${capability}`);
+      Logger.log(`[P1-1] Migrated receipt for capability: ${capability}`);
     }
 
-    console.log(`[P1-1] Migration complete: ${capabilities.length} receipt(s) generated`);
+    Logger.log(`[P1-1] Migration complete: ${capabilities.length} receipt(s) generated`);
   } catch (error) {
-    console.error('[P1-1] Migration failed:', error);
+    Logger.error(`[P1-1] Migration failed: ${error instanceof Error ? error.message : String(error)}`);
     throw error; // 重新抛出，让调用方处理
   }
 }

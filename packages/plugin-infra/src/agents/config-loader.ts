@@ -6,6 +6,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { deepMerge } from '@opencode-flow-engine/shared';
 import type { BuiltinAgentName, AgentOverrides, AgentOverrideConfig } from './types.js';
+import { Logger } from '../utils/logger.js';
 
 export interface AgentConfigEntry {
   model?: string;
@@ -66,7 +67,7 @@ export async function loadSFlowConfig(projectDir?: string): Promise<SFlowConfig>
     const raw = await readFile(configPath, 'utf-8');
     return JSON.parse(raw);
   } catch {
-    console.warn(`[sflow] Failed to parse ${configPath}`);
+    await Logger.warn(`[sflow] Failed to parse ${configPath}`);
     return {};
   }
 }
@@ -81,7 +82,7 @@ export async function loadUserSFlowConfig(configPath?: string): Promise<SFlowCon
   try {
     await access(path);
   } catch {
-    console.warn(`[flow-engine] No user-level config found at ${path}. Run 'sflow init --user' to create one.`);
+    await Logger.warn(`[flow-engine] No user-level config found at ${path}. Run 'sflow init --user' to create one.`);
     return {};
   }
 
@@ -89,7 +90,7 @@ export async function loadUserSFlowConfig(configPath?: string): Promise<SFlowCon
     const raw = await readFile(path, 'utf-8');
     return JSON.parse(raw);
   } catch {
-    console.warn(`[sflow] Failed to parse user config: ${path}`);
+    await Logger.warn(`[sflow] Failed to parse user config: ${path}`);
     return {};
   }
 }
@@ -116,7 +117,7 @@ export async function loadCascadedSFlowConfig(projectDir?: string): Promise<SFlo
     const legacyTiers = ['mechanical', 'strong'];
     for (const tier of legacyTiers) {
       if (tier in merged.modelProfiles) {
-        console.warn(
+        await Logger.warn(
           `[sflow] Legacy tier "${tier}" detected in modelProfiles. ` +
           `The 4-tier system (mechanical/standard/strong/review) has been replaced by ` +
           `6-tier (free/quick/standard/deep/ultra/review). ` +

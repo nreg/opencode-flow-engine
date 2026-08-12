@@ -7,6 +7,7 @@
 import type { ExecutionPlan, ExecutionMode, PlanSource, Wave, DP4Result } from '../execution-plan-types.js';
 import { ensureDir, readJsonFile, writeJsonFile, stateFileMutex } from '@opencode-flow-engine/shared';
 import { EXECUTION_MODE_THRESHOLDS } from '@opencode-flow-engine/core';
+import { Logger } from '../../utils/logger.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -227,7 +228,7 @@ export async function createExecutionPlan(
     await migrateLegacyReceipts(changeDir, plan);
   } catch (error) {
     // 迁移失败不应阻止 plan 创建，记录警告即可
-    console.warn('[T2.10] Failed to migrate legacy receipts:', error);
+    Logger.warn(`[T2.10] Failed to migrate legacy receipts: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   return plan;
@@ -383,7 +384,7 @@ export async function reviseExecutionPlan(
     await migrateLegacyReceipts(changeDir, revisedPlan);
   } catch (error) {
     // 迁移失败不应阻止 plan 修订，记录警告即可
-    console.warn('[T2.10] Failed to migrate legacy receipts:', error);
+    Logger.warn(`[T2.10] Failed to migrate legacy receipts: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   return revisedPlan;

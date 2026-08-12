@@ -5,6 +5,7 @@
 
 import { fileExists, readJsonFile, directoryExists, isContractStale as checkContractStale } from "@opencode-flow-engine/shared";
 import { resolveArtifactPath, readArtifactContent, artifactExists, resolveSpecsDir, listSpecFiles } from './artifact-paths.js';
+import { Logger } from '../../utils/logger.js';
 
 export const BOULDER_STATE_FILE = ".flow-engine/sflow/boulder-state.json";
 
@@ -76,7 +77,7 @@ export async function migrateSingleArtifact(srcPath: string, dstPath: string): P
     try {
       await copyFile(srcPath, dstPath);
     } catch (err) {
-      console.warn(`[migrateSingleArtifact] Failed to copy ${srcPath} -> ${dstPath}:`, err instanceof Error ? err.message : err);
+      Logger.warn(`[migrateSingleArtifact] Failed to copy ${srcPath} -> ${dstPath}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }
@@ -98,7 +99,7 @@ export async function migrateLegacyArtifacts(changeDir: string): Promise<void> {
   try {
     await ensureMigrateDir(changeDir);
   } catch (err) {
-    console.warn(`[migrateLegacyArtifacts] ensureMigrateDir failed for ${changeDir}:`, err instanceof Error ? err.message : err);
+    Logger.warn(`[migrateLegacyArtifacts] ensureMigrateDir failed for ${changeDir}: ${err instanceof Error ? err.message : String(err)}`);
     return;
   }
   
@@ -127,7 +128,7 @@ export async function migrateLegacyArtifacts(changeDir: string): Promise<void> {
         }
       }
     } catch (err) {
-      console.warn(`[migrateLegacyArtifacts] Specs directory migration failed (${legacySpecsDir} -> ${newSpecsDir}):`, err instanceof Error ? err.message : err);
+      Logger.warn(`[migrateLegacyArtifacts] Specs directory migration failed (${legacySpecsDir} -> ${newSpecsDir}): ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   
@@ -135,7 +136,7 @@ export async function migrateLegacyArtifacts(changeDir: string): Promise<void> {
     const { writeFile } = await import('node:fs/promises');
     await writeFile(markerPath, new Date().toISOString());
   } catch (err) {
-    console.warn(`[migrateLegacyArtifacts] Marker write failed (${markerPath}):`, err instanceof Error ? err.message : err);
+    Logger.warn(`[migrateLegacyArtifacts] Marker write failed (${markerPath}): ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -260,7 +261,7 @@ export async function detectWorkflowState(
           reasons.push('Contract is stale, needs regeneration');
         }
       } catch (err) {
-        console.warn(`[detectWorkflowState] Contract staleness check failed for ${changeDir}:`, err instanceof Error ? err.message : err);
+        Logger.warn(`[detectWorkflowState] Contract staleness check failed for ${changeDir}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }
@@ -315,7 +316,7 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
         const uiDesignPath = await resolveArtifactPath(changeDir, 'ui-design.md');
         await unlink(uiDesignPath);
       } catch (err) {
-        console.warn(`[detectStateMismatch] Failed to delete invalid ui-design.md at ${changeDir}:`, err instanceof Error ? err.message : err);
+        Logger.warn(`[detectStateMismatch] Failed to delete invalid ui-design.md at ${changeDir}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
     return 'specifying';
