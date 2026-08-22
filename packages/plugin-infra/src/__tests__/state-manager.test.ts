@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdir, rm, writeFile, readFile, access } from 'fs/promises';
 import { join } from 'path';
-import { createStateManager, detectStateMismatch, simpleHash, writeStateFile } from '../features/state-manager.js';
+import { createStateManager, detectStateMismatch, simpleHash, writeStateFile, detectWorkflowState } from '../features/state-manager.js';
 // P1-1: Import migration helper functions
 import {
   ensureMigrateDir,
@@ -854,5 +854,117 @@ describe('readSpecContent', () => {
   it('should return null if spec does not exist', async () => {
     const content = await readSpecContent(dir, 'auth.md');
     expect(content).toBeNull();
+  });
+});
+
+// ─── Wave 6: detectWorkflowState Tests ──────────────────────────────────────────
+
+describe('detectWorkflowState — exploring state reachability', () => {
+  const dir = tempDir('detect-exploring');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should return exploring when no artifacts exist', async () => {
+    // No .flow-engine/sflow/ directory or artifacts
+    const result = await detectWorkflowState(dir);
+    expect(result.state).toBe('exploring');
+    expect(result.skill).toBe('need-explorer');
+    expect(result.reasons).toContain('No planning artifacts found');
+  });
+
+  it('should return exploring when .flow-engine/sflow/ exists but no artifacts', async () => {
+    // .flow-engine/sflow/ directory exists but empty
+    await ensureDir(dir + '/.flow-engine/sflow');
+    const result = await detectWorkflowState(dir);
+    expect(result.state).toBe('exploring');
+    expect(result.skill).toBe('need-explorer');
+  });
+
+  it('should return exploring when only state.json exists (no planning artifacts)', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
+      state: 'exploring',
+      mode: 'full'
+    }));
+    const result = await detectWorkflowState(dir);
+    expect(result.state).toBe('exploring');
+    expect(result.skill).toBe('need-explorer');
+  });
+});
+
+describe('detectWorkflowState — backward compatibility', () => {
+  const dir = tempDir('detect-backward-compat');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await ensureDir(dir + '/.flow-engine/sflow');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should return specifying when proposal exists but design/tasks missing', async () => {
+    await writeFile(dir + '/.flow-engine/sflow/proposal.md', '# Proposal');
+    const result = await detectWorkflowState(dir);
+    expect(result.state).toBe('specifying');
+    expect(result.skill).toBe('spec-writer');
+  });
+
+  it('should return specifying when specs exist but design/tasks missing', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow/specs');
+    await writeFile(dir + '/.flow-engine/sflow/specs/auth.md', '# Auth Spec');
+    const result = await detectWorkflowState(dir);
+    expect(result.state).toBe('specifying');
+    expect(result.skill).toBe('spec-writer');
+  });
+
+  it('should return bridging when contract exists but not approved', async () => {
+    await writeFile(dir + '/.flow-engine/sflow/proposal.md', '# Proposal');
+    await writeFile(dir + '/.flow-engine/sflow/design.md', '# Design');
+    await writeFile(dir + '/.flow-engine/sflow/tasks.md', '# Tasks');
+    await writeFile(dir + '/.flow-engine/sflow/execution-contract.md', '# Contract');
+    const result = await detectWorkflowState(dir);
+    expect(result.state).toBe('bridging');
+    expect(result.skill).toBe('contract-builder');
+    expect(result.reasons).toContain('Contract exists but not approved');
+  });
+
+  it('should return executing when contract is approved', async () => {
+    await writeFile(dir + '/.flow-engine/sflow/proposal.md', '# Proposal');
+    await writeFile(dir + '/.flow-engine/sflow/design.md', '# Design');
+    await writeFile(dir + '/.flow-engine/sflow/tasks.md', '# Tasks');
+    await writeFile(dir + '/.flow-engine/sflow/execution-contract.md', '# Contract');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
+      state: 'approved-for-build',
+      mode: 'full',
+      contractApproved: true
+    }));
+    const result = await detectWorkflowState(dir);
+    expect(result.state).toBe('executing');
+    expect(result.skill).toBe('build-executor');
+    expect(result.isApproved).toBe(true);
+  });
+
+  it('should return executing when state is already executing', async () => {
+    await writeFile(dir + '/.flow-engine/sflow/proposal.md', '# Proposal');
+    await writeFile(dir + '/.flow-engine/sflow/design.md', '# Design');
+    await writeFile(dir + '/.flow-engine/sflow/tasks.md', '# Tasks');
+    await writeFile(dir + '/.flow-engine/sflow/execution-contract.md', '# Contract');
+    await writeFile(dir + '/.flow-engine/sflow/state.json', JSON.stringify({
+      state: 'executing',
+      mode: 'full'
+    }));
+    const result = await detectWorkflowState(dir);
+    expect(result.state).toBe('executing');
+    expect(result.isApproved).toBe(true);
   });
 });
