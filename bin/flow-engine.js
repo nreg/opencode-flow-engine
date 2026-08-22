@@ -436,34 +436,36 @@ async function installSkillsCommand(args) {
   
   // 确定分发源目录（使用 fileURLToPath 定位包根，兼容 npx/全局安装）
   let sourceDir;
+  let isDevPath = false; // P1-1: 标记是否使用 devPath 回退
   try {
     // 方案1：通过 import.meta.url 定位（bin/ → 包根）
     const binDir = dirname(fileURLToPath(import.meta.url));
     const pkgRoot = join(binDir, '..');
     sourceDir = join(pkgRoot, 'skills');
-
+    
     // 验证目录存在
     if (!exists(sourceDir)) {
       // 方案2：开发模式 - 尝试从项目根定位
       const devPath = join(pkgRoot, 'packages', 'plugin-infra', 'skills');
       if (exists(devPath)) {
         sourceDir = devPath;
+        isDevPath = true; // P1-1: 标记使用了 devPath 回退
       } else {
         throw new Error(`技能源目录不存在: ${sourceDir}`);
       }
     }
-
+    
     // P1-2: 源目录验证 - 确保是项目根 skills/（防误装轨道 1 技能）
     const { basename, dirname: getParentDir } = await import('path');
     const sourceDirName = basename(sourceDir);
     const parentDir = getParentDir(sourceDir);
     const parentDirName = basename(parentDir);
-
+    
     // 检查目录名是否为 'skills'
     if (sourceDirName !== 'skills') {
       throw new Error(`源目录名必须为 'skills'，当前为: ${sourceDirName}`);
     }
-
+    
     // 检查是否误定位到 workflows/sflow/skills（轨道 1 技能）
     if (parentDirName === 'sflow') {
       const grandparentDir = getParentDir(parentDir);
@@ -476,14 +478,17 @@ async function installSkillsCommand(args) {
         );
       }
     }
-
-    // 检查父目录是否为包根（包含 package.json）
-    const packageJsonPath = join(parentDir, 'package.json');
-    if (!exists(packageJsonPath)) {
-      throw new Error(
-        `源目录父路径不是有效的包根（缺少 package.json）: ${parentDir}\n` +
-        `请确保 opencode-flow-engine 已正确安装。`
-      );
+    
+    // P1-1: 区分验证强度 - 主路径严格验证 package.json，devPath 回退跳过
+    if (!isDevPath) {
+      // 检查父目录是否为包根（包含 package.json）
+      const packageJsonPath = join(parentDir, 'package.json');
+      if (!exists(packageJsonPath)) {
+        throw new Error(
+          `源目录父路径不是有效的包根（缺少 package.json）: ${parentDir}\n` +
+          `请确保 opencode-flow-engine 已正确安装。`
+        );
+      }
     }
   } catch (err) {
     console.error(`错误: 无法定位技能源目录: ${err.message}`);

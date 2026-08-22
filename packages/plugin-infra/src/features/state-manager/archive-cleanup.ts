@@ -129,9 +129,12 @@ async function readStateJson(sflowDir: string): Promise<{ changeName: string; mo
 }
 
 /**
- * Concurrent execution control flag
+ * Concurrent execution control flag with timeout protection
+ * P1-2: Add timestamp to detect stale locks
  */
 let inProgress = false;
+let inProgressSince: number | null = null;
+const IN_PROGRESS_TIMEOUT_MS = 30000; // 30 seconds
 
 /**
  * Archive cleanup - Move active artifacts to archive directory
@@ -148,20 +151,31 @@ export async function archiveCleanup(
   changeDir: string,
   changeNameOverride?: string
 ): Promise<ArchiveCleanupResult> {
-  // P0-3: Concurrent execution guard
+  // P0-3: Concurrent execution guard with timeout protection
+  // P1-2: Check if inProgress lock is stale (older than 30 seconds)
   if (inProgress) {
-    const fallbackChangeName = changeNameOverride || generateChangeName();
-    return {
-      archivedFiles: [],
-      preservedAssets: [],
-      archiveDir: join(changeDir, '.flow-engine', 'sflow', 'archive', fallbackChangeName),
-      changeName: fallbackChangeName,
-      error: 'Archive cleanup already in progress',
-      success: false
-    };
+    const now = Date.now();
+    if (inProgressSince !== null && (now - inProgressSince) > IN_PROGRESS_TIMEOUT_MS) {
+      // Lock is stale, reset it
+      console.warn(`警告: 检测到过期的 inProgress 锁（已存在 ${Math.round((now - inProgressSince) / 1000)} 秒），自动释放`);
+      inProgress = false;
+      inProgressSince = null;
+    } else {
+      // Lock is still valid
+      const fallbackChangeName = changeNameOverride || generateChangeName();
+      return {
+        archivedFiles: [],
+        preservedAssets: [],
+        archiveDir: join(changeDir, '.flow-engine', 'sflow', 'archive', fallbackChangeName),
+        changeName: fallbackChangeName,
+        error: 'Archive cleanup already in progress',
+        success: false
+      };
+    }
   }
   
   inProgress = true;
+  inProgressSince = Date.now(); // P1-2: Record timestamp when setting lock
   const sflowDir = join(changeDir, '.flow-engine', 'sflow');
   const archiveBaseDir = join(sflowDir, 'archive');
   
@@ -215,6 +229,7 @@ export async function archiveCleanup(
     // If no active artifacts, return error without creating archive directory
     if (!hasActiveArtifacts) {
       inProgress = false;
+      inProgressSince = null; // P1-2: Reset timestamp
       return {
         archivedFiles: [],
         preservedAssets: [],
@@ -412,6 +427,7 @@ export async function archiveCleanup(
 
     // P0-3: Reset concurrent execution flag
     inProgress = false;
+    inProgressSince = null; // P1-2: Reset timestamp
     
     return {
       archivedFiles,
@@ -424,6 +440,7 @@ export async function archiveCleanup(
   } catch (err) {
     // P0-3: Reset concurrent execution flag on error
     inProgress = false;
+    inProgressSince = null; // P1-2: Reset timestamp
     
     const fallbackChangeName = changeNameOverride || generateChangeName();
     return {
