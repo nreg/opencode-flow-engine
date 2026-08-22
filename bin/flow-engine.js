@@ -422,7 +422,7 @@ async function installSkillsCommand(args) {
   const { homedir } = await import('os');
   
   // 解析过滤参数
-  let filterPattern = 'gsap-'; // 默认只安装 gsap-* 技能
+  let filterPattern = null; // 默认安装全部轨道 2 技能
   if (args && args.length > 0) {
     if (args.includes('--all')) {
       filterPattern = null; // 安装所有技能
@@ -440,12 +440,12 @@ async function installSkillsCommand(args) {
     // 方案1：通过 import.meta.url 定位（bin/ → 包根）
     const binDir = dirname(fileURLToPath(import.meta.url));
     const pkgRoot = join(binDir, '..');
-    sourceDir = join(pkgRoot, 'workflows', 'sflow', 'skills');
-    
+    sourceDir = join(pkgRoot, 'skills');
+
     // 验证目录存在
     if (!exists(sourceDir)) {
       // 方案2：回退到 process.cwd() 相对定位（开发模式）
-      const devPath = join(process.cwd(), 'workflows', 'sflow', 'skills');
+      const devPath = join(process.cwd(), 'skills');
       if (exists(devPath)) {
         sourceDir = devPath;
       } else {
@@ -552,8 +552,8 @@ Commands:
   status [dir]            Show workflow status
   validate <change-dir>   Validate artifacts
   install-skills [options] Install bundled skills to ~/.agents/skills/
-                           --filter <pattern>  Filter skills by prefix (default: gsap-)
-                           --all              Install all skills
+                           --filter <pattern>  Filter skills by prefix
+                           --all              Install all skills (default)
   help                    Show this help message
   version                 Show version
 
@@ -566,8 +566,8 @@ Examples:
   sflow init ./my-project Initialize in specific directory
   sflow status            Show status of current project
   sflow validate ./changes/my-feature  Validate specific change
-  sflow install-skills    Install GSAP skills (default)
-  sflow install-skills --all  Install all skills
+  sflow install-skills    Install all track-2 skills (default)
+  sflow install-skills --filter gsap-  Install GSAP skills only
   sflow install-skills --filter frontend-  Install frontend-* skills
   `);
 }
