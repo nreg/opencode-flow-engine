@@ -3,8 +3,8 @@ import { Logger } from './logger';
 import { join } from 'path';
 import { mkdir, rm, readFile, writeFile } from 'fs/promises';
 
-const TEST_LOG_DIR = join(process.cwd(), '.flow-engine', 'sflow');
-const TEST_LOG_FILE = join(TEST_LOG_DIR, 'plugin.log');
+const TEST_LOG_DIR = join(import.meta.dir, '__logger_test_tmp__');
+const TEST_LOG_FILE = join(TEST_LOG_DIR, '.flow-engine', 'sflow', 'plugin.log');
 
 describe('Logger', () => {
   beforeEach(async () => {
@@ -15,7 +15,7 @@ describe('Logger', () => {
       // 目录不存在，忽略
     }
     // 重置 Logger 状态（重新初始化）
-    Logger.initialize(process.cwd());
+    Logger.initialize(TEST_LOG_DIR);
   });
 
   afterEach(async () => {
@@ -180,7 +180,7 @@ describe('Logger', () => {
 
   describe('Task 1.5: 路径初始化', () => {
     it('应该支持显式 initialize(changeDir)', async () => {
-      const customDir = process.cwd();
+      const customDir = TEST_LOG_DIR;
       Logger.initialize(customDir);
 
       await Logger.log('Test with custom dir');
@@ -191,7 +191,7 @@ describe('Logger', () => {
 
     it('应该支持默认 process.cwd()', async () => {
       // 不调用 initialize，使用默认路径
-      Logger.initialize(process.cwd());
+      Logger.initialize(TEST_LOG_DIR);
 
       await Logger.log('Test with default dir');
 

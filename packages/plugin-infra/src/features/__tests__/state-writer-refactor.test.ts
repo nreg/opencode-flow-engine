@@ -11,7 +11,7 @@
  * - Generic decisionPoint handling
  * - All behaviors combined
  */
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { mkdir, rm, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeStateFile } from '../state-manager/state-writer.js';
@@ -1006,13 +1006,13 @@ describe('writeStateFile — non-array decisionPoints handling (P1-1 fix)', () =
       })
     );
 
-    // Capture Logger.warn
+    // Capture Logger.warn using spyOn for automatic restoration
     const { Logger } = await import('../../utils/logger.js');
     const warnSpy: string[] = [];
-    const originalWarn = Logger.warn;
-    Logger.warn = async (message: string) => {
+    const spy = spyOn(Logger, 'warn');
+    spy.mockImplementation(async (message: string) => {
       warnSpy.push(message);
-    };
+    });
 
     try {
       await writeStateFile(dir, 'specifying');
@@ -1025,7 +1025,7 @@ describe('writeStateFile — non-array decisionPoints handling (P1-1 fix)', () =
       expect(warnSpy.length).toBeGreaterThan(0);
       expect(warnSpy[0]).toContain('decisionPoints is not an array');
     } finally {
-      Logger.warn = originalWarn;
+      spy.mockRestore();
     }
   });
 

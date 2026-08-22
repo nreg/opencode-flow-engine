@@ -268,7 +268,7 @@ describe('Config Loader', () => {
 });
 
 describe('Config File Integration with Agent Builder', () => {
-  const CWD_SFLOW = join(process.cwd(), '.flow-engine/sflow');
+  const CWD_SFLOW = join(process.cwd(), '.flow-engine', 'sflow');
   const CWD_CONFIG = join(CWD_SFLOW, 'config.json');
   const USER_CONFIG_DIR = join(tmpdir(), `sflow-test-user-${Date.now()}`);
   const USER_CONFIG_FILE = join(USER_CONFIG_DIR, 'opencode-flow-engine.json');

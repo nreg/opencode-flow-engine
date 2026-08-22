@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import type { DecisionPoint } from '@opencode-flow-engine/core';
 
 describe('record_decision_point state progression', () => {
-  const testDir = join(process.cwd(), '.test-dp-state-fix');
+  const testDir = join(import.meta.dir, '__dp_state_fix_tmp__');
   const stateDir = join(testDir, '.flow-engine', 'sflow');
   const statePath = join(stateDir, 'state.json');
 
