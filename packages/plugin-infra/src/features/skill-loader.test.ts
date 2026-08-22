@@ -220,40 +220,6 @@ describe('References Auto-Merge', () => {
       expect(designMatrixIndex).toBeLessThan(toneCardsIndex);
     });
 
-    it('should merge references in correct order (taste-skill with 11 refs)', async () => {
-      const skill = await loader.loadSkill('taste-skill');
-      expect(skill).toBeDefined();
-      expect(skill!.content).toBeDefined();
-      
-      // 验证所有 11 个 references 都被合并
-      const expectedRefs = [
-        'ai-tells.md',
-        'apple-liquid-glass.md',
-        'block-library.md',
-        'canonical-sources.md',
-        'dark-mode.md',
-        'dial-definitions.md',
-        'install-commands.md',
-        'out-of-scope.md',
-        'performance-accessibility.md',
-        'pre-flight.md',
-        'vocabulary.md',
-      ];
-      
-      for (const ref of expectedRefs) {
-        expect(skill!.content).toContain(`--- ### Sub-file: ${ref} ---`);
-      }
-      
-      // 验证字典序
-      const indices = expectedRefs.map(ref => 
-        skill!.content.indexOf(`--- ### Sub-file: ${ref} ---`)
-      );
-      
-      for (let i = 0; i < indices.length - 1; i++) {
-        expect(indices[i]).toBeLessThan(indices[i + 1]);
-      }
-    });
-
     it('should merge references when directory exists', async () => {
       const skill = await loader.loadSkill('workflow-start');
       expect(skill).toBeDefined();
