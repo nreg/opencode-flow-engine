@@ -63,6 +63,16 @@ Or use slash commands for cross-workflow actions:
 /flow-restyle        → One-click visual restyle (frontend only)
 ```
 
+### CLI Commands
+
+```bash
+# Install GSAP animation skills (8 skills) to global directory
+flow-engine install-skills
+
+# Show help
+flow-engine --help
+```
+
 ---
 
 ## Workflow Selection
@@ -203,16 +213,19 @@ Step 7: Anti-AI-Slop Check   → 8 categories, 42 rules
 
 **71 Brand Design References**: Built-in library of design systems from Apple, Stripe, Linear, Notion, Claude, Ferrari, and 65+ other brands. Each includes complete color palettes, typography scales, and interaction patterns. Users select a reference brand to inherit design tokens, then fine-tune in Step 4.
 
-### ui-implementer: 9 Merged Frontend Skills
+### ui-implementer: 10 Merged Frontend Skills
 
-The `ui-implementer` subagent loads 9 frontend specialized skills at runtime, each providing domain-specific rules and patterns:
+The `ui-implementer` subagent loads 10 frontend specialized skills at runtime, each providing domain-specific rules and patterns:
 
 | Phase | Skills Loaded | Purpose |
 |-------|--------------|---------|
 | Design Intake | `taste-skill` | Aesthetic direction, anti-slop, design reading |
 | Design System | `shadcn-ui` + `ui-ux-pro-max` | Component library theming, 95+ color palettes, 56 font pairings |
 | Component Implementation | `frontend-design-pro` + `svg-architect` | Component layout, SVG icon design |
+| **Motion & Animation** | **GSAP skill group** (gsap-core, gsap-scrolltrigger, gsap-timeline, etc. - 8 skills) | **Complex animation scenarios**: loading, entrance, scroll-triggered, Banner/Hero animations |
 | Quality Pass | `polish` + `frontend-code-review` + `impeccable` + `frontend-performance-optimization` | Spacing/alignment, code review, production standards, Core Web Vitals |
+
+**GSAP Skills Installation**: Run `flow-engine install-skills` to automatically install 8 GSAP animation skills to the global directory `~/.agents/skills/`.
 
 **Delivery Checklist**: 10-item pre-commit verification (console.log cleanup, interactive states, hardcoded colors, responsive adaptation, accessibility, and more).
 
@@ -334,6 +347,13 @@ SDD-mode execution is orchestrated via `.flow-engine/sflow/execution-plan.json`:
 - Tracks ADDED/MODIFIED/REMOVED/RENAMED specs per change
 - Auto-detects spec sync conflicts across changes
 - spec-merger merges delta specs on close
+
+### Archive Cleanup Mechanism
+- **Auto-executed after DP-7 confirmation**: When workflow enters `closing` state and user confirms, archive cleanup is automatically executed
+- **Move active artifacts**: proposal.md, design.md, tasks.md, execution-contract.md, specs/ are moved to `.flow-engine/sflow/archive/<change-name>/`
+- **Preserve cross-change assets**: lessons.md, subagent-store/, notifications/, verification-report.md, archive-metadata.json remain in root directory
+- **Reset state**: state.json is reset to initial state (state: "exploring"), ensuring next workflow can start normally
+- **Audit trail**: Archive is moved, not deleted, preserving historical traceability
 
 ### Hook System
 

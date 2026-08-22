@@ -253,17 +253,17 @@ Use bash commands to execute archive cleanup:
 CHANGE_NAME=$(node -e "const s = require('./.flow-engine/sflow/state.json'); console.log(s.changeName || 'change-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19))")
 
 # 2. 创建归档目录
-mkdir -p ".flow-engine/sflow/archive/${CHANGE_NAME}"
+mkdir -p ".flow-engine/sflow/archive/\${CHANGE_NAME}"
 
 # 3. 移动工件
-mv .flow-engine/sflow/proposal.md ".flow-engine/sflow/archive/${CHANGE_NAME}/"
-mv .flow-engine/sflow/design.md ".flow-engine/sflow/archive/${CHANGE_NAME}/"
-mv .flow-engine/sflow/tasks.md ".flow-engine/sflow/archive/${CHANGE_NAME}/"
-mv .flow-engine/sflow/execution-contract.md ".flow-engine/sflow/archive/${CHANGE_NAME}/"
-mv .flow-engine/sflow/specs ".flow-engine/sflow/archive/${CHANGE_NAME}/"
+mv .flow-engine/sflow/proposal.md ".flow-engine/sflow/archive/\${CHANGE_NAME}/"
+mv .flow-engine/sflow/design.md ".flow-engine/sflow/archive/\${CHANGE_NAME}/"
+mv .flow-engine/sflow/tasks.md ".flow-engine/sflow/archive/\${CHANGE_NAME}/"
+mv .flow-engine/sflow/execution-contract.md ".flow-engine/sflow/archive/\${CHANGE_NAME}/"
+mv .flow-engine/sflow/specs ".flow-engine/sflow/archive/\${CHANGE_NAME}/"
 
 # 4. 备份 state.json
-cp .flow-engine/sflow/state.json ".flow-engine/sflow/archive/${CHANGE_NAME}/state.json.backup"
+cp .flow-engine/sflow/state.json ".flow-engine/sflow/archive/\${CHANGE_NAME}/state.json.backup"
 
 # 5. 重置 state.json
 echo '{"state":"exploring","changeName":"","mode":"full","batches_completed":0,"last_transition":"'"$(date -u +"%Y-%m-%dT%H:%M:%SZ")"'"}' > .flow-engine/sflow/state.json

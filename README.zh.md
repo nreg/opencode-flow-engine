@@ -63,6 +63,16 @@ npm install -g opencode-flow-engine
 /flow-restyle        → 一键换调性（仅前端项目）
 ```
 
+### CLI 命令
+
+```bash
+# 安装 GSAP 动效技能（8 项）到全局目录
+flow-engine install-skills
+
+# 查看帮助
+flow-engine --help
+```
+
 ---
 
 ## 工作流选择
@@ -203,16 +213,19 @@ Step 7: 反 AI-slop 检查  → 8 类 42 条规则
 
 **71 品牌设计参考**：内置 Apple、Stripe、Linear、Notion、Claude、Ferrari 等 71 个品牌的完整设计系统。每个包含完整色板、字体层级和交互模式。用户选择参考品牌后自动继承设计 token，再在 Step 4 中微调。
 
-### ui-implementer：9 项前端技能融合
+### ui-implementer：10 项前端技能融合
 
-`ui-implementer` 子智能体在运行时加载 9 项前端专业技能，每项提供领域特定的规则和模式：
+`ui-implementer` 子智能体在运行时加载 10 项前端专业技能，每项提供领域特定的规则和模式：
 
 | 阶段 | 加载技能 | 作用 |
 |------|---------|------|
 | 设计解读 | `taste-skill` | 美学方向、反 AI-slop、设计阅读 |
 | 设计系统 | `shadcn-ui` + `ui-ux-pro-max` | 组件库主题、95+ 色板、56 字体配对 |
 | 组件实现 | `frontend-design-pro` + `svg-architect` | 组件布局、SVG 图标设计 |
+| **动效阶段** | **GSAP 技能组**（gsap-core、gsap-scrolltrigger、gsap-timeline 等 8 项） | **复杂动画场景**：loading、进场、滚动触发、Banner/Hero 动效 |
 | 质量检查 | `polish` + `frontend-code-review` + `impeccable` + `frontend-performance-optimization` | 间距/对齐、代码审查、生产标准、Core Web Vitals |
+
+**GSAP 技能安装**：运行 `flow-engine install-skills` 自动安装 8 项 GSAP 动效技能到全局目录 `~/.agents/skills/`。
 
 **交付自检清单**：10 项提交前验证（console.log 清除、交互状态完备、无硬编码颜色、响应式适配、无障碍等）。
 
@@ -334,6 +347,13 @@ SDD 模式通过 `.flow-engine/sflow/execution-plan.json` 编排：
 - 跟踪每个变更的 ADDED/MODIFIED/REMOVED/RENAMED 规格
 - 自动检测跨变更的规格同步冲突
 - spec-merger 在关闭时合并增量规格
+
+### 归档清理机制
+- **DP-7 确认后自动执行**：工作流进入 `closing` 状态并经用户确认后，自动执行归档清理
+- **移动 active 工件**：proposal.md、design.md、tasks.md、execution-contract.md、specs/ 移动到 `.flow-engine/sflow/archive/<change-name>/`
+- **保留跨变更资产**：lessons.md、subagent-store/、notifications/、verification-report.md、archive-metadata.json 保留在根目录
+- **重置状态**：state.json 重置为初始状态（state: "exploring"），确保下次工作流可正常启动
+- **审计追踪**：归档是移动而非删除，历史可追溯
 
 ### 钩子系统
 
