@@ -28,6 +28,9 @@ async function main() {
     case 'validate':
       await validateCommand(args.slice(1));
       break;
+    case 'install-skills':
+      await installSkillsCommand();
+      break;
     case 'help':
     case '--help':
     case '-h':
@@ -411,6 +414,95 @@ async function validateCommand(args) {
 }
 
 /**
+ * Install bundled skills to ~/.agents/skills/
+ */
+async function installSkillsCommand() {
+  const { readdirSync, statSync, existsSync: exists, mkdirSync: mkdir, cpSync } = await import('fs');
+  const { homedir } = await import('os');
+  
+  // 确定分发源目录（bin 目录的上一级）
+  const sourceDir = join(__dirname, '..', 'workflows', 'sflow', 'skills');
+  // 确定目标目录
+  const targetDir = join(homedir(), '.agents', 'skills');
+  
+  console.log('安装分发源技能到全局目录...');
+  console.log(`源目录: ${sourceDir}`);
+  console.log(`目标目录: ${targetDir}`);
+  console.log('');
+  
+  // 检查源目录是否存在
+  if (!exists(sourceDir)) {
+    console.error(`错误: 分发源目录不存在: ${sourceDir}`);
+    console.error('请确保 opencode-flow-engine 已正确安装');
+    process.exit(1);
+  }
+  
+  // 确保目标目录存在
+  if (!exists(targetDir)) {
+    mkdir(targetDir, { recursive: true });
+    console.log(`创建目标目录: ${targetDir}`);
+  }
+  
+  // 找出所有 gsap-* 技能目录
+  let skillDirs = [];
+  try {
+    const entries = readdirSync(sourceDir, { withFileTypes: true });
+    skillDirs = entries
+      .filter(entry => entry.isDirectory() && entry.name.startsWith('gsap-'))
+      .map(entry => entry.name);
+  } catch (err) {
+    console.error(`错误: 无法读取源目录: ${err.message}`);
+    process.exit(1);
+  }
+  
+  if (skillDirs.length === 0) {
+    console.log('未找到 gsap-* 技能目录');
+    return;
+  }
+  
+  console.log(`找到 ${skillDirs.length} 个技能目录:`);
+  skillDirs.forEach(name => console.log(`  - ${name}`));
+  console.log('');
+  
+  // 逐目录复制
+  let installedCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+  
+  for (const skillName of skillDirs) {
+    const sourcePath = join(sourceDir, skillName);
+    const targetPath = join(targetDir, skillName);
+    
+    try {
+      // 幂等性检查：目标目录已存在同名技能
+      if (exists(targetPath)) {
+        console.log(`已安装: ${skillName} (跳过)`);
+        skippedCount++;
+        continue;
+      }
+      
+      // 复制目录
+      cpSync(sourcePath, targetPath, { recursive: true });
+      console.log(`已安装: ${skillName}`);
+      installedCount++;
+    } catch (err) {
+      console.error(`错误: 复制 ${skillName} 失败: ${err.message}`);
+      errorCount++;
+    }
+  }
+  
+  console.log('');
+  console.log('安装完成:');
+  console.log(`  成功: ${installedCount}`);
+  console.log(`  跳过: ${skippedCount}`);
+  console.log(`  失败: ${errorCount}`);
+  
+  if (errorCount > 0) {
+    process.exit(1);
+  }
+}
+
+/**
  * Show help
  */
 function showHelp() {
@@ -425,6 +517,7 @@ Commands:
   init --user             Initialize user-level config (~/.flow-engine/sflow/config.json)
   status [dir]            Show workflow status
   validate <change-dir>   Validate artifacts
+  install-skills          Install bundled skills to ~/.agents/skills/
   help                    Show this help message
   version                 Show version
 
@@ -437,6 +530,7 @@ Examples:
   sflow init ./my-project Initialize in specific directory
   sflow status            Show status of current project
   sflow validate ./changes/my-feature  Validate specific change
+  sflow install-skills    Install GSAP skills to global directory
   `);
 }
 
