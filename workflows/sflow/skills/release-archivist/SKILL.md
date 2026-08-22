@@ -155,8 +155,10 @@ See [references/archive-procedure.md](references/archive-procedure.md) for outpu
 {
   "state": "exploring",
   "changeName": "",
-  "mode": "full",
+  "mode": "<保留原值>",
   "batches_completed": 0,
+  "afk": false,
+  "afkTier": 0,
   "last_transition": "<ISO-8601-timestamp>"
 }
 ```

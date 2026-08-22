@@ -17,7 +17,8 @@ import {
   readFile, 
   writeFile, 
   access,
-  readdir
+  readdir,
+  stat
 } from 'fs/promises';
 import { join } from 'path';
 import { constants } from 'fs';
@@ -160,9 +161,9 @@ export async function archiveCleanup(
       if (await exists(srcPath)) {
         const dstPath = join(archiveDir, artifact);
         try {
-          // Check if it's a file or directory
-          const stats = await readdir(srcPath).catch(() => null);
-          if (stats) {
+          // Check if it's a file or directory using stat (P1-2 fix)
+          const fileStat = await stat(srcPath);
+          if (fileStat.isDirectory()) {
             // It's a directory
             await cp(srcPath, dstPath, { recursive: true });
           } else {
