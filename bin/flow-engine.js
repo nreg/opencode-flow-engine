@@ -29,7 +29,7 @@ async function main() {
       await validateCommand(args.slice(1));
       break;
     case 'install-skills':
-      await installSkillsCommand();
+      await installSkillsCommand(args.slice(1));
       break;
     case 'help':
     case '--help':
@@ -415,27 +415,57 @@ async function validateCommand(args) {
 
 /**
  * Install bundled skills to ~/.agents/skills/
+ * @param {string[]} args - Command arguments (--filter <pattern> or --all)
  */
-async function installSkillsCommand() {
-  const { readdirSync, statSync, existsSync: exists, mkdirSync: mkdir, cpSync } = await import('fs');
+async function installSkillsCommand(args) {
+  const { readdirSync, existsSync: exists, mkdirSync: mkdir, cpSync } = await import('fs');
   const { homedir } = await import('os');
   
-  // 确定分发源目录（bin 目录的上一级）
-  const sourceDir = join(__dirname, '..', 'workflows', 'sflow', 'skills');
+  // 解析过滤参数
+  let filterPattern = 'gsap-'; // 默认只安装 gsap-* 技能
+  if (args && args.length > 0) {
+    if (args.includes('--all')) {
+      filterPattern = null; // 安装所有技能
+    } else {
+      const filterIndex = args.indexOf('--filter');
+      if (filterIndex !== -1 && args[filterIndex + 1]) {
+        filterPattern = args[filterIndex + 1];
+      }
+    }
+  }
+  
+  // 确定分发源目录（使用 fileURLToPath 定位包根，兼容 npx/全局安装）
+  let sourceDir;
+  try {
+    // 方案1：通过 import.meta.url 定位（bin/ → 包根）
+    const binDir = dirname(fileURLToPath(import.meta.url));
+    const pkgRoot = join(binDir, '..');
+    sourceDir = join(pkgRoot, 'workflows', 'sflow', 'skills');
+    
+    // 验证目录存在
+    if (!exists(sourceDir)) {
+      // 方案2：回退到 process.cwd() 相对定位（开发模式）
+      const devPath = join(process.cwd(), 'workflows', 'sflow', 'skills');
+      if (exists(devPath)) {
+        sourceDir = devPath;
+      } else {
+        throw new Error(`技能源目录不存在: ${sourceDir}`);
+      }
+    }
+  } catch (err) {
+    console.error(`错误: 无法定位技能源目录: ${err.message}`);
+    console.error('请确保 opencode-flow-engine 已正确安装或在项目根目录下运行');
+    process.exit(1);
+  }
+  
   // 确定目标目录
   const targetDir = join(homedir(), '.agents', 'skills');
   
   console.log('安装分发源技能到全局目录...');
   console.log(`源目录: ${sourceDir}`);
   console.log(`目标目录: ${targetDir}`);
+  console.log(`过滤条件: ${filterPattern ? filterPattern + '*' : '全部'}`);
   console.log('');
-  
-  // 检查源目录是否存在
-  if (!exists(sourceDir)) {
-    console.error(`错误: 分发源目录不存在: ${sourceDir}`);
-    console.error('请确保 opencode-flow-engine 已正确安装');
-    process.exit(1);
-  }
   
   // 确保目标目录存在
   if (!exists(targetDir)) {
@@ -443,12 +473,16 @@ async function installSkillsCommand() {
     console.log(`创建目标目录: ${targetDir}`);
   }
   
-  // 找出所有 gsap-* 技能目录
+  // 找出符合条件的技能目录
   let skillDirs = [];
   try {
     const entries = readdirSync(sourceDir, { withFileTypes: true });
     skillDirs = entries
-      .filter(entry => entry.isDirectory() && entry.name.startsWith('gsap-'))
+      .filter(entry => {
+        if (!entry.isDirectory()) return false;
+        if (!filterPattern) return true; // --all：安装全部
+        return entry.name.startsWith(filterPattern);
+      })
       .map(entry => entry.name);
   } catch (err) {
     console.error(`错误: 无法读取源目录: ${err.message}`);
@@ -456,7 +490,7 @@ async function installSkillsCommand() {
   }
   
   if (skillDirs.length === 0) {
-    console.log('未找到 gsap-* 技能目录');
+    console.log(`未找到${filterPattern ? ` ${filterPattern}*` : ''}技能目录`);
     return;
   }
   
@@ -517,7 +551,9 @@ Commands:
   init --user             Initialize user-level config (~/.flow-engine/sflow/config.json)
   status [dir]            Show workflow status
   validate <change-dir>   Validate artifacts
-  install-skills          Install bundled skills to ~/.agents/skills/
+  install-skills [options] Install bundled skills to ~/.agents/skills/
+                           --filter <pattern>  Filter skills by prefix (default: gsap-)
+                           --all              Install all skills
   help                    Show this help message
   version                 Show version
 
@@ -530,7 +566,9 @@ Examples:
   sflow init ./my-project Initialize in specific directory
   sflow status            Show status of current project
   sflow validate ./changes/my-feature  Validate specific change
-  sflow install-skills    Install GSAP skills to global directory
+  sflow install-skills    Install GSAP skills (default)
+  sflow install-skills --all  Install all skills
+  sflow install-skills --filter frontend-  Install frontend-* skills
   `);
 }
 

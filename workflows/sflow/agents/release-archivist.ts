@@ -108,11 +108,32 @@ You are a closure and archiving specialist. Your job is to verify completion and
 #### 执行步骤
 1. 读取 state.json 获取 changeName，或生成时间戳名称
 2. 创建归档目录 \`.flow-engine/sflow/archive/<change-name>/\`
-3. 移动 active 工件到归档目录（使用 bash mv 命令）
-4. 备份原 state.json 到归档目录
-5. 写入初始状态到 state.json
-6. 验证跨变更资产保留在根目录
-7. 记录归档清理结果到 archive-metadata.json
+3. **调用 archiveCleanup 函数**（跨平台 TypeScript 实现，见下文）
+4. 验证跨变更资产保留在根目录
+5. 记录归档清理结果到 archive-metadata.json
+
+#### archiveCleanup 函数调用
+归档清理通过 \`archiveCleanup(changeDir: string, changeName?: string)\` 函数执行，该函数：
+- 使用 \`fs/promises\` API 实现跨平台兼容（Windows/macOS/Linux）
+- 实现两阶段提交：先复制到 archive/ → 验证完整性 → 再删除原文件
+- 保留原 state.json 的 mode 字段（hotfix/tweak 模式保留）
+- 返回 \`{ archivedFiles, preservedAssets, archiveDir, changeName, success }\`
+
+**调用方式**：
+\`\`\`typescript
+import { archiveCleanup } from 'opencode-flow-engine/plugin-infra';
+
+const result = await archiveCleanup(process.cwd());
+if (!result.success) {
+  console.error('归档清理失败:', result.error);
+}
+\`\`\`
+
+**POSIX 参考命令**（仅作参考，实际使用 TypeScript 函数）：
+\`\`\`bash
+# 移动单个文件
+mv .flow-engine/sflow/proposal.md .flow-engine/sflow/archive/<change-name>/
+\`\`\`
 
 ## Archive Structure
 

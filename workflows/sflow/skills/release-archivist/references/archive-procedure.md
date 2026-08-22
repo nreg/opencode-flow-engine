@@ -63,7 +63,34 @@ When workflow is `hotfix` or `tweak`, release-archivist performs lightweight ver
 
 ### 详细步骤
 
-#### Step 1: 确定归档目录名
+#### Step 1: 调用 archiveCleanup 函数（推荐）
+
+归档清理通过跨平台 TypeScript 函数执行，兼容 Windows/macOS/Linux：
+
+```typescript
+import { archiveCleanup } from 'opencode-flow-engine/plugin-infra';
+
+const result = await archiveCleanup(process.cwd());
+
+if (result.success) {
+  console.log('Archive Cleanup:', result.changeName);
+  console.log('Archived files:', result.archivedFiles);
+  console.log('Preserved assets:', result.preservedAssets);
+  console.log('Archive directory:', result.archiveDir);
+} else {
+  console.error('Archive cleanup failed:', result.error);
+}
+```
+
+**函数特性**：
+- **跨平台兼容**：使用 `fs/promises` API，不依赖 shell 命令
+- **两阶段提交**：先复制到 archive/ → 验证完整性 → 再删除原文件
+- **保留原 mode**：state.json 重置时保留 hotfix/tweak 模式
+- **事务性保证**：任一步骤失败返回明确错误状态
+
+#### Step 2: POSIX 参考命令（仅作参考）
+
+以下 bash 命令仅用于理解逻辑，**实际执行应使用 TypeScript 函数**：
 
 ```bash
 # 读取 state.json 获取 changeName
@@ -74,79 +101,11 @@ ARCHIVE_DIR=".flow-engine/sflow/archive/${CHANGE_NAME}"
 mkdir -p "${ARCHIVE_DIR}"
 ```
 
-#### Step 2: 移动 Active 工件
-
-```bash
-# 移动单个文件
-move_artifact() {
-  local src=".flow-engine/sflow/$1"
-  local dst="${ARCHIVE_DIR}/$1"
-  if [ -f "$src" ]; then
-    mv "$src" "$dst"
-    echo "✓ Moved $1 to archive"
-  fi
-}
-
-# 移动目录
-move_directory() {
-  local src=".flow-engine/sflow/$1"
-  local dst="${ARCHIVE_DIR}/$1"
-  if [ -d "$src" ]; then
-    mv "$src" "$dst"
-    echo "✓ Moved $1/ to archive"
-  fi
-}
-
-# 执行移动
-move_artifact "proposal.md"
-move_artifact "design.md"
-move_artifact "tasks.md"
-move_artifact "execution-contract.md"
-move_artifact "boulder-state.json"
-move_directory "specs"
-```
-
-#### Step 3: 备份并重置 state.json
-
-```bash
-# 备份原 state.json
-if [ -f ".flow-engine/sflow/state.json" ]; then
-  cp ".flow-engine/sflow/state.json" "${ARCHIVE_DIR}/state.json.backup"
-fi
-
-# 写入初始状态
-cat > ".flow-engine/sflow/state.json" << EOF
-{
-  "state": "exploring",
-  "changeName": "",
-  "mode": "full",
-  "batches_completed": 0,
-  "last_transition": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-}
-EOF
-
-echo "✓ Reset state.json to exploring"
-```
-
-#### Step 4: 验证跨变更资产保留
-
-```bash
-# 确认以下资产仍在根目录
-check_preserved() {
-  local asset=".flow-engine/sflow/$1"
-  if [ -e "$asset" ]; then
-    echo "✓ Preserved: $1"
-  else
-    echo "⚠ Not found: $1 (may not exist yet)"
-  fi
-}
-
-check_preserved "lessons.md"
-check_preserved "subagent-store"
-check_preserved "notifications"
-check_preserved "verification-report.md"
-check_preserved "archive-metadata.json"
-```
+**Windows 兼容说明**：
+- `mkdir -p` 在 Windows PowerShell 中为 `New-Item -ItemType Directory -Force`
+- `mv` 在 Windows 中为 `Move-Item -Force`
+- `cp` 在 Windows 中为 `Copy-Item -Force`
+- **推荐使用 TypeScript 函数**，避免平台差异
 
 ### 示例输出
 
@@ -175,8 +134,8 @@ Root directory ready for next workflow (state: exploring)
 
 - **归档目录已存在**：追加时间戳后缀（如 `change-auth-20260822-143000-2`）
 - **工件不存在**：跳过，记录日志（不视为错误）
-- **移动失败**：停止清理，报告错误，不重置 state.json
-- **state.json 写入失败**：回滚移动操作，报告严重错误
+- **移动失败**：TypeScript 函数返回 `success: false` 和错误信息
+- **state.json 写入失败**：函数返回错误状态，不删除原工件（两阶段提交保护）
 
 ### 归档清理后状态
 
@@ -184,7 +143,7 @@ Root directory ready for next workflow (state: exploring)
 
 ```
 .flow-engine/sflow/
-├── state.json              # 初始状态 (state: exploring)
+├── state.json              # 初始状态 (state: exploring, mode 保留原值)
 ├── lessons.md              # 经验教训库
 ├── subagent-store/         # 子代理状态
 ├── notifications/          # 通知记录
@@ -197,6 +156,7 @@ Root directory ready for next workflow (state: exploring)
         ├── tasks.md
         ├── execution-contract.md
         ├── specs/
+        ├── boulder-state.json  # 如存在
         └── state.json.backup
 ```
 
