@@ -159,4 +159,33 @@ describe('install-skills CLI', () => {
       expect(skillDirs).not.toContain('gsap-core');
     });
   });
+
+  describe('P1-2: 源目录验证', () => {
+    it('应验证源目录名为 skills', async () => {
+      const binPath = join(process.cwd(), 'bin', 'flow-engine.js');
+      const content = await readFile(binPath, 'utf-8');
+      
+      // 验证包含目录名验证逻辑
+      expect(content).toContain("if (sourceDirName !== 'skills')");
+    });
+
+    it('应检测并拒绝轨道 1 技能目录（workflows/sflow/skills）', async () => {
+      const binPath = join(process.cwd(), 'bin', 'flow-engine.js');
+      const content = await readFile(binPath, 'utf-8');
+      
+      // 验证包含轨道 1 检测逻辑
+      expect(content).toContain("if (parentDirName === 'sflow')");
+      expect(content).toContain('检测到轨道 1 技能目录');
+      expect(content).toContain('禁止安装轨道 1 技能');
+    });
+
+    it('应验证父目录包含 package.json', async () => {
+      const binPath = join(process.cwd(), 'bin', 'flow-engine.js');
+      const content = await readFile(binPath, 'utf-8');
+      
+      // 验证包含 package.json 验证逻辑
+      expect(content).toContain("const packageJsonPath = join(parentDir, 'package.json')");
+      expect(content).toContain('源目录父路径不是有效的包根');
+    });
+  });
 });

@@ -444,13 +444,47 @@ async function installSkillsCommand(args) {
 
     // 验证目录存在
     if (!exists(sourceDir)) {
-      // 方案2：回退到 process.cwd() 相对定位（开发模式）
-      const devPath = join(process.cwd(), 'skills');
+      // 方案2：开发模式 - 尝试从项目根定位
+      const devPath = join(pkgRoot, 'packages', 'plugin-infra', 'skills');
       if (exists(devPath)) {
         sourceDir = devPath;
       } else {
         throw new Error(`技能源目录不存在: ${sourceDir}`);
       }
+    }
+
+    // P1-2: 源目录验证 - 确保是项目根 skills/（防误装轨道 1 技能）
+    const { basename, dirname: getParentDir } = await import('path');
+    const sourceDirName = basename(sourceDir);
+    const parentDir = getParentDir(sourceDir);
+    const parentDirName = basename(parentDir);
+
+    // 检查目录名是否为 'skills'
+    if (sourceDirName !== 'skills') {
+      throw new Error(`源目录名必须为 'skills'，当前为: ${sourceDirName}`);
+    }
+
+    // 检查是否误定位到 workflows/sflow/skills（轨道 1 技能）
+    if (parentDirName === 'sflow') {
+      const grandparentDir = getParentDir(parentDir);
+      const grandparentDirName = basename(grandparentDir);
+      if (grandparentDirName === 'workflows') {
+        throw new Error(
+          `检测到轨道 1 技能目录: ${sourceDir}\n` +
+          `禁止安装轨道 1 技能（workflows/sflow/skills/）。\n` +
+          `请确保 opencode-flow-engine 已正确安装或在项目根目录下运行。`
+        );
+      }
+    }
+
+    // 检查父目录是否为包根（包含 package.json）
+    const packageJsonPath = join(parentDir, 'package.json');
+    if (!exists(packageJsonPath)) {
+      throw new Error(
+        `源目录父路径不是有效的包根（缺少 package.json）: ${parentDir}\n` +
+        `请确保 opencode-flow-engine 已正确安装。`
+      );
+    }
     }
   } catch (err) {
     console.error(`错误: 无法定位技能源目录: ${err.message}`);

@@ -91,12 +91,34 @@ function generateChangeName(): string {
 
 /**
  * Read state.json and extract changeName and mode
+ * P0-3: Validate JSON integrity
  */
-async function readStateJson(sflowDir: string): Promise<{ changeName: string; mode: string } | null> {
+async function readStateJson(sflowDir: string): Promise<{ changeName: string; mode: string; error?: string } | null> {
   const statePath = join(sflowDir, 'state.json');
   try {
     const content = await readFile(statePath, 'utf-8');
-    const state = JSON.parse(content);
+
+    // P0-3: Validate JSON parse
+    let state;
+    try {
+      state = JSON.parse(content);
+    } catch (parseError) {
+      return {
+        changeName: '',
+        mode: 'full',
+        error: `state.json is corrupted: ${parseError instanceof Error ? parseError.message : String(parseError)}`
+      };
+    }
+
+    // P0-3: Validate required fields exist
+    if (typeof state !== 'object' || state === null) {
+      return {
+        changeName: '',
+        mode: 'full',
+        error: 'state.json is invalid: not an object'
+      };
+    }
+
     return {
       changeName: state.changeName || '',
       mode: state.mode || 'full'
@@ -213,6 +235,18 @@ export async function archiveCleanup(
     }
     
     await mkdir(archiveDir, { recursive: true });
+
+    // P0-2: Create archive-in-progress marker file
+    const markerPath = join(archiveDir, '.archive-in-progress');
+    try {
+      await writeFile(markerPath, JSON.stringify({
+        startTime: new Date().toISOString(),
+        changeName,
+        pid: process.pid
+      }, null, 2), 'utf-8');
+    } catch (err) {
+      console.error(`Warning: Failed to create archive marker: ${err}`);
+    }
     
     // Phase 1: Copy to archive (two-phase commit)
     const copiedFiles: string[] = [];
@@ -338,9 +372,22 @@ export async function archiveCleanup(
         afkTier: 0,
         last_transition: new Date().toISOString()
       };
-      
-      await writeFile(statePath, JSON.stringify(initialState, null, 2), 'utf-8');
-      archivedFiles.push('state.json (reset)');
+
+      // P0-1: Atomic write - write to temp file first, then rename
+      const stateTmpPath = join(sflowDir, 'state.json.tmp');
+      try {
+        await writeFile(stateTmpPath, JSON.stringify(initialState, null, 2), 'utf-8');
+        await rename(stateTmpPath, statePath);
+        archivedFiles.push('state.json (reset)');
+      } catch (err) {
+        console.error(`Warning: Failed to reset state.json: ${err}`);
+        // Clean up temp file if it exists
+        try {
+          await rm(stateTmpPath, { force: true });
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
     }
     
     // Verify preserved assets
@@ -350,7 +397,14 @@ export async function archiveCleanup(
         preservedAssets.push(asset);
       }
     }
-    
+
+    // P0-2: Remove archive-in-progress marker on success
+    try {
+      await rm(markerPath, { force: true });
+    } catch {
+      // Ignore marker cleanup errors
+    }
+
     // P0-3: Reset concurrent execution flag
     inProgress = false;
     

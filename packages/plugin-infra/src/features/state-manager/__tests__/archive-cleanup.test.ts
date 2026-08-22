@@ -432,6 +432,75 @@ describe('archiveCleanup', () => {
       }
     }
   });
+
+  // P0-1: 原子写入测试 - 验证 state.json.tmp 不残留
+  it('should not leave state.json.tmp after atomic write (P0-1)', async () => {
+    const result = await archiveCleanup(TEST_DIR);
+
+    expect(result.success).toBe(true);
+
+    // 验证 state.json.tmp 不存在
+    const tmpPath = join(SFLOW_DIR, 'state.json.tmp');
+    const tmpExists = await exists(tmpPath);
+    expect(tmpExists).toBe(false);
+
+    // 验证 state.json 存在且有效
+    const statePath = join(SFLOW_DIR, 'state.json');
+    const stateExists = await exists(statePath);
+    expect(stateExists).toBe(true);
+
+    const stateContent = await readFile(statePath, 'utf-8');
+    const state = JSON.parse(stateContent);
+    expect(state.state).toBe('exploring');
+  });
+
+  // P0-2: 归档标记文件测试 - 成功后标记文件应被删除
+  it('should remove archive-in-progress marker on success (P0-2)', async () => {
+    const result = await archiveCleanup(TEST_DIR);
+
+    expect(result.success).toBe(true);
+
+    // 验证标记文件不存在
+    const archiveDir = join(SFLOW_DIR, 'archive', 'test-change-001');
+    const markerPath = join(archiveDir, '.archive-in-progress');
+    const markerExists = await exists(markerPath);
+    expect(markerExists).toBe(false);
+  });
+
+  // P0-3: state.json 损坏验证测试
+  it('should handle corrupted state.json gracefully (P0-3)', async () => {
+    // 创建损坏的 state.json
+    await writeFile(join(SFLOW_DIR, 'state.json'), '{ invalid json }');
+
+    const result = await archiveCleanup(TEST_DIR);
+
+    // 应该仍然成功（使用默认值）
+    expect(result.success).toBe(true);
+
+    // 验证 state.json 被正确重置
+    const statePath = join(SFLOW_DIR, 'state.json');
+    const stateContent = await readFile(statePath, 'utf-8');
+    const state = JSON.parse(stateContent);
+    expect(state.state).toBe('exploring');
+    expect(state.mode).toBe('full'); // 默认模式
+  });
+
+  // P0-3: state.json 非对象验证测试
+  it('should handle non-object state.json gracefully (P0-3)', async () => {
+    // 创建非对象的 state.json
+    await writeFile(join(SFLOW_DIR, 'state.json'), '"string value"');
+
+    const result = await archiveCleanup(TEST_DIR);
+
+    // 应该仍然成功（使用默认值）
+    expect(result.success).toBe(true);
+
+    // 验证 state.json 被正确重置
+    const statePath = join(SFLOW_DIR, 'state.json');
+    const stateContent = await readFile(statePath, 'utf-8');
+    const state = JSON.parse(stateContent);
+    expect(state.state).toBe('exploring');
+  });
 });
 
 describe('listArchives', () => {
