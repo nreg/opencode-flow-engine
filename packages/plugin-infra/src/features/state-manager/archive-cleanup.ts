@@ -128,18 +128,24 @@ export async function archiveCleanup(
   const preservedAssets: string[] = [];
   
   try {
-    // Step 1: Determine change name
+    // Step 1: Determine change name and mode
     let changeName = changeNameOverride || '';
     let originalMode = 'full';
-    
-    if (!changeName) {
-      const state = await readStateJson(sflowDir);
-      if (state) {
-        changeName = state.changeName || generateChangeName();
-        originalMode = state.mode;
-      } else {
-        changeName = generateChangeName();
+
+    // Always read state.json to get mode (even if changeName is overridden)
+    const state = await readStateJson(sflowDir);
+    if (state) {
+      if (!changeName) {
+        changeName = state.changeName || '';
       }
+      if (state.mode) {
+        originalMode = state.mode;
+      }
+    }
+
+    // Generate changeName if still empty
+    if (!changeName) {
+      changeName = generateChangeName();
     }
     
     let archiveDir = join(archiveBaseDir, changeName);

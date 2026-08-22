@@ -126,16 +126,64 @@ describe('archiveCleanup', () => {
       batches_completed: 1,
       last_transition: '2026-08-23T10:00:00Z'
     }, null, 2));
-    
+
     const result = await archiveCleanup(TEST_DIR);
-    
+
     expect(result.success).toBe(true);
-    
+
     const statePath = join(SFLOW_DIR, 'state.json');
     const stateContent = await readFile(statePath, 'utf-8');
     const state = JSON.parse(stateContent);
-    
+
     expect(state.mode).toBe('hotfix');
+  });
+
+  it('should preserve hotfix mode when changeNameOverride is provided (P1-1)', async () => {
+    // Create state.json with hotfix mode
+    await writeFile(join(SFLOW_DIR, 'state.json'), JSON.stringify({
+      state: 'closing',
+      changeName: 'test-hotfix-override',
+      mode: 'hotfix',
+      batches_completed: 1,
+      last_transition: '2026-08-23T10:00:00Z'
+    }, null, 2));
+
+    // Call with changeNameOverride
+    const result = await archiveCleanup(TEST_DIR, 'custom-change');
+
+    expect(result.success).toBe(true);
+    expect(result.changeName).toBe('custom-change');
+
+    // Verify mode is still hotfix (not default 'full')
+    const statePath = join(SFLOW_DIR, 'state.json');
+    const stateContent = await readFile(statePath, 'utf-8');
+    const state = JSON.parse(stateContent);
+
+    expect(state.mode).toBe('hotfix');
+  });
+
+  it('should preserve tweak mode when changeNameOverride is provided (P1-1)', async () => {
+    // Create state.json with tweak mode
+    await writeFile(join(SFLOW_DIR, 'state.json'), JSON.stringify({
+      state: 'closing',
+      changeName: 'test-tweak-override',
+      mode: 'tweak',
+      batches_completed: 1,
+      last_transition: '2026-08-23T10:00:00Z'
+    }, null, 2));
+
+    // Call with changeNameOverride
+    const result = await archiveCleanup(TEST_DIR, 'custom-change-2');
+
+    expect(result.success).toBe(true);
+    expect(result.changeName).toBe('custom-change-2');
+
+    // Verify mode is still tweak (not default 'full')
+    const statePath = join(SFLOW_DIR, 'state.json');
+    const stateContent = await readFile(statePath, 'utf-8');
+    const state = JSON.parse(stateContent);
+
+    expect(state.mode).toBe('tweak');
   });
   
   it('should use timestamp if changeName is empty', async () => {
