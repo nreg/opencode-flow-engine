@@ -801,20 +801,13 @@ describe('listSpecFiles', () => {
     expect(files.sort()).toEqual(['auth.md', 'user.md']);
   });
 
-  it('should list files from legacy path if new path does not exist', async () => {
+  it('should NOT fallback to legacy path (project root specs/)', async () => {
+    // Project root specs/ exists but should NOT be detected
     await ensureDir(dir + '/specs');
     await writeFile(dir + '/specs/auth.md', '# Auth Spec');
     const files = await listSpecFiles(dir);
-    expect(files).toEqual(['auth.md']);
-  });
-
-  it('should prefer new path over legacy path', async () => {
-    await ensureDir(dir + '/.flow-engine/sflow/specs');
-    await writeFile(dir + '/.flow-engine/sflow/specs/auth.md', '# Auth Spec');
-    await ensureDir(dir + '/specs');
-    await writeFile(dir + '/specs/user.md', '# User Spec');
-    const files = await listSpecFiles(dir);
-    expect(files).toEqual(['auth.md']);
+    // Should return empty array, not fallback to legacy path
+    expect(files).toEqual([]);
   });
 
   it('should return empty array if specs does not exist', async () => {

@@ -79,19 +79,15 @@ export async function resolveSpecsDir(changeDir: string): Promise<string> {
 }
 
 /**
- * List spec files with dual-path compatibility.
- * Tries new path first, falls back to legacy path.
+ * List spec files from change directory.
+ * Only detects delta specs in .flow-engine/sflow/specs/ (change-specific).
+ * Does NOT fallback to project root specs/ (which is the main spec library).
+ * Returns empty array if directory does not exist or read fails.
  */
 export async function listSpecFiles(changeDir: string): Promise<string[]> {
   const newPath = `${changeDir}/.flow-engine/sflow/specs`;
-  const legacyPath = `${changeDir}/specs`;
   
-  const newFiles = await listFiles(newPath, '.md').catch(() => []);
-  if (newFiles.length > 0) {
-    return newFiles;
-  }
-  
-  return listFiles(legacyPath, '.md').catch(() => []);
+  return listFiles(newPath, '.md').catch(() => []);
 }
 
 /**
