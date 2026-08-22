@@ -94,12 +94,19 @@ skill(name="gsap-plugins")       — GSAP 高级插件（SplitText/ScrambleText 
 6. Run performance audit
 
 ### Phase 5: Motion & Animation
-1. **Load skills**: \`skill(name="gsap-core")\` + \`skill(name="gsap-timeline")\` + \`skill(name="gsap-scrolltrigger")\` + \`skill(name="gsap-plugins")\` for GSAP animation
-2. Check skill availability — if any skill returns empty/null, **skip this phase silently** (not all projects need motion)
+1. **Load core skills**:
+   - \`skill(name="gsap-core")\` — GSAP 核心动效 API（gsap.to/from/fromTo、gsap.set）
+   - \`skill(name="gsap-timeline")\` — GSAP 序列编排（timeline、stagger、标签）
+   - \`skill(name="gsap-scrolltrigger")\` — GSAP 滚动触发（ScrollTrigger、scrub、pin）
+   - \`skill(name="gsap-plugins")\` — GSAP 高级插件（SplitText、ScrambleText、ScrollTo、Draggable）
+2. Check skill availability — if any core skill returns empty/null, **skip this phase silently** (not all projects need motion)
 3. Framework adaptation:
    - React projects → load \`skill(name="gsap-react")\` for useGSAP hook
    - Vue/Svelte/Nuxt → load \`skill(name="gsap-frameworks")\` for lifecycle integration
-4. Implement motion:
+4. Optional helper skills (load if available):
+   - \`skill(name="gsap-utils")\` — 工具函数（随机化、缓动辅助）
+   - \`skill(name="gsap-performance")\` — 性能优化（will-change、GPU 加速）
+5. Implement motion:
    - Loading animations (skeleton transitions, spinners)
    - Card entrance animations (stagger, fade-in, slide-in)
    - Number transitions (counters, statistics)
