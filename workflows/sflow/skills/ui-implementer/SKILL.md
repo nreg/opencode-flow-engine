@@ -15,6 +15,7 @@ description: "前端 UI 实现专用智能体。将 ui-design.md 设计规范转
 | Phase 2 设计系统 | `skill(name="shadcn-ui")` + `skill(name="ui-ux-pro-max")` | 组件库主题、色板/字体选择 |
 | Phase 3 组件实现 | `skill(name="frontend-design-pro")` + `skill(name="svg-architect")` | 组件布局设计、SVG 图标 |
 | Phase 4 质量检查 | `skill(name="polish")` + `skill(name="frontend-code-review")` + `skill(name="impeccable")` + `skill(name="frontend-performance-optimization")` | 间距/对齐、代码审查、品质标准、性能优化 |
+| Phase 5 动效实现 | `skill(name="gsap-core")` + `skill(name="gsap-timeline")` + `skill(name="gsap-scrolltrigger")` + `skill(name="gsap-plugins")` | GSAP 动效：loading、卡片进场、数字过渡、滚动触发、Banner/Hero |
 
 **技能可用性检查**：调用 `skill(name="<name>")` 后检查返回值。如不可用（空/假值），跳过该技能静默继续，不要阻塞或告警。不是所有安装都包含每项前端技能。
 
@@ -142,6 +143,56 @@ npx shadcn@latest add <component>   # 添加组件
 所有 UI 组件必须定义以下状态：default / hover / focus（键盘导航）/ active / disabled / loading（骨架屏 > spinner）/ empty（有引导文案）/ error（有错误说明和恢复操作）
 
 **加载态优先级**：元素匹配轮廓的骨架屏 > 占位色块 > 通用旋转 spinner
+
+## Phase 5: Motion & Animation（动效实现）
+
+### 适用场景
+
+- Loading 动画（骨架屏过渡、spinner、进度条）
+- 卡片进场动画（stagger、淡入、滑入）
+- 数字过渡动画（计数器、统计数据）
+- 滚动触发动画（视差、固定、reveal）
+- Banner/Hero 营销页动效（文字动画、图片缩放、CTA 引导）
+
+### 技能加载顺序
+
+1. **gsap-core** — GSAP 核心动效 API（gsap.to/from/fromTo、gsap.set）
+2. **gsap-timeline** — GSAP 序列编排（timeline、stagger、标签）
+3. **gsap-scrolltrigger** — GSAP 滚动触发（ScrollTrigger、scrub、pin）
+4. **gsap-plugins** — GSAP 高级插件（SplitText、ScrambleText、ScrollTo、Draggable）
+
+### 技能可用性检查
+
+调用 `skill(name="gsap-*")` 后检查返回值：
+- **可用**（返回内容）→ 加载动效规则，进入动效实现阶段
+- **不可用**（空/假值）→ **跳过动效阶段，静默继续**（与 Phase 1-4 容错逻辑一致）
+
+**不阻塞、不告警**。不是所有项目都需要动效，也不是所有安装都包含 GSAP 技能。
+
+### 框架适配
+
+| 框架 | 额外技能 |
+|------|---------|
+| React | `skill(name="gsap-react")` — useGSAP hook、ref 管理 |
+| Vue / Svelte / Nuxt | `skill(name="gsap-frameworks")` — 生命周期集成、ref 管理 |
+
+### 动效纪律对齐
+
+| 约束 | 标准 |
+|------|------|
+| 时长范围 | 100-700ms（Micro: 100-200ms, Transition: 200-400ms, Emphasis: 400-700ms） |
+| 缓动曲线 | 使用标准缓动：`power2.inOut` / `power3.out` / `expo.out`，避免 linear |
+| prefers-reduced-motion | 所有动画设置 fallback：`gsap.matchMedia().add("(prefers-reduced-motion: reduce)", ...)` |
+| 滚动监听 | **禁裸 scroll 监听**，使用 `ScrollTrigger.create()` 代替 `window.addEventListener('scroll', ...)` |
+| 性能优化 | 仅动画 `transform` / `opacity`，避免触发 layout 的属性（width/height/top/left） |
+
+### 动效实现流程
+
+1. **检查技能可用性** — 调用 `skill(name="gsap-core")`，检查返回值
+2. **加载核心技能** — 如可用，依次加载 gsap-core → gsap-timeline → gsap-scrolltrigger → gsap-plugins
+3. **框架适配** — 根据项目框架加载 gsap-react 或 gsap-frameworks
+4. **实现动效** — 按设计稿或 ui-design.md 动效规范实现
+5. **性能验证** — 检查是否仅动画 transform/opacity，是否处理 prefers-reduced-motion
 
 ## Task Completion Rule
 

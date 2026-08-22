@@ -50,6 +50,10 @@ skill(name="polish")             — Spacing, alignment, responsive quality chec
 skill(name="frontend-code-review") — Code quality scanning, severity grading
 skill(name="frontend-performance-optimization") — Core Web Vitals, bundle optimization
 skill(name="impeccable")         — Production-grade design standards, absolute bans
+skill(name="gsap-core")          — GSAP 核心动效 API
+skill(name="gsap-timeline")      — GSAP 序列编排
+skill(name="gsap-scrolltrigger") — GSAP 滚动触发
+skill(name="gsap-plugins")       — GSAP 高级插件（SplitText/ScrambleText 等）
 \`\`\`
 
 **Skill availability handling**: Before each \`skill(name="<name>")\` call, check the return value.
@@ -88,6 +92,25 @@ skill(name="impeccable")         — Production-grade design standards, absolute
 4. Check responsive breakpoints
 5. Review code against frontend-code-review standards
 6. Run performance audit
+
+### Phase 5: Motion & Animation
+1. **Load skills**: \`skill(name="gsap-core")\` + \`skill(name="gsap-timeline")\` + \`skill(name="gsap-scrolltrigger")\` + \`skill(name="gsap-plugins")\` for GSAP animation
+2. Check skill availability — if any skill returns empty/null, **skip this phase silently** (not all projects need motion)
+3. Framework adaptation:
+   - React projects → load \`skill(name="gsap-react")\` for useGSAP hook
+   - Vue/Svelte/Nuxt → load \`skill(name="gsap-frameworks")\` for lifecycle integration
+4. Implement motion:
+   - Loading animations (skeleton transitions, spinners)
+   - Card entrance animations (stagger, fade-in, slide-in)
+   - Number transitions (counters, statistics)
+   - Scroll-triggered animations (parallax, pin, reveal)
+   - Banner/Hero marketing animations (text effects, image zoom, CTA guides)
+5. Motion discipline:
+   - Duration: 100-700ms (Micro: 100-200ms, Transition: 200-400ms, Emphasis: 400-700ms)
+   - Easing: Standard curves (power2.inOut, power3.out, expo.out) — avoid linear
+   - \`prefers-reduced-motion\`: \`gsap.matchMedia().add("(prefers-reduced-motion: reduce)", ...)\` fallback
+   - **No raw scroll listeners**: Use \`ScrollTrigger.create()\` instead of \`window.addEventListener('scroll', ...)\`
+   - Performance: Only animate \`transform\` / \`opacity\`, avoid layout-triggering properties
 
 ## Anti-AI-Slop 8-Category Checks
 
