@@ -115,6 +115,64 @@ The closure is not complete until delta specs are merged. Specs that aren't sync
 
 See [references/archive-procedure.md](references/archive-procedure.md) for output standard and lightweight closure details.
 
+### Archive Cleanup（归档清理）
+
+**触发时机**：DP-7 归档确认后，在写入 verification-report.md 和 archive-metadata.json 之后执行。
+
+**目的**：清理 `.flow-engine/sflow/` 根目录的 active 工件，避免下次工作流状态检测误判（卡在 executing/specifying）。
+
+**核心原则**：归档是"移动"不是"删除"，保留审计追踪。
+
+#### 移动的 Active 工件
+
+移动到 `.flow-engine/sflow/archive/<change-name>/` 目录：
+
+- `proposal.md`
+- `design.md`
+- `tasks.md`
+- `execution-contract.md`
+- `specs/` 目录（含其中所有 .md 文件）
+- `state.json`（移动前先备份，然后重置）
+- `boulder-state.json`（如有）
+
+#### 保留的跨变更资产
+
+以下资产保留在 `.flow-engine/sflow/` 根目录，**不移动**：
+
+- `lessons.md` — 经验教训库，跨变更共享
+- `subagent-store/` — 子代理状态存储
+- `notifications/` — 通知记录
+- `verification-report.md` — 验证报告（本次变更）
+- `archive-metadata.json` — 归档元数据（本次变更）
+- `polling.log` — 轮询日志
+- `.artifacts-migrated` — 迁移标记
+
+#### state.json 重置
+
+移动后，重置 `state.json` 为初始状态：
+
+```json
+{
+  "state": "exploring",
+  "changeName": "",
+  "mode": "full",
+  "batches_completed": 0,
+  "last_transition": "<ISO-8601-timestamp>"
+}
+```
+
+确保下次 `detectWorkflowState` 从零检测，新工作流可正常启动。
+
+#### change-name 来源
+
+优先取 `state.json` 的 `changeName` 字段；为空则用时间戳（如 `change-20260822-143000`）。
+
+#### 实现位置
+
+归档清理逻辑在 `release-archivist.ts` 的 DP-7 流程后执行，或作为独立工具函数供 agent 调用。
+
+See [references/archive-procedure.md](references/archive-procedure.md) for detailed cleanup steps and example commands.
+
 ## LESSONS Knowledge Base Nomination
 
 Closing 阶段扫描 SUMMARY.md 和 PROGRESS.md，按条件提名入库。
