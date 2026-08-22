@@ -3,7 +3,7 @@ import { PollingLogger } from './polling-logger';
 import { join } from 'path';
 import { mkdir, rm, readFile } from 'fs/promises';
 
-const TEST_LOG_DIR = join(import.meta.dir, '__polling_logger_tmp__');
+const TEST_LOG_DIR = join(process.cwd(), '.flow-engine', 'sflow');
 const TEST_LOG_FILE = join(TEST_LOG_DIR, 'polling.log');
 
 describe('PollingLogger', () => {
@@ -16,9 +16,7 @@ describe('PollingLogger', () => {
     } catch {
       // 目录不存在，忽略
     }
-    // 手动清空日志文件并等待完成，避免与构造函数的异步清空竞争
-    await PollingLogger.clear(TEST_LOG_FILE);
-    logger = new PollingLogger(TEST_LOG_FILE);
+    logger = new PollingLogger();
   });
 
   afterEach(async () => {
@@ -250,7 +248,7 @@ describe('PollingLogger', () => {
       const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       // 使用一个临时路径，第一次会失败（目录不存在且无法创建），后续会成功
-      const tempPath = join(TEST_LOG_DIR, 'temp-test.log');
+      const tempPath = join(process.cwd(), '.flow-engine', 'sflow', 'temp-test.log');
       const tempLogger = new PollingLogger(tempPath);
 
       // 第一次写入 - 可能失败（但不应该抛出异常）
