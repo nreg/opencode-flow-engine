@@ -95,15 +95,17 @@ You are a closure and archiving specialist. Your job is to verify completion and
 {
   "state": "exploring",
   "changeName": "",
-  "mode": "full",
+  "mode": "<保留原值>",
   "batches_completed": 0,
+  "afk": false,
+  "afkTier": 0,
   "last_transition": "<ISO-8601-timestamp>"
 }
 \`\`\`
 确保下次 detectWorkflowState 从零检测，新工作流可正常启动。
 
 #### change-name 来源
-优先取 state.json 的 changeName 字段；为空则用时间戳（如 \`change-20260822-143000\`）。
+优先取 state.json 的 changeName 字段；为空则用时间戳（如 \`change-2026-08-23T10-00-00\`）。
 
 #### 执行步骤
 1. 读取 state.json 获取 changeName，或生成时间戳名称
@@ -261,36 +263,24 @@ Do NOT finish without providing this report. The orchestrator is waiting for you
 You have access to:
 - \`read\` - Read files and reports
 - \`write\` - Write verification report and archive
-- \`bash\` - Run tests and commands (use \`mv\` to move artifacts to archive)
+- \`bash\` - Run tests and commands
 - \`glob\` - Search for files
 - \`artifact_inspector\` - Inspect planning artifacts for decision-point audit
 
-### Archive Cleanup Commands
+### Archive Cleanup Execution
 
-Use bash commands to execute archive cleanup:
+**必须**使用 \`archiveCleanup\` TypeScript 函数执行归档清理，**禁止**使用 bash 命令：
 
-\`\`\`bash
-# 1. 确定归档目录名
-CHANGE_NAME=$(node -e "const s = require('./.flow-engine/sflow/state.json'); console.log(s.changeName || 'change-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19))")
+\`\`\`typescript
+import { archiveCleanup } from 'opencode-flow-engine/plugin-infra';
 
-# 2. 创建归档目录
-mkdir -p ".flow-engine/sflow/archive/\${CHANGE_NAME}"
-
-# 3. 移动工件
-mv .flow-engine/sflow/proposal.md ".flow-engine/sflow/archive/\${CHANGE_NAME}/"
-mv .flow-engine/sflow/design.md ".flow-engine/sflow/archive/\${CHANGE_NAME}/"
-mv .flow-engine/sflow/tasks.md ".flow-engine/sflow/archive/\${CHANGE_NAME}/"
-mv .flow-engine/sflow/execution-contract.md ".flow-engine/sflow/archive/\${CHANGE_NAME}/"
-mv .flow-engine/sflow/specs ".flow-engine/sflow/archive/\${CHANGE_NAME}/"
-
-# 4. 备份 state.json
-cp .flow-engine/sflow/state.json ".flow-engine/sflow/archive/\${CHANGE_NAME}/state.json.backup"
-
-# 5. 重置 state.json
-echo '{"state":"exploring","changeName":"","mode":"full","batches_completed":0,"last_transition":"'"$(date -u +"%Y-%m-%dT%H:%M:%SZ")"'"}' > .flow-engine/sflow/state.json
+const result = await archiveCleanup(process.cwd());
+if (!result.success) {
+  console.error('归档清理失败:', result.error);
+}
 \`\`\`
 
-**注意**：使用 \`mv\` 命令移动工件，而不是 \`rm\` 删除。`,
+该函数使用 \`fs/promises\` API 实现跨平台兼容（Windows/macOS/Linux），实现两阶段提交保证事务安全性。`,
       temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('release-archivist'),
 });

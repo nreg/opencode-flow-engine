@@ -48,6 +48,7 @@ const ACTIVE_ARTIFACTS = [
   'design.md',
   'tasks.md',
   'execution-contract.md',
+  'ui-design.md',
   'boulder-state.json'
 ];
 
@@ -140,9 +141,14 @@ export async function archiveCleanup(
       }
     }
     
-    const archiveDir = join(archiveBaseDir, changeName);
-    
-    // Step 2: Create archive directory
+    let archiveDir = join(archiveBaseDir, changeName);
+
+    // Step 2: Create archive directory (handle existing directory)
+    let suffix = 0;
+    while (await exists(archiveDir)) {
+      suffix++;
+      archiveDir = join(archiveBaseDir, `${changeName}-${suffix}`);
+    }
     await mkdir(archiveDir, { recursive: true });
     
     // Phase 1: Copy to archive (two-phase commit)
@@ -200,8 +206,25 @@ export async function archiveCleanup(
     // Phase 2: Remove originals and reset state.json
     // Only proceed if at least one file was copied
     if (copiedFiles.length > 0) {
-      // Remove original active artifacts
-      for (const artifact of ACTIVE_ARTIFACTS) {
+      // Remove original files that were successfully copied
+      for (const artifact of copiedFiles) {
+        // Skip state.json.backup (source state.json will be reset, not deleted)
+        if (artifact === 'state.json.backup') continue;
+
+        // Handle specs/ directory
+        if (artifact === 'specs/') {
+          if (await exists(specsSrc)) {
+            try {
+              await rm(specsSrc, { recursive: true, force: true });
+              archivedFiles.push('specs/');
+            } catch (err) {
+              console.error(`Warning: Failed to remove specs/: ${err}`);
+            }
+          }
+          continue;
+        }
+
+        // Handle regular artifacts
         const srcPath = join(sflowDir, artifact);
         if (await exists(srcPath)) {
           try {
@@ -212,16 +235,6 @@ export async function archiveCleanup(
           }
         }
       }
-      
-      // Remove original specs/
-      if (await exists(specsSrc)) {
-        try {
-          await rm(specsSrc, { recursive: true, force: true });
-          archivedFiles.push('specs/');
-        } catch (err) {
-          console.error(`Warning: Failed to remove specs/: ${err}`);
-        }
-      }
     }
     
     // Reset state.json (preserve original mode)
@@ -230,6 +243,8 @@ export async function archiveCleanup(
       changeName: '',
       mode: originalMode, // P1-4: Preserve original mode
       batches_completed: 0,
+      afk: false,
+      afkTier: 0,
       last_transition: new Date().toISOString()
     };
     
@@ -253,11 +268,12 @@ export async function archiveCleanup(
     };
     
   } catch (err) {
+    const fallbackChangeName = changeNameOverride || generateChangeName();
     return {
       archivedFiles,
       preservedAssets,
-      archiveDir: join(archiveBaseDir, changeNameOverride || generateChangeName()),
-      changeName: changeNameOverride || generateChangeName(),
+      archiveDir: join(archiveBaseDir, fallbackChangeName),
+      changeName: fallbackChangeName,
       error: err instanceof Error ? err.message : String(err),
       success: false
     };

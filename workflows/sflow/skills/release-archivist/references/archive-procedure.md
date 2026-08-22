@@ -132,7 +132,7 @@ Root directory ready for next workflow (state: exploring)
 
 ### 错误处理
 
-- **归档目录已存在**：追加时间戳后缀（如 `change-auth-20260822-143000-2`）
+- **归档目录已存在**：追加序号后缀（如 `change-auth-20260822-143000-2`、`change-auth-20260822-143000-3`）
 - **工件不存在**：跳过，记录日志（不视为错误）
 - **移动失败**：TypeScript 函数返回 `success: false` 和错误信息
 - **state.json 写入失败**：函数返回错误状态，不删除原工件（两阶段提交保护）
