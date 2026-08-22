@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Track 2 Skills Migration** - 轨道 2 技能分离
+  - 18 Track 2 skills migrated from `workflows/sflow/skills/` to project root `skills/` directory
+  - Semantic isolation: Track 1 (skill-loader injection source, 11 skills) vs Track 2 (runtime distribution source, 18 skills)
+  - Eliminates loadAllSkills() false injection risk for Track 2 skills
+  - Updated README.md and README.zh.md project structure documentation
+
 - **GSAP Animation Skills Integration** - GSAP 动效能力整合
   - 8 GSAP skills (gsap-core, gsap-scrolltrigger, gsap-timeline, gsap-draggable, gsap-motionpath, gsap-scrollto, gsap-easepack, gsap-utils) added as distribution source in `workflows/sflow/skills/gsap-*/`
   - ui-implementer Phase 5: Motion & Animation stage with GSAP skill loading
@@ -33,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Comprehensive test coverage (6 test cases + non-interference verification)
 
 ### Changed
+
+- **install-skills CLI Behavior** - install-skills 命令行为修正
+  - Source path changed from `workflows/sflow/skills/` to project root `skills/`
+  - Default filterPattern changed from `'gsap-'` to `null` (installs all 18 Track 2 skills)
+  - No-parameter execution now installs all skills instead of only GSAP skills
+  - Backward compatible: `--filter` and `--all` flags unchanged
 
 - Enhanced `writeStateFile` to support AFK fields and auto-close logic
 - Enhanced `restoreState` to force-close AFK on terminal state detection

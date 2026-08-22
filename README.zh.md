@@ -215,7 +215,7 @@ Step 7: 反 AI-slop 检查  → 8 类 42 条规则
 
 ### ui-implementer：10 项前端技能融合
 
-`ui-implementer` 子智能体在运行时加载 10 项前端专业技能，每项提供领域特定的规则和模式：
+`ui-implementer` 子智能体在运行时加载 10 项前端专业技能，每项提供领域特定的规则和模式。**技能分发源位置**：项目根 `skills/` 目录（轨道 2，18 个技能）。
 
 | 阶段 | 加载技能 | 作用 |
 |------|---------|------|
@@ -502,10 +502,11 @@ opencode-flow-engine/
 │   │       └── helpers/         # 辅助函数、output-extractor、
 │   │                            # completion-detector、polling
 │   └── shared/                  # 共享工具函数
+├── skills/                      # 轨道 2 前端技能分发源（18 个）
 ├── workflows/
 │   ├── sflow/                   # SFlow 工作流
 │   │   ├── agents/              # 11 个 agent 工厂
-│   │   ├── skills/              # 22 个技能定义（13 sFlow + 9 前端 UI）
+│   │   ├── skills/              # 11 个轨道 1 agent 同名技能（skill-loader 注入源）
 │   │   └── templates/           # 产物模板（含 UI-DESIGN.md）
 │   └── iflow/                   # IFlow 工作流
 │       ├── agents/              # 6 个 agent 工厂

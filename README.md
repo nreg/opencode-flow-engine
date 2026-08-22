@@ -215,7 +215,7 @@ Step 7: Anti-AI-Slop Check   → 8 categories, 42 rules
 
 ### ui-implementer: 10 Merged Frontend Skills
 
-The `ui-implementer` subagent loads 10 frontend specialized skills at runtime, each providing domain-specific rules and patterns:
+The `ui-implementer` subagent loads 10 frontend specialized skills at runtime, each providing domain-specific rules and patterns. **Skill distribution source**: Project root `skills/` directory (Track 2, 18 skills).
 
 | Phase | Skills Loaded | Purpose |
 |-------|--------------|---------|
@@ -530,10 +530,11 @@ opencode-flow-engine/
 │   │       └── helpers/         # Utility functions, output-extractor,
 │   │                            # completion-detector, polling
 │   └── shared/                  # Shared utilities
+├── skills/                      # Track 2 frontend skill distribution source (18 skills)
 ├── workflows/
 │   ├── sflow/                   # SFlow workflow
 │   │   ├── agents/              # 11 agent factories
-│   │   ├── skills/              # 22 skill definitions (13 sFlow + 9 frontend UI)
+│   │   ├── skills/              # 11 Track 1 agent-same-name skills (skill-loader injection source)
 │   │   └── templates/           # Artifact templates (incl. UI-DESIGN.md)
 │   └── iflow/                   # IFlow workflow
 │       ├── agents/              # 6 agent factories
