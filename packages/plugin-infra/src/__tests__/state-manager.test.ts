@@ -756,28 +756,23 @@ describe('resolveSpecsDir', () => {
     await cleanupDir(dir);
   });
 
-  it('should return new path if specs exists in .flow-engine/sflow/specs', async () => {
+  it('should return new path (.flow-engine/sflow/specs)', async () => {
     await ensureDir(dir + '/.flow-engine/sflow/specs');
     const path = await resolveSpecsDir(dir);
     expect(path).toBe(dir + '/.flow-engine/sflow/specs');
   });
 
-  it('should return legacy path if specs only in root', async () => {
+  it('should NOT fallback to legacy path (project root specs/)', async () => {
+    // Project root specs/ exists but should NOT be returned
     await ensureDir(dir + '/specs');
     const path = await resolveSpecsDir(dir);
-    expect(path).toBe(dir + '/specs');
-  });
-
-  it('should prefer new path over legacy path', async () => {
-    await ensureDir(dir + '/.flow-engine/sflow/specs');
-    await ensureDir(dir + '/specs');
-    const path = await resolveSpecsDir(dir);
+    // Should still return new path, not fallback
     expect(path).toBe(dir + '/.flow-engine/sflow/specs');
   });
 
-  it('should return legacy path if specs does not exist anywhere', async () => {
+  it('should return new path even if specs does not exist', async () => {
     const path = await resolveSpecsDir(dir);
-    expect(path).toBe(dir + '/specs');
+    expect(path).toBe(dir + '/.flow-engine/sflow/specs');
   });
 });
 
@@ -828,27 +823,20 @@ describe('readSpecContent', () => {
     await cleanupDir(dir);
   });
 
-  it('should read from new path if exists', async () => {
+  it('should read from new path (.flow-engine/sflow/specs)', async () => {
     await ensureDir(dir + '/.flow-engine/sflow/specs');
     await writeFile(dir + '/.flow-engine/sflow/specs/auth.md', '# Auth Spec');
     const content = await readSpecContent(dir, 'auth.md');
     expect(content).toBe('# Auth Spec');
   });
 
-  it('should read from legacy path if new path does not exist', async () => {
+  it('should NOT fallback to legacy path (project root specs/)', async () => {
+    // Project root specs/ exists but should NOT be read
     await ensureDir(dir + '/specs');
     await writeFile(dir + '/specs/auth.md', '# Auth Spec');
     const content = await readSpecContent(dir, 'auth.md');
-    expect(content).toBe('# Auth Spec');
-  });
-
-  it('should prefer new path over legacy path', async () => {
-    await ensureDir(dir + '/.flow-engine/sflow/specs');
-    await writeFile(dir + '/.flow-engine/sflow/specs/auth.md', '# New Auth Spec');
-    await ensureDir(dir + '/specs');
-    await writeFile(dir + '/specs/auth.md', '# Legacy Auth Spec');
-    const content = await readSpecContent(dir, 'auth.md');
-    expect(content).toBe('# New Auth Spec');
+    // Should return null, not fallback to legacy path
+    expect(content).toBeNull();
   });
 
   it('should return null if spec does not exist', async () => {

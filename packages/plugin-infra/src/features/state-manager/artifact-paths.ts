@@ -64,18 +64,13 @@ export async function artifactExists(changeDir: string, artifactName: string): P
 }
 
 /**
- * Resolve specs directory path with dual-path compatibility.
- * Priority: .flow-engine/sflow/specs (new) → specs (legacy)
+ * Resolve specs directory path.
+ * Only returns new path: .flow-engine/sflow/specs (change-specific delta specs).
+ * Does NOT fallback to project root specs/ (which is the main spec library).
  */
 export async function resolveSpecsDir(changeDir: string): Promise<string> {
   const newPath = `${changeDir}/.flow-engine/sflow/specs`;
-  const legacyPath = `${changeDir}/specs`;
-  
-  if (await directoryExists(newPath)) {
-    return newPath;
-  }
-  
-  return legacyPath;
+  return newPath;
 }
 
 /**
@@ -91,17 +86,14 @@ export async function listSpecFiles(changeDir: string): Promise<string[]> {
 }
 
 /**
- * Read spec content with dual-path compatibility.
- * Tries new path first, falls back to legacy path.
+ * Read spec content.
+ * Only reads from new path: .flow-engine/sflow/specs/<specName> (change-specific delta specs).
+ * Does NOT fallback to project root specs/ (which is the main spec library).
+ * Returns null if file does not exist.
  */
 export async function readSpecContent(changeDir: string, specName: string): Promise<string | null> {
   const newPath = `${changeDir}/.flow-engine/sflow/specs/${specName}`;
-  const legacyPath = `${changeDir}/specs/${specName}`;
-  
-  const newContent = await readFile(newPath).catch(() => null);
-  if (newContent) return newContent;
-  
-  return readFile(legacyPath).catch(() => null);
+  return readFile(newPath).catch(() => null);
 }
 
 /**
