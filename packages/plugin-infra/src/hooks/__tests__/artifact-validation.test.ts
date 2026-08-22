@@ -70,7 +70,7 @@ Users SHALL be able to login with email and password.
     );
 
     // Setup: Create delta spec with conflict (MODIFY non-existent requirement)
-    const deltaSpecDir = join(changeDir, 'specs');
+    const deltaSpecDir = join(changeDir, '.flow-engine', 'sflow', 'specs');
     await ensureDir(deltaSpecDir);
     await writeFile(
       join(deltaSpecDir, 'auth.md'),
@@ -126,7 +126,7 @@ Users SHALL be able to login with email and password.
     );
 
     // Setup: Create delta spec with ADDED (compatible)
-    const deltaSpecDir = join(changeDir, 'specs');
+    const deltaSpecDir = join(changeDir, '.flow-engine', 'sflow', 'specs');
     await ensureDir(deltaSpecDir);
     await writeFile(
       join(deltaSpecDir, 'auth.md'),
@@ -171,7 +171,7 @@ Authentication capability.
     );
 
     // Create a delta spec for a different capability (no baseline for this one)
-    const deltaSpecDir = join(changeDir, 'specs');
+    const deltaSpecDir = join(changeDir, '.flow-engine', 'sflow', 'specs');
     await ensureDir(deltaSpecDir);
     await writeFile(
       join(deltaSpecDir, 'new-feature.md'),
@@ -218,7 +218,7 @@ Authentication capability.
     );
 
     // Setup: Create delta spec (but preflight should skip)
-    const deltaSpecDir = join(nonStandardChangeDir, 'specs');
+    const deltaSpecDir = join(nonStandardChangeDir, '.flow-engine', 'sflow', 'specs');
     await ensureDir(deltaSpecDir);
     await writeFile(
       join(deltaSpecDir, 'auth.md'),
@@ -250,7 +250,7 @@ Test requirement SHALL work.
     // Setup: No baseline spec
 
     // Setup: Create delta spec
-    const deltaSpecDir = join(changeDir, 'specs');
+    const deltaSpecDir = join(changeDir, '.flow-engine', 'sflow', 'specs');
     await ensureDir(deltaSpecDir);
     await writeFile(
       join(deltaSpecDir, 'auth.md'),

@@ -58,7 +58,7 @@ describe('Task 7.1: DP-4 Recommendation in state-transition', () => {
     await cleanupDir(dir);
     await ensureDir(dir);
     await ensureDir(dir + '/.flow-engine/sflow');
-    await ensureDir(dir + '/specs');
+    await ensureDir(dir + '/.flow-engine/sflow/specs');
     hook = createStateTransitionHook();
   });
 
@@ -72,7 +72,7 @@ describe('Task 7.1: DP-4 Recommendation in state-transition', () => {
     await writeFile(dir + '/proposal.md', '# Proposal\n\n## Why\nSome motivation.');
     await writeFile(dir + '/design.md', '# Design\n\n## Architecture\nSome design.');
     await writeFile(dir + '/tasks.md', '- [ ] task one\n- [ ] task two');
-    await writeFile(dir + '/specs/test.md', '# Spec');
+    await writeFile(dir + '/.flow-engine/sflow/specs/test.md', '# Spec');
     await writeFile(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nTest contract.');
 
     const result = await hook.execute({
@@ -102,7 +102,7 @@ describe('Task 7.1: DP-4 Recommendation in state-transition', () => {
     await writeFile(dir + '/proposal.md', '# Proposal\n\n## Why\nSome motivation.');
     await writeFile(dir + '/design.md', '# Design\n\n## Architecture\nSome design.');
     await writeFile(dir + '/tasks.md', '- [ ] task one depends on W2\n- [ ] task two cross-module coordination');
-    await writeFile(dir + '/specs/test.md', '# Spec');
+    await writeFile(dir + '/.flow-engine/sflow/specs/test.md', '# Spec');
     await writeFile(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nTest contract.');
 
     const result = await hook.execute({
@@ -143,7 +143,7 @@ describe('Task 7.1: DP-4 Recommendation in state-transition', () => {
     await writeStateJson(dir, { state: 'bridging', mode: 'full' });
     await writeFile(dir + '/proposal.md', '# Proposal\n\n## Why\nSome motivation.');
     await writeFile(dir + '/design.md', '# Design\n\n## Architecture\nSome design.');
-    await writeFile(dir + '/specs/test.md', '# Spec');
+    await writeFile(dir + '/.flow-engine/sflow/specs/test.md', '# Spec');
     await writeFile(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nTest contract.');
     // No tasks.md — preflight gate should block transition
 
@@ -556,7 +556,7 @@ describe('Integration: bridging→approved-for-build with DP-4 recommendation', 
     await cleanupDir(dir);
     await ensureDir(dir);
     await ensureDir(dir + '/.flow-engine/sflow');
-    await ensureDir(dir + '/specs');
+    await ensureDir(dir + '/.flow-engine/sflow/specs');
     hook = createStateTransitionHook();
   });
 
@@ -578,7 +578,7 @@ describe('Integration: bridging→approved-for-build with DP-4 recommendation', 
     await writeFile(dir + '/proposal.md', '# Proposal\n\n## Why\nBuild execution control plane.');
     await writeFile(dir + '/design.md', '# Design\n\n## Architecture\nModular design with hooks.');
     await writeFile(dir + '/tasks.md', '- [ ] Implement DP-4 logic\n- [ ] Add git branch isolation\n- [ ] Write tests');
-    await writeFile(dir + '/specs/test.md', '# Spec');
+    await writeFile(dir + '/.flow-engine/sflow/specs/test.md', '# Spec');
     await writeFile(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nExecution control plane.');
 
     const result = await hook.execute({
