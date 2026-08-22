@@ -485,7 +485,6 @@ async function installSkillsCommand(args) {
         `请确保 opencode-flow-engine 已正确安装。`
       );
     }
-    }
   } catch (err) {
     console.error(`错误: 无法定位技能源目录: ${err.message}`);
     console.error('请确保 opencode-flow-engine 已正确安装或在项目根目录下运行');

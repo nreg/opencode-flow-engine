@@ -164,7 +164,7 @@ describe('install-skills CLI', () => {
     it('应验证源目录名为 skills', async () => {
       const binPath = join(process.cwd(), 'bin', 'flow-engine.js');
       const content = await readFile(binPath, 'utf-8');
-      
+
       // 验证包含目录名验证逻辑
       expect(content).toContain("if (sourceDirName !== 'skills')");
     });
@@ -172,7 +172,7 @@ describe('install-skills CLI', () => {
     it('应检测并拒绝轨道 1 技能目录（workflows/sflow/skills）', async () => {
       const binPath = join(process.cwd(), 'bin', 'flow-engine.js');
       const content = await readFile(binPath, 'utf-8');
-      
+
       // 验证包含轨道 1 检测逻辑
       expect(content).toContain("if (parentDirName === 'sflow')");
       expect(content).toContain('检测到轨道 1 技能目录');
@@ -182,10 +182,65 @@ describe('install-skills CLI', () => {
     it('应验证父目录包含 package.json', async () => {
       const binPath = join(process.cwd(), 'bin', 'flow-engine.js');
       const content = await readFile(binPath, 'utf-8');
-      
+
       // 验证包含 package.json 验证逻辑
       expect(content).toContain("const packageJsonPath = join(parentDir, 'package.json')");
       expect(content).toContain('源目录父路径不是有效的包根');
+    });
+
+    // P1-2: 真实行为测试 - 语法验证
+    it('bin/flow-engine.js 应通过 node --check 语法验证', async () => {
+      const { execSync } = await import('child_process');
+      const binPath = join(process.cwd(), 'bin', 'flow-engine.js');
+
+      // 使用 node --check 验证语法（不能用 bun，bun 宽松解析会掩盖语法错误）
+      let syntaxValid = false;
+      let errorMsg = '';
+      try {
+        execSync(`node --check "${binPath}"`, { encoding: 'utf-8', stdio: 'pipe' });
+        syntaxValid = true;
+      } catch (error: any) {
+        errorMsg = error.stderr || error.message;
+      }
+
+      expect(syntaxValid).toBe(true);
+      if (!syntaxValid) {
+        console.error(`语法验证失败: ${errorMsg}`);
+      }
+    });
+
+    // P1-2: 真实行为测试 - 实际执行验证
+    it('install-skills 命令应能实际执行并输出正常', async () => {
+      const { execSync } = await import('child_process');
+      const binPath = join(process.cwd(), 'bin', 'flow-engine.js');
+
+      // 实际执行 install-skills 命令
+      let output = '';
+      let exitCode = 0;
+      try {
+        output = execSync(`node "${binPath}" install-skills`, {
+          encoding: 'utf-8',
+          stdio: 'pipe',
+          timeout: 10000 // 10 秒超时
+        });
+      } catch (error: any) {
+        output = error.stdout || '';
+        exitCode = error.status || 1;
+      }
+
+      // 验证退出码为 0
+      expect(exitCode).toBe(0);
+
+      // 验证输出包含关键信息
+      expect(output).toContain('安装分发源技能到全局目录');
+      expect(output).toContain('源目录:');
+      expect(output).toContain('找到 18 个技能目录');
+      expect(output).toContain('安装完成:');
+
+      // 验证输出包含关键技能名称
+      expect(output).toContain('taste-skill');
+      expect(output).toContain('impeccable');
+      expect(output).toContain('polish');
     });
   });
 });

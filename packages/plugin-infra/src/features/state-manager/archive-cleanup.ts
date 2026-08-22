@@ -176,6 +176,11 @@ export async function archiveCleanup(
     // Always read state.json to get mode (even if changeName is overridden)
     const state = await readStateJson(sflowDir);
     if (state) {
+      // P1-1: Propagate readStateJson error (state.json corruption detection)
+      if (state.error) {
+        console.warn(`警告: ${state.error}`);
+        // Continue with defaults - changeName will be auto-generated if empty
+      }
       if (!changeName) {
         changeName = state.changeName || '';
       }
