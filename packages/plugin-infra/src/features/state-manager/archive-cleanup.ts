@@ -107,6 +107,11 @@ async function readStateJson(sflowDir: string): Promise<{ changeName: string; mo
 }
 
 /**
+ * Concurrent execution control flag
+ */
+let inProgress = false;
+
+/**
  * Archive cleanup - Move active artifacts to archive directory
  * 
  * Two-phase commit:
@@ -121,6 +126,20 @@ export async function archiveCleanup(
   changeDir: string,
   changeNameOverride?: string
 ): Promise<ArchiveCleanupResult> {
+  // P0-3: Concurrent execution guard
+  if (inProgress) {
+    const fallbackChangeName = changeNameOverride || generateChangeName();
+    return {
+      archivedFiles: [],
+      preservedAssets: [],
+      archiveDir: join(changeDir, '.flow-engine', 'sflow', 'archive', fallbackChangeName),
+      changeName: fallbackChangeName,
+      error: 'Archive cleanup already in progress',
+      success: false
+    };
+  }
+  
+  inProgress = true;
   const sflowDir = join(changeDir, '.flow-engine', 'sflow');
   const archiveBaseDir = join(sflowDir, 'archive');
   
@@ -148,6 +167,37 @@ export async function archiveCleanup(
       changeName = generateChangeName();
     }
     
+    // P0-2: Empty Guard - Check if any active artifacts exist
+    let hasActiveArtifacts = false;
+    for (const artifact of ACTIVE_ARTIFACTS) {
+      const artifactPath = join(sflowDir, artifact);
+      if (await exists(artifactPath)) {
+        hasActiveArtifacts = true;
+        break;
+      }
+    }
+    
+    // Check specs/ directory
+    if (!hasActiveArtifacts) {
+      const specsPath = join(sflowDir, 'specs');
+      if (await exists(specsPath)) {
+        hasActiveArtifacts = true;
+      }
+    }
+    
+    // If no active artifacts, return error without creating archive directory
+    if (!hasActiveArtifacts) {
+      inProgress = false;
+      return {
+        archivedFiles: [],
+        preservedAssets: [],
+        archiveDir: join(archiveBaseDir, changeName),
+        changeName,
+        error: 'No active artifacts to archive',
+        success: false
+      };
+    }
+    
     let archiveDir = join(archiveBaseDir, changeName);
 
     // Step 2: Create archive directory (handle existing directory)
@@ -156,6 +206,12 @@ export async function archiveCleanup(
       suffix++;
       archiveDir = join(archiveBaseDir, `${changeName}-${suffix}`);
     }
+    
+    // Update changeName if suffix was added
+    if (suffix > 0) {
+      changeName = `${changeName}-${suffix}`;
+    }
+    
     await mkdir(archiveDir, { recursive: true });
     
     // Phase 1: Copy to archive (two-phase commit)
@@ -172,12 +228,30 @@ export async function archiveCleanup(
           if (fileStat.isDirectory()) {
             // It's a directory
             await cp(srcPath, dstPath, { recursive: true });
+            
+            // P0-4: Verify directory copy integrity
+            const dstStat = await stat(dstPath);
+            if (dstStat.isDirectory()) {
+              const entries = await readdir(dstPath);
+              if (entries.length > 0) {
+                copiedFiles.push(artifact);
+              } else {
+                console.error(`Warning: Copied directory ${artifact} is empty, skipping`);
+              }
+            }
           } else {
             // It's a file
             const content = await readFile(srcPath);
             await writeFile(dstPath, content);
+            
+            // P0-4: Verify file copy integrity
+            const dstStat = await stat(dstPath);
+            if (dstStat.isFile() && dstStat.size > 0) {
+              copiedFiles.push(artifact);
+            } else {
+              console.error(`Warning: Copied file ${artifact} is empty or invalid, skipping`);
+            }
           }
-          copiedFiles.push(artifact);
         } catch (err) {
           // Log error but continue with other files
           console.error(`Warning: Failed to copy ${artifact}: ${err}`);
@@ -191,7 +265,17 @@ export async function archiveCleanup(
       const specsDst = join(archiveDir, 'specs');
       try {
         await cp(specsSrc, specsDst, { recursive: true });
-        copiedFiles.push('specs/');
+        
+        // P0-4: Verify specs/ copy integrity
+        const specsDstStat = await stat(specsDst);
+        if (specsDstStat.isDirectory()) {
+          const entries = await readdir(specsDst);
+          if (entries.length > 0) {
+            copiedFiles.push('specs/');
+          } else {
+            console.error(`Warning: Copied specs/ directory is empty, skipping`);
+          }
+        }
       } catch (err) {
         console.error(`Warning: Failed to copy specs/: ${err}`);
       }
@@ -242,21 +326,22 @@ export async function archiveCleanup(
           }
         }
       }
+      
+      // P0-1: Reset state.json ONLY after successful archive (preserve original mode)
+      // This is inside the if (copiedFiles.length > 0) block to ensure transactional safety
+      const initialState = {
+        state: 'exploring',
+        changeName: '',
+        mode: originalMode, // P1-4: Preserve original mode
+        batches_completed: 0,
+        afk: false,
+        afkTier: 0,
+        last_transition: new Date().toISOString()
+      };
+      
+      await writeFile(statePath, JSON.stringify(initialState, null, 2), 'utf-8');
+      archivedFiles.push('state.json (reset)');
     }
-    
-    // Reset state.json (preserve original mode)
-    const initialState = {
-      state: 'exploring',
-      changeName: '',
-      mode: originalMode, // P1-4: Preserve original mode
-      batches_completed: 0,
-      afk: false,
-      afkTier: 0,
-      last_transition: new Date().toISOString()
-    };
-    
-    await writeFile(statePath, JSON.stringify(initialState, null, 2), 'utf-8');
-    archivedFiles.push('state.json (reset)');
     
     // Verify preserved assets
     for (const asset of PRESERVED_ASSETS) {
@@ -265,6 +350,9 @@ export async function archiveCleanup(
         preservedAssets.push(asset);
       }
     }
+    
+    // P0-3: Reset concurrent execution flag
+    inProgress = false;
     
     return {
       archivedFiles,
@@ -275,6 +363,9 @@ export async function archiveCleanup(
     };
     
   } catch (err) {
+    // P0-3: Reset concurrent execution flag on error
+    inProgress = false;
+    
     const fallbackChangeName = changeNameOverride || generateChangeName();
     return {
       archivedFiles,

@@ -292,6 +292,146 @@ describe('archiveCleanup', () => {
     // Verify that even if some files couldn't be copied, the function completed
     // This is a behavioral test - the actual two-phase commit logic is in the implementation
   });
+
+  // P0 修复测试：复制失败时 state.json 不被重置
+  it('should not reset state.json when copy fails (P0-1)', async () => {
+    // 保存原始 state.json 内容
+    const originalState = {
+      state: 'closing',
+      changeName: 'test-change-001',
+      mode: 'full',
+      batches_completed: 2,
+      last_transition: '2026-08-23T10:00:00Z'
+    };
+
+    // 删除所有工件，模拟复制失败场景
+    await rm(join(SFLOW_DIR, 'proposal.md'));
+    await rm(join(SFLOW_DIR, 'design.md'));
+    await rm(join(SFLOW_DIR, 'tasks.md'));
+    await rm(join(SFLOW_DIR, 'execution-contract.md'));
+    await rm(join(SFLOW_DIR, 'specs'), { recursive: true, force: true });
+
+    const result = await archiveCleanup(TEST_DIR);
+
+    // 应该返回失败（无工件可归档）
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No active artifacts');
+
+    // state.json 应该保持原状
+    const statePath = join(SFLOW_DIR, 'state.json');
+    const stateContent = await readFile(statePath, 'utf-8');
+    const state = JSON.parse(stateContent);
+
+    expect(state.state).toBe('closing');
+    expect(state.changeName).toBe('test-change-001');
+    expect(state.batches_completed).toBe(2);
+  });
+
+  // P0 修复测试：无 active 工件时返回 error（Empty Guard）
+  it('should return error when no active artifacts exist (P0-2)', async () => {
+    // 删除所有 active 工件
+    await rm(join(SFLOW_DIR, 'proposal.md'));
+    await rm(join(SFLOW_DIR, 'design.md'));
+    await rm(join(SFLOW_DIR, 'tasks.md'));
+    await rm(join(SFLOW_DIR, 'execution-contract.md'));
+    await rm(join(SFLOW_DIR, 'specs'), { recursive: true, force: true });
+
+    const result = await archiveCleanup(TEST_DIR);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No active artifacts');
+    expect(result.archivedFiles).toHaveLength(0);
+
+    // 验证没有创建归档目录
+    const archiveDir = join(SFLOW_DIR, 'archive');
+    const archiveExists = await exists(archiveDir);
+    expect(archiveExists).toBe(false);
+  });
+
+  // P0 修复测试：复制成功时 state.json 正确重置
+  it('should reset state.json only when artifacts are successfully archived (P0-1)', async () => {
+    const result = await archiveCleanup(TEST_DIR);
+
+    expect(result.success).toBe(true);
+    expect(result.archivedFiles.length).toBeGreaterThan(0);
+
+    // state.json 应该被重置
+    const statePath = join(SFLOW_DIR, 'state.json');
+    const stateContent = await readFile(statePath, 'utf-8');
+    const state = JSON.parse(stateContent);
+
+    expect(state.state).toBe('exploring');
+    expect(state.changeName).toBe('');
+    expect(state.batches_completed).toBe(0);
+  });
+
+  // P0 修复测试：changeName 冲突 suffix 逻辑
+  it('should handle changeName conflicts with suffix (P0)', async () => {
+    // 第一次归档
+    const result1 = await archiveCleanup(TEST_DIR, 'conflict-test');
+    expect(result1.success).toBe(true);
+    expect(result1.changeName).toBe('conflict-test');
+
+    // 重新创建工件
+    await writeFile(join(SFLOW_DIR, 'proposal.md'), '# Proposal 2');
+    await writeFile(join(SFLOW_DIR, 'state.json'), JSON.stringify({
+      state: 'closing',
+      changeName: 'conflict-test',
+      mode: 'full'
+    }, null, 2));
+
+    // 第二次归档（相同 changeName）
+    const result2 = await archiveCleanup(TEST_DIR, 'conflict-test');
+    expect(result2.success).toBe(true);
+    expect(result2.changeName).toBe('conflict-test-1');
+
+    // 验证两个归档目录都存在
+    const archiveBase = join(SFLOW_DIR, 'archive');
+    const archives = await readdir(archiveBase);
+    expect(archives).toContain('conflict-test');
+    expect(archives).toContain('conflict-test-1');
+  });
+
+  // P0 修复测试：并发调用行为正确
+  it('should handle concurrent calls correctly (P0-3)', async () => {
+    // 连续两次调用（模拟并发）
+    const [result1, result2] = await Promise.all([
+      archiveCleanup(TEST_DIR, 'concurrent-1'),
+      archiveCleanup(TEST_DIR, 'concurrent-2')
+    ]);
+
+    // 至少一个应该成功
+    expect(result1.success || result2.success).toBe(true);
+
+    // 如果两个都成功，应该有不同的 changeName
+    if (result1.success && result2.success) {
+      expect(result1.changeName).not.toBe(result2.changeName);
+    }
+  });
+
+  // P0 修复测试：Phase 1 完整性验证
+  it('should verify copied files integrity (P0-4)', async () => {
+    const result = await archiveCleanup(TEST_DIR);
+
+    expect(result.success).toBe(true);
+
+    // 验证归档目录中的文件确实存在且非空
+    const archiveDir = join(SFLOW_DIR, 'archive', 'test-change-001');
+
+    for (const file of result.archivedFiles) {
+      if (file === 'state.json (reset)') continue;
+
+      const archivedPath = join(archiveDir, file);
+      const exists = await access(archivedPath, constants.F_OK).then(() => true).catch(() => false);
+      expect(exists).toBe(true);
+
+      if (!file.endsWith('/')) {
+        // 文件应该非空
+        const content = await readFile(archivedPath);
+        expect(content.length).toBeGreaterThan(0);
+      }
+    }
+  });
 });
 
 describe('listArchives', () => {
@@ -307,8 +447,24 @@ describe('listArchives', () => {
   it('should list archive directories sorted by most recent', async () => {
     // Create multiple archives
     await archiveCleanup(TEST_DIR, 'change-2026-08-20');
+    
+    // Recreate artifacts for second archive
+    await writeFile(join(SFLOW_DIR, 'proposal.md'), '# Proposal 2');
+    await writeFile(join(SFLOW_DIR, 'design.md'), '# Design 2');
+    await writeFile(join(SFLOW_DIR, 'tasks.md'), '# Tasks 2');
+    await writeFile(join(SFLOW_DIR, 'execution-contract.md'), '# Contract 2');
+    await mkdir(join(SFLOW_DIR, 'specs'), { recursive: true });
+    await writeFile(join(SFLOW_DIR, 'specs', 'feature.md'), '# Feature Spec 2');
     await writeFile(join(SFLOW_DIR, 'state.json'), JSON.stringify({ state: 'closing', changeName: 'change-2026-08-21' }));
     await archiveCleanup(TEST_DIR, 'change-2026-08-21');
+    
+    // Recreate artifacts for third archive
+    await writeFile(join(SFLOW_DIR, 'proposal.md'), '# Proposal 3');
+    await writeFile(join(SFLOW_DIR, 'design.md'), '# Design 3');
+    await writeFile(join(SFLOW_DIR, 'tasks.md'), '# Tasks 3');
+    await writeFile(join(SFLOW_DIR, 'execution-contract.md'), '# Contract 3');
+    await mkdir(join(SFLOW_DIR, 'specs'), { recursive: true });
+    await writeFile(join(SFLOW_DIR, 'specs', 'feature.md'), '# Feature Spec 3');
     await writeFile(join(SFLOW_DIR, 'state.json'), JSON.stringify({ state: 'closing', changeName: 'change-2026-08-22' }));
     await archiveCleanup(TEST_DIR, 'change-2026-08-22');
     
