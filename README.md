@@ -66,12 +66,17 @@ Or use slash commands for cross-workflow actions:
 ### CLI Commands
 
 ```bash
-# Install GSAP animation skills (8 skills) to global directory
+# Install all Track 2 skills (18 skills) to global directory
 flow-engine install-skills
+
+# Install specific skills with filter
+flow-engine install-skills --filter gsap-
 
 # Show help
 flow-engine --help
 ```
+
+**Note**: `install-skills` supports top-level SKILL.md overwrite for skills like `frontend-design-pro` while preserving subdirectories.
 
 ---
 

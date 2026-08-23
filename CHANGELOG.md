@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **frontend-design-pro 仓库版聚合 SKILL.md** - OpenCode 兼容入口
+  - 创建 skills/frontend-design-pro/SKILL.md，提供统一入口文档
+  - 包含 6 个子技能清单表 + 相对路径引用 + 使用方式说明
+  - 不包含绝对路径和 Claude 插件配置，纯 OpenCode 环境
+  - install-skills 支持顶层 SKILL.md 覆盖，子目录保持不变
+
 - **Track 2 Skills Migration** - 轨道 2 技能分离
   - 18 Track 2 skills migrated from `workflows/sflow/skills/` to project root `skills/` directory
   - Semantic isolation: Track 1 (skill-loader injection source, 11 skills) vs Track 2 (runtime distribution source, 18 skills)
@@ -40,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **install-skills 覆盖支持** - 顶层 SKILL.md 精准覆盖
+  - 支持 frontend-design-pro 顶层 SKILL.md 覆盖，子目录保持不变
+  - 保持幂等性：已存在目录跳过，仅覆盖顶层文件
+  - 帮助文档更新：说明覆盖行为
+
 - **install-skills CLI Behavior** - install-skills 命令行为修正
   - Source path changed from `workflows/sflow/skills/` to project root `skills/`
   - Default filterPattern changed from `'gsap-'` to `null` (installs all 18 Track 2 skills)
@@ -50,6 +61,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced `restoreState` to force-close AFK on terminal state detection
 - Enhanced `workflow-router` Phase 0 to handle `set-afk-on` action
 - Enhanced `spec-flow.ts` with AFK Intent Gate entry and AFK Mode Rules
+
+### Changed
+
+- **ui-ux-pro-max 冗余内层嵌套删除** - 单一来源约束
+  - 删除 skills/ui-ux-pro-max/ui-ux-pro-max/ 冗余目录
+  - 外层结构完整保留：SKILL.md、references/、data/、scripts/
+  - 符合分发源单一来源原则，消除 24KB 冗余空间
 
 ### Fixed
 

@@ -66,12 +66,17 @@ npm install -g opencode-flow-engine
 ### CLI 命令
 
 ```bash
-# 安装 GSAP 动效技能（8 项）到全局目录
+# 安装所有轨道 2 技能（18 项）到全局目录
 flow-engine install-skills
+
+# 使用过滤器安装特定技能
+flow-engine install-skills --filter gsap-
 
 # 查看帮助
 flow-engine --help
 ```
+
+**注意**：`install-skills` 支持顶层 SKILL.md 覆盖（如 `frontend-design-pro`），子目录保持不变。
 
 ---
 
