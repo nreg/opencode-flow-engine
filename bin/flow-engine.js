@@ -557,13 +557,63 @@ async function installSkillsCommand(args) {
             // 目标已有 SKILL.md，覆盖更新
             cpSync(srcSkillMd, dstSkillMd);
             console.log(`已更新: ${skillName} (SKILL.md)`);
+            
+            // 同步源目录的顶层子目录（references/、data/、scripts/ 等）
+            let syncedSubdirs = 0;
+            try {
+              const srcEntries = readdirSync(sourcePath, { withFileTypes: true });
+              const srcSubdirs = srcEntries.filter(e => e.isDirectory());
+              
+              for (const subdir of srcSubdirs) {
+                const srcSubdirPath = join(sourcePath, subdir.name);
+                const dstSubdirPath = join(targetPath, subdir.name);
+                
+                // 目标缺失该子目录 → 整体复制
+                if (!exists(dstSubdirPath)) {
+                  cpSync(srcSubdirPath, dstSubdirPath, { recursive: true });
+                  syncedSubdirs++;
+                  console.log(`  + 同步子目录: ${subdir.name}/`);
+                }
+                // 目标已有该子目录 → 跳过（幂等）
+              }
+            } catch (err) {
+              console.error(`  警 同步子目录失败: ${err.message}`);
+            }
+            
             updatedCount++;
+            if (syncedSubdirs > 0) {
+              console.log(`  已同步 ${syncedSubdirs} 个子目录`);
+            }
             continue;
           } else {
             // 目标缺 SKILL.md，补复制
             cpSync(srcSkillMd, dstSkillMd);
             console.log(`已安装: ${skillName} (SKILL.md)`);
+            
+            // 同步源目录的顶层子目录
+            let syncedSubdirs = 0;
+            try {
+              const srcEntries = readdirSync(sourcePath, { withFileTypes: true });
+              const srcSubdirs = srcEntries.filter(e => e.isDirectory());
+              
+              for (const subdir of srcSubdirs) {
+                const srcSubdirPath = join(sourcePath, subdir.name);
+                const dstSubdirPath = join(targetPath, subdir.name);
+                
+                if (!exists(dstSubdirPath)) {
+                  cpSync(srcSubdirPath, dstSubdirPath, { recursive: true });
+                  syncedSubdirs++;
+                  console.log(`  + 同步子目录: ${subdir.name}/`);
+                }
+              }
+            } catch (err) {
+              console.error(`  警 同步子目录失败: ${err.message}`);
+            }
+            
             installedCount++;
+            if (syncedSubdirs > 0) {
+              console.log(`  已同步 ${syncedSubdirs} 个子目录`);
+            }
             continue;
           }
         }
