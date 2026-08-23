@@ -538,21 +538,41 @@ async function installSkillsCommand(args) {
   
   // 逐目录复制
   let installedCount = 0;
+  let updatedCount = 0;
   let skippedCount = 0;
   let errorCount = 0;
-  
+
   for (const skillName of skillDirs) {
     const sourcePath = join(sourceDir, skillName);
     const targetPath = join(targetDir, skillName);
-    
+
     try {
       // 幂等性检查：目标目录已存在同名技能
       if (exists(targetPath)) {
+        // 检查源是否有顶层 SKILL.md 需要同步（覆盖逻辑）
+        const srcSkillMd = join(sourcePath, 'SKILL.md');
+        if (exists(srcSkillMd)) {
+          const dstSkillMd = join(targetPath, 'SKILL.md');
+          if (exists(dstSkillMd)) {
+            // 目标已有 SKILL.md，覆盖更新
+            cpSync(srcSkillMd, dstSkillMd);
+            console.log(`已更新: ${skillName} (SKILL.md)`);
+            updatedCount++;
+            continue;
+          } else {
+            // 目标缺 SKILL.md，补复制
+            cpSync(srcSkillMd, dstSkillMd);
+            console.log(`已安装: ${skillName} (SKILL.md)`);
+            installedCount++;
+            continue;
+          }
+        }
+        // 源无 SKILL.md，保持原有跳过行为
         console.log(`已安装: ${skillName} (跳过)`);
         skippedCount++;
         continue;
       }
-      
+
       // 复制目录
       cpSync(sourcePath, targetPath, { recursive: true });
       console.log(`已安装: ${skillName}`);
@@ -562,10 +582,11 @@ async function installSkillsCommand(args) {
       errorCount++;
     }
   }
-  
+
   console.log('');
   console.log('安装完成:');
   console.log(`  成功: ${installedCount}`);
+  console.log(`  更新: ${updatedCount}`);
   console.log(`  跳过: ${skippedCount}`);
   console.log(`  失败: ${errorCount}`);
   
@@ -592,6 +613,7 @@ Commands:
   install-skills [options] Install bundled skills to ~/.agents/skills/
                            --filter <pattern>  Filter skills by prefix
                            --all              Install all skills (default)
+                           Note: 已存在的技能目录会跳过，但顶层 SKILL.md 会被覆盖更新
   help                    Show this help message
   version                 Show version
 
