@@ -424,18 +424,26 @@ export function createCallFlowAgentTools(
         );
       }
 
-      // Detect multi-wave packing in build-executor prompts (constraint violation)
-      if (subagent_type === 'build-executor') {
+      // Detect multi-wave packing in build-executor / iflow-plan-executor prompts (constraint violation)
+      if (subagent_type === 'build-executor' || subagent_type === 'iflow-plan-executor') {
         const waveExecutionPattern = /(?:Execute|Run|Perform|Dispatch)\s+Wave\s+\d+/gi;
         const waveMatches = (prompt as string).match(waveExecutionPattern);
         const uniqueWaves = waveMatches ? new Set(waveMatches.map(w => w.toLowerCase())).size : 0;
         
         if (uniqueWaves > 1) {
-          return await formatToolError(
-            `Wave Orchestration Constraint Violation: Detected ${uniqueWaves} waves in single build-executor prompt. ` +
-            `Waves MUST be dispatched one at a time with Review Gate checks between them. ` +
-            `Please delegate waves sequentially: Wave 1 → Review Gate → Wave 2 → Review Gate → ...`
-          );
+          if (subagent_type === 'build-executor') {
+            return await formatToolError(
+              `Wave Orchestration Constraint Violation: Detected ${uniqueWaves} waves in single build-executor prompt. ` +
+              `Waves MUST be dispatched one at a time with Review Gate checks between them. ` +
+              `Please delegate waves sequentially: Wave 1 → Review Gate → Wave 2 → Review Gate → ...`
+            );
+          } else {
+            return await formatToolError(
+              `Wave Orchestration Constraint Violation: Detected ${uniqueWaves} waves in single iflow-plan-executor prompt. ` +
+              `Waves MUST be dispatched one at a time. ` +
+              `Please delegate waves sequentially: Wave 1 → Wave 2 → ...`
+            );
+          }
         }
       }
 
