@@ -62,7 +62,7 @@ export interface TaskTrackerInstance {
   afterHook: (
     input: { tool: string; sessionID: string },
     output: { output?: string },
-  ) => Promise<void>;
+  ) => Promise<TrackerRecord | null>;
   getTrackerData: (sessionId: string) => Promise<TrackerRecord[]>;
   clearTracker: () => Promise<void>;
   dispose?: () => Promise<void>;
@@ -175,8 +175,8 @@ export function createTaskTracker(
   async function afterHook(
     input: { tool: string; sessionID: string },
     output: { output?: string },
-  ): Promise<void> {
-    if (!enabled) return;
+  ): Promise<TrackerRecord | null> {
+    if (!enabled) return null;
 
     // 查找匹配的 beforeHook 记录
     const prefix = input.sessionID + '::' + input.tool + '::';
@@ -192,7 +192,7 @@ export function createTaskTracker(
       }
     }
 
-    if (!matchedKey || !matchedBefore) return;
+    if (!matchedKey || !matchedBefore) return null;
 
     // 从内存中移除
     pendingMap.delete(matchedKey);
@@ -227,6 +227,8 @@ export function createTaskTracker(
       fileData.records.push(fullRecord);
       await writeTrackerFile(fileData);
     });
+
+    return fullRecord;
   }
 
   /**

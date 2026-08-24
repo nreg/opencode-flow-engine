@@ -39,7 +39,7 @@ const globalLogger = new PollingLogger();
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
 import { createTaskTracker } from './features/task-tracker.js';
-import { recoverIFlowState } from '../../../workflows/iflow/iflow-state-manager.js';
+import { recoverIFlowState, saveIFlowCheckpoint, type IFlowCheckpointFile } from '../../../workflows/iflow/iflow-state-manager.js';
 import { registerFlowCommands } from '../../../workflows/shared/slash-commands.js';
 import { createCompactionContext } from '../../../workflows/shared/compaction-context.js';
 
@@ -385,9 +385,43 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
             }
           }
         }
-        // TaskTracker: 记录子 agent 调用结束
+        // TaskTracker: 记录子 agent 调用结束，并落盘 checkpoint
         if (taskTracker && taskTracker.afterHook) {
-          await taskTracker.afterHook(input, output);
+          const record = await taskTracker.afterHook(input, output);
+          if (record) {
+            try {
+              const iflowState = await recoverIFlowState(workDir);
+              let parsed: { task_id?: string; subagent?: string; status?: string } = {};
+              try {
+                parsed = JSON.parse(output.output ?? '{}') as {
+                  task_id?: string;
+                  subagent?: string;
+                  status?: string;
+                };
+              } catch {
+                // output.output 非 JSON 时忽略，使用兜底值
+              }
+              const taskId = parsed.task_id || `${Date.now()}_${record.subagentType}`;
+              const checkpoint: IFlowCheckpointFile = {
+                taskId,
+                state: iflowState.state,
+                cycleNumber: iflowState.cycleNumber,
+                subagentType: record.subagentType,
+                inputSummary: record.inputSummary,
+                outputSummary: record.outputSummary,
+                startedAt: record.startedAt,
+                completedAt: record.completedAt,
+                durationMs: record.durationMs,
+                // 异步模式下 call_flow_agent 立即返回 running 状态，checkpoint 应如实记录
+                status: parsed.status === 'running' ? 'running' : record.status,
+              };
+              await saveIFlowCheckpoint(workDir, checkpoint);
+            } catch (err) {
+              Logger.warn(
+                `[IFlow] checkpoint 写入失败: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+          }
         }
       },
 
