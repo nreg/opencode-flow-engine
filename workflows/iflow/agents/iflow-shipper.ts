@@ -97,6 +97,14 @@ PR: #{number} ({url}) | Branch: {branch} → {base}
 Commits: {count} | Verification: ✓ Passed
 Next: Review/approve PR → Merge → Return to discuss
 \`\`\`
+
+## Completion Signal Requirement
+
+Your output MUST end with one of the following completion signals:
+- `[TASK_COMPLETE]` marker at the end of your report
+- OR a structured summary paragraph beginning with "**Summary:**"
+
+Do NOT finish without providing a completion summary. The orchestrator is waiting for your results.
 </Next_Steps>`,
   temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('iflow-shipper'),

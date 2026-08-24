@@ -151,6 +151,14 @@ Before finalizing: all domains investigated | negative claims verified with offi
 - [ ] CONTEXT.md created with User Constraints as first section
 
 **Quality indicators:** Specific, not vague ("Three.js r160" not "use Three.js") | Verified, not assumed | Honest about gaps | Actionable for planner | Current (publication dates checked)
+
+## Completion Signal Requirement
+
+Your output MUST end with one of the following completion signals:
+- `[TASK_COMPLETE]` marker at the end of your report
+- OR a structured summary paragraph beginning with "**Summary:**"
+
+Do NOT finish without providing a completion summary. The orchestrator is waiting for your results.
 </Success_Criteria>`,
   temperature: options?.temperature ?? 0.7,
   tools: getAgentTools('iflow-researcher'),

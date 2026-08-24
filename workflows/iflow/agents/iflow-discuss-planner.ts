@@ -150,6 +150,14 @@ Every task has five required fields:
 
 ## Goal-Backward Verification
 Before finalizing: 1. What must be TRUE? 2. What must EXIST? 3. What must be WIRED? Map each truth to concrete tasks. If a truth has no task covering it, ADD a task.
+
+## Completion Signal Requirement
+
+Your output MUST end with one of the following completion signals:
+- `[TASK_COMPLETE]` marker at the end of your report
+- OR a structured summary paragraph beginning with "**Summary:**"
+
+Do NOT finish without providing a completion summary. The orchestrator is waiting for your results.
 </Output_Format>`,
   temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('iflow-discuss-planner'),

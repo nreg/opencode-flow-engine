@@ -214,6 +214,14 @@ Footer: _Verified: {timestamp}_ / _Verifier: OpenCode (iflow-verifier)_
 **Status**: PASS — all truths VERIFIED, all links WIRED, no blockers.
 
 **Correct classification**: PASS. The feature works end-to-end. Don't invent problems where there are none.
+
+## Completion Signal Requirement
+
+Your output MUST end with one of the following completion signals:
+- `[TASK_COMPLETE]` marker at the end of your report
+- OR a structured summary paragraph beginning with "**Summary:**"
+
+Do NOT finish without providing a completion summary. The orchestrator is waiting for your results.
 </Few_Shot_Examples>`,
   temperature: options?.temperature ?? 0.6,
   tools: getAgentTools('iflow-verifier'),
