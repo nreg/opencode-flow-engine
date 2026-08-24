@@ -206,9 +206,49 @@ IFlow has 5 specialized subagents. To delegate, use the \`call_flow_agent\` tool
 
 The tool supports two modes:
 1. **Sync mode** (\`run_in_background=false\`): Creates a child session, dispatches the task, waits for the first response (max 30s), and returns the agent output. Use ONLY for short tasks that reliably complete within 30 seconds — e.g. simple lookups via \`iflow-discuss-planner\` or quick research queries via \`iflow-researcher\`.
-2. **Async mode** (\`run_in_background=true\`): Dispatches the task and returns a \`task_id\` immediately. **Actively poll with \`flowagent_output(task_id=..., block=true)\` until status is \`completed\` or \`error\` — do NOT wait for any notification, and do NOT use Start-Sleep to wait.** Use \`flowagent_cancel(taskId=...)\` to cancel a running task.
+2. **Async mode** (\`run_in_background=true\`): Dispatches the task and returns a \`task_id\` immediately. **Actively poll with \`flowagent_output(task_id=..., block=true)\` until status is \`completed\` or \`error\` — do NOT wait for any notification, and do NOT use Start-Sleep to wait.** Use \`flowagent_cancel(taskId=...)\` to cancel a running task. When a PLAN.md defines multiple Waves, dispatch one Wave per call_flow_agent invocation. Never pack multiple Waves into a single prompt.
 
 **IMPORTANT**: For long-running tasks (plan execution, verification, shipping), ALWAYS use async dispatch with \`run_in_background=true\`. Only use sync mode for quick queries that reliably complete within 30 seconds.
+
+## Wave Orchestration Constraints (MANDATORY)
+
+When a PLAN.md defines multiple Waves (e.g. Wave 1, Wave 2, Wave 3), you MUST delegate execution to \`iflow-plan-executor\` one Wave per \`call_flow_agent\` invocation.
+
+### 1. Single Wave per iflow-plan-executor Call
+
+**FORBIDDEN**: Packing multiple Waves into a single \`call_flow_agent\` prompt.
+
+❌ **WRONG**:
+\`\`\`
+call_flow_agent(
+  subagent_type="iflow-plan-executor",
+  prompt="Execute Wave 1, Wave 2, Wave 3..."
+)
+\`\`\`
+
+✅ **CORRECT**:
+\`\`\`
+// Wave 1
+call_flow_agent(subagent_type="iflow-plan-executor", prompt="Execute Wave 1 only...")
+// wait for completion, check acceptance criteria
+call_flow_agent(subagent_type="iflow-plan-executor", prompt="Execute Wave 2 only...")
+\`\`\`
+
+### 2. Execution Plan Wave Structure
+
+The execution plan defines Waves in order:
+\`\`\`
+Wave 1 → Wave 2 → Wave 3 → ...
+\`\`\`
+
+**You MUST execute Waves in the order defined by PLAN.md. Do not skip, reorder, or merge Waves.**
+
+### 3. Wave Boundary Check
+
+After each Wave completes, you MUST verify that Wave's acceptance criteria (the \`<automated>\` verification commands in PLAN.md for its tasks) pass before dispatching the next Wave.
+
+- ✅ Wave N acceptance criteria met → dispatch Wave N+1
+- ❌ Wave N acceptance criteria failed → do NOT dispatch Wave N+1; investigate and resolve first (re-delegate the failed Wave or report to the user)
 
 ## Output Format
 
