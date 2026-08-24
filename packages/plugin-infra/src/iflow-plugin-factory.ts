@@ -39,7 +39,7 @@ const globalLogger = new PollingLogger();
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
 import { createTaskTracker } from './features/task-tracker.js';
-import { recoverIFlowState, saveIFlowCheckpoint, type IFlowCheckpointFile } from '../../../workflows/iflow/iflow-state-manager.js';
+import { recoverIFlowState, saveIFlowCheckpoint, readIFlowCheckpoint, type IFlowCheckpointFile } from '../../../workflows/iflow/iflow-state-manager.js';
 import { registerFlowCommands } from '../../../workflows/shared/slash-commands.js';
 import { createCompactionContext } from '../../../workflows/shared/compaction-context.js';
 
@@ -421,6 +421,47 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
                 `[IFlow] checkpoint 写入失败: ${err instanceof Error ? err.message : String(err)}`,
               );
             }
+          }
+        }
+
+        // flowagent_output 完成检测：异步模式下 call_flow_agent 写入的 checkpoint
+        // 停留在 running 状态，需在 flowagent_output 返回 completed/error 时更新对应 checkpoint
+        if (toolName === 'flowagent_output') {
+          try {
+            const parsed = JSON.parse(output.output ?? '{}') as {
+              task_id?: string;
+              status?: string;
+              result?: unknown;
+            };
+            const taskId = parsed.task_id;
+            const status = parsed.status;
+            if (taskId && (status === 'completed' || status === 'error')) {
+              const existing = await readIFlowCheckpoint(workDir, taskId);
+              // 幂等性：仅当 checkpoint 存在且仍为 running 时更新
+              // （避免重复写入，或覆盖同步模式已在 call_flow_agent after 中落盘的 completed）
+              if (existing && existing.status === 'running') {
+                const resultStr = typeof parsed.result === 'string'
+                  ? parsed.result
+                  : JSON.stringify(parsed.result ?? '');
+                const completedAt = new Date().toISOString();
+                const startedAtTs = existing.startedAt ? new Date(existing.startedAt).getTime() : NaN;
+                const durationMs = Number.isNaN(startedAtTs)
+                  ? 0
+                  : Math.max(0, new Date(completedAt).getTime() - startedAtTs);
+                const updated: IFlowCheckpointFile = {
+                  ...existing,
+                  status: status === 'error' ? 'failed' : 'completed',
+                  completedAt,
+                  durationMs,
+                  outputSummary: resultStr,
+                };
+                await saveIFlowCheckpoint(workDir, updated);
+              }
+            }
+          } catch (err) {
+            Logger.warn(
+              `[IFlow] flowagent_output checkpoint 更新失败: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
       },
