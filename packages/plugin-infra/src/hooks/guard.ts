@@ -33,7 +33,7 @@ import {
 } from "./guard/checks/index.js";
 import type { SchemaMigrationGuardOptions } from "./guard/checks/index.js";
 
-async function detectActiveWorkflow(changeDir: string): Promise<'iflow' | 'sflow' | 'none'> {
+export async function detectActiveWorkflow(changeDir: string): Promise<'iflow' | 'sflow' | 'none'> {
   const iflowExists = await directoryExists(`${changeDir}/.flow-engine/iflow`);
   if (iflowExists) return 'iflow';
   const sflowExists = await directoryExists(`${changeDir}/.flow-engine/sflow`);

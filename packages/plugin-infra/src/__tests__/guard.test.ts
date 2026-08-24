@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
-import { createGuardHook } from '../hooks/guard.js';
+import { createGuardHook, detectActiveWorkflow } from '../hooks/guard.js';
 import * as shared from '@opencode-flow-engine/shared';
 
 function tempDir(name: string): string {
@@ -444,5 +444,49 @@ describe('Guard Hook — detectActiveWorkflow single-call optimization', () => {
 
     const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
+  });
+});
+
+// ─── P1-3: detectActiveWorkflow dual-directory priority ───────────────────────
+
+describe('Guard Hook — detectActiveWorkflow dual-directory priority', () => {
+  const dir = tempDir('guard-dual-directory');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should return iflow when both iflow and sflow directories exist', async () => {
+    // Create both directories
+    await ensureDir(dir + '/.flow-engine/iflow');
+    await ensureDir(dir + '/.flow-engine/sflow');
+
+    // detectActiveWorkflow should return 'iflow' (iflow check is first)
+    const result = await detectActiveWorkflow(dir);
+    expect(result).toBe('iflow');
+  });
+
+  it('should return iflow when only iflow directory exists', async () => {
+    await ensureDir(dir + '/.flow-engine/iflow');
+
+    const result = await detectActiveWorkflow(dir);
+    expect(result).toBe('iflow');
+  });
+
+  it('should return sflow when only sflow directory exists', async () => {
+    await ensureDir(dir + '/.flow-engine/sflow');
+
+    const result = await detectActiveWorkflow(dir);
+    expect(result).toBe('sflow');
+  });
+
+  it('should return none when neither directory exists', async () => {
+    const result = await detectActiveWorkflow(dir);
+    expect(result).toBe('none');
   });
 });

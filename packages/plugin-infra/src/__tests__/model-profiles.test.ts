@@ -7,6 +7,7 @@ import {
   resolveModelWithFallback,
   clearUnavailableModels,
   markModelUnavailable,
+  AGENT_PROFILES,
 } from '../agents/agent-builder.js';
 import type { ModelProvenance, AGENT_PROFILES_TYPE } from '../agents/agent-builder.js';
 import {
@@ -79,11 +80,6 @@ describe('SFlowConfig with modelProfiles', () => {
 
 describe('AGENT_PROFILES registry', () => {
   it('should map all SFlow agents to profile names', () => {
-    // Import the AGENT_PROFILES from agent-builder
-    // We verify the mapping via resolveModelWithFallback behavior
-    // and also check the exported constant
-    const { AGENT_PROFILES } = require('../agents/agent-builder.js') as { AGENT_PROFILES: AGENT_PROFILES_TYPE };
-    
     // SFlow agents - 6-tier mapping
     // sFlow is NOT in AGENT_PROFILES (primary agent bypasses tier resolution)
     expect(AGENT_PROFILES['sFlow']).toBeUndefined();
@@ -110,10 +106,18 @@ describe('AGENT_PROFILES registry', () => {
     expect(AGENT_PROFILES['flow-health']).toBe('review');
   });
 
-  it('should not map IFlow agents', () => {
-    const { AGENT_PROFILES } = require('../agents/agent-builder.js') as { AGENT_PROFILES: AGENT_PROFILES_TYPE };
+  it('should not map IFlow main agent', () => {
+    // iFlow main agent bypasses profile resolution (like sFlow)
     expect(AGENT_PROFILES['iFlow']).toBeUndefined();
-    expect(AGENT_PROFILES['iflow-discuss-planner']).toBeUndefined();
+  });
+
+  it('should map IFlow subagents to profiles', () => {
+    // IFlow subagents now have profile mappings
+    expect(AGENT_PROFILES['iflow-discuss-planner']).toBe('standard');
+    expect(AGENT_PROFILES['iflow-researcher']).toBe('standard');
+    expect(AGENT_PROFILES['iflow-plan-executor']).toBe('deep');
+    expect(AGENT_PROFILES['iflow-verifier']).toBe('review');
+    expect(AGENT_PROFILES['iflow-shipper']).toBe('quick');
   });
 });
 
@@ -252,23 +256,24 @@ describe('resolveModelWithFallback — profile resolution', () => {
   });
 });
 
-describe('resolveModelWithFallback — SFlow gating', () => {
+describe('resolveModelWithFallback — workflow gating', () => {
   beforeEach(() => {
     clearUnavailableModels();
   });
 
-  it('should skip profile step when activeWorkflow is iflow', () => {
+  it('should use profile when activeWorkflow is iflow', () => {
     const result = resolveModelWithFallback(
-      'spec-writer',
+      'iflow-discuss-planner',
       undefined,
       {},
       undefined,
       {
-        modelProfiles: { deep: { model: 'powerful-model', fallback_models: [] } },
+        modelProfiles: { standard: { model: 'kimi-k2.6', fallback_models: [] } },
         activeWorkflow: 'iflow',
       },
     );
-    expect(result.provenance).toBe('provider-fallback');
+    expect(result.model).toBe('kimi-k2.6');
+    expect(result.provenance).toBe('profile');
   });
 
   it('should skip profile step when activeWorkflow is none', () => {
@@ -308,6 +313,17 @@ describe('resolveModelWithFallback — SFlow gating', () => {
     );
     expect(result.model).toBe('powerful-model');
     expect(result.provenance).toBe('profile');
+  });
+
+  it('should skip profile when activeWorkflow is undefined but modelProfiles present', () => {
+    const result = resolveModelWithFallback(
+      'spec-writer',
+      undefined,
+      {},
+      undefined,
+      { modelProfiles: { deep: { model: 'deep-model', fallback_models: [] } } },
+    );
+    expect(result.provenance).toBe('provider-fallback');
   });
 });
 
@@ -374,21 +390,22 @@ describe('Integration: modelProfiles through config pipeline', () => {
     expect(result.provenance).toBe('profile');
   });
 
-  it('should use 3-layer chain when IFlow agent with profileOptions', () => {
-    // IFlow agents are not in AGENT_PROFILES, so even with sflow workflow,
-    // they should not get profile resolution
+  it('should use profile for IFlow agent when mapped in AGENT_PROFILES', () => {
+    // iflow-plan-executor is now mapped to 'deep' in AGENT_PROFILES
+    // With sflow workflow, it should use profile resolution
     const result = resolveModelWithFallback(
       'iflow-plan-executor',
       undefined,
       {},
       undefined,
       {
-        modelProfiles: { standard: 'standard-model' },
+        modelProfiles: { deep: { model: 'deep-model', fallback_models: [] } },
         activeWorkflow: 'sflow',
       },
     );
-    // iflow-plan-executor is not in AGENT_PROFILES → no profile → provider-fallback
-    expect(result.provenance).toBe('provider-fallback');
+    // iflow-plan-executor is in AGENT_PROFILES → use profile
+    expect(result.model).toBe('deep-model');
+    expect(result.provenance).toBe('profile');
   });
 });
 
@@ -880,5 +897,143 @@ describe('resolveModelWithFallback — modelType parameter', () => {
     } finally {
       (DEFAULT_PROFILE_MODELS as any).deep = originalDefault;
     }
+  });
+
+  // P1-2: model_type × activeWorkflow combination tests
+  it('should use model_type profile when activeWorkflow is iflow', () => {
+    const result = resolveModelWithFallback(
+      'iflow-plan-executor',
+      undefined,
+      {},
+      undefined,
+      { modelProfiles: { deep: { model: 'deep-model', fallback_models: [] } }, activeWorkflow: 'iflow' },
+      'deep',
+    );
+    expect(result.model).toBe('deep-model');
+    expect(result.provenance).toBe('profile');
+  });
+
+  it('should use model_type profile when activeWorkflow is none', () => {
+    const result = resolveModelWithFallback(
+      'spec-writer',
+      undefined,
+      {},
+      undefined,
+      { modelProfiles: { ultra: { model: 'ultra-model', fallback_models: [] } }, activeWorkflow: 'none' },
+      'ultra',
+    );
+    expect(result.model).toBe('ultra-model');
+    expect(result.provenance).toBe('profile');
+  });
+
+  it('should use model_type review when activeWorkflow is iflow', () => {
+    const result = resolveModelWithFallback(
+      'iflow-verifier',
+      undefined,
+      {},
+      undefined,
+      { modelProfiles: { review: { model: 'review-model', fallback_models: [] } }, activeWorkflow: 'iflow' },
+      'review',
+    );
+    expect(result.model).toBe('review-model');
+    expect(result.provenance).toBe('profile');
+  });
+});
+
+// ─── Wave 6: IFlow profile support ─────────────────────────────────────────────
+
+describe('resolveModelWithFallback — IFlow profile support', () => {
+  beforeEach(() => {
+    clearUnavailableModels();
+  });
+
+  it('should use standard profile for iflow-discuss-planner', () => {
+    const result = resolveModelWithFallback(
+      'iflow-discuss-planner',
+      undefined,
+      {},
+      undefined,
+      {
+        modelProfiles: { standard: { model: 'kimi-k2.6', fallback_models: [] } },
+        activeWorkflow: 'iflow',
+      },
+    );
+    expect(result.model).toBe('kimi-k2.6');
+    expect(result.provenance).toBe('profile');
+  });
+
+  it('should use standard profile for iflow-researcher', () => {
+    const result = resolveModelWithFallback(
+      'iflow-researcher',
+      undefined,
+      {},
+      undefined,
+      {
+        modelProfiles: { standard: { model: 'kimi-k2.6', fallback_models: [] } },
+        activeWorkflow: 'iflow',
+      },
+    );
+    expect(result.model).toBe('kimi-k2.6');
+    expect(result.provenance).toBe('profile');
+  });
+
+  it('should use deep profile for iflow-plan-executor', () => {
+    const result = resolveModelWithFallback(
+      'iflow-plan-executor',
+      undefined,
+      {},
+      undefined,
+      {
+        modelProfiles: { deep: { model: 'deepseek-v4', fallback_models: [] } },
+        activeWorkflow: 'iflow',
+      },
+    );
+    expect(result.model).toBe('deepseek-v4');
+    expect(result.provenance).toBe('profile');
+  });
+
+  it('should use review profile for iflow-verifier', () => {
+    const result = resolveModelWithFallback(
+      'iflow-verifier',
+      undefined,
+      {},
+      undefined,
+      {
+        modelProfiles: { review: { model: 'claude-sonnet-4', fallback_models: [] } },
+        activeWorkflow: 'iflow',
+      },
+    );
+    expect(result.model).toBe('claude-sonnet-4');
+    expect(result.provenance).toBe('profile');
+  });
+
+  it('should use quick profile for iflow-shipper', () => {
+    const result = resolveModelWithFallback(
+      'iflow-shipper',
+      undefined,
+      {},
+      undefined,
+      {
+        modelProfiles: { quick: { model: 'gpt-4o-mini', fallback_models: [] } },
+        activeWorkflow: 'iflow',
+      },
+    );
+    expect(result.model).toBe('gpt-4o-mini');
+    expect(result.provenance).toBe('profile');
+  });
+
+  it('should bypass profile for iFlow main agent (no mapping)', () => {
+    const result = resolveModelWithFallback(
+      'iFlow',
+      undefined,
+      {},
+      undefined,
+      {
+        modelProfiles: { standard: { model: 'kimi-k2.6', fallback_models: [] } },
+        activeWorkflow: 'iflow',
+      },
+    );
+    // iFlow is not in AGENT_PROFILES → bypass profile → provider-fallback
+    expect(result.provenance).toBe('provider-fallback');
   });
 });

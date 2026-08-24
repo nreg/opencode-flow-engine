@@ -13,6 +13,7 @@ import type { LocalToolDefinition } from './types/local-tool-definition.js';
 import { z } from 'zod';
 
 import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentModelMap } from './types.js';
+type BuiltinAgentName = import('./agents/types.js').BuiltinAgentName;
 import { IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolError, detectAgnesProvider } from './types.js';
 
 import { getAgentMode, createAgent } from './agents/index.js';
@@ -184,7 +185,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
         // Register only IFlow agents
         const iflowAgentNames = IFLOW_AGENT_NAMES as readonly string[];
         for (const name of iflowAgentNames) {
-          const override = configOverrides[name as import('./agents/types.js').BuiltinAgentName];
+          const override = configOverrides[name as BuiltinAgentName];
 
           let skillContent = skillLoader.getSkill(name)?.content;
           if (name === 'iflow-plan-executor') {
@@ -196,7 +197,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
             }
           }
 
-          const agentCfg = await createAgent(name as import('./agents/types.js').BuiltinAgentName, undefined, undefined, skillContent);
+          const agentCfg = await createAgent(name as BuiltinAgentName, undefined, undefined, skillContent, 'iflow');
 
           const instructions = (typeof agentCfg.instructions === 'string' ? agentCfg.instructions : '') || (typeof agentCfg.prompt === 'string' ? agentCfg.prompt : '');
           const modelName = typeof agentCfg.model === 'string' ? agentCfg.model : undefined;
@@ -206,7 +207,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
           cfg.agent[name] = {
             model: modelName,
             prompt: instructions,
-            mode: getAgentMode(name as import('./agents/types.js').BuiltinAgentName),
+            mode: getAgentMode(name as BuiltinAgentName),
             tools: agentTools,
             color: AGENT_COLORS[name],
             temperature: override?.temperature ?? temperature,
@@ -221,11 +222,16 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
         }
 
         // Register shared agents (cross-workflow, standalone)
-        // These are not bound to any IFlow workflow state.
+        // These are NOT bound to any IFlow workflow state (they don't participate
+        // in the IFlow state machine), but they DO participate in tier-based model
+        // resolution: passing 'iflow' enables AGENT_PROFILES tier resolution
+        // (equivalent to how sflow-plugin-factory registers them with default 'sflow').
+        // Do NOT pass 'none' here — that would skip tier resolution and diverge
+        // from the sflow registration behavior.
         const sharedNames = SHARED_AGENT_NAMES as readonly string[];
         for (const name of sharedNames) {
-          const override = configOverrides[name as import('./agents/types.js').BuiltinAgentName];
-          const agentCfg = await createAgent(name as import('./agents/types.js').BuiltinAgentName, undefined, undefined, undefined);
+          const override = configOverrides[name as BuiltinAgentName];
+          const agentCfg = await createAgent(name as BuiltinAgentName, undefined, undefined, undefined, 'iflow');
 
           const instructions = (typeof agentCfg.instructions === 'string' ? agentCfg.instructions : '') || (typeof agentCfg.prompt === 'string' ? agentCfg.prompt : '');
           const modelName = typeof agentCfg.model === 'string' ? agentCfg.model : undefined;

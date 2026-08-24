@@ -13,6 +13,8 @@ import {
   getAlternativeModel,
   markModelUnavailable,
   clearUnavailableModels,
+  AGENT_PROFILES,
+  resolveModelWithFallback,
 } from './agent-builder.js';
 
 describe('Agent Builder', () => {
@@ -476,5 +478,217 @@ describe('Agent Builder', () => {
       expect(instructions).toContain('Single Wave per build-executor Call');
       expect(instructions).toContain('Execution Contract Wave Structure');
     });
+  });
+
+  describe('Wave 3 - activeWorkflow Parameter', () => {
+    describe('createAgent', () => {
+      it('should accept activeWorkflow parameter with sflow value', async () => {
+        const agent = await createAgent('sFlow', undefined, undefined, undefined, 'sflow');
+        expect(agent).toBeDefined();
+        expect(agent.id).toBe('sFlow');
+      });
+
+      it('should accept activeWorkflow parameter with iflow value', async () => {
+        const agent = await createAgent('iFlow', undefined, undefined, undefined, 'iflow');
+        expect(agent).toBeDefined();
+        expect(agent.id).toBe('IFlow');
+      });
+
+      it('should accept activeWorkflow parameter with none value', async () => {
+        const agent = await createAgent('sFlow', undefined, undefined, undefined, 'none');
+        expect(agent).toBeDefined();
+        expect(agent.id).toBe('sFlow');
+      });
+
+      it('should default to sflow when activeWorkflow is not provided', async () => {
+        // This tests backward compatibility - existing code should work unchanged
+        const agent = await createAgent('sFlow');
+        expect(agent).toBeDefined();
+        expect(agent.id).toBe('sFlow');
+        // The default behavior should be the same as passing 'sflow' explicitly
+      });
+    });
+
+    describe('createAllAgents', () => {
+      it('should accept activeWorkflow parameter with sflow value', async () => {
+        const agents = await createAllAgents(undefined, undefined, undefined, 'sflow');
+        expect(agents).toBeDefined();
+        expect(agents.sFlow).toBeDefined();
+      });
+
+      it('should accept activeWorkflow parameter with iflow value', async () => {
+        const agents = await createAllAgents(undefined, undefined, undefined, 'iflow');
+        expect(agents).toBeDefined();
+        expect(agents.iFlow).toBeDefined();
+      });
+
+      it('should accept activeWorkflow parameter with none value', async () => {
+        const agents = await createAllAgents(undefined, undefined, undefined, 'none');
+        expect(agents).toBeDefined();
+        expect(agents.sFlow).toBeDefined();
+      });
+
+      it('should default to sflow when activeWorkflow is not provided', async () => {
+        // This tests backward compatibility - existing code should work unchanged
+        const agents = await createAllAgents();
+        expect(agents).toBeDefined();
+        expect(agents.sFlow).toBeDefined();
+      });
+    });
+  });
+});
+
+// ─── Wave 6: AGENT_PROFILES IFlow agents ───────────────────────────────────────
+
+describe('AGENT_PROFILES — IFlow agents', () => {
+  it('should map iflow-discuss-planner to standard', () => {
+    expect(AGENT_PROFILES['iflow-discuss-planner']).toBe('standard');
+  });
+
+  it('should map iflow-researcher to standard', () => {
+    expect(AGENT_PROFILES['iflow-researcher']).toBe('standard');
+  });
+
+  it('should map iflow-plan-executor to deep', () => {
+    expect(AGENT_PROFILES['iflow-plan-executor']).toBe('deep');
+  });
+
+  it('should map iflow-verifier to review', () => {
+    expect(AGENT_PROFILES['iflow-verifier']).toBe('review');
+  });
+
+  it('should map iflow-shipper to quick', () => {
+    expect(AGENT_PROFILES['iflow-shipper']).toBe('quick');
+  });
+
+  it('should not map iFlow main agent', () => {
+    expect(AGENT_PROFILES['iFlow']).toBeUndefined();
+  });
+});
+
+// ─── Wave 6 Fix: iFlow activeWorkflow tier resolution ───────────────────────────
+
+describe('createAgent — iFlow activeWorkflow tier resolution', () => {
+  it('should resolve iflow-plan-executor via deep tier when activeWorkflow is iflow', async () => {
+    // Construct modelProfiles config with deep tier (maps to iflow-plan-executor)
+    const modelProfiles = {
+      deep: {
+        model: 'provider/test-deep-model',
+        fallback_models: ['provider/test-deep-fallback'],
+      },
+    };
+
+    // Call resolveModelWithFallback with activeWorkflow: 'iflow'
+    const result = resolveModelWithFallback(
+      'iflow-plan-executor',
+      undefined, // model
+      undefined, // configOverrides
+      undefined, // overrides
+      {
+        modelProfiles,
+        activeWorkflow: 'iflow',
+      },
+    );
+
+    // Verify provenance is 'profile' (tier resolution), not 'system-default'
+    expect(result.provenance).toBe('profile');
+    expect(result.model).toBe('provider/test-deep-model');
+  });
+
+  it('should resolve iflow-discuss-planner via standard tier when activeWorkflow is iflow', async () => {
+    // Construct modelProfiles config with standard tier (maps to iflow-discuss-planner)
+    const modelProfiles = {
+      standard: {
+        model: 'provider/test-standard-model',
+        fallback_models: ['provider/test-standard-fallback'],
+      },
+    };
+
+    const result = resolveModelWithFallback(
+      'iflow-discuss-planner',
+      undefined,
+      undefined,
+      undefined,
+      {
+        modelProfiles,
+        activeWorkflow: 'iflow',
+      },
+    );
+
+    expect(result.provenance).toBe('profile');
+    expect(result.model).toBe('provider/test-standard-model');
+  });
+
+  it('should resolve iflow-verifier via review tier when activeWorkflow is iflow', async () => {
+    // Construct modelProfiles config with review tier (maps to iflow-verifier)
+    const modelProfiles = {
+      review: {
+        model: 'provider/test-review-model',
+        fallback_models: ['provider/test-review-fallback'],
+      },
+    };
+
+    const result = resolveModelWithFallback(
+      'iflow-verifier',
+      undefined,
+      undefined,
+      undefined,
+      {
+        modelProfiles,
+        activeWorkflow: 'iflow',
+      },
+    );
+
+    expect(result.provenance).toBe('profile');
+    expect(result.model).toBe('provider/test-review-model');
+  });
+
+  it('should skip tier resolution when activeWorkflow is none', async () => {
+    // Even with modelProfiles, tier resolution should be skipped when activeWorkflow is 'none'
+    const modelProfiles = {
+      deep: {
+        model: 'provider/test-deep-model',
+        fallback_models: ['provider/test-deep-fallback'],
+      },
+    };
+
+    const result = resolveModelWithFallback(
+      'iflow-plan-executor',
+      undefined,
+      undefined,
+      undefined,
+      {
+        modelProfiles,
+        activeWorkflow: 'none',
+      },
+    );
+
+    // Should NOT use tier resolution (provenance should NOT be 'profile')
+    // It may fall back to system default or provider-fallback, but not from modelProfiles tier
+    expect(result.provenance).not.toBe('profile');
+  });
+
+  it('should use default tier resolution when activeWorkflow is sflow', async () => {
+    // sFlow activeWorkflow should also enable tier resolution
+    const modelProfiles = {
+      deep: {
+        model: 'provider/test-deep-model',
+        fallback_models: ['provider/test-deep-fallback'],
+      },
+    };
+
+    const result = resolveModelWithFallback(
+      'iflow-plan-executor',
+      undefined,
+      undefined,
+      undefined,
+      {
+        modelProfiles,
+        activeWorkflow: 'sflow',
+      },
+    );
+
+    expect(result.provenance).toBe('profile');
+    expect(result.model).toBe('provider/test-deep-model');
   });
 });

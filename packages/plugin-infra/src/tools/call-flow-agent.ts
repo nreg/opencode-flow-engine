@@ -30,7 +30,7 @@ import type {
 import { formatToolError, generateTaskId, PROBE_PENDING } from '../types.js';
 import type { ToolDefinition } from './types.js';
 import { DEFAULT_PROFILE_MODELS } from '../agents/config-loader.js';
-import { resolveModelWithFallback } from '../agents/agent-builder.js';
+import { resolveModelWithFallback, VALID_MODEL_TIERS, type ModelTier } from '../agents/agent-builder.js';
 import type { BuiltinAgentName } from '../agents/types.js';
 import { Logger } from '../utils/logger.js';
 
@@ -417,10 +417,10 @@ export function createCallFlowAgentTools(
         return await formatToolError(validationError);
       }
 
-      const validTiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'];
-      if (model_type && !validTiers.includes(model_type as string)) {
+      if (model_type && !VALID_MODEL_TIERS.has(model_type as ModelTier)) {
+        const validTiers = Array.from(VALID_MODEL_TIERS).join(', ');
         return await formatToolError(
-          `Invalid model_type "${model_type}". Valid tiers are: ${validTiers.join(', ')}`,
+          `Invalid model_type "${model_type}". Valid tiers are: ${validTiers}`,
         );
       }
 
@@ -465,6 +465,12 @@ export function createCallFlowAgentTools(
           // 3. modelProfiles user-configured tier model
           // 4. DEFAULT_PROFILE_MODELS tier model
           // 5. Fallback chain (per-agent → tier → DEFAULT_PROFILE_MODELS → DEFAULT_FALLBACKS)
+
+          // activeWorkflow is intentionally a constant 'sflow' here (no dynamic directory
+          // detection): the gate condition (activeWorkflow === 'sflow' || 'iflow') treats
+          // both values identically, so the model_type branch (Priority 3) result is
+          // unaffected by the actual workflow context. A dynamic detectActiveWorkflow()
+          // call would add filesystem I/O with zero behavioral difference.
           const result = resolveModelWithFallback(
             subagent_type as BuiltinAgentName,
             undefined,

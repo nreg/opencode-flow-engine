@@ -497,7 +497,8 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
 
             const override = configOverrides[name];
             const skill = skillLoader.getSkill(name);
-            const agentCfg = await createAgent(name, undefined, undefined, skill?.content);
+            // SFlow agents register with explicit 'sflow' activeWorkflow (style consistency)
+            const agentCfg = await createAgent(name, undefined, undefined, skill?.content, 'sflow');
 
             const instructions = (typeof agentCfg.instructions === 'string' ? agentCfg.instructions : '') || (typeof agentCfg.prompt === 'string' ? agentCfg.prompt : '');
             const modelName = typeof agentCfg.model === 'string' ? agentCfg.model : undefined;

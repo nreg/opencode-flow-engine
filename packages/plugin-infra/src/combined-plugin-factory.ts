@@ -273,7 +273,10 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
       for (const name of getAgentNames()) {
         const override = configOverrides[name];
         const skill = skillLoader.getSkill(name);
-        const agentCfg = await createAgent(name, undefined, undefined, skill?.content);
+        // IFlow subagents are registered with 'iflow' activeWorkflow (semantic correctness);
+        // SFlow/shared agents keep the default 'sflow' (backward compatible)
+        const isIflowAgent = (IFLOW_AGENT_NAMES as readonly string[]).includes(name);
+        const agentCfg = await createAgent(name, undefined, undefined, skill?.content, isIflowAgent ? 'iflow' : undefined);
 
         const instructions = (typeof agentCfg.instructions === 'string' ? agentCfg.instructions : '') || (typeof agentCfg.prompt === 'string' ? agentCfg.prompt : '');
         const modelName = typeof agentCfg.model === 'string' ? agentCfg.model : undefined;

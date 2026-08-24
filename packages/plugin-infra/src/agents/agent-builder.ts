@@ -167,11 +167,12 @@ const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
  * - quick, standard, deep, review: static agent bindings
  * - sFlow, iFlow: primary agents, NOT in AGENT_PROFILES (bypass tier resolution)
  */
-export type AGENT_PROFILES_TYPE = Record<string, 'free' | 'quick' | 'standard' | 'deep' | 'ultra' | 'review'>;
+export type AGENT_PROFILES_TYPE = Record<string, ModelTier>;
 
 export const AGENT_PROFILES: AGENT_PROFILES_TYPE = {
   // quick tier - mechanical execution, archive, explore
   'release-archivist': 'quick',
+  'iflow-shipper': 'quick', // IFlow workflow agent
   
   // standard tier - regular subtasks
   'need-explorer': 'standard',
@@ -179,6 +180,8 @@ export const AGENT_PROFILES: AGENT_PROFILES_TYPE = {
   'spec-merger': 'standard',
   'flow-intel': 'standard',
   'flow-evolve': 'standard',
+  'iflow-discuss-planner': 'standard', // IFlow workflow agent
+  'iflow-researcher': 'standard', // IFlow workflow agent
   
   // deep tier - code execution, complex tasks
   'spec-writer': 'deep',
@@ -188,12 +191,14 @@ export const AGENT_PROFILES: AGENT_PROFILES_TYPE = {
   'ui-implementer': 'deep',
   'flow-architect': 'deep',
   'flow-restyle': 'deep',
+  'iflow-plan-executor': 'deep', // IFlow workflow agent
   
   // review tier - review tasks
   'code-reviewer': 'review',
   'test-engineer': 'review',
   'review-engineer': 'review',
   'flow-health': 'review',
+  'iflow-verifier': 'review', // IFlow workflow agent
 };
 
 /**
@@ -434,7 +439,8 @@ export function resolveModelWithFallback(
   // Priority 5: AGENT_PROFILES static binding → tier resolution
   let primaryModel: string | undefined;
   const agentProfile = AGENT_PROFILES[name];
-  if (profileOptions?.activeWorkflow === 'sflow' && agentProfile) {
+  // sflow/iflow enable tier resolution; none/absent skip (backward compatible)
+  if ((profileOptions?.activeWorkflow === 'sflow' || profileOptions?.activeWorkflow === 'iflow') && agentProfile) {
     const tierConfig = profileOptions?.modelProfiles?.[agentProfile] ?? DEFAULT_PROFILE_MODELS[agentProfile];
     if (tierConfig?.model) {
       if (isModelAvailable(tierConfig.model)) {
@@ -504,6 +510,7 @@ export async function createAgent(
   model?: string,
   overrides?: AgentOverrides,
   skillContent?: string,
+  activeWorkflow?: 'sflow' | 'iflow' | 'none',
 ): Promise<AgentConfig> {
   const factory = AGENT_REGISTRY[name];
   if (!factory) {
@@ -518,7 +525,7 @@ export async function createAgent(
 
   const resolved = resolveModelWithFallback(name, model, configOverrides, overrides, {
       modelProfiles: config.modelProfiles,
-      activeWorkflow: 'sflow',
+      activeWorkflow: activeWorkflow ?? 'sflow',
     });
 
   // Resolve temperature: override > config > factory default
@@ -547,6 +554,7 @@ export async function createAllAgents(
   model?: string,
   overrides?: AgentOverrides,
   skillContents?: Record<string, string>,
+  activeWorkflow?: 'sflow' | 'iflow' | 'none',
 ): Promise<Record<BuiltinAgentName, AgentConfig>> {
   const agents: Partial<Record<BuiltinAgentName, AgentConfig>> = {};
 
@@ -558,7 +566,7 @@ export async function createAllAgents(
 
 const resolved = resolveModelWithFallback(name, model, configOverrides, overrides, {
     modelProfiles: config.modelProfiles,
-    activeWorkflow: 'sflow',
+    activeWorkflow: activeWorkflow ?? 'sflow',
   });
 
     const content = skillContents?.[name];

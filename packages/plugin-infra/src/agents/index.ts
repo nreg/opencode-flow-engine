@@ -58,6 +58,7 @@ export {
   getAllDefaultModels,
   clearConfigCache,
   getAlternativeModel,
+  resolveModelWithFallback,
 } from './agent-builder.js';
 
 export type {
