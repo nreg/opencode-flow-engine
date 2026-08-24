@@ -70,6 +70,12 @@ export const LOOSE_COMPLETION_AGENTS: string[] = [
   'release-archivist',
   'spec-merger',
   'ui-implementer',
+  // iFlow subagents
+  'iflow-discuss-planner',
+  'iflow-researcher',
+  'iflow-plan-executor',
+  'iflow-verifier',
+  'iflow-shipper',
 ];
 
 /** Combined list of all agents with completion enforcement enabled.
