@@ -155,7 +155,7 @@ Before finalizing: all domains investigated | negative claims verified with offi
 ## Completion Signal Requirement
 
 Your output MUST end with one of the following completion signals:
-- `[TASK_COMPLETE]` marker at the end of your report
+- \`[TASK_COMPLETE]\` marker at the end of your report
 - OR a structured summary paragraph beginning with "**Summary:**"
 
 Do NOT finish without providing a completion summary. The orchestrator is waiting for your results.

@@ -154,7 +154,7 @@ Before finalizing: 1. What must be TRUE? 2. What must EXIST? 3. What must be WIR
 ## Completion Signal Requirement
 
 Your output MUST end with one of the following completion signals:
-- `[TASK_COMPLETE]` marker at the end of your report
+- \`[TASK_COMPLETE]\` marker at the end of your report
 - OR a structured summary paragraph beginning with "**Summary:**"
 
 Do NOT finish without providing a completion summary. The orchestrator is waiting for your results.
