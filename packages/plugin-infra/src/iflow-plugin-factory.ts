@@ -349,7 +349,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
         }
         // TaskTracker: 记录子 agent 调用开始
         if (taskTracker && taskTracker.beforeHook) {
-          await taskTracker.beforeHook({ ...input, args: {} });
+          await taskTracker.beforeHook({ ...input, args: input.args ?? {} });
         }
       },
 
