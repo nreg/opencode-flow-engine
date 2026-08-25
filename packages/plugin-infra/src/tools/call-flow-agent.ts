@@ -408,6 +408,21 @@ export function createCallFlowAgentTools(
         model_type,
       } = args;
 
+      // F1: 防御性检查 — LLM 偶发未传 subagent_type 时给出清晰、可操作错误
+      if (!subagent_type || typeof subagent_type !== 'string' || subagent_type.trim() === '') {
+        return await formatToolError(
+          `缺少必需的 subagent_type 参数。请始终显式指定要调用的子 agent 名称（例如 ${workflowName.toLowerCase()}-plan-executor、build-executor）。`,
+        );
+      }
+
+      // F2: 禁止子 agent 再调用子 agent（仅主 orchestrator 可委派）
+      const callerAgent = (context as { agent?: string }).agent;
+      if (callerAgent && !['sflow', 'iflow'].includes(callerAgent.toLowerCase())) {
+        return await formatToolError(
+          `子 agent "${callerAgent}" 不允许调用 call_flow_agent。只有主 orchestrator（sFlow/iFlow）可以委派子 agent。`,
+        );
+      }
+
       // Validate agent name
       const validationError = await validateAgent(
         subagent_type as string,
@@ -824,6 +839,18 @@ export function createCallFlowAgentTools(
       block: z.boolean().optional().describe('Wait for completion (default: false)'),
     } as Record<string, unknown>,
     execute: async (args: Record<string, unknown>, _context) => {
+      // F2: 禁止子 agent 再调用子 agent（仅主 orchestrator 可委派）
+      const callerAgent = (_context as { agent?: string }).agent;
+      if (callerAgent && !['sflow', 'iflow'].includes(callerAgent.toLowerCase())) {
+        return {
+          title: 'FlowAgent Output',
+          output: JSON.stringify(
+            { success: false, error: `子 agent "${callerAgent}" 不允许调用 flowagent_output。只有主 orchestrator（sFlow/iFlow）可以委派子 agent。` },
+            null,
+            2,
+          ),
+        };
+      }
       const { task_id, block } = args as { task_id: string; block?: boolean };
       const changeDir = resolveChangeDir(undefined, _context.directory);
 
@@ -1100,6 +1127,18 @@ export function createCallFlowAgentTools(
       taskId: z.string().describe('Task ID to cancel (required, prefix: sf_)'),
     } as Record<string, unknown>,
     execute: async (args: Record<string, unknown>, _context) => {
+      // F2: 禁止子 agent 再调用子 agent（仅主 orchestrator 可委派）
+      const callerAgent = (_context as { agent?: string }).agent;
+      if (callerAgent && !['sflow', 'iflow'].includes(callerAgent.toLowerCase())) {
+        return {
+          title: 'FlowAgent Cancel',
+          output: JSON.stringify(
+            { success: false, error: `子 agent "${callerAgent}" 不允许调用 flowagent_cancel。只有主 orchestrator（sFlow/iFlow）可以委派子 agent。` },
+            null,
+            2,
+          ),
+        };
+      }
       const { taskId } = args as { taskId: string };
       try {
         const task = backgroundTaskRegistry.get(taskId);
