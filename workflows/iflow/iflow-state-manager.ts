@@ -39,10 +39,23 @@ export type IFlowStateName =
   | 'verifying'
   | 'shipping';
 
+/**
+ * IFlow workflow mode — determined by the Complexity Assessment.
+ * - 'full': complete 6-state cycle (default)
+ * - 'tweak': streamlined path — skip discussing/researching/planning
+ * - 'hotfix': streamlined path for bounded fixes — skip researching/planning
+ */
+export type IFlowWorkflowMode = 'full' | 'tweak' | 'hotfix';
+
 /** IFlow state.json schema */
 export interface IFlowStateFile {
   /** Current workflow state */
   state: IFlowStateName;
+  /**
+   * Workflow mode from Complexity Assessment.
+   * Optional for backward compatibility — defaults to 'full' when absent.
+   */
+  mode?: IFlowWorkflowMode;
   /** Current iteration cycle number (1-based) */
   cycleNumber: number;
   /** ISO 8601 timestamp when current state was entered */
@@ -124,6 +137,7 @@ function truncateSummary(text: string, maxLength: number = MAX_SUMMARY_LENGTH): 
 function createDefaultState(): IFlowStateFile {
   return {
     state: 'discussing',
+    mode: 'full',
     cycleNumber: 1,
     enteredAt: new Date().toISOString(),
     artifactPaths: [],

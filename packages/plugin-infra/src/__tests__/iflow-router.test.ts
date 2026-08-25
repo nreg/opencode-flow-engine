@@ -751,4 +751,99 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     // Should have a valid state
     expect(data.data.state).toBeDefined();
   });
+
+  // ─── Mode Tests ──────────────────────────────────────────────────────────
+
+  it('should default mode to "full" when no state.json exists', async () => {
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    const result = await tool.execute(
+      { changeDir: dir },
+      { directory: dir } as any,
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    expect(data.data.mode).toBe('full');
+  });
+
+  it('should read mode from state.json when present', async () => {
+    await writeIFlowState(dir, { state: 'executing', mode: 'tweak', iteration: 1 });
+    await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
+    await writeIFlowArtifact(dir, 'EXECUTING', JSON.stringify({
+      enteredAt: '2025-01-01T00:00:00Z',
+      fromState: 'planning',
+      iteration: 1,
+    }));
+
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    const result = await tool.execute(
+      { changeDir: dir },
+      { directory: dir } as any,
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    expect(data.data.mode).toBe('tweak');
+    expect(data.data.state).toBe('executing');
+  });
+
+  it('should default to "full" when state.json has no mode field', async () => {
+    await writeIFlowState(dir, { state: 'planning', iteration: 1 });
+    await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
+
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    const result = await tool.execute(
+      { changeDir: dir },
+      { directory: dir } as any,
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    expect(data.data.mode).toBe('full');
+  });
+
+  it('should return direct execution nextAction for tweak mode in discussing state', async () => {
+    await writeIFlowState(dir, { state: 'discussing', mode: 'tweak', iteration: 1 });
+
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    const result = await tool.execute(
+      { changeDir: dir },
+      { directory: dir } as any,
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    expect(data.data.mode).toBe('tweak');
+    expect(data.data.nextAction).toContain('[mode=tweak] Direct execution');
+    expect(data.data.nextAction).toContain('iflow-plan-executor');
+  });
+
+  it('should write mode to state.json when persisting state', async () => {
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    await tool.execute(
+      { changeDir: dir },
+      { directory: dir } as any,
+    );
+
+    const { readJsonFile } = await import('@opencode-flow-engine/shared');
+    const persisted = await readJsonFile<{ mode?: string }>(dir + '/.flow-engine/iflow/state.json');
+    expect(persisted?.mode).toBe('full');
+  });
+
+  it('should include mode in STATE.md', async () => {
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    await tool.execute(
+      { changeDir: dir },
+      { directory: dir } as any,
+    );
+
+    const stateMd = await readFile(dir + '/.flow-engine/iflow/STATE.md', 'utf-8');
+    expect(stateMd).toContain('**Mode**');
+  });
 });

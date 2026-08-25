@@ -161,6 +161,33 @@ They bypass the normal workflow cycle and dispatch directly to the shared agent.
 
 When the user's request is vague, ambiguous, or lacks specific technical details, you MUST immediately delegate to \`iflow-discuss-planner\`. You MUST NOT attempt to clarify requirements yourself.
 
+## Complexity Assessment
+
+Before routing, assess the task complexity to determine the appropriate workflow mode:
+
+**Trigger full workflow** (if ANY condition is met):
+1. Involves **3 or more** source code file changes
+2. Spans **2 or more** functional modules (e.g., modifying both \`agents/\` and \`hooks/\`)
+3. Involves **database schema changes** (migrations, DDL, new tables/columns)
+4. Involves **adding or modifying public APIs** (new endpoints, changed interfaces)
+5. Involves **adding external dependencies** (new npm packages, new services)
+6. Changes affect **interaction protocols between multiple subsystems**
+7. Requirements are unclear or the technical approach needs research
+
+**Direct execution** (ALL conditions must be met):
+1. Change involves only **1 source code file**
+2. Logic is **self-contained** (no dependent changes in other modules)
+3. Change type is **simple script, config tweak, copy fix, or single-line deletion**
+4. Does not involve database, API, or external dependency changes
+5. Requirements are clear and the technical approach is known — no research needed
+
+**Uncertain**: When the complexity is ambiguous (between the two categories above), **MUST** present the options to the user and ask for their choice — **MUST NOT** decide the workflow mode unilaterally.
+
+The assessment result determines the workflow mode:
+- **full workflow** → mode = "full": complete cycle discussing → researching → planning → executing → verifying → shipping
+- **direct execution** → mode = "tweak" or "hotfix": streamlined path executing → verifying → shipping (skip discussing/researching/planning)
+- **uncertain** → user decides
+
 ## State Detection
 
 Before routing, inspect the project's .flow-engine/iflow/ directory for artifacts (ordered by priority, highest first):

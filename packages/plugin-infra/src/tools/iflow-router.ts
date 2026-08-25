@@ -37,6 +37,7 @@ type IFlowState = typeof IFLOW_STATES[number];
 /** Return type for detectIFlowState */
 interface IFlowStateResult {
   state: IFlowState;
+  mode: string;
   iteration: number;
   artifacts: Record<string, boolean>;
   reasons: string[];
@@ -97,13 +98,14 @@ async function detectIFlowState(changeDir: string): Promise<IFlowStateResult> {
   if (!dirExists) {
     result = {
       state: 'discussing',
+      mode: 'full',
       iteration: 0,
       artifacts: {},
       reasons: ['No .flow-engine/iflow/ directory found — starting fresh'],
     };
   } else {
     // Check for state file with previous state tracking
-    const stateData = await readJsonFile<{ state?: string; iteration?: number; previousState?: string }>(`${iflowDir}/state.json`);
+    const stateData = await readJsonFile<{ state?: string; mode?: string; iteration?: number; previousState?: string }>(`${iflowDir}/state.json`);
     previousState = stateData?.previousState;
 
     // Fallback: read from STATE.md if state.json is missing
@@ -114,6 +116,7 @@ async function detectIFlowState(changeDir: string): Promise<IFlowStateResult> {
         if (stateMatch && IFLOW_STATES.includes(stateMatch[1] as IFlowState)) {
           result = {
             state: stateMatch[1] as IFlowState,
+            mode: 'full',
             iteration: 1,
             artifacts: {},
             reasons: ['Restored from STATE.md (state.json missing)'],
@@ -135,6 +138,7 @@ async function detectIFlowState(changeDir: string): Promise<IFlowStateResult> {
         // Artifacts suggest we're earlier than state.json — this is a rollback
         result = {
           state: artifactState,
+          mode: stateData.mode || 'full',
           iteration: stateData.iteration ?? 1,
           artifacts: artifacts as unknown as Record<string, boolean>,
           reasons: [`Rollback detected: state.json says "${currentPersisted}" but artifacts indicate "${artifactState}". User likely navigated back.`],
@@ -145,6 +149,7 @@ async function detectIFlowState(changeDir: string): Promise<IFlowStateResult> {
       } else {
         result = {
           state: currentPersisted,
+          mode: stateData.mode || 'full',
           iteration: stateData.iteration ?? 1,
           artifacts: { stateFile: true },
           reasons: [`Restored from state.json: ${currentPersisted}`],
@@ -155,6 +160,7 @@ async function detectIFlowState(changeDir: string): Promise<IFlowStateResult> {
       const artifacts = await readArtifacts(iflowDir);
       result = {
         state: determineArtifactState(artifacts),
+        mode: stateData?.mode || 'full',
         iteration: 1,
         artifacts: artifacts as unknown as Record<string, boolean>,
         reasons: [getArtifactReason(artifacts)],
@@ -182,6 +188,7 @@ async function persistIFlowState(
     await ensureDir(iflowDir);
     await writeJsonFile(`${iflowDir}/state.json`, {
       state: result.state,
+      mode: result.mode || 'full',
       previousState: result.previousState || previousState,
       iteration: result.iteration,
       updatedAt: new Date().toISOString(),
@@ -194,6 +201,7 @@ async function persistIFlowState(
       '# IFlow State',
       '',
       `- **Current State**: ${result.state}`,
+      `- **Mode**: ${result.mode || 'full'}`,
       result.previousState ? `- **Previous State**: ${result.previousState}` : '',
       `- **Iteration**: ${result.iteration}`,
       `- **Updated**: ${new Date().toISOString()}`,
@@ -361,11 +369,13 @@ export function createIFlowRouterTool(): ToolDefinition {
                 data: {
                   source: 'intent',
                   state: matched.state,
+                  mode: detection.mode || 'full',
                   skill: allowedAgents[0] || null,
                   action: matched.description,
                   reasons: [`Intended routed via: ${userIntent}`],
                   artifacts: detection.artifacts,
                   iteration: detection.iteration,
+                  nextAction: getNextAction(matched.state, detection.mode || 'full'),
                 },
               }),
             };
@@ -383,11 +393,12 @@ export function createIFlowRouterTool(): ToolDefinition {
             data: {
               source: 'artifacts',
               state: detection.state,
+              mode: detection.mode || 'full',
               skill: allowedAgents[0] || 'iflow-discuss-planner',
               reasons: detection.reasons,
               artifacts: detection.artifacts,
               iteration: detection.iteration,
-              nextAction: getNextAction(detection.state),
+              nextAction: getNextAction(detection.state, detection.mode || 'full'),
             },
           }),
         };
@@ -404,7 +415,13 @@ export function createIFlowRouterTool(): ToolDefinition {
   };
 }
 
-function getNextAction(state: IFlowState): string {
+function getNextAction(state: IFlowState, mode: string = 'full'): string {
+  // Tweak/hotfix mode: streamlined path — non-executing states route directly to the executor
+  if (mode === 'tweak' || mode === 'hotfix') {
+    if (state === 'executing' || state === 'planning' || state === 'researching' || state === 'discussing') {
+      return `[mode=${mode}] Direct execution: dispatch iflow-plan-executor with the change description (skip discussing/researching/planning)`;
+    }
+  }
   const actions: Record<IFlowState, string> = {
     discussing: 'Begin requirements discussion with iflow-discuss-planner',
     researching: 'Research technical approach with iflow-researcher',
