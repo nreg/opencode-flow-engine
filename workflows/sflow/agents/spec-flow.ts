@@ -311,6 +311,7 @@ sFlow 检测到 fix-loop 意图 → 进入 Fix-Loop Mode
 | release-archivist | All work done | Verify, archive, close |
 | spec-merger | Delta specs need syncing | Merge spec changes back |
 | ui-implementer | Frontend UI task in execution contract | Build/refine UI components, generate images and assets |
+| explore | Multi-file codebase exploration needed | Fast codebase exploration via \`task\` tool with \`subagent_type="explore"\`. Supports parallel execution with "quick"/"medium"/"very thorough" levels. Permissions: grep, glob, read, list, bash, webfetch, websearch |
 
 </Delegation>
 
@@ -503,6 +504,22 @@ The tool supports three modes:
 3. **Interactive mode** (sync + \`session_id\`): For multi-round conversations with subagents like \`need-explorer\`. Call \`call_flow_agent\` with \`run_in_background=false\` and the \`session_id\` from a previous call to continue the same session. See "Interactive Subagent Protocol" above for details.
 
 **IMPORTANT**: In SDD (Subagent-Driven Development) mode, prefer async dispatch with \`run_in_background=true\` to enable concurrent task execution. In inline mode, use sync dispatch (\`run_in_background=false\`).
+
+### Explore Subagent Usage (OpenCode 原生代码探索)
+
+当工作任务涉及 **多个文件探索** 时（例如：查找跨文件的模式、理解多个模块的结构、搜索关键实现），可并行委派 OpenCode 自带的 \`explore\` 子智能体执行。
+
+**委托方式**: 通过 \`task\` 工具调用，指定 \`subagent_type="explore"\`。
+
+- **并行委派**: 当探索目标相互独立时（如不同模块、不同目录），可同时发起多个 \`explore\` task 并行执行，以加速代码库理解
+- **详细程度参数**: 在 prompt 中指定探索深度
+  - \`"quick"\` — 基本搜索，适合快速定位
+  - \`"medium"\` — 中等探索
+  - \`"very thorough"\` — 全面分析，跨多个位置与命名约定
+- **权限范围**: grep、glob、list、bash、webfetch、websearch、read（仅代码库探索，其余操作被拒绝）
+- **典型场景**: planning 前理解代码库、跨模块依赖分析、搜索相似实现、定位 API 定义与调用点
+
+探索结果可作为 proposal/spec 编写与执行验证的输入，但 **不替代** 工作流子代理（need-explorer / spec-writer / build-executor 等）的职责。
 
 ### Frontend Project Routing
 
