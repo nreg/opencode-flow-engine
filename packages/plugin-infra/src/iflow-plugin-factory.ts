@@ -37,6 +37,7 @@ import { Logger } from './utils/logger.js';
 // 全局 PollingLogger 实例（复用 polling.log）
 const globalLogger = new PollingLogger();
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
+import { SFLOW_AGENT_NAMES } from '../../../workflows/sflow/index.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
 import { createTaskTracker } from './features/task-tracker.js';
 import { recoverIFlowState, saveIFlowCheckpoint, readIFlowCheckpoint, type IFlowCheckpointFile } from '../../../workflows/iflow/iflow-state-manager.js';
@@ -68,12 +69,19 @@ function createIFlowTools(
     workflowName: 'IFlow',
     modelProfiles,
     configOverrides,
-    validateAgent: (subagentType) => {
+    validateAgent: (subagentType, context) => {
       const sharedNames = SHARED_AGENT_NAMES as readonly string[];
       if (sharedNames.includes(subagentType as string)) return null;
-      const validIFlowAgents = IFLOW_AGENT_NAMES as readonly string[];
-      if (!validIFlowAgents.includes(subagentType as string)) {
-        return `无效的 IFlow agent: "${subagentType}"。可用的 IFlow agent: ${validIFlowAgents.join(', ')}，共享 agent: ${sharedNames.join(', ')}`;
+      // F3: 按调用方 work flow 选择白名单 — sFlow orchestrator 调 sflow 子 agent 时
+      // 不应被 IFlow 校验拒绝（环境仅加载 iFlow 插件提供 call_flow_agent 的场景）
+      const caller = String((context as { agent?: string })?.agent ?? '').toLowerCase();
+      const isSFlowCaller = caller === 'sflow' || caller.startsWith('sflow-');
+      const agentNames = isSFlowCaller
+        ? (SFLOW_AGENT_NAMES as readonly string[])
+        : (IFLOW_AGENT_NAMES as readonly string[]);
+      if (!agentNames.includes(subagentType as string)) {
+        const workflowLabel = isSFlowCaller ? 'SFlow' : 'IFlow';
+        return `无效的 ${workflowLabel} agent: "${subagentType}"。可用的 agent: ${agentNames.join(', ')}，共享 agent: ${sharedNames.join(', ')}`;
       }
       return null;
     },

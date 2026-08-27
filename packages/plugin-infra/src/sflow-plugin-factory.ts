@@ -358,12 +358,19 @@ export function createSFlowTools(
     workflowName: 'SFlow',
     modelProfiles,
     configOverrides,
-    validateAgent: (subagentType) => {
+    validateAgent: (subagentType, context) => {
       const sharedNames = SHARED_AGENT_NAMES as readonly string[];
       if (sharedNames.includes(subagentType as string)) return null;
-      const validSFlowAgents = SFLOW_AGENT_NAMES as readonly string[];
-      if (!validSFlowAgents.includes(subagentType as string)) {
-        return `无效的 SFlow agent: "${subagentType}"。可用的 SFlow agent: ${validSFlowAgents.join(', ')}，共享 agent: ${sharedNames.join(', ')}`;
+      // F3: 按调用方 work flow 选择白名单 — IFlow orchestrator 调 iflow 子 agent 时
+      // 不应被 SFlow 校验拒绝（环境仅加载 sFlow 插件提供 call_flow_agent 的场景）
+      const caller = String((context as { agent?: string })?.agent ?? '').toLowerCase();
+      const isIFlowCaller = caller === 'iflow' || caller.startsWith('iflow-');
+      const agentNames = isIFlowCaller
+        ? (IFLOW_AGENT_NAMES as readonly string[])
+        : (SFLOW_AGENT_NAMES as readonly string[]);
+      if (!agentNames.includes(subagentType as string)) {
+        const workflowLabel = isIFlowCaller ? 'IFlow' : 'SFlow';
+        return `无效的 ${workflowLabel} agent: "${subagentType}"。可用的 agent: ${agentNames.join(', ')}，共享 agent: ${sharedNames.join(', ')}`;
       }
       return null;
     },
