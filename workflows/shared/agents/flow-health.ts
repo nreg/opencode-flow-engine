@@ -388,5 +388,5 @@ mkdir -p .flow-engine/sflow/health
 - 工具未安装走回退：grep 手动搜索作为降级方案
 - 反哺工件前需确认：步骤 5 的写入操作需用户确认
 `,
-  temperature: options?.temperature ?? 0.2,
+  temperature: options?.temperature ?? 0.6,
 });

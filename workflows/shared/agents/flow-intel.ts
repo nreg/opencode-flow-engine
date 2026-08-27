@@ -248,5 +248,5 @@ export const createFlowIntelAgent: AgentFactory = (model: string, options?: { te
 5. **扫描深度控制** — 目录结构深度 ≤ 3，避免信息过载
 6. **时效性标注** — CONTEXT.md 必须包含生成时间戳，方便后续判断是否需要重新扫描
 `,
-  temperature: options?.temperature ?? 0.2,
+  temperature: options?.temperature ?? 0.6,
 });

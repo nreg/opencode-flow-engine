@@ -215,5 +215,5 @@ export const createFlowArchitectAgent: AgentFactory = (model: string, options?: 
 - 重构模式必须先备份再写入，不可跳过
 - 每个步骤完成后向用户确认，不可一口气跑完不确认
 `,
-  temperature: options?.temperature ?? 0.3,
+  temperature: options?.temperature ?? 0.6,
 });

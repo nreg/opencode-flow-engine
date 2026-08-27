@@ -288,7 +288,7 @@ export function generateConfigTemplate(): SFlowConfig {
       },
       'iflow-verifier': {
         model: 'provider/minimax-m2.7',
-        temperature: 0.3,
+        temperature: 0.6,
         fallback_models: ['provider/deepseek-v4-flash', 'provider/glm-5.1'],
       },
       'iflow-researcher': {

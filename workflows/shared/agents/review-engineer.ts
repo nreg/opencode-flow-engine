@@ -222,5 +222,5 @@ Before reading any \`.flow-engine/sflow/\` artifact:
 
 任务完成后，请在输出末尾使用 [TASK_COMPLETE] 标记结束会话。
 `,
-  temperature: options?.temperature ?? 0.3,
+  temperature: options?.temperature ?? 0.6,
 });

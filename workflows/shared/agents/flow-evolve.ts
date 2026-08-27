@@ -225,5 +225,5 @@ export const createFlowEvolveAgent: AgentFactory = (model: string, options?: { t
 - 写入前必须备份：cp 命令不可跳过
 - 按段 append：使用 edit 工具追加，不整文件 rewrite
 `,
-  temperature: options?.temperature ?? 0.3,
+  temperature: options?.temperature ?? 0.6,
 });

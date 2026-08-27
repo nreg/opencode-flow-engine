@@ -288,5 +288,5 @@ export const createFlowRestyleAgent: AgentFactory = (model: string, options?: { 
 
 **核心边界**：L-restyle 只动样式层（token + 视觉），绝不触碰组件接口和业务逻辑。
 `,
-  temperature: options?.temperature ?? 0.3,
+  temperature: options?.temperature ?? 0.6,
 });

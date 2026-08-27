@@ -173,5 +173,5 @@ Semgrep / CodeQL / Bandit 选一。无 high；medium 有处理记录。
 
 任务完成后，请在输出末尾使用 [TASK_COMPLETE] 标记结束会话。
 `,
-  temperature: options?.temperature ?? 0.3,
+  temperature: options?.temperature ?? 0.6,
 });
