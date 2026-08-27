@@ -41,7 +41,7 @@ import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
 import { createTaskTracker } from './features/task-tracker.js';
 import { recoverIFlowState, saveIFlowCheckpoint, readIFlowCheckpoint, type IFlowCheckpointFile } from '../../../workflows/iflow/iflow-state-manager.js';
 import { registerFlowCommands } from '../../../workflows/shared/slash-commands.js';
-import { createCompactionContext } from '../../../workflows/shared/compaction-context.js';
+import { createCompactionContext, type CompactionState } from '../../../workflows/shared/compaction-context.js';
 
 // ─── Background task registry (per-factory instance) ──────────────────────────
 
@@ -472,7 +472,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
           const { readJsonFile } = await import('@opencode-flow-engine/shared');
           const state = await readJsonFile(stateFile) as Record<string, unknown> | null;
           if (!state || !state.state) return;
-          const context = createCompactionContext('iFlow', state as never);
+          const context = createCompactionContext('iFlow', state as unknown as CompactionState);
           if (context) {
             output.context.push(context);
           }

@@ -29,7 +29,7 @@ import { createSkillLoader } from './features/skill-loader.js';
 import type { HookContext } from './hooks/types.js';
 import { ensureDir, writeJsonFile } from '@opencode-flow-engine/shared';
 import { getStateFilePath } from './features/state-manager.js';
-import { createCompactionContext } from '../../../workflows/shared/compaction-context.js';
+import { createCompactionContext, type CompactionState } from '../../../workflows/shared/compaction-context.js';
 import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { createValidatorTools, createWorkflowTools } from './features/builtin-mcp.js';
 import { createCheckToolAvailableTool } from './features/tool-availability.js';
@@ -347,11 +347,8 @@ export function createSFlowTools(
   modelProfiles?: import('./agents/config-loader.js').ModelProfileConfig,
   configOverrides?: import('./agents/types.js').AgentOverrides,
 ): Record<string, LocalToolDefinition> {
-  // createCallFlowAgentTools returns Record<string, ToolDefinition> (zod v4 types)
-  // We need Record<string, LocalToolDefinition> (zod v3 compatible)
-  // The double assertion is necessary because ToolDefinition and LocalToolDefinition
-  // have incompatible args types (zod v4 ZodRawShape vs Record<string, unknown>)
-  // Runtime behavior is unchanged - both use the same execute function signature
+  // createCallFlowAgentTools 返回 Record<string, LocalToolDefinition>（zod v3 兼容）
+  // 与 SFlow 工具表类型一致，无需强转
   const callFlowAgentTools = createCallFlowAgentTools({
     client,
     backgroundTaskRegistry,
@@ -370,7 +367,7 @@ export function createSFlowTools(
       }
       return null;
     },
-  }) as unknown as Record<string, LocalToolDefinition>;
+  });
 
   const tools: Record<string, LocalToolDefinition> = {
     ...createWorkflowRouterTools(client),
@@ -777,7 +774,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
             const { readJsonFile } = await import('@opencode-flow-engine/shared');
             const state = await readJsonFile(stateFile) as Record<string, unknown> | null;
             if (!state || !state.state) return;
-            const context = createCompactionContext('sFlow', state as never);
+            const context = createCompactionContext('sFlow', state as unknown as CompactionState);
             if (context) {
               output.context.push(context);
             }
