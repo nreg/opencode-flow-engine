@@ -1149,6 +1149,37 @@ await activeLogger.log(sessionID, 'completed', { reason, elapsed: `${elapsed}ms`
 
 ---
 
+### 9.4 子 agent 白名单校验（F1/F2/F3）
+
+`call_flow_agent` 在执行前经过三级校验（`call-flow-agent.ts:411-440`）：
+
+| 级别 | 校验 | 说明 |
+|------|------|------|
+| **F1** | `subagent_type` 必填 | LLM 偶发未传时返回清晰可操作错误 |
+| **F2** | 仅主 orchestrator 可委派 | 子 agent（非 `sflow`/`iflow`）调用 `call_flow_agent`/`flowagent_output`/`flowagent_cancel` 一律拒绝 |
+| **F3** | 白名单校验 | `validateAgent` 校验 `subagent_type` 是否在允许的 agent 列表内 |
+
+**F3 白名单选择（上下文感知）：**
+
+每个插件工厂注入的 `validateAgent` 现在按**调用方 work flow** 选择白名单：
+
+```text
+sflow-plugin-factory / iflow-plugin-factory:
+  shared agent（test-engineer / review-engineer 等）→ 始终放行
+  context.agent 为 iflow* → 使用 IFLOW_AGENT_NAMES
+  context.agent 为 sflow* → 使用 SFLOW_AGENT_NAMES
+  context.agent 为空 → 回退到插件自身 work flow 白名单
+
+combined-plugin-factory:
+  按 .flow-engine/iflow|sflow 目录 + context.agent 判定 callerWorkflow
+  iflow → IFLOW_AGENT_NAMES；sflow → SFLOW_AGENT_NAMES；unknown → 放行全部
+```
+
+**背景（F3 修复动机）：**
+实战中发现环境仅加载 sFlow 插件提供 `call_flow_agent` 时，IFlow orchestrator 调用 `call_flow_agent(iflow-plan-executor)` 会被 SFlow 的 `validateAgent` 拒绝——因为旧实现硬编码只认 `SFLOW_AGENT_NAMES`，不含 iflow 子 agent（尽管这些 agent 本身是 IFlow 的，校验逻辑却不认调用方）。修复后按 `context.agent` 动态选择白名单，IFlow/SFlow 双向调用均正确放行。
+
+---
+
 ## 10. 文件路径索引
 
 | 功能 | 文件路径 |
@@ -1162,11 +1193,13 @@ await activeLogger.log(sessionID, 'completed', { reason, elapsed: `${elapsed}ms`
 | 子 agent 状态存储 | `packages/plugin-infra/src/features/subagent-store.ts` |
 | 轮询日志 | `packages/plugin-infra/src/features/polling-logger.ts` |
 | 类型定义 | `packages/plugin-infra/src/types.ts` |
-| 插件入口 | `packages/plugin-infra/src/sflow-plugin-factory.ts` |
+| 插件入口（sFlow） | `packages/plugin-infra/src/sflow-plugin-factory.ts` |
+| 插件入口（iFlow） | `packages/plugin-infra/src/iflow-plugin-factory.ts` |
+| 插件入口（combined） | `packages/plugin-infra/src/combined-plugin-factory.ts` |
 
 ---
 
-**文档版本：** v1.3.0
-**最后更新：** 2026-08-11
+**文档版本：** v1.4.0
+**最后更新：** 2026-08-28
 **基于代码版本：** opencode-flow-engine main branch
-**更新内容：** 补充 session.status 兜底机制、共享 hook 处理函数、竞态条件保护、事件到达检测场景
+**更新内容：** 补充 9.4 子 agent 白名单校验（F1/F2/F3）及 F3 上下文感知修复
