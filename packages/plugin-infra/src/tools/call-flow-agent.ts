@@ -28,7 +28,7 @@ import type {
   SFlowClient,
 } from '../types.js';
 import { formatToolError, generateTaskId, PROBE_PENDING } from '../types.js';
-import type { ToolDefinition } from './types.js';
+import type { LocalToolDefinition } from '../types/local-tool-definition.js';
 import { DEFAULT_PROFILE_MODELS } from '../agents/config-loader.js';
 import { resolveModelWithFallback, VALID_MODEL_TIERS, type ModelTier } from '../agents/agent-builder.js';
 import type { BuiltinAgentName } from '../agents/types.js';
@@ -337,7 +337,7 @@ export interface CallFlowAgentOptions {
  */
 export function createCallFlowAgentTools(
   options: CallFlowAgentOptions,
-): Record<string, ToolDefinition> {
+): Record<string, LocalToolDefinition> {
   const {
     client,
     backgroundTaskRegistry,
@@ -359,10 +359,9 @@ export function createCallFlowAgentTools(
     return `${prefix} → ${subagentType}`;
   };
 
-  const callFlowAgentTool: ToolDefinition = {
-    name: 'call_flow_agent' as never,
+  const callFlowAgentTool: LocalToolDefinition = {
     description: `Invoke a specialized ${workflowName} subagent. Supports sync (run_in_background=false) and async (run_in_background=true) modes. Async mode returns a task_id; use flowagent_output to retrieve results when complete.`,
-    parameters: {
+    args: {
       description: z.string().describe('Short (3-5 words) description of the task'),
       prompt: z.string().describe('The task for the subagent to perform'),
       subagent_type: z
@@ -829,10 +828,9 @@ export function createCallFlowAgentTools(
     },
   };
 
-  const flowagentOutputTool: ToolDefinition = {
-    name: 'flowagent_output' as never,
+  const flowagentOutputTool: LocalToolDefinition = {
     description: `Retrieve results from a background ${workflowName} subagent task (call_flow_agent async mode). Poll with block=true to wait for completion (timeout: 120s); the tool returns immediately with current status when block=false. Call this after dispatching an async task to fetch its result.`,
-    parameters: {
+    args: {
       task_id: z
         .string()
         .describe('The task ID returned by call_flow_agent (run_in_background=true, prefix: sf_)'),
@@ -1120,10 +1118,9 @@ export function createCallFlowAgentTools(
     },
   };
 
-  const flowagentCancelTool: ToolDefinition = {
-    name: 'flowagent_cancel' as never,
+  const flowagentCancelTool: LocalToolDefinition = {
     description: `Cancel a running ${workflowName} subagent task by task_id (call_flow_agent async mode). Use this when you no longer need the result.`,
-    parameters: {
+    args: {
       taskId: z.string().describe('Task ID to cancel (required, prefix: sf_)'),
     } as Record<string, unknown>,
     execute: async (args: Record<string, unknown>, _context) => {
@@ -1203,14 +1200,14 @@ export function createCallFlowAgentTools(
   watcher.start();
 
   // P0-3: Expose watcher.stop() for resource cleanup (prevents interval leak in tests)
-  const tools: Record<string, ToolDefinition> & { _stopWatcher?: () => void } = {
+  const tools: Record<string, LocalToolDefinition> & { _stopWatcher?: () => void } = {
     call_flow_agent: callFlowAgentTool,
     flowagent_output: flowagentOutputTool,
     flowagent_cancel: flowagentCancelTool,
   };
   
-  // Attach _stopWatcher for test cleanup (not part of ToolDefinition, excluded from return type)
+  // Attach _stopWatcher for test cleanup (not part of LocalToolDefinition, excluded from return type)
   tools._stopWatcher = () => watcher.stop();
 
-  return tools as Record<string, ToolDefinition>;
+  return tools as Record<string, LocalToolDefinition>;
 }
