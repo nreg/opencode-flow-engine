@@ -2,12 +2,10 @@
 
 [**简体中文**](./README.zh.md) | **English**
 
-OpenSpec planning engine + Superpowers execution discipline + GSD iterative cycle, integrated as an OpenCode Plugin.
-
 opencode-flow-engine provides two complementary workflow modes:
 
-- **sFlow** — Linear workflow: requirements → planning → implementation → review → debugging → archival
-- **iFlow** — Iterative workflow: GSD cycle: discuss → research → plan → execute → verify → ship → repeat
+- **IFlow** — Iterative workflow: GSD
+- **SFlow** — Linear workflow: SDD+TDD
 
 ---
 

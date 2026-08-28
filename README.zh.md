@@ -2,12 +2,25 @@
 
 **English** | [**简体中文**](./README.zh.md)
 
-OpenSpec 规划引擎 + Superpowers 执行纪律 + GSD 迭代循环，集成于 OpenCode 插件。
-
 opencode-flow-engine 提供两种互补的工作流模式：
 
-- **sFlow** — 线性工作流：需求 → 规划 → 实现 → 审查 → 调试 → 归档
-- **iFlow** — 迭代工作流：GSD 循环：讨论 → 研究 → 规划 → 执行 → 验证 → 发布 → 循环
+- **IFlow** — 迭代工作流：GSD 循环
+- **SFlow** — 线性工作流：SDD+TDD
+
+**SFlow** 集成 OpenSpec 规划引擎 + Superpowers 执行纪律 的Agent流程，属于‌**SDD（规格驱动开发）+ TDD（测试驱动开发）双轮驱动的AI工程化开发流程**‌，是当前AI编程领域成熟的“规范定标+执行保序”闭环体系。
+
+**核心对应关系**
+
+- ‌**OpenSpec 规划引擎**‌：完全对应 SDD（Specification-Driven Development，规格驱动开发）的核心能力，负责在编码前把模糊需求转化为结构化、可追溯的规格文档，锁定需求意图，杜绝需求漂移。
+- ‌**Superpowers 执行纪律**‌：内置强制 TDD（测试驱动开发）流程，将软件工程最佳实践封装为标准化Skill，强制Agent遵循“规划→拆解→执行→审查”的严谨开发路径，保障代码执行质量。
+
+**流程底层逻辑**
+
+这套组合形成了完整的上下层互补闭环：
+
+- 上层 OpenSpec 解决“做对”的问题：输出 proposal.md、design.md、spec.md、tasks.md 等标准化文档，作为Agent开发的唯一真理来源。
+- 下层 Superpowers 解决“做好”的问题：基于SDD输出的任务清单，强制执行“先写失败测试、再写最小实现代码、最后重构”的TDD流程，从源头保障代码质量。
+- 二者结合后，完全匹配“SDD定规范、TDD保执行”的经典AI工程化范式，是当前可控、可追溯的高质量AI开发体系的典型代表。
 
 ---
 
