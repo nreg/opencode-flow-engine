@@ -86,23 +86,27 @@ function createCombinedTools(
     modelProfiles,
     configOverrides,
     validateAgent: async (subagentType, context) => {
+      // F3: 优先按调用方 agent 身份判定 work flow（context.agent 由 opencode 注入，
+      // 准确反映当前调用方），目录判定仅在 agent 无法识别时作为兜底。
+      // 背景：项目可能同时存在 .flow-engine/sflow 与 .flow-engine/iflow，或历史
+      // 用过 sFlow 后切换到 iFlow——仅凭目录会误判调用方身份，导致 IFlow
+      // orchestrator 调 iflow 子 agent 被 SFlow 白名单拒绝。
       const changeDir = resolveChangeDir(undefined, context.directory as string);
-
-      // Detect workflow context
-      const isSFlowContext = await directoryExists(`${changeDir}/.flow-engine/sflow`);
-      const isIFlowContext = await directoryExists(`${changeDir}/.flow-engine/iflow`);
+      const callerAgent = (context.agent as string) || '';
+      const lower = callerAgent.toLowerCase();
 
       let callerWorkflow: 'iflow' | 'sflow' | 'unknown' = 'unknown';
-      if (isIFlowContext && !isSFlowContext) {
+      if (lower === 'iflow' || lower.startsWith('iflow-')) {
         callerWorkflow = 'iflow';
-      } else if (isSFlowContext && !isIFlowContext) {
+      } else if (lower === 'sflow' || lower.startsWith('sflow-')) {
         callerWorkflow = 'sflow';
-      } else if (isIFlowContext && isSFlowContext) {
-        const callerAgent = (context.agent as string) || '';
-        const lower = callerAgent.toLowerCase();
-        if (lower === 'iflow' || lower.startsWith('iflow-')) {
+      } else {
+        // context.agent 缺失或无法识别 → 用目录兜底判定
+        const isSFlowContext = await directoryExists(`${changeDir}/.flow-engine/sflow`);
+        const isIFlowContext = await directoryExists(`${changeDir}/.flow-engine/iflow`);
+        if (isIFlowContext && !isSFlowContext) {
           callerWorkflow = 'iflow';
-        } else if (lower === 'sflow' || lower.startsWith('sflow-')) {
+        } else if (isSFlowContext && !isIFlowContext) {
           callerWorkflow = 'sflow';
         }
       }
