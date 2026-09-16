@@ -374,10 +374,13 @@ export function createCallFlowAgentTools(
         .describe(
           'true=async (returns task_id for flowagent_output), false=sync (waits for completion)',
         ),
-      session_id: z.string().optional().describe('Existing session to continue (sync mode only)'),
+      session_id: z
+        .string()
+        .nullish()
+        .describe('Existing session to continue (sync mode only)'),
       agent_id: z
         .string()
-        .optional()
+        .nullish()
         .describe(
           'Resume a previous subagent by agent_id. When provided, context from the previous run is injected into the prompt.',
         ),
@@ -473,7 +476,21 @@ export function createCallFlowAgentTools(
         let sessionID: string;
         let isNew = false;
         let effectivePrompt = prompt as string;
-        let resolvedAgentId = agent_id as string | undefined;
+
+        // 归一化可选参数：null / 空字符串 / 字面量 "null" 均视为"未提供"。
+        // 背景：LLM 主编排器有时会把可选参数显式填成 null 或字符串 "null"，
+        // 若直接透传会导致无效的 resume（"Agent null not found in subagent-store"）
+        // 或复用名为 "null" 的 session。这里统一降级为 undefined。
+        const normalizedAgentId =
+          typeof agent_id === 'string' && agent_id.trim() !== '' && agent_id !== 'null'
+            ? agent_id
+            : undefined;
+        const normalizedSessionId =
+          typeof session_id === 'string' && session_id.trim() !== '' && session_id !== 'null'
+            ? session_id
+            : undefined;
+
+        let resolvedAgentId = normalizedAgentId;
         
         // Model resolution strategy:
         // - If model_type is specified: use resolveModelWithFallback to respect the full priority chain
@@ -514,24 +531,24 @@ export function createCallFlowAgentTools(
         }
 
         // P1: Resume 模式 — 传入 agent_id 时从 subagent-store 恢复上下文
-        if (agent_id) {
+        if (normalizedAgentId) {
           try {
-            const resumeResult = await store.resumeAgent(agent_id as string, prompt as string);
+            const resumeResult = await store.resumeAgent(normalizedAgentId, prompt as string);
             effectivePrompt = resumeResult.prompt;
-            resolvedAgentId = agent_id as string;
+            resolvedAgentId = normalizedAgentId;
           } catch (resumeErr) {
             const msg = resumeErr instanceof Error ? resumeErr.message : String(resumeErr);
             return await formatToolError(msg);
           }
         }
 
-        if (session_id) {
+        if (normalizedSessionId) {
           if (run_in_background) {
             return await formatToolError(
               'session_id is not supported in background mode. Use run_in_background=false to continue an existing session.',
             );
           }
-          sessionID = session_id as string;
+          sessionID = normalizedSessionId;
         } else {
 
           const createResult = await (
@@ -834,7 +851,7 @@ export function createCallFlowAgentTools(
       task_id: z
         .string()
         .describe('The task ID returned by call_flow_agent (run_in_background=true, prefix: sf_)'),
-      block: z.boolean().optional().describe('Wait for completion (default: false)'),
+      block: z.boolean().nullish().describe('Wait for completion (default: false)'),
     } as Record<string, unknown>,
     execute: async (args: Record<string, unknown>, _context) => {
       // F2: 禁止子 agent 再调用子 agent（仅主 orchestrator 可委派）
@@ -849,7 +866,9 @@ export function createCallFlowAgentTools(
           ),
         };
       }
-      const { task_id, block } = args as { task_id: string; block?: boolean };
+      const { task_id, block } = args as { task_id: string; block?: boolean | null };
+      // nullish 归一化：仅当显式 block === true 时才等待，其余（undefined/null/false）按默认 false 处理
+      const shouldBlock = block === true;
       const changeDir = resolveChangeDir(undefined, _context.directory);
 
       const pollAndComplete = async (task: BackgroundTaskEntry): Promise<BackgroundTaskEntry> => {
@@ -1095,7 +1114,7 @@ export function createCallFlowAgentTools(
           };
         }
 
-        if (!block) {
+        if (!shouldBlock) {
           return buildResponse(existingTask);
         }
 

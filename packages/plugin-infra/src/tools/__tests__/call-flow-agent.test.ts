@@ -2837,3 +2837,164 @@ describe('Batch 3: directory parameter passing (TO-4/TO-5/TO-6/TO-7)', () => {
     });
   });
 });
+
+// ─── Bugfix: nullish 可选参数兼容（null / 空字符串 / "null"） ────────────────
+//
+// 背景：LLM 主编排器有时会把可选参数显式填成 null 或字符串 "null"：
+//   - zod `.optional()` 只接受 undefined，显式传 null 会被 schema 校验直接拒绝
+//   - 字符串 "null" 会通过 `if (agent_id)` 真值判断，触发无效 resume
+//     （"Agent null not found in subagent-store"）
+// 修复：schema 改为 `.nullish()`，execute 层把 null/空串/"null" 归一化为 undefined，
+//       使其行为与"省略参数"完全一致。
+
+describe('Bugfix: nullish 可选参数兼容', () => {
+  let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
+
+  beforeEach(() => {
+    promptCalls = [];
+    currentTools = null;
+  });
+
+  it('schema: agent_id / session_id 同时接受 null 与 undefined', () => {
+    const client = createMockClient({ pollOutputs: ['ok [TASK_COMPLETE]'], promptCalls });
+    const tools = createTestTools(createTestOptions(client));
+    currentTools = tools;
+
+    // null 被接受（修复前 .optional() 会拒绝）
+    expect(tools.call_flow_agent.args.agent_id.safeParse(null).success).toBe(true);
+    expect(tools.call_flow_agent.args.session_id.safeParse(null).success).toBe(true);
+    // undefined（省略）仍被接受
+    expect(tools.call_flow_agent.args.agent_id.safeParse(undefined).success).toBe(true);
+    expect(tools.call_flow_agent.args.session_id.safeParse(undefined).success).toBe(true);
+    // 正常字符串仍被接受
+    expect(tools.call_flow_agent.args.agent_id.safeParse('agent_1').success).toBe(true);
+    expect(tools.call_flow_agent.args.session_id.safeParse('session_1').success).toBe(true);
+  });
+
+  it('schema: block 同时接受 null 与 undefined', () => {
+    const client = createMockClient({ pollOutputs: ['ok [TASK_COMPLETE]'], promptCalls });
+    const tools = createTestTools(createTestOptions(client));
+    currentTools = tools;
+
+    expect(tools.flowagent_output.args.block.safeParse(null).success).toBe(true);
+    expect(tools.flowagent_output.args.block.safeParse(undefined).success).toBe(true);
+    expect(tools.flowagent_output.args.block.safeParse(true).success).toBe(true);
+    expect(tools.flowagent_output.args.block.safeParse(false).success).toBe(true);
+  });
+
+  it('execute: agent_id=null 且 session_id=null 应走新建 session 流程', async () => {
+    const client = createMockClient({
+      pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+      promptCalls,
+    });
+    const tools = createTestTools(createTestOptions(client));
+    currentTools = tools;
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+        agent_id: null,
+        session_id: null,
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    // 新建 session（而非复用 null / "null"）
+    expect(data.sessionID).toBe('test-session-001');
+    expect(promptCalls.length).toBeGreaterThan(0);
+    expect(promptCalls[0].id).toBe('test-session-001');
+  });
+
+  it('execute: agent_id 为无效字符串（"" / "null" / 空白）应走新建 session 流程', async () => {
+    for (const invalidAgentId of ['', 'null', '   ']) {
+      promptCalls = [];
+      const client = createMockClient({
+        pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+        promptCalls,
+      });
+      const tools = createTestTools(createTestOptions(client));
+      currentTools = tools;
+
+      const result = await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+          agent_id: invalidAgentId,
+        },
+        { sessionID: 'parent-session', directory: '' },
+      );
+
+      const data = JSON.parse(result.output);
+      // 修复前 agent_id="null" 会走 resume 分支并报 "Agent null not found in subagent-store"
+      expect(data.success).toBe(true);
+      expect(data.error).toBeUndefined();
+      expect(data.sessionID).toBe('test-session-001');
+    }
+  });
+
+  it('execute: session_id 为无效字符串（"" / "null"）应新建 session 而非复用', async () => {
+    for (const invalidSessionId of ['', 'null']) {
+      promptCalls = [];
+      const client = createMockClient({
+        pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+        promptCalls,
+      });
+      const tools = createTestTools(createTestOptions(client));
+      currentTools = tools;
+
+      const result = await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+          session_id: invalidSessionId,
+        },
+        { sessionID: 'parent-session', directory: '' },
+      );
+
+      const data = JSON.parse(result.output);
+      expect(data.success).toBe(true);
+      // 修复前 session_id="null" 会把字面量 "null" 当作 sessionID 复用
+      expect(data.sessionID).toBe('test-session-001');
+      expect(promptCalls[0].id).toBe('test-session-001');
+    }
+  });
+
+  it('flowagent_output: block=null 应按默认 false 立即返回（不等待完成）', async () => {
+    const client = createMockClient({
+      pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+      promptCalls,
+    });
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    // 直接注入一个 running 状态任务，避免 watcher 定时器干扰
+    const taskId = 'st_block_null_test';
+    options.backgroundTaskRegistry.set(taskId, {
+      sessionID: 'test-session-001',
+      subagentType: 'build-executor',
+      status: 'running',
+      createdAt: Date.now(),
+    });
+
+    const result = await tools.flowagent_output.execute(
+      { task_id: taskId, block: null },
+      { sessionID: 'parent-session', directory: '' },
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.task_id).toBe(taskId);
+    // 若错误地按 block=true 处理，pollAndComplete 会把任务推进为 completed
+    expect(data.status).toBe('running');
+    expect(data.result).toBeUndefined();
+  });
+});
