@@ -109,6 +109,11 @@ async function initCommand(args) {
 
 /**
  * Generate default config template
+ *
+ * 注意：本函数内的默认模型名（含 modelProfiles 各档）必须与
+ * packages/plugin-infra/src/agents/config-loader.ts 的 generateConfigTemplate()
+ * 保持同步。两处为重复的 configTemplate 知识来源，修改其中一处时需同步另一处，
+ * 以避免 CLI 初始化配置与运行时 config-loader 生成的配置出现默认模型名不一致。
  */
 function configTemplate() {
   return {
@@ -228,10 +233,12 @@ function configTemplate() {
       artifact_inspector: true,
     },
     modelProfiles: {
-      mechanical: 'fast-cheap-model',
-      standard: 'balanced-model',
-      strong: 'powerful-model',
-      review: 'review-specialized-model',
+      lite: { model: 'provider/fast-model', fallback_models: [] },
+      quick: { model: 'provider/quick-model', fallback_models: [] },
+      standard: { model: 'provider/standard-model', fallback_models: [] },
+      deep: { model: 'provider/deep-model', fallback_models: [] },
+      ultra: { model: 'provider/ultra-model', fallback_models: [] },
+      review: { model: 'provider/review-model', fallback_models: [] },
     },
   };
 }

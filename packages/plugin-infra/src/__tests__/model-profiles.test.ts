@@ -21,14 +21,14 @@ import type { SFlowConfig, ModelProfileConfig } from '../agents/config-loader.js
 describe('ModelProfileConfig interface', () => {
   it('should accept 6 optional object fields with model and fallback_models', () => {
     const full: ModelProfileConfig = {
-      free: { model: 'fast-model', fallback_models: [] },
+      lite: { model: 'fast-model', fallback_models: [] },
       quick: { model: 'quick-model', fallback_models: ['fallback1'] },
       standard: { model: 'default-model', fallback_models: [] },
       deep: { model: 'deep-model', fallback_models: ['fallback2'] },
       ultra: { model: 'ultra-model', fallback_models: [] },
       review: { model: 'review-model', fallback_models: ['fallback3'] },
     };
-    expect(full.free?.model).toBe('fast-model');
+    expect(full.lite?.model).toBe('fast-model');
     expect(full.quick?.fallback_models).toEqual(['fallback1']);
     expect(full.standard?.model).toBe('default-model');
     expect(full.deep?.fallback_models).toEqual(['fallback2']);
@@ -42,7 +42,7 @@ describe('ModelProfileConfig interface', () => {
       deep: { model: 'deep-model', fallback_models: [] },
     };
     expect(partial.standard?.model).toBe('default-model');
-    expect(partial.free).toBeUndefined();
+    expect(partial.lite).toBeUndefined();
     expect(partial.quick).toBeUndefined();
   });
 
@@ -56,7 +56,7 @@ describe('SFlowConfig with modelProfiles', () => {
   it('should accept modelProfiles as optional field', () => {
     const config: SFlowConfig = {
       modelProfiles: {
-        free: { model: 'fast', fallback_models: [] },
+        lite: { model: 'fast', fallback_models: [] },
         quick: { model: 'quick', fallback_models: [] },
         standard: { model: 'default', fallback_models: [] },
         deep: { model: 'deep', fallback_models: [] },
@@ -64,7 +64,7 @@ describe('SFlowConfig with modelProfiles', () => {
         review: { model: 'review', fallback_models: [] },
       },
     };
-    expect(config.modelProfiles?.free?.model).toBe('fast');
+    expect(config.modelProfiles?.lite?.model).toBe('fast');
   });
 
   it('should work without modelProfiles', () => {
@@ -194,19 +194,20 @@ describe('resolveModelWithFallback — profile resolution', () => {
     expect(result.provenance).toBe('config-override');
   });
 
-  it('should use DEFAULT_PROFILE_MODELS when user tier not configured', () => {
+  it('should resolve lite profile model when model_type is "lite"', () => {
     const result = resolveModelWithFallback(
       'spec-writer',
       undefined,
       {},
       undefined,
       {
-        modelProfiles: { free: { model: 'fast-model', fallback_models: [] } },
+        modelProfiles: { lite: { model: 'fast-model', fallback_models: [] } },
         activeWorkflow: 'sflow',
       },
+      'lite', // model_type 显式指定 lite 档，优先级高于 spec-writer 的 deep 静态绑定
     );
-    // spec-writer → deep tier, not in user config → use DEFAULT_PROFILE_MODELS.deep
-    expect(result.model).toBe('provider/glm-5.1');
+    // model_type='lite' 应读取 modelProfiles.lite.model（fast-model），而非 deep 静态绑定
+    expect(result.model).toBe('fast-model');
     expect(result.provenance).toBe('profile');
   });
 
@@ -337,7 +338,7 @@ describe('generateConfigTemplate — modelProfiles', () => {
 
   it('should have all 6 profile keys in modelProfiles', () => {
     const template = generateConfigTemplate();
-    expect(template.modelProfiles?.free).toBeDefined();
+    expect(template.modelProfiles?.lite).toBeDefined();
     expect(template.modelProfiles?.quick).toBeDefined();
     expect(template.modelProfiles?.standard).toBeDefined();
     expect(template.modelProfiles?.deep).toBeDefined();
@@ -347,7 +348,7 @@ describe('generateConfigTemplate — modelProfiles', () => {
 
   it('should have { model, fallback_models } structure for each profile', () => {
     const template = generateConfigTemplate();
-    const tiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
+    const tiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
     for (const tier of tiers) {
       const tierConfig = template.modelProfiles?.[tier];
       expect(tierConfig).toBeDefined();
@@ -694,8 +695,8 @@ describe('resolveModelWithFallback — modelType parameter', () => {
     }
   });
 
-  it('should support all 6 tiers: free/quick/standard/deep/ultra/review', () => {
-    const tiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
+  it('should support all 6 tiers: lite/quick/standard/deep/ultra/review', () => {
+    const tiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
     for (const tier of tiers) {
       const result = resolveModelWithFallback(
         'spec-writer',

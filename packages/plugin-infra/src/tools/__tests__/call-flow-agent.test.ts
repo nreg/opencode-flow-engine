@@ -1725,7 +1725,7 @@ describe('Wave 4: model_type parameter', () => {
       currentTools = tools;
 
       // Test each valid tier
-      const validTiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'];
+      const validTiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'];
       
       for (const tier of validTiers) {
         const result = await tools.call_flow_agent.execute(
@@ -1947,7 +1947,7 @@ describe('Wave 4: model_type parameter', () => {
       const output = (result as { output: string }).output;
       expect(output).toContain('invalid-tier');
       expect(output).toContain('valid');
-      expect(output).toContain('free');
+      expect(output).toContain('lite');
       expect(output).toContain('quick');
       expect(output).toContain('standard');
       expect(output).toContain('deep');
@@ -1978,7 +1978,7 @@ describe('Wave 4: model_type parameter', () => {
 
       const output = (result as { output: string }).output;
       // Verify all 6 tiers are mentioned
-      const validTiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'];
+      const validTiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'];
       for (const tier of validTiers) {
         expect(output).toContain(tier);
       }

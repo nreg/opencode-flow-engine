@@ -151,6 +151,98 @@ describe('Config Loader', () => {
     });
   });
 
+  describe('loadCascadedSFlowConfig legacy migration', () => {
+    it('should migrate legacy "free" tier to "lite" when lite is absent', async () => {
+      const { dir, file } = createTempUserConfigDir();
+      process.env.FLOW_ENGINE_USER_CONFIG_FILE = file;
+      try {
+        writeTestConfig({
+          modelProfiles: {
+            free: { model: 'provider/free-legacy', fallback_models: ['provider/glm-5.1'] },
+            standard: { model: 'provider/kimi-k2.6', fallback_models: [] },
+          },
+        });
+        const config = await loadCascadedSFlowConfig(TEST_DIR);
+        // free should be renamed to lite, content preserved
+        expect(config.modelProfiles?.lite).toEqual({
+          model: 'provider/free-legacy',
+          fallback_models: ['provider/glm-5.1'],
+        });
+        // legacy "free" key must be removed
+        expect('free' in (config.modelProfiles as Record<string, unknown>)).toBe(false);
+      } finally {
+        delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('should NOT overwrite an explicit "lite" tier with legacy "free"', async () => {
+      const { dir, file } = createTempUserConfigDir();
+      process.env.FLOW_ENGINE_USER_CONFIG_FILE = file;
+      try {
+        writeTestConfig({
+          modelProfiles: {
+            free: { model: 'provider/free-legacy', fallback_models: [] },
+            lite: { model: 'provider/explicit-lite', fallback_models: [] },
+          },
+        });
+        const config = await loadCascadedSFlowConfig(TEST_DIR);
+        // explicit lite wins, free key removed
+        expect(config.modelProfiles?.lite).toEqual({
+          model: 'provider/explicit-lite',
+          fallback_models: [],
+        });
+        expect('free' in (config.modelProfiles as Record<string, unknown>)).toBe(false);
+      } finally {
+        delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('should warn and drop string-valued tiers (old 4-tier format)', async () => {
+      const { dir, file } = createTempUserConfigDir();
+      process.env.FLOW_ENGINE_USER_CONFIG_FILE = file;
+      try {
+        writeTestConfig({
+          modelProfiles: {
+            lite: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
+            standard: 'provider/kimi-k2.6' as unknown as { model: string; fallback_models: string[] },
+          },
+        });
+        const config = await loadCascadedSFlowConfig(TEST_DIR);
+        // valid object tier preserved
+        expect(config.modelProfiles?.lite).toBeDefined();
+        // string-valued tier removed (not silently kept)
+        expect('standard' in (config.modelProfiles as Record<string, unknown>)).toBe(false);
+      } finally {
+        delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('should warn and drop legacy 4-tier keys (mechanical/strong)', async () => {
+      const { dir, file } = createTempUserConfigDir();
+      process.env.FLOW_ENGINE_USER_CONFIG_FILE = file;
+      try {
+        writeTestConfig({
+          modelProfiles: {
+            mechanical: { model: 'provider/x', fallback_models: [] },
+            strong: { model: 'provider/y', fallback_models: [] },
+            lite: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
+          },
+        });
+        const config = await loadCascadedSFlowConfig(TEST_DIR);
+        const profiles = config.modelProfiles as Record<string, unknown>;
+        expect('mechanical' in profiles).toBe(false);
+        expect('strong' in profiles).toBe(false);
+        expect(profiles.lite).toBeDefined();
+      } finally {
+        delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe('agentOverridesFromConfig', () => {
     it('should return empty overrides when no agents configured', () => {
       const overrides = agentOverridesFromConfig({});
@@ -363,14 +455,14 @@ describe('Config File Integration with Agent Builder', () => {
 describe('Wave 1: ModelProfileConfig 6-tier structure', () => {
   it('should accept 6-tier object format with model and fallback_models', () => {
     const config: import('./config-loader.js').ModelProfileConfig = {
-      free: { model: 'provider/fast-model', fallback_models: [] },
+      lite: { model: 'provider/fast-model', fallback_models: [] },
       quick: { model: 'provider/quick-model', fallback_models: ['provider/fallback1'] },
       standard: { model: 'provider/standard-model', fallback_models: [] },
       deep: { model: 'provider/deep-model', fallback_models: ['provider/fallback2'] },
       ultra: { model: 'provider/ultra-model', fallback_models: [] },
       review: { model: 'provider/review-model', fallback_models: ['provider/fallback3'] },
     };
-    expect(config.free?.model).toBe('provider/fast-model');
+    expect(config.lite?.model).toBe('provider/fast-model');
     expect(config.quick?.fallback_models).toEqual(['provider/fallback1']);
     expect(config.standard?.model).toBe('provider/standard-model');
     expect(config.deep?.fallback_models).toEqual(['provider/fallback2']);
@@ -384,7 +476,7 @@ describe('Wave 1: ModelProfileConfig 6-tier structure', () => {
       deep: { model: 'provider/deep-model', fallback_models: [] },
     };
     expect(config.standard?.model).toBe('provider/standard-model');
-    expect(config.free).toBeUndefined();
+    expect(config.lite).toBeUndefined();
     expect(config.quick).toBeUndefined();
   });
 
@@ -397,16 +489,16 @@ describe('Wave 1: ModelProfileConfig 6-tier structure', () => {
     // };
     // Since we can't test compilation errors at runtime, we just verify the new structure
     const good: import('./config-loader.js').ModelProfileConfig = {
-      free: { model: 'provider/model', fallback_models: [] },
+      lite: { model: 'provider/model', fallback_models: [] },
     };
-    expect(good.free?.model).toBe('provider/model');
+    expect(good.lite?.model).toBe('provider/model');
   });
 });
 
 describe('Wave 1: DEFAULT_PROFILE_MODELS constant', () => {
   it('should export DEFAULT_PROFILE_MODELS with all 6 tiers', () => {
     expect(DEFAULT_PROFILE_MODELS).toBeDefined();
-    expect(DEFAULT_PROFILE_MODELS.free).toBeDefined();
+    expect(DEFAULT_PROFILE_MODELS.lite).toBeDefined();
     expect(DEFAULT_PROFILE_MODELS.quick).toBeDefined();
     expect(DEFAULT_PROFILE_MODELS.standard).toBeDefined();
     expect(DEFAULT_PROFILE_MODELS.deep).toBeDefined();
@@ -415,7 +507,7 @@ describe('Wave 1: DEFAULT_PROFILE_MODELS constant', () => {
   });
 
   it('should have { model, fallback_models } structure for each tier', () => {
-    const tiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
+    const tiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
     for (const tier of tiers) {
       expect(DEFAULT_PROFILE_MODELS[tier]).toBeDefined();
       expect(DEFAULT_PROFILE_MODELS[tier].model).toBeDefined();
@@ -426,14 +518,14 @@ describe('Wave 1: DEFAULT_PROFILE_MODELS constant', () => {
   });
 
   it('should use provider/ prefix format for model identifiers', () => {
-    const tiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
+    const tiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
     for (const tier of tiers) {
       expect(DEFAULT_PROFILE_MODELS[tier].model).toMatch(/^provider\//);
     }
   });
 
   it('should have empty fallback_models arrays initially', () => {
-    const tiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
+    const tiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
     for (const tier of tiers) {
       expect(DEFAULT_PROFILE_MODELS[tier].fallback_models).toEqual([]);
     }
@@ -444,7 +536,7 @@ describe('Wave 1: generateConfigTemplate with 6-tier modelProfiles', () => {
   it('should emit 6-tier object format in modelProfiles', () => {
     const template = generateConfigTemplate();
     expect(template.modelProfiles).toBeDefined();
-    expect(template.modelProfiles?.free).toBeDefined();
+    expect(template.modelProfiles?.lite).toBeDefined();
     expect(template.modelProfiles?.quick).toBeDefined();
     expect(template.modelProfiles?.standard).toBeDefined();
     expect(template.modelProfiles?.deep).toBeDefined();
@@ -454,7 +546,7 @@ describe('Wave 1: generateConfigTemplate with 6-tier modelProfiles', () => {
 
   it('should have { model, fallback_models } structure for each tier in template', () => {
     const template = generateConfigTemplate();
-    const tiers = ['free', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
+    const tiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
     for (const tier of tiers) {
       const tierConfig = template.modelProfiles?.[tier];
       expect(tierConfig).toBeDefined();

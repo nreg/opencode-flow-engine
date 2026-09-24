@@ -394,7 +394,7 @@ export function createCallFlowAgentTools(
         .string()
         .optional()
         .describe(
-          'Model tier to use for this call (free/quick/standard/deep/ultra/review). Overrides agent static binding.',
+          'Model tier to use for this call (lite/quick/standard/deep/ultra/review). Overrides agent static binding.',
         ),
     } as Record<string, unknown>,
     execute: async (args, context) => {

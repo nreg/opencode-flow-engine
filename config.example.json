@@ -64,7 +64,7 @@
     "artifact_inspector": true
   },
   "modelProfiles": {
-    "free": { "model": "step-3.7-flash", "fallback_models": [] },
+    "lite": { "model": "step-3.7-flash", "fallback_models": [] },
     "quick": { "model": "deepseek-v4-flash", "fallback_models": [] },
     "standard": { "model": "glm-5.1", "fallback_models": [] },
     "deep": { "model": "glm-5.1", "fallback_models": [] },

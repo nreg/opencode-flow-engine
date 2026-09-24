@@ -14,7 +14,7 @@ describe('SFlow Agent - Routing Logic (Batch 3)', () => {
 
     it('should include all 6 tiers in the tier rules table', () => {
       // Verify all 6 tiers are mentioned in the rules
-      expect(instructions).toContain('free');
+      expect(instructions).toContain('lite');
       expect(instructions).toContain('quick');
       expect(instructions).toContain('standard');
       expect(instructions).toContain('deep');
@@ -39,8 +39,8 @@ describe('SFlow Agent - Routing Logic (Batch 3)', () => {
       expect(instructions).toMatch(/可选.*model_type|model_type.*可选/);
     });
 
-    it('should map single-line fixes to free tier', () => {
-      expect(instructions).toMatch(/单行.*free|free.*单行/);
+    it('should map single-line fixes to lite tier', () => {
+      expect(instructions).toMatch(/单行.*lite|lite.*单行/);
     });
 
     it('should map mechanical execution to quick tier', () => {

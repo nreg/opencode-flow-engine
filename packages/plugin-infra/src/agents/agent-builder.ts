@@ -10,12 +10,12 @@ import type { SFlowConfig, ModelProfileConfig } from './config-loader.js';
 /**
  * Model tier names (6-tier system)
  */
-export type ModelTier = 'free' | 'quick' | 'standard' | 'deep' | 'ultra' | 'review';
+export type ModelTier = 'lite' | 'quick' | 'standard' | 'deep' | 'ultra' | 'review';
 
 /**
  * Valid model tier set for validation
  */
-export const VALID_MODEL_TIERS: Set<ModelTier> = new Set(['free', 'quick', 'standard', 'deep', 'ultra', 'review']);
+export const VALID_MODEL_TIERS: Set<ModelTier> = new Set(['lite', 'quick', 'standard', 'deep', 'ultra', 'review']);
 import {
   createSFlowAgent,
   createNeedExplorerAgent,
@@ -162,8 +162,8 @@ const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
  * Agent profile mappings — maps each agent to its default model profile.
  * Used by resolveModelWithFallback to resolve model via modelProfiles config.
  * 
- * 6-tier system: free, quick, standard, deep, ultra, review
- * - free, ultra: dynamic routing targets, no static binding
+ * 6-tier system: lite, quick, standard, deep, ultra, review
+ * - lite, ultra: dynamic routing targets, no static binding
  * - quick, standard, deep, review: static agent bindings
  * - sFlow, iFlow: primary agents, NOT in AGENT_PROFILES (bypass tier resolution)
  */

@@ -16,7 +16,7 @@ export interface AgentConfigEntry {
 }
 
 export interface ModelProfileConfig {
-  free?: { model: string; fallback_models: string[] };
+  lite?: { model: string; fallback_models: string[] };
   quick?: { model: string; fallback_models: string[] };
   standard?: { model: string; fallback_models: string[] };
   deep?: { model: string; fallback_models: string[] };
@@ -25,7 +25,7 @@ export interface ModelProfileConfig {
 }
 
 export const DEFAULT_PROFILE_MODELS: Required<ModelProfileConfig> = {
-  free: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
+  lite: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
   quick: { model: 'provider/mimo-v2.5', fallback_models: [] },
   standard: { model: 'provider/kimi-k2.6', fallback_models: [] },
   deep: { model: 'provider/glm-5.1', fallback_models: [] },
@@ -112,19 +112,53 @@ export async function loadCascadedSFlowConfig(projectDir?: string): Promise<SFlo
 
   // Legacy format detection (Spec R2)
   // The 4-tier system (mechanical/standard/strong/review) has been replaced by
-  // 6-tier (free/quick/standard/deep/ultra/review)
+  // 6-tier (lite/quick/standard/deep/ultra/review)
   if (merged.modelProfiles) {
+    const profiles = merged.modelProfiles as Record<string, unknown>;
+
+    // ① free → lite rename: the "free" tier was globally renamed to "lite".
+    // Migrate existing "free" config into "lite" (only when lite is absent and
+    // the value is a 6-tier object) so old-config users don't silently lose it.
+    if ('free' in profiles) {
+      const freeVal = profiles.free;
+      await Logger.warn(
+        `[sflow] Legacy tier "free" detected in modelProfiles. ` +
+        `The "free" tier has been renamed to "lite". Please update your config.`,
+      );
+      if (!('lite' in profiles) && freeVal && typeof freeVal === 'object') {
+        profiles.lite = freeVal;
+      }
+      // Remove legacy key to prevent usage
+      delete profiles.free;
+    }
+
+    // Legacy 4-tier detection (mechanical/standard/strong/review)
     const legacyTiers = ['mechanical', 'strong'];
     for (const tier of legacyTiers) {
-      if (tier in merged.modelProfiles) {
+      if (tier in profiles) {
         await Logger.warn(
           `[sflow] Legacy tier "${tier}" detected in modelProfiles. ` +
           `The 4-tier system (mechanical/standard/strong/review) has been replaced by ` +
-          `6-tier (free/quick/standard/deep/ultra/review). ` +
+          `6-tier (lite/quick/standard/deep/ultra/review). ` +
           `Please update your config. Falling back to DEFAULT_PROFILE_MODELS for this tier.`,
         );
         // Remove legacy key to prevent usage
-        delete (merged.modelProfiles as Record<string, unknown>)[tier];
+        delete profiles[tier];
+      }
+    }
+
+    // ② string-valued tiers (old 4-tier string format) must be upgraded to the
+    // 6-tier object format { model: string; fallback_models: string[] }.
+    for (const [tier, value] of Object.entries(profiles)) {
+      if (typeof value === 'string') {
+        await Logger.warn(
+          `[sflow] Legacy string format detected for tier "${tier}" in modelProfiles. ` +
+          `Tier configs must be upgraded to the 6-tier object format ` +
+          `{ model: string; fallback_models: string[] }. ` +
+          `Falling back to DEFAULT_PROFILE_MODELS for this tier.`,
+        );
+        // Remove string-valued key to prevent usage
+        delete profiles[tier];
       }
     }
   }
@@ -317,7 +351,7 @@ export function generateConfigTemplate(): SFlowConfig {
       artifact_inspector: true,
     },
     modelProfiles: {
-      free: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
+      lite: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
       quick: { model: 'provider/mimo-v2.5', fallback_models: [] },
       standard: { model: 'provider/kimi-k2.6', fallback_models: [] },
       deep: { model: 'provider/glm-5.1', fallback_models: [] },
