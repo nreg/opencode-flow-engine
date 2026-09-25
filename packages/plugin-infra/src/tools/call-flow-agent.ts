@@ -30,12 +30,36 @@ import type {
 import { formatToolError, generateTaskId, PROBE_PENDING } from '../types.js';
 import type { LocalToolDefinition } from '../types/local-tool-definition.js';
 import { DEFAULT_PROFILE_MODELS } from '../agents/config-loader.js';
-import { resolveModelWithFallback, VALID_MODEL_TIERS, type ModelTier } from '../agents/agent-builder.js';
+import {
+  resolveModelWithFallback,
+  getAlternativeModel,
+  markModelUnavailable,
+  VALID_MODEL_TIERS,
+  type ModelTier,
+} from '../agents/agent-builder.js';
 import type { BuiltinAgentName } from '../agents/types.js';
 import { Logger } from '../utils/logger.js';
 
 /** Maximum concurrent subagent sessions of the same type */
 const MAX_CONCURRENT_SUBAGENTS = 3;
+
+/**
+ * 模型故障转移次数上限（Wave 1 定义，Wave 2 的循环使用）。
+ * 语义：首模型 + 最多 2 次换模型 = 最多 3 次 prompt 尝试。
+ * 理由：OpenCode 已在同一模型上重试 5 次，插件层叠加过多会显著拉长等待；
+ * DEFAULT_FALLBACKS 每个 agent 仅 2 个 fallback，超过 2 次换模型必然退化为重复。
+ */
+const MAX_MODEL_RETRIES = 2;
+
+/** subagent-store 事件类型：记录一次模型故障转移（D-8） */
+const MODEL_FALLBACK_EVENT = 'model_fallback';
+
+/** sendPromptOnce 的返回结构：区分 ok / HTTP status / message（D-1） */
+interface PromptSendResult {
+  ok: boolean;
+  status?: number;
+  message?: string;
+}
 
 /**
  * Parse model string 'provider/modelID' into SDK v1 format { providerID, modelID }
@@ -90,6 +114,340 @@ function releaseSubagentSlot(subagentType: string): void {
   } else {
     runningSubagentCounts.set(subagentType, current - 1);
   }
+}
+
+/**
+ * 发送一次 prompt（D-1 核心）。
+ *
+ * 关键：以 `{ throwOnError: true }` 调用 `client.session.prompt` 并用 try/catch 包裹。
+ * SDK 默认 throwOnError:false 走 result-tuple 返回，`.catch` 永不执行（死代码），
+ * 因此故障转移无法触发。启用 throwOnError 后，HTTP 错误会 throw，
+ * 错误对象被 hey-api error-interceptor 包装为 `Error(message, { cause: { body, status } })`，
+ * 从而能区分 ok / status / message。
+ *
+ * 本函数**不**做任何拉黑 / 换模型动作（那是 D-2 的触发点，属于 Wave 2 的 Task 3）。
+ */
+async function sendPromptOnce(
+  client: SFlowClient,
+  params: {
+    sessionID: string;
+    agent: string;
+    text: string;
+    model: { providerID: string; modelID: string };
+  },
+): Promise<PromptSendResult> {
+  try {
+    // 注意：hey-api SDK 的 session.prompt(options) 只接受一个 options 对象，
+    // throwOnError 必须是 options 的顶层字段（不是第二个参数，否则被忽略 → 死代码复现）。
+    await client.session.prompt({
+      path: { id: params.sessionID },
+      body: {
+        agent: params.agent,
+        parts: [{ type: 'text', text: params.text }],
+        model: params.model,
+      },
+      throwOnError: true,
+    });
+    return { ok: true };
+  } catch (err) {
+    const e = err as Error & { cause?: { status?: number; body?: unknown }; status?: number };
+    // 降级顺序读取 HTTP 状态码（hey-api error-interceptor 把 { body, status } 注入 cause）
+    const status = e?.cause?.status ?? e?.status ?? undefined;
+    const message = e?.message ?? String(err);
+    return { ok: false, status, message };
+  }
+}
+
+/**
+ * 构造接管轮次的 prompt 文本（D-5）。
+ *
+ * 当 attemptIndex > 0 时，在 basePrompt 前置一段接管声明，包含：
+ *  - "第 N 次接管轮次"
+ *  - 前一个失败模型名
+ *  - "不要重复前次已完成的工作，直接从失败处继续 —— 前次模型调用失败未产生有效输出"
+ *
+ * attemptIndex === 0 时**原样返回** basePrompt（保证既有 65 个测试的 prompt 断言不受影响）。
+ */
+function buildAttemptPrompt(basePrompt: string, attemptIndex: number, previousModel?: string): string {
+  if (attemptIndex === 0) {
+    return basePrompt;
+  }
+  const previous = previousModel ? `前一个失败模型为 ${previousModel}` : '前一个模型未知';
+  const header =
+    `【第 ${attemptIndex} 次接管轮次】${previous}。` +
+    `不要重复前次已完成的工作，直接从失败处继续 —— 前次模型调用失败未产生有效输出。\n\n`;
+  return `${header}${basePrompt}`;
+}
+
+// ─── Wave 2 (Task 3): 模型故障转移编排器 ───────────────────────────────────────
+
+type AttemptStatus = 'ok' | 'model-failure' | 'context-overflow' | 'fatal';
+interface AttemptResult {
+  status: AttemptStatus;
+  output: string | null;
+  detail?: string;
+}
+
+/**
+ * 读取 session 最后一条 assistant 消息的 error.name，用于 D-6 判定 ContextOverflowError。
+ *
+ * 注意：polling 层(`polling.ts`)未读取 `info.error` 字段，且 `parts[].error` 是 retry part，
+ * 真正的 halt 错误落在 `info.error`（`MessageV2.fromError` 产出）。因此这里只用 `info.error`，
+ * 绝不用 `parts[].error` 替代。结构不确定时用宽松读取 + 失败静默返回 undefined，不得抛异常。
+ */
+async function readLastAssistantErrorName(client: SFlowClient, sessionID: string): Promise<string | undefined> {
+  try {
+    const res = await (
+      client as unknown as {
+        session: { messages(args: { path: { id: string } }): Promise<{ data?: unknown }> };
+      }
+    ).session.messages({ path: { id: sessionID } });
+    const data = res.data;
+    if (!Array.isArray(data)) return undefined;
+    for (let i = data.length - 1; i >= 0; i--) {
+      const msg = data[i] as { info?: { role?: string; error?: { name?: string } } };
+      if (msg?.info?.role === 'assistant') {
+        return msg.info.error?.name;
+      }
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+interface RunFallbackResult {
+  success: boolean;
+  output: string | null;
+  model: string;
+  attemptedModels: string[];
+  fallbacks: Array<{ from: string; to: string; reason: string }>;
+  failureReason?: 'exhausted' | 'context-overflow' | 'fatal' | 'invalid-model';
+  detail?: string;
+}
+
+/**
+ * 模型故障转移编排器（D-2/D-3/D-4/D-5/D-6/D-7/D-8）。
+ *
+ * 循环：send → poll。poll 返回 null（OpenCode 已在同一模型重试 5 次后确认失败）即最强"该模型不可用"判据。
+ *  - D-3：换模型只用 `getAlternativeModel`（禁用 `resolveModelWithFallback` 的 P1/P2/P7 无黑名单检查分支）
+ *  - D-4：三重终止 —— ① 无替代模型 ② 重复模型 ③ `attemptedModels.length > MAX_MODEL_RETRIES`
+ *  - D-5：同 session 换 model 重新 prompt，prompt 文本声明"接管轮次"
+ *  - D-6：ContextOverflowError 既不拉黑也不换模型
+ *  - D-7：前置校验失败（send 不 ok）直接终止，不拉黑不换模型
+ *  - D-8：模型故障 → `markModelUnavailable` 拉黑
+ *
+ * MAX_MODEL_RETRIES = 2 语义：首模型 + 最多 2 次换模型 = 最多 3 次 prompt 调用（非"最多 2 次调用"）。
+ */
+async function runWithModelFallback(params: {
+  client: SFlowClient;
+  sessionID: string;
+  agentName: string;
+  basePrompt: string;
+  initialModel: string;
+  maxWaitMs: number;
+  directory: string;
+  poll: (sessionID: string, model: string) => Promise<string | null>;
+  onFallback?: (info: { from: string; to: string; attempt: number; reason: string }) => Promise<void> | void;
+}): Promise<RunFallbackResult> {
+  const { client, sessionID, agentName, basePrompt, initialModel, poll, onFallback } = params;
+  let currentModel = initialModel;
+  const attemptedModels: string[] = [];
+  const fallbacks: Array<{ from: string; to: string; reason: string }> = [];
+
+  // MAX_MODEL_RETRIES = 2 ⇒ 最多 3 次 prompt：首次 + 2 次换模型。
+  for (let attempt = 0; ; attempt++) {
+    const parsed = parseModelString(currentModel);
+    if (!parsed) {
+      return {
+        success: false,
+        failureReason: 'invalid-model',
+        attemptedModels,
+        fallbacks,
+        output: null,
+        model: currentModel,
+      };
+    }
+    attemptedModels.push(currentModel);
+
+    const send = await sendPromptOnce(client, {
+      sessionID,
+      agent: agentName,
+      text: buildAttemptPrompt(basePrompt, attempt, attempt > 0 ? attemptedModels[attempt - 1] : undefined),
+      model: parsed,
+    });
+    if (!send.ok) {
+      // D-7：前置校验失败（HTTP 400/404：SessionBusy / model not found / agent 不存在）直接终止，
+      // 不拉黑、不换模型。
+      return {
+        success: false,
+        failureReason: 'fatal',
+        detail: `HTTP ${send.status ?? 'unknown'}`,
+        attemptedModels,
+        fallbacks,
+        model: currentModel,
+        output: null,
+      };
+    }
+
+    const output = await poll(sessionID, currentModel);
+    if (output !== null) {
+      return { success: true, output, model: currentModel, attemptedModels, fallbacks };
+    }
+
+    // D-6：ContextOverflow —— 不拉黑、不换模型，交给 runtime auto-compaction
+    const errName = await readLastAssistantErrorName(client, sessionID);
+    if (errName === 'ContextOverflowError') {
+      return {
+        success: false,
+        failureReason: 'context-overflow',
+        output: null,
+        model: currentModel,
+        attemptedModels,
+        fallbacks,
+      };
+    }
+
+    // D-2/D-8：模型故障 → 拉黑
+    markModelUnavailable(currentModel);
+
+    // 终止条件 ③：换模型次数上限（attemptedModels 已含本次失败，> MAX_MODEL_RETRIES 即停）
+    if (attemptedModels.length > MAX_MODEL_RETRIES) {
+      return {
+        success: false,
+        failureReason: 'exhausted',
+        detail: 'MAX_MODEL_RETRIES reached',
+        output: null,
+        model: currentModel,
+        attemptedModels,
+        fallbacks,
+      };
+    }
+
+    // 终止条件 ①：无可用替代模型（D-3：必须用 getAlternativeModel，不得用 resolveModelWithFallback）
+    const next = getAlternativeModel(currentModel, agentName);
+    if (!next) {
+      return {
+        success: false,
+        failureReason: 'exhausted',
+        detail: 'no alternative model',
+        output: null,
+        model: currentModel,
+        attemptedModels,
+        fallbacks,
+      };
+    }
+
+    // 终止条件 ②：重复模型检测（防 P7 system-default 退化导致的无限循环）
+    if (attemptedModels.includes(next)) {
+      return {
+        success: false,
+        failureReason: 'exhausted',
+        detail: `model ${next} already attempted`,
+        output: null,
+        model: currentModel,
+        attemptedModels,
+        fallbacks,
+      };
+    }
+
+    const reason = errName ? `assistant error: ${errName}` : 'poll returned null (retry exhausted)';
+    fallbacks.push({ from: currentModel, to: next, reason });
+    await onFallback?.({ from: currentModel, to: next, attempt: attempt + 1, reason });
+    currentModel = next;
+  }
+}
+
+// ─── Wave 2 (Task 5): async 模式故障转移 ──────────────────────────────────────
+
+/**
+ * 模块级状态容器：记录每个 async task 已尝试的模型（避免重复换模型与跨调用泄漏）。
+ * 不新增文件、不改 types.ts 主结构（attemptedModels 字段在 Task 4/5 中按需写入 registry）。
+ */
+const taskModelAttempts = new Map<string, string[]>();
+
+/**
+ * async 模式单次故障转移尝试（D-3/D-4/D-5/D-6/D-7/D-8）。
+ *
+ * 与 `runWithModelFallback` 不同：async 场景里 prompt 早已发出，只需要在检测到 null 后
+ * 换模型重 prompt。三重终止（D-4）与拉黑（D-8）逻辑同 sync。
+ *
+ * 返回 `{ retried: true, nextModel }`：换模型重 prompt 成功，任务保持 running；
+ * 返回 `{ retried: false }`：终止条件命中（无替代模型 / 重复 / 超限 / 前置校验失败），
+ *   上层应走既有错误路径。
+ */
+async function tryAsyncModelFallback(params: {
+  client: SFlowClient;
+  registry: BackgroundTaskRegistry;
+  taskId: string;
+  changeDir: string;
+}): Promise<{ retried: true; nextModel: string } | { retried: false }> {
+  const { client, registry, taskId, changeDir } = params;
+  const task = registry.get(taskId);
+  if (!task || !task.resolvedModel) return { retried: false };
+
+  const parsed = parseModelString(task.resolvedModel);
+  if (!parsed) return { retried: false };
+
+  const attempted = taskModelAttempts.get(taskId) ?? [task.resolvedModel];
+  if (!attempted.includes(task.resolvedModel)) attempted.push(task.resolvedModel);
+
+  // D-8：拉黑当前失败模型
+  markModelUnavailable(task.resolvedModel);
+
+  // D-3：换模型（禁止 resolveModelWithFallback）
+  const next = getAlternativeModel(task.resolvedModel, task.subagentType);
+  if (!next) return { retried: false }; // 终止条件 ①
+
+  // D-4：重复模型 / 超限检测
+  if (attempted.includes(next)) return { retried: false }; // 终止条件 ②
+  if (attempted.length > MAX_MODEL_RETRIES) return { retried: false }; // 终止条件 ③
+
+  const nextParsed = parseModelString(next);
+  if (!nextParsed) return { retried: false };
+
+  // D-5：同 session 换模型重 prompt，声明"接管并继续"
+  const send = await sendPromptOnce(client, {
+    sessionID: task.sessionID,
+    agent: task.subagentType,
+    text: buildAttemptPrompt(
+      '前次模型调用失败，请接管并继续任务。前次模型未产生有效输出，请从当前 session 上下文接管并继续，不要重复已完成的工作。',
+      attempted.length,
+      task.resolvedModel,
+    ),
+    model: nextParsed,
+  });
+  if (!send.ok) return { retried: false }; // D-7：前置校验失败不重试
+
+  // 保持 running、不释放并发槽位（D-4 未命中前绝不宣告失败）
+  registry.set(taskId, {
+    ...task,
+    resolvedModel: next,
+    status: 'running',
+    attemptedModels: [...attempted, next],
+    _errorCount: 0,
+  });
+  taskModelAttempts.set(taskId, [...attempted, next]);
+
+  // 写 model_fallback 事件（反查 agent_id，找不到则跳过，不阻塞）
+  try {
+    const store = createSubagentStore({ changeDir });
+    const agents = await store.listAgents();
+    const matched = agents.find((a) => a.session_id === task.sessionID);
+    if (matched) {
+      await store.appendEvent(matched.agent_id, {
+        timestamp: new Date().toISOString(),
+        event_type: MODEL_FALLBACK_EVENT,
+        detail: `${task.resolvedModel} -> ${next}`,
+      });
+    }
+  } catch (err) {
+    Logger.warn(
+      `[CallFlowAgent] async 模型故障转移事件写入失败: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  return { retried: true, nextModel: next };
 }
 
 // ─── BackgroundTaskWatcher ─────────────────────────────────────────────────────
@@ -147,13 +505,108 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
         }
 
         if (probeResult === null) {
+          // Wave 2 Task 5：尝试模型故障转移（换模型重 prompt），直至成功/耗尽。
+          // 设计：保持 running、不释放并发槽位；耗尽后才走原错误路径（D-4 未命中前不宣告失败）。
+          let fb = await tryAsyncModelFallback({ client, registry, taskId, changeDir: task.changeDir || '' });
+          // 使用 live registry 条目而非 L483 的过期 task 快照，避免覆盖故障转移已写入的 resolvedModel/attemptedModels
+          const baseEntry = registry.get(taskId) ?? task;
+          let fallbackCompletedOutput: string | null = null;
+          let safety = 0;
+          while (fb.retried && safety <= MAX_MODEL_RETRIES + 2) {
+            safety++;
+            const reProbe = await pollSessionCompletion(
+              client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
+              task.sessionID,
+              { maxWaitMs: 300, probeMode: true, directory: task.changeDir, eventDriven: false, pollIntervalMs: 50 },
+            );
+            if (reProbe === PROBE_PENDING) {
+              // 仍在进行中，交由下一轮 tick 处理（仅清除 _processing，不覆盖故障转移已更新的 registry）
+              const live = registry.get(taskId);
+              if (live) {
+                live._processing = false;
+                registry.set(taskId, live);
+              }
+              fb = { retried: false } as { retried: false };
+              break;
+            }
+            if (reProbe !== null) {
+              // 换模型后已完成
+              fallbackCompletedOutput = reProbe as string;
+              fb = { retried: false } as { retried: false };
+              break;
+            }
+            fb = await tryAsyncModelFallback({ client, registry, taskId, changeDir: task.changeDir || '' });
+          }
+
+          if (fallbackCompletedOutput !== null) {
+            // 故障转移后成功完成：复用到原 completed 路径
+            const asyncHasSignal = hasCompletionSignal(fallbackCompletedOutput);
+            const now = Date.now();
+            const completedEntry: BackgroundTaskEntry = {
+              ...baseEntry,
+              status: 'completed',
+              result: fallbackCompletedOutput,
+              completedAt: now,
+              slotReleased: baseEntry.slotReleased ?? false,
+              _errorCount: 0,
+            };
+            registry.set(taskId, completedEntry);
+            if (!completedEntry.slotReleased) {
+              releaseSubagentSlot(task.subagentType);
+              completedEntry.slotReleased = true;
+              registry.set(taskId, completedEntry);
+            }
+            try {
+              const nm = createNotificationManager({ changeDir: task.changeDir || '' });
+              await nm.writeNotification({
+                type: 'async_completed',
+                subagent: task.subagentType,
+                task_id: taskId,
+                session_id: task.sessionID,
+                summary: fallbackCompletedOutput.slice(0, 200),
+                has_completion_signal: asyncHasSignal,
+              });
+            } catch (err) {
+              Logger.warn(`[BackgroundTaskWatcher] 写入完成通知失败: ${err instanceof Error ? err.message : String(err)}`);
+            }
+            try {
+              const store = createSubagentStore({ changeDir: task.changeDir || '' });
+              const agents = await store.listAgents();
+              const matchedAgent = agents.find((a) => a.session_id === task.sessionID);
+              if (matchedAgent) {
+                await store.updateOutput(matchedAgent.agent_id, fallbackCompletedOutput);
+                await store.appendEvent(matchedAgent.agent_id, {
+                  timestamp: new Date().toISOString(),
+                  event_type: 'completed',
+                  detail: `Async task ${taskId} completed (after model fallback)`,
+                });
+              }
+            } catch (err) {
+              Logger.warn(`[BackgroundTaskWatcher] 更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
+            }
+            taskModelAttempts.delete(taskId);
+            continue;
+          }
+
+          if (fb.retried && safety <= MAX_MODEL_RETRIES + 2) {
+            // 安全上限内仍 running：保持任务运行，交给后续 tick（仅清除 _processing，不覆盖故障转移已更新的 registry）
+            const live = registry.get(taskId);
+            if (live) {
+              live._processing = false;
+              registry.set(taskId, live);
+            }
+            continue;
+          }
+
+          // 故障转移耗尽（safety 触顶 或 fb.retried === false，且未转 completed）→ 原错误路径
           const now = Date.now();
+          const baseEntryForError = registry.get(taskId) ?? task;
           const updated: BackgroundTaskEntry = {
-            ...task,
+            ...baseEntryForError,
             status: 'error',
             error: 'Task failed after max retries',
             completedAt: now,
-            slotReleased: task.slotReleased ?? false,
+            slotReleased: baseEntryForError.slotReleased ?? false,
           };
           registry.set(taskId, updated);
 
@@ -191,6 +644,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
           } catch (err) {
             Logger.warn(`[BackgroundTaskWatcher] 更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
            }
+          taskModelAttempts.delete(taskId);
         } else {
           // probeResult is string (session idle, task completed)
           // Type guard: at this point probeResult is guaranteed to be string
@@ -249,7 +703,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
         if (currentTaskForError && currentTaskForError.status === 'running') {
           const now = Date.now();
           const errorCount = currentTaskForError._errorCount ?? 0;
-          
+
           if (errorCount >= 3) {
             // F-2: Re-fetch latest state before updating to avoid overwriting concurrent changes
             const latestTaskBeforeUpdate = registry.get(taskId);
@@ -262,9 +716,9 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
                 slotReleased: latestTaskBeforeUpdate.slotReleased ?? false,
               };
               registry.set(taskId, updated);
-              
-              if (!updated.slotReleased) {
-                releaseSubagentSlot(latestTaskBeforeUpdate.subagentType);
+
+              if (!updated.slotReleased && updated.status !== 'running') {
+                releaseSubagentSlot(updated.subagentType);
                 updated.slotReleased = true;
                 registry.set(taskId, updated);
               }
@@ -603,24 +1057,8 @@ export function createCallFlowAgentTools(
           );
         }
 
-        await (
-          client.session.prompt as (args: {
-            path: { id: string };
-            body: Record<string, unknown>;
-          }) => Promise<unknown>
-        )({
-          path: { id: sessionID },
-          body: {
-            agent: subagent_type as string,
-            parts: [{ type: 'text', text: finalPrompt }],
-            model: parsedModel,
-          },
-        }).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          throw new Error(`Failed to send prompt: ${msg}`);
-        });
-
-        // P1: 首次调用（无 session_id）时创建 agent store 记录
+        // P1: 首次调用（无 session_id）时创建 agent store 记录（Wave 1 Task 2：上移至首次 prompt 之前，
+        // 以便后续故障转移事件可在换模型时刻写入 agent store —— 记录不存在则事件无处可写）
         if (isNew && !resolvedAgentId) {
           resolvedAgentId = `agent_${Date.now()}_${subagent_type}`;
           try {
@@ -636,7 +1074,24 @@ export function createCallFlowAgentTools(
           }
         }
 
+        // ── Background 模式：发送首次 prompt 后立即返回 task_id（故障转移由 watcher/pollAndComplete 异步处理）──
         if (isBackground) {
+          // Wave 1 Task 1：以 sendPromptOnce 发送首次 prompt（{ throwOnError: true } + try/catch）
+          const firstSend = await sendPromptOnce(client, {
+            sessionID,
+            agent: subagent_type as string,
+            text: finalPrompt,
+            model: parsedModel,
+          });
+
+          // Wave 1 Task 2 / D-7：前置校验失败不拉黑不换模型，直接返回工具错误
+          if (!firstSend.ok) {
+            return await formatToolError(
+              `Failed to send prompt (HTTP ${firstSend.status ?? 'unknown'}): ${firstSend.message ?? 'no detail'}. ` +
+                `前置校验失败（SessionBusy / model not found / agent 不存在）不属于模型故障，未触发模型故障转移。`,
+            );
+          }
+
           // Check concurrency limit: max 3 parallel subagents of the same type
           if (!acquireSubagentSlot(subagent_type as string)) {
             return await formatToolError(
@@ -655,6 +1110,8 @@ export function createCallFlowAgentTools(
             resolvedModel: subagentModel,
             modelType: model_type as string | undefined,
           });
+          // Wave 2 Task 5：记录已尝试模型，供故障转移终止判定使用
+          taskModelAttempts.set(taskId, [subagentModel]);
 
           // P1: 追加 started 事件
           if (resolvedAgentId) {
@@ -687,25 +1144,76 @@ export function createCallFlowAgentTools(
           };
         }
 
-        let lastOutput = await pollSessionCompletion(
-          client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
+        // ── Sync 模式：runWithModelFallback 编排（prompt + 故障转移循环 + poll）──
+        const fallbackResult = await runWithModelFallback({
+          client,
           sessionID,
-          { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS, directory: changeDir },
-        );
+          agentName: subagent_type as string,
+          basePrompt: finalPrompt,
+          initialModel: subagentModel,
+          maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS,
+          directory: changeDir,
+          poll: async () =>
+            (await pollSessionCompletion(
+              client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
+              sessionID,
+              { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS, directory: changeDir },
+            )) as string | null,
+          onFallback: async (info) => {
+            if (resolvedAgentId) {
+              try {
+                await store.appendEvent(resolvedAgentId, {
+                  timestamp: new Date().toISOString(),
+                  event_type: MODEL_FALLBACK_EVENT,
+                  detail: `model fallback ${info.from} -> ${info.to} (attempt ${info.attempt}): ${info.reason}`,
+                });
+              } catch (err) {
+                Logger.warn(
+                  `[CallFlowAgent] 写入 model_fallback 事件失败: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              }
+            }
+          },
+        });
 
-        // Task 3.2: Handle null output (retry exhausted) in sync mode
-        if (lastOutput === null) {
+        // 故障转移失败分支分派（D-4/D-6/D-7）
+        if (!fallbackResult.success) {
           const syncTaskId = generateTaskId(backgroundTaskCounter);
+          if (fallbackResult.failureReason === 'fatal' || fallbackResult.failureReason === 'invalid-model') {
+            return await formatToolError(
+              `模型调用失败 (${fallbackResult.detail ?? 'unknown'})：前置校验失败或模型格式非法，未触发模型故障转移。`,
+            );
+          }
+          if (fallbackResult.failureReason === 'context-overflow') {
+            return {
+              title: sessionLabel,
+              output: JSON.stringify(
+                {
+                  success: false,
+                  subagent: subagent_type,
+                  sessionID,
+                  error:
+                    'ContextOverflowError: 上下文溢出由 runtime auto-compaction 处理，未拉黑模型、未换模型重试',
+                  attempted_models: fallbackResult.attemptedModels,
+                },
+                null,
+                2,
+              ),
+            };
+          }
+          // exhausted：复用原 null 输出结构（status:'error' + success:false），补充可观测字段（D-8）
           backgroundTaskRegistry.set(syncTaskId, {
             sessionID,
             subagentType: subagent_type as string,
             status: 'error',
-            error: 'Session retry exhausted or polling failed',
+            error: 'Session retry exhausted or polling failed (model fallback exhausted)',
             createdAt: Date.now(),
             completedAt: Date.now(),
             slotReleased: false,
+            resolvedModel: fallbackResult.model,
+            modelType: model_type as string | undefined,
+            fallbackAttempted: fallbackResult.attemptedModels,
           });
-
           return {
             title: sessionLabel,
             output: JSON.stringify(
@@ -714,13 +1222,18 @@ export function createCallFlowAgentTools(
                 subagent: subagent_type,
                 sessionID,
                 task_id: syncTaskId,
-                error: 'Session retry exhausted or polling failed',
+                error: 'Session retry exhausted or polling failed (model fallback exhausted)',
+                attempted_models: fallbackResult.attemptedModels,
+                model_fallbacks: fallbackResult.fallbacks,
               },
               null,
               2,
             ),
           };
         }
+
+        // 故障转移成功：继续走原有完成检测流程
+        let lastOutput: string = fallbackResult.output ?? '';
 
         // P3: 同步模式完成检测与重试
         // Type guard: in sync mode (no probeMode), lastOutput is string | null
@@ -739,7 +1252,7 @@ export function createCallFlowAgentTools(
               body: {
                 agent: subagent_type as string,
                 parts: REMINDER_MESSAGE.parts,
-                model: parseModelString(subagentModel),
+                model: parseModelString(fallbackResult.model),
               },
             });
           },
@@ -767,6 +1280,10 @@ export function createCallFlowAgentTools(
           result: lastOutput,
           createdAt: Date.now(),
           completedAt: Date.now(),
+          // Wave 2 Task 4 / D-8：registry 写入最终生效模型与故障转移链，供追踪与重试一致性
+          resolvedModel: fallbackResult.model,
+          modelType: model_type as string | undefined,
+          fallbackAttempted: fallbackResult.attemptedModels,
         });
 
         // P3: 检测完成信号状态（用于通知）
@@ -832,6 +1349,9 @@ export function createCallFlowAgentTools(
               sessionID,
               task_id: syncTaskId,
               output: lastOutput,
+              // Wave 2 Task 4 / D-8：暴露实际生效模型与故障转移链
+              model: fallbackResult.model,
+              ...(fallbackResult.fallbacks.length > 0 && { model_fallbacks: fallbackResult.fallbacks }),
               ...(structuredOutput !== undefined && { structured_output: structuredOutput }),
               ...(syncWarnings.length > 0 && { warnings: syncWarnings }),
             },
@@ -907,13 +1427,47 @@ export function createCallFlowAgentTools(
         backgroundTaskRegistry.set(task_id, currentTask);
 
         try {
-          const output = await pollSessionCompletion(
+          let output = await pollSessionCompletion(
             client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
             task.sessionID,
             { maxWaitMs: DEFAULT_MAX_WAIT_MS, directory: changeDir },
           );
 
           const now = Date.now();
+
+          // Wave 2 Task 5：尝试模型故障转移（换模型重 prompt），循环直至成功/耗尽。
+          // 设计：保持 running、不释放并发槽位；耗尽后才走原错误路径（D-4 未命中前不宣告失败）。
+          let fb = await tryAsyncModelFallback({ client, registry: backgroundTaskRegistry, taskId: task_id, changeDir });
+          let fbSafety = 0;
+          while (fb.retried && fbSafety <= MAX_MODEL_RETRIES + 2) {
+            fbSafety++;
+            const rePoll = await pollSessionCompletion(
+              client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
+              task.sessionID,
+              { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS, directory: changeDir },
+            );
+            if (rePoll !== null) {
+              output = rePoll as string;
+              fb = { retried: false } as { retried: false };
+              break;
+            }
+            fb = await tryAsyncModelFallback({ client, registry: backgroundTaskRegistry, taskId: task_id, changeDir });
+          }
+
+          if (fb.retried) {
+            // 故障转移进行中仍 running：保持任务运行、不释放槽位，返回 running（交给 watcher 后续探测）
+            const runningEntry: BackgroundTaskEntry = {
+              ...task,
+              status: 'running',
+              _errorCount: 0,
+            };
+            backgroundTaskRegistry.set(task_id, runningEntry);
+            return runningEntry;
+          }
+
+          // 故障转移后使用最新 registry 快照（含新 resolvedModel），再走成功/错误路径
+          const latestEntry = backgroundTaskRegistry.get(task_id);
+          if (latestEntry) task = latestEntry;
 
           let updated: BackgroundTaskEntry;
           if (output === null) {
@@ -961,6 +1515,7 @@ export function createCallFlowAgentTools(
               Logger.warn(`[CallFlowAgent] 异步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
             }
 
+            taskModelAttempts.delete(task_id);
             return updated;
           }
 
@@ -1017,6 +1572,7 @@ export function createCallFlowAgentTools(
             Logger.warn(`[CallFlowAgent] 异步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
           }
 
+          taskModelAttempts.delete(task_id);
           return updated;
         } catch (err) {
           // F-1: Handle pollSessionCompletion exceptions (network errors, etc.)
@@ -1069,6 +1625,7 @@ export function createCallFlowAgentTools(
             Logger.warn(`[CallFlowAgent] 异步模式更新 subagent-store 失败: ${storeErr instanceof Error ? storeErr.message : String(storeErr)}`);
           }
 
+          taskModelAttempts.delete(task_id);
           return updated;
         } finally {
           const latest = backgroundTaskRegistry.get(task_id);
@@ -1198,6 +1755,7 @@ export function createCallFlowAgentTools(
           releaseSubagentSlot(task.subagentType);
         }
         backgroundTaskRegistry.delete(taskId);
+        taskModelAttempts.delete(taskId);
         return {
           title: 'FlowAgent Cancel',
           output: JSON.stringify(

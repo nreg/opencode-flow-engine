@@ -32,6 +32,10 @@ export interface BackgroundTaskEntry {
   resolvedModel?: string;
   /** P1-5: original model_type parameter (for tracing) */
   modelType?: string;
+  /** Wave 2: models attempted across the fallback chain (for tracing) */
+  attemptedModels?: string[];
+  /** Wave 2: fallback chain attempted (sync mode tracing, mirrors attemptedModels) */
+  fallbackAttempted?: string[];
   /** P1-3: error count for watcher retry logic (internal use) */
   _errorCount?: number;
   /** P1-1: processing flag to prevent race condition between watcher and pollAndComplete */

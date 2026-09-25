@@ -124,9 +124,9 @@ export async function pollSessionCompletion(
     return result;
   }
 
-  // P0-FIX: probeMode 下先检查 status，明确 busy 的会话直接返回 PROBE_PENDING
-  //（避免不必要的 messages 调用）。retry 状态必须走主循环的 retry 语义
-  //（attempt>=5 判定为 error），不能在此短路。
+  // P0-FIX: probeMode 下先检查 status，明确 busy/retry 的会话直接返回对应结果
+  //（避免不必要的 messages 调用和主循环 sleep）。busy → PROBE_PENDING，
+  // retry + attempt>=5 → null（error），retry + attempt<5 → PROBE_PENDING（仍在重试中）。
   // 注意：仅在 probeMode 下预查 status——非 probeMode 增加 status 调用会改变
   // 已有调用序列（顺序计数 mock 测试依赖），且主循环的 status 检查已足够。
   if (probeMode) {
@@ -156,6 +156,24 @@ export async function pollSessionCompletion(
       }
 
       if (statusEntry && statusEntry.type === 'busy') {
+        return await logExit('probe_pending', PROBE_PENDING);
+      }
+
+      // probeMode 下 retry 状态直接判定：attempt >= MAX_RETRY_ATTEMPTS 返回 null（error），
+      // attempt < MAX_RETRY_ATTEMPTS 返回 PROBE_PENDING（仍在重试中）。
+      // 避免进入主循环的 sleep → setTimeout 在 setInterval 回调上下文中可能不被事件循环调度，
+      // 导致 watcher 故障转移 while 循环卡死。
+      if (statusEntry && statusEntry.type === 'retry') {
+        const attempt = statusEntry.attempt ?? 0;
+        const next = statusEntry.next;
+        const MAX_RETRY_ATTEMPTS = 5;
+        const now = Date.now();
+        const isNextExpired = next !== undefined && next < now - RETRY_WAIT_BUFFER;
+        const isAttemptExceeded = attempt >= MAX_RETRY_ATTEMPTS;
+        const isRetryError = isAttemptExceeded || isNextExpired;
+        if (isRetryError) {
+          return await logExit('retry_error', null);
+        }
         return await logExit('probe_pending', PROBE_PENDING);
       }
     } catch {

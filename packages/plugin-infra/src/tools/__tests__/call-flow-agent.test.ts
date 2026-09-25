@@ -14,16 +14,32 @@ import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
 import { createCallFlowAgentTools, resetRunningSubagentCounts } from '../call-flow-agent.js';
 import { DEFAULT_PROFILE_MODELS } from '../../agents/config-loader.js';
 import { resetGlobalEventBus, getGlobalEventBus } from '../../features/event-bus.js';
+import { clearUnavailableModels, markModelUnavailable, getAlternativeModel } from '../../agents/agent-builder.js';
 
 // ─── Test helpers ──────────────────────────────────────────────────────────
 
-/** Create a mock SFlowClient with controllable session behavior */
+/**
+ * Create a mock SFlowClient with controllable session behavior.
+ *
+ * Wave 3 (Task 6) 扩展：支持故障注入能力
+ * - promptFailures: 按 prompt 调用顺序消费，number → HTTP 错误（cause.status），Error → 原样抛出，null/缺省 → 成功
+ * - pollFailure: 'retry-error' 时 status mock 返回 retry 终态（attempt=5），使 pollSessionCompletion 返回 null
+ * - pollFailureAfter: 前 N 次 poll 返回 null，之后恢复正常（idle）—— 用于"首次失败、重试成功"场景
+ * - assistantErrorName: 让 messages mock 返回的 assistant 消息带 info.error.name（用于 ContextOverflow 分支测试）
+ */
 function createMockClient(options: {
   pollOutputs: string[]; // outputs returned by pollSessionCompletion in sequence
   promptCalls?: Array<{ id: string; body: Record<string, unknown> }>;
+  promptFailures?: Array<number | Error | null>; // Wave 3: prompt 故障注入
+  pollFailure?: 'retry-error' | null; // Wave 3: poll 返回 null（retry 耗尽）
+  pollFailureAfter?: number; // Wave 3: 前 N 次 poll 失败，之后恢复（0 = 不失败，缺省 = 全部失败）
+  assistantErrorName?: string; // Wave 3: assistant info.error.name 注入
 }) {
   let pollIndex = 0;
+  let pollAttemptIndex = 0; // Wave 3: 跟踪 pollSessionCompletion 调用次数（通过 status 调用计数）
   const promptCalls = options.promptCalls ?? [];
+  const promptFailures = options.promptFailures ?? [];
+  let promptCallIndex = 0;
 
   return {
     session: {
@@ -34,18 +50,56 @@ function createMockClient(options: {
       ),
       prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
         promptCalls.push({ id: args.path.id, body: args.body });
+        // Wave 3: 按 promptFailures 队列注入故障
+        if (promptCallIndex < promptFailures.length) {
+          const failure = promptFailures[promptCallIndex];
+          promptCallIndex++;
+          if (failure !== null && failure !== undefined) {
+            if (typeof failure === 'number') {
+              // 模拟 HTTP 错误：throw Error with cause.status（hey-api error-interceptor 形态）
+              const err = new Error(`HTTP ${failure}: request failed`);
+              (err as any).cause = { status: failure, body: {} };
+              throw err;
+            } else if (failure instanceof Error) {
+              throw failure;
+            }
+          }
+          // null → 成功，继续
+        } else {
+          promptCallIndex++;
+        }
+        // 成功：sendPromptOnce 使用 { throwOnError: true }，成功时不抛异常
       }),
       messages: mock(async () => {
         const output = options.pollOutputs[Math.min(pollIndex, options.pollOutputs.length - 1)];
         pollIndex++;
+        // Wave 3: 构造消息列表，保留原有 parts 结构，追加 info 字段
+        const assistantMsg: Record<string, unknown> = {
+          parts: [{ type: 'text', text: output }],
+        };
+        if (options.assistantErrorName) {
+          assistantMsg.info = { role: 'assistant', error: { name: options.assistantErrorName } };
+        }
         return {
           data: [
             { parts: [{ type: 'text', text: 'user prompt' }] },
-            { parts: [{ type: 'text', text: output }] },
+            assistantMsg,
           ],
         };
       }),
       status: mock(async () => {
+        // Wave 3: pollFailure 注入 —— 返回 retry 终态使 pollSessionCompletion 返回 null
+        // pollFailureAfter 语义：前 N 次 poll 失败，之后恢复 idle
+        //   pollFailureAfter 缺省（Infinity）= 全部失败
+        //   pollFailureAfter = 1 = 第 1 次 poll 失败，第 2 次起恢复
+        //   pollFailureAfter = 0 = 不失败（与不设 pollFailure 等价）
+        if (options.pollFailure === 'retry-error') {
+          pollAttemptIndex++;
+          const failCount = options.pollFailureAfter ?? Infinity;
+          if (pollAttemptIndex <= failCount) {
+            return { data: { 'test-session-001': { type: 'retry', attempt: 5, next: 0 } } };
+          }
+        }
         return { data: { 'test-session-001': { type: 'idle' } } };
       }),
       abort: mock(async () => {}),
@@ -87,6 +141,7 @@ afterEach(() => {
   currentTools = null;
   resetRunningSubagentCounts();
   resetGlobalEventBus(); // Batch 4: Reset event bus between tests
+  clearUnavailableModels(); // Wave 2: 统一兜底，清理模块级 UNAVAILABLE_MODELS（故障转移测试会写入拉黑），防止跨测试泄漏
 });
 
 // ─── P3: 异步模式 completion enforcement ────────────────────────────────────
@@ -1993,6 +2048,11 @@ describe('P0: model_type routing priority chain', () => {
 
   beforeEach(() => {
     promptCalls = [];
+    clearUnavailableModels(); // D-9：每个测试前清理黑名单，防止跨测试泄漏
+  });
+
+  afterEach(() => {
+    clearUnavailableModels(); // D-9：每个测试后清理黑名单
   });
 
   it('P0-1: should use user-configured modelProfiles when model_type is specified', async () => {
@@ -2996,5 +3056,335 @@ describe('Bugfix: nullish 可选参数兼容', () => {
     // 若错误地按 block=true 处理，pollAndComplete 会把任务推进为 completed
     expect(data.status).toBe('running');
     expect(data.result).toBeUndefined();
+  });
+});
+
+// ─── Wave 3: 模型级故障转移 (model fallback) 测试 ──────────────────────────────
+
+describe('模型级故障转移 (model fallback)', () => {
+  let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
+
+  beforeEach(() => {
+    promptCalls = [];
+    currentTools = null;
+    clearUnavailableModels(); // D-9：每个测试前清理黑名单
+  });
+
+  afterEach(() => {
+    clearUnavailableModels(); // D-9：每个测试后清理黑名单
+  });
+
+  it('F-1: 换模型重试成功（首次 poll 失败 → 拉黑 → 换模型 → 重 prompt → 成功）', async () => {
+    // pollFailureAfter=1：第 1 次 poll 失败，第 2 次起恢复 idle
+    const client = createMockClient({
+      pollOutputs: ['Task completed [TASK_COMPLETE]'],
+      promptCalls,
+      pollFailure: 'retry-error',
+      pollFailureAfter: 1,
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test fallback',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    const data = JSON.parse(result.output);
+
+    // 断言 1：prompt 调用 2 次（首次 + 换模型重试）
+    expect(promptCalls.length).toBe(2);
+
+    // 断言 2：第 2 次 prompt 使用 fallback 模型（build-executor 的第一个 fallback = provider/glm-5）
+    const secondModel = promptCalls[1].body.model as { providerID: string; modelID: string };
+    expect(secondModel.modelID).toBe('glm-5');
+
+    // 断言 3：第 2 次 prompt 文本含"接管"字样（D-5）
+    const secondParts = promptCalls[1].body.parts as Array<{ type: string; text: string }>;
+    expect(secondParts[0].text).toContain('接管');
+
+    // 断言 4：最终成功
+    expect(data.success).toBe(true);
+    expect(data.model).toContain('glm-5');
+  });
+
+  it('F-2: 拉黑生效（故障模型不再被选中）', async () => {
+    // 复用 F-1 场景，额外验证 markModelUnavailable 的效果
+    const client = createMockClient({
+      pollOutputs: ['Task completed [TASK_COMPLETE]'],
+      promptCalls,
+      pollFailure: 'retry-error',
+      pollFailureAfter: 1,
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+
+    await tools.call_flow_agent.execute(
+      {
+        description: 'test blacklist',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    // 断言：首次模型 provider/test-model 已被拉黑
+    // getAlternativeModel 跳过 currentModel 且跳过黑名单模型
+    // 验证方式：把所有 fallback 也拉黑后，getAlternativeModel 应返回 null
+    // 先验证 glm-5 仍可用（F-1 只拉黑了 test-model）
+    const alt1 = getAlternativeModel('provider/test-model', 'build-executor');
+    expect(alt1).toBe('provider/glm-5'); // 第一个可用 fallback
+
+    // 再拉黑 glm-5，验证 kimi-k2.6 被选中
+    markModelUnavailable('provider/glm-5');
+    const alt2 = getAlternativeModel('provider/test-model', 'build-executor');
+    expect(alt2).toBe('provider/kimi-k2.6');
+
+    // 再拉黑 kimi-k2.6，验证无可用模型
+    markModelUnavailable('provider/kimi-k2.6');
+    const alt3 = getAlternativeModel('provider/test-model', 'build-executor');
+    expect(alt3).toBeNull();
+
+    // 测试结束清理（afterEach 也会清理，但显式清理更安全）
+    clearUnavailableModels();
+  });
+
+  it('F-3: 换模型次数上限（MAX_MODEL_RETRIES=2，最多 3 次 prompt）', async () => {
+    // pollFailure 无 pollFailureAfter = 每次 poll 都失败
+    const client = createMockClient({
+      pollOutputs: ['irrelevant'],
+      promptCalls,
+      pollFailure: 'retry-error',
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test max retries',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    const data = JSON.parse(result.output);
+
+    // 断言 1：prompt 调用 3 次（首次 + 2 次换模型 = MAX_MODEL_RETRIES=2 的语义）
+    expect(promptCalls.length).toBe(3);
+
+    // 断言 2：最终失败
+    expect(data.success).toBe(false);
+
+    // 断言 3：error 含 exhausted（故障转移耗尽）
+    expect(data.error).toContain('exhausted');
+
+    // 断言 4：attempted_models 数组长度为 3（验证 MAX_MODEL_RETRIES=2 语义：首模型 + 2 次换模型）
+    expect(data.attempted_models).toBeDefined();
+    expect(data.attempted_models.length).toBe(3);
+
+    // 断言 5：3 次 prompt 使用的模型依次为 test-model → glm-5 → kimi-k2.6
+    const models = promptCalls.map(c => (c.body.model as { providerID: string; modelID: string }).modelID);
+    expect(models[0]).toBe('test-model');
+    expect(models[1]).toBe('glm-5');
+    expect(models[2]).toBe('kimi-k2.6');
+  });
+
+  it('F-4: 无可用替代模型（getAlternativeModel 返回 null，立即终止）', async () => {
+    // 预先拉黑 build-executor 的全部 fallback
+    markModelUnavailable('provider/glm-5');
+    markModelUnavailable('provider/kimi-k2.6');
+
+    const client = createMockClient({
+      pollOutputs: ['irrelevant'],
+      promptCalls,
+      pollFailure: 'retry-error',
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test no alternative',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    const data = JSON.parse(result.output);
+
+    // 断言 1：仅 1 次 prompt（首次失败后无替代模型，立即终止）
+    expect(promptCalls.length).toBe(1);
+
+    // 断言 2：最终失败
+    expect(data.success).toBe(false);
+
+    // 断言 3：error 含 "no alternative model" 或 "exhausted"
+    expect(data.error).toMatch(/no alternative model|exhausted/i);
+  });
+
+  it('F-5: ContextOverflow 豁免（不拉黑、不换模型）', async () => {
+    const client = createMockClient({
+      pollOutputs: ['irrelevant'],
+      promptCalls,
+      pollFailure: 'retry-error',
+      assistantErrorName: 'ContextOverflowError',
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test context overflow',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    const data = JSON.parse(result.output);
+
+    // 断言 1：仅 1 次 prompt（ContextOverflow 不换模型）
+    expect(promptCalls.length).toBe(1);
+
+    // 断言 2：最终失败
+    expect(data.success).toBe(false);
+
+    // 断言 3：error 含 ContextOverflow 且明确未换模型
+    expect(data.error).toContain('ContextOverflow');
+
+    // 断言 4：模型未被拉黑（getAlternativeModel 仍能返回 fallback）
+    const alt = getAlternativeModel('provider/test-model', 'build-executor');
+    expect(alt).toBe('provider/glm-5'); // 若未被拉黑，第一个 fallback 仍可用
+  });
+
+  it('F-6a: 前置校验失败 HTTP 400 不换模型', async () => {
+    const client = createMockClient({
+      pollOutputs: ['irrelevant'],
+      promptCalls,
+      promptFailures: [400],
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test http 400',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    const output = result.output;
+
+    // 断言 1：仅 1 次 prompt（前置校验失败不重试）
+    expect(promptCalls.length).toBe(1);
+
+    // 断言 2：返回错误
+    expect(output).toContain('HTTP 400');
+
+    // 断言 3：明确"未触发模型故障转移"
+    expect(output).toContain('未触发模型故障转移');
+  });
+
+  it('F-6b: 前置校验失败 HTTP 404 不换模型', async () => {
+    const client = createMockClient({
+      pollOutputs: ['irrelevant'],
+      promptCalls,
+      promptFailures: [404],
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test http 404',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    const output = result.output;
+
+    // 断言 1：仅 1 次 prompt
+    expect(promptCalls.length).toBe(1);
+
+    // 断言 2：返回错误
+    expect(output).toContain('HTTP 404');
+
+    // 断言 3：明确"未触发模型故障转移"
+    expect(output).toContain('未触发模型故障转移');
+  });
+
+  it('F-7: async pollAndComplete 路径换模型重 prompt（保持 running、不释放槽位）', async () => {
+    // pollFailureAfter=1：第 1 次 poll 失败 → tryAsyncModelFallback → 换模型重 prompt → 第 2 次 poll 成功
+    const client = createMockClient({
+      pollOutputs: ['Task completed [TASK_COMPLETE]'],
+      promptCalls,
+      pollFailure: 'retry-error',
+      pollFailureAfter: 1,
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+
+    // 启动 async 任务
+    const startResult = await tools.call_flow_agent.execute(
+      {
+        description: 'test async fallback',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: true,
+      },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    const startData = JSON.parse(startResult.output);
+    expect(startData.success).toBe(true);
+    const taskId = startData.task_id;
+
+    // 用 flowagent_output + block=true 触发 pollAndComplete
+    const outputResult = await tools.flowagent_output.execute(
+      { task_id: taskId, block: true },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    const outputData = JSON.parse(outputResult.output);
+
+    // 断言 1：最终成功（故障转移后完成）
+    expect(outputData.success).toBe(true);
+
+    // 断言 2：prompt 调用 2 次（初始 + 换模型重 prompt）
+    expect(promptCalls.length).toBe(2);
+
+    // 断言 3：第 2 次 prompt 使用 fallback 模型
+    const secondModel = promptCalls[1].body.model as { providerID: string; modelID: string };
+    expect(secondModel.modelID).toBe('glm-5');
+
+    // 断言 4：registry 中 resolvedModel 已变为 fallback 模型
+    const task = options.backgroundTaskRegistry.get(taskId);
+    expect(task).toBeDefined();
+    expect(task?.resolvedModel).toContain('glm-5');
   });
 });
