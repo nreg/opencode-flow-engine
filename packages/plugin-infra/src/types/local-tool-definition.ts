@@ -10,7 +10,7 @@
  * Solution:
  * - Define LocalToolDefinition with permissive args type (Record<string, unknown>)
  * - This maintains type safety for description and execute, while bypassing zod version conflict
- * - Runtime behavior unchanged: args are still validated by zod v3 at runtime
+ * - NOTE: args are NOT validated by zod at runtime — zod v3 schemas are passed to a host expecting zod v4 ($ZodType), so validation is skipped and raw LLM output reaches execute. Tools must defensively normalize their own args.
  */
 
 import type { ToolContext, ToolResult } from '@opencode-ai/plugin';
@@ -28,7 +28,7 @@ import type { ToolContext, ToolResult } from '@opencode-ai/plugin';
  * 5. Using Record<string, unknown> causes TS2322 errors in plugin factories
  * 
  * This is safe because:
- * - Runtime validation still happens via zod v3
+ * - NOTE: args are NOT validated by zod at runtime — zod v3 schemas are passed to a host expecting zod v4 ($ZodType), so validation is skipped and raw LLM output reaches execute. Tools must defensively normalize their own args (e.g. boolean args like run_in_background).
  * - The execute function receives properly typed args via destructuring
  * - TypeScript still validates the execute function signature
  * - This is a well-documented workaround for zod version conflicts

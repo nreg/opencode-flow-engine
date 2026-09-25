@@ -410,6 +410,17 @@ export function createCallFlowAgentTools(
         model_type,
       } = args;
 
+      // F3: 严格布尔归一化 — zod v3 schema 在宿主侧不生效校验，LLM 可能把
+      // run_in_background 输出成字符串 "false"/"true"。字符串 "false" 在 JS 中
+      // 为 truthy，会导致同步调用被误判为后台模式（返回 task_id / session_id 报错）。
+      // 这里按语义转换为真正的 boolean。
+      const isBackground =
+        run_in_background === true || run_in_background === 'true'
+          ? true
+          : run_in_background === false || run_in_background === 'false'
+            ? false
+            : true;
+
       // F1: 防御性检查 — LLM 偶发未传 subagent_type 时给出清晰、可操作错误
       if (!subagent_type || typeof subagent_type !== 'string' || subagent_type.trim() === '') {
         return await formatToolError(
@@ -543,7 +554,7 @@ export function createCallFlowAgentTools(
         }
 
         if (normalizedSessionId) {
-          if (run_in_background) {
+          if (isBackground) {
             return await formatToolError(
               'session_id is not supported in background mode. Use run_in_background=false to continue an existing session.',
             );
@@ -625,7 +636,7 @@ export function createCallFlowAgentTools(
           }
         }
 
-        if (run_in_background) {
+        if (isBackground) {
           // Check concurrency limit: max 3 parallel subagents of the same type
           if (!acquireSubagentSlot(subagent_type as string)) {
             return await formatToolError(

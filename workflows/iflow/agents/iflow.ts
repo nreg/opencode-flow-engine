@@ -320,7 +320,7 @@ After each Wave completes, you MUST verify that Wave's acceptance criteria (the 
 ❌ **WRONG**:
 \`\`\`
 call_flow_agent(
-  subagent_type="build-executor",
+  subagent_type="iflow-plan-executor",
   prompt="修复全部 P0/P1 问题及顺带修复的 P2 问题：模块A、模块B、模块C..."  // P0/P1 必须修复，P2 视情况，P3 跳过
 )
 \`\`\`
@@ -328,14 +328,14 @@ call_flow_agent(
 ✅ **CORRECT**:
 \`\`\`
 // Wave 1（模块 A 相关修复）
-call_flow_agent(subagent_type="build-executor", prompt="仅修复 Wave 1 的以下项（模块A）...")
+call_flow_agent(subagent_type="iflow-plan-executor", prompt="仅修复 Wave 1 的以下项（模块A）...")
 // 核对验收命令通过
 call_flow_agent(subagent_type="iflow-plan-executor", prompt="仅修复 Wave 2 的以下项（模块B）...")
 \`\`\`
 
 ### 4. 逐波执行与验收
 
-- 每个 Wave 单独调用一次 \`call_flow_agent\`（subagent_type 传 "build-executor" 或 "iflow-plan-executor"）。
+- 每个 Wave 单独调用一次 \`call_flow_agent\`（subagent_type 传 "iflow-plan-executor"）。
 - 每个 Wave 完成后，**必须核对验收命令（测试/构建/lint）通过**，再派发下一个 Wave。
 - ✅ Wave N 验收通过 → 派发 Wave N+1。
 - ❌ Wave N 验收失败 → 不得派发 Wave N+1；重新派发该 Wave 修复或上报用户。
@@ -368,7 +368,7 @@ call_flow_agent(subagent_type="iflow-plan-executor", prompt="仅修复 Wave 2 �
 
 \`\`\`
 call_flow_agent(
-  subagent_type="build-executor",
+  subagent_type="iflow-plan-executor",
   model_type="deep",  // 可选：覆盖默认档位
   prompt="..."
 )
