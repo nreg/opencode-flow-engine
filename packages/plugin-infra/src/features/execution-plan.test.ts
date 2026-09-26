@@ -21,9 +21,23 @@ import {
   readRepairState,
   updateRepairState,
   validateRepairContinuity,
+  // P0-2: Issue-identity circuit breaker
+  issueFailureCount,
+  validateIssueId,
+  adjudicateWave,
+  readActiveAdjudicationAsync,
+  // P0-3: Plan revision recovery
+  resolveRecommendationPlanRevision,
+  // P1-1: Review targets
+  reviewTargets,
+  // P1-5: Review base
+  normalizeCommitSha,
+  recordReviewBase,
+  validateFinalReviewRange,
+  isGitEnvironment,
 } from './execution-plan.js';
-import type { ExecutionPlan, Wave, ReviewReceipt, RepairState } from './execution-plan-types.js';
-import { MAX_REPAIR_FAILURES } from '@opencode-flow-engine/core';
+import type { ExecutionPlan, Wave, ReviewReceipt, RepairState, ReviewEvidence, Adjudication, ReviewPolicy, SchemaVersion } from './execution-plan-types.js';
+import { MAX_REPAIR_FAILURES, MAX_ISSUE_REPAIR_FAILURES, ISSUE_ID_PATTERN, FULL_COMMIT_SHA } from '@opencode-flow-engine/core';
 
 // ─── Test Helpers ──────────────────────────────────────────────────────────────
 
@@ -1141,5 +1155,903 @@ describe('Repair Circuit Breaker', () => {
 
       await cleanupDir(workDir);
     });
+  });
+});
+
+// ─── Wave 3: P0-2 Issue-Identity Circuit Breaker ────────────────────────────────
+
+describe('P0-2: Issue-Identity Circuit Breaker', () => {
+  const dir = tempDir('issue-circuit');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await setupStateJson(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  describe('Legacy behavior unchanged (schema_version 1 / no schema_version)', () => {
+    it('should use threshold 5 and count all failures for legacy plans', async () => {
+      const plan = await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Legacy plan',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // Legacy plan: no schema_version, no issue field
+      // 5 failures with DIFFERENT issues should still trigger at threshold 5
+      let currentHead = 'initial-head';
+      for (let i = 0; i < MAX_REPAIR_FAILURES; i++) {
+        const receipt = await recordReviewReceipt(dir, 'W1', {
+          status: 'fail',
+          base: currentHead,
+          head: `head${i}`,
+          report: `Failure ${i}`,
+        });
+        currentHead = `head${i}`;
+
+        if (i < MAX_REPAIR_FAILURES - 1) {
+          expect(receipt.repair_state?.status).toBe('repairing');
+        } else {
+          expect(receipt.repair_state?.status).toBe('adjudication-required');
+          expect(receipt.repair_state?.failure_count).toBe(MAX_REPAIR_FAILURES);
+        }
+      }
+    });
+
+    it('should NOT require issue field for legacy fail receipts', async () => {
+      const plan = await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Legacy plan no issue',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // Legacy plan: fail receipt without issue should succeed
+      const receipt = await recordReviewReceipt(dir, 'W1', {
+        status: 'fail',
+        base: 'base1',
+        head: 'head1',
+        report: 'Legacy failure without issue',
+      });
+
+      expect(receipt.status).toBe('fail');
+      expect(receipt.issue).toBeUndefined();
+    });
+
+    it('should NOT block when review_base is missing (legacy)', async () => {
+      // Legacy plan without review_base should not block reviews
+      const plan = await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Legacy no review_base',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // review_base is not set — should not block
+      expect(plan.review_base).toBeUndefined();
+    });
+  });
+
+  describe('Schema_version 2 issue-identity circuit breaker', () => {
+    it('should require issue field for schema_version 2 fail receipts', async () => {
+      // Create plan with schema_version 2
+      await setupStateJson(dir);
+      const planPath = dir + '/.flow-engine/sflow/execution-plan.json';
+      const basePlan = await readExecutionPlan(dir);
+      if (basePlan) {
+        const updatedPlan = { ...basePlan, schema_version: 2 as SchemaVersion };
+        updatedPlan.hash = await computeContentHash(updatedPlan);
+        await writeFile(planPath, JSON.stringify(updatedPlan, null, 2));
+      } else {
+        // Create a plan first
+        await createExecutionPlan(dir, {
+          mode: 'sdd',
+          source: 'default',
+          rationale: 'Schema v2 plan',
+          waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+        });
+        const created = await readExecutionPlan(dir);
+        const updatedPlan = { ...created!, schema_version: 2 as SchemaVersion };
+        updatedPlan.hash = await computeContentHash(updatedPlan);
+        await writeFile(planPath, JSON.stringify(updatedPlan, null, 2));
+      }
+
+      // Fail receipt without issue should be rejected
+      await expect(
+        recordReviewReceipt(dir, 'W1', {
+          status: 'fail',
+          base: 'base1',
+          head: 'head1',
+          report: 'Schema v2 failure without issue',
+        }),
+      ).rejects.toThrow(/issue identifier/i);
+    });
+
+    it('should accept fail receipt with valid issue for schema_version 2', async () => {
+      await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Schema v2 with issue',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+      const planPath = dir + '/.flow-engine/sflow/execution-plan.json';
+      const created = await readExecutionPlan(dir);
+      const updatedPlan = { ...created!, schema_version: 2 as SchemaVersion };
+      updatedPlan.hash = await computeContentHash(updatedPlan);
+      await writeFile(planPath, JSON.stringify(updatedPlan, null, 2));
+
+      const receipt = await recordReviewReceipt(dir, 'W1', {
+        status: 'fail',
+        base: 'base1',
+        head: 'head1',
+        report: 'Schema v2 failure with issue',
+        issue: 'BUG-123',
+      });
+
+      expect(receipt.status).toBe('fail');
+      expect(receipt.issue).toBe('BUG-123');
+    });
+
+    it('should trigger circuit breaker at 3 same-issue consecutive failures (schema_version 2)', async () => {
+      await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Schema v2 issue threshold',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+      const planPath = dir + '/.flow-engine/sflow/execution-plan.json';
+      const created = await readExecutionPlan(dir);
+      const updatedPlan = { ...created!, schema_version: 2 as SchemaVersion };
+      updatedPlan.hash = await computeContentHash(updatedPlan);
+      await writeFile(planPath, JSON.stringify(updatedPlan, null, 2));
+
+      // 3 same-issue failures should trigger adjudication
+      let currentHead = 'initial-head';
+      for (let i = 0; i < MAX_ISSUE_REPAIR_FAILURES; i++) {
+        const receipt = await recordReviewReceipt(dir, 'W1', {
+          status: 'fail',
+          base: currentHead,
+          head: `head${i}`,
+          report: `Same issue failure ${i}`,
+          issue: 'BUG-456',
+        });
+        currentHead = `head${i}`;
+
+        if (i < MAX_ISSUE_REPAIR_FAILURES - 1) {
+          expect(receipt.repair_state?.status).toBe('repairing');
+        } else {
+          expect(receipt.repair_state?.status).toBe('adjudication-required');
+        }
+      }
+    });
+
+    it('should NOT trigger circuit breaker when different issues alternate (schema_version 2)', async () => {
+      await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Schema v2 different issues',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+      const planPath = dir + '/.flow-engine/sflow/execution-plan.json';
+      const created = await readExecutionPlan(dir);
+      const updatedPlan = { ...created!, schema_version: 2 as SchemaVersion };
+      updatedPlan.hash = await computeContentHash(updatedPlan);
+      await writeFile(planPath, JSON.stringify(updatedPlan, null, 2));
+
+      // 4 failures with alternating issues should NOT trigger (each issue only has 2 consecutive)
+      let currentHead = 'initial-head';
+      const issues = ['BUG-A', 'BUG-B', 'BUG-A', 'BUG-B'];
+      for (let i = 0; i < issues.length; i++) {
+        const receipt = await recordReviewReceipt(dir, 'W1', {
+          status: 'fail',
+          base: currentHead,
+          head: `head${i}`,
+          report: `Failure ${i}`,
+          issue: issues[i],
+        });
+        currentHead = `head${i}`;
+        expect(receipt.repair_state?.status).toBe('repairing');
+      }
+    });
+  });
+
+  describe('issueFailureCount', () => {
+    it('should count all failures for legacy plans (no schema_version)', () => {
+      const plan: ExecutionPlan = {
+        mode: 'sdd', source: 'default', rationale: 'test',
+        waves: [], hash: 'sha256:abc', artifacts_hash: 'a', contract_hash: 'c', revision: 1,
+      };
+      const failures: ReviewEvidence[] = [
+        { base: 'a', head: 'b', report: 'r1', recorded_at: '2026-01-01', issue: 'X' },
+        { base: 'b', head: 'c', report: 'r2', recorded_at: '2026-01-02', issue: 'Y' },
+        { base: 'c', head: 'd', report: 'r3', recorded_at: '2026-01-03', issue: 'X' },
+      ];
+      expect(issueFailureCount(plan, failures)).toBe(3);
+    });
+
+    it('should count only same-issue failures for schema_version 2', () => {
+      const plan: ExecutionPlan = {
+        mode: 'sdd', source: 'default', rationale: 'test',
+        waves: [], hash: 'sha256:abc', artifacts_hash: 'a', contract_hash: 'c', revision: 1,
+        schema_version: 2,
+      };
+      const failures: ReviewEvidence[] = [
+        { base: 'a', head: 'b', report: 'r1', recorded_at: '2026-01-01', issue: 'X' },
+        { base: 'b', head: 'c', report: 'r2', recorded_at: '2026-01-02', issue: 'Y' },
+        { base: 'c', head: 'd', report: 'r3', recorded_at: '2026-01-03', issue: 'X' },
+      ];
+      // Latest issue is 'X', so count only 'X' failures = 2
+      expect(issueFailureCount(plan, failures)).toBe(2);
+    });
+
+    it('should return 0 for empty failures array', () => {
+      const plan: ExecutionPlan = {
+        mode: 'sdd', source: 'default', rationale: 'test',
+        waves: [], hash: 'sha256:abc', artifacts_hash: 'a', contract_hash: 'c', revision: 1,
+        schema_version: 2,
+      };
+      expect(issueFailureCount(plan, [])).toBe(0);
+    });
+  });
+
+  describe('validateIssueId', () => {
+    it('should accept valid issue IDs', () => {
+      expect(validateIssueId('BUG-123')).toBe(true);
+      expect(validateIssueId('issue_456')).toBe(true);
+      expect(validateIssueId('CVE:2024-1234')).toBe(true);
+      expect(validateIssueId('a.b-c:d')).toBe(true);
+    });
+
+    it('should reject invalid issue IDs', () => {
+      expect(() => validateIssueId('')).toThrow();
+      expect(() => validateIssueId('has spaces')).toThrow();
+      expect(() => validateIssueId('a'.repeat(129))).toThrow();
+      expect(() => validateIssueId('special!char')).toThrow();
+    });
+  });
+
+  describe('startsNewChain', () => {
+    it('should reset failure history when previous repair resolved and previous receipt is not fail', async () => {
+      await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test startsNewChain',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // First: fail
+      await recordReviewReceipt(dir, 'W1', {
+        status: 'fail',
+        base: 'base1',
+        head: 'head1',
+        report: 'First failure',
+      });
+
+      // Second: pass (resolves the repair)
+      await recordReviewReceipt(dir, 'W1', {
+        status: 'pass',
+        base: 'head1',
+        head: 'head2',
+        report: 'Fixed',
+      });
+
+      // Third: new failure — should start a new chain (failure_count = 1, not 2)
+      const receipt = await recordReviewReceipt(dir, 'W1', {
+        status: 'fail',
+        base: 'head2',
+        head: 'head3',
+        report: 'New failure after resolution',
+      });
+
+      expect(receipt.repair_state?.failure_count).toBe(1);
+      expect(receipt.repair_state?.status).toBe('repairing');
+    });
+  });
+
+  describe('adjudicateWave', () => {
+    it('should authorize one review after adjudication-required', async () => {
+      await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test adjudicateWave',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // Reach adjudication-required state (5 failures for legacy plan)
+      let currentHead = 'initial-head';
+      for (let i = 0; i < MAX_REPAIR_FAILURES; i++) {
+        await recordReviewReceipt(dir, 'W1', {
+          status: 'fail',
+          base: currentHead,
+          head: `head${i}`,
+          report: `Failure ${i}`,
+        });
+        currentHead = `head${i}`;
+      }
+
+      // Adjudicate
+      const auth = await adjudicateWave(dir, 'W1', {
+        decision: 'allow-review',
+        confirmed: true,
+        reason: 'Human reviewed the failures and authorizes one more attempt',
+      });
+
+      expect(auth.status).toBe('authorized');
+      expect(auth.decision).toBe('allow-review');
+      expect(auth.confirmed).toBe(true);
+      expect(auth.id).toBeTruthy();
+    });
+
+    it('should reject adjudication with wrong decision', async () => {
+      await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test wrong decision',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      await expect(
+        adjudicateWave(dir, 'W1', {
+          decision: 'skip',
+          confirmed: true,
+          reason: 'Wrong decision',
+        }),
+      ).rejects.toThrow(/allow-review/i);
+    });
+
+    it('should reject adjudication without confirmation', async () => {
+      await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test no confirmation',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      await expect(
+        adjudicateWave(dir, 'W1', {
+          decision: 'allow-review',
+          confirmed: false,
+          reason: 'Not confirmed',
+        }),
+      ).rejects.toThrow(/confirmed/i);
+    });
+
+    it('should allow one review after adjudication and then block again', async () => {
+      await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test one-time authorization',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // Reach adjudication-required
+      let currentHead = 'initial-head';
+      for (let i = 0; i < MAX_REPAIR_FAILURES; i++) {
+        await recordReviewReceipt(dir, 'W1', {
+          status: 'fail',
+          base: currentHead,
+          head: `head${i}`,
+          report: `Failure ${i}`,
+        });
+        currentHead = `head${i}`;
+      }
+
+      // Adjudicate
+      await adjudicateWave(dir, 'W1', {
+        decision: 'allow-review',
+        confirmed: true,
+        reason: 'Authorizing one more attempt',
+      });
+
+      // Should now allow one more review (fail again)
+      const receipt = await recordReviewReceipt(dir, 'W1', {
+        status: 'fail',
+        base: currentHead,
+        head: 'head_after_adjudication',
+        report: 'Failure after adjudication',
+      });
+      expect(receipt.status).toBe('fail');
+
+      // Next attempt should be blocked again (authorization consumed)
+      await expect(
+        recordReviewReceipt(dir, 'W1', {
+          status: 'fail',
+          base: 'head_after_adjudication',
+          head: 'head_blocked',
+          report: 'Should be blocked',
+        }),
+      ).rejects.toThrow(/adjudication/i);
+    });
+
+    it('should reject duplicate adjudication when one is already active', async () => {
+      await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test duplicate adjudication',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // Reach adjudication-required
+      let currentHead = 'initial-head';
+      for (let i = 0; i < MAX_REPAIR_FAILURES; i++) {
+        await recordReviewReceipt(dir, 'W1', {
+          status: 'fail',
+          base: currentHead,
+          head: `head${i}`,
+          report: `Failure ${i}`,
+        });
+        currentHead = `head${i}`;
+      }
+
+      // First adjudication
+      await adjudicateWave(dir, 'W1', {
+        decision: 'allow-review',
+        confirmed: true,
+        reason: 'First authorization',
+      });
+
+      // Second adjudication should be rejected (already has active authorization)
+      await expect(
+        adjudicateWave(dir, 'W1', {
+          decision: 'allow-review',
+          confirmed: true,
+          reason: 'Duplicate authorization',
+        }),
+      ).rejects.toThrow(/already has an active/i);
+    });
+  });
+});
+
+// ─── Wave 3: P0-3 Plan Revision Recovery ────────────────────────────────────────
+
+describe('P0-3: resolveRecommendationPlanRevision', () => {
+  const dir = tempDir('plan-revision');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await setupStateJson(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should return revision from state when available', async () => {
+    await setupStateJson(dir, { execution_plan_revision: 3 });
+    const revision = await resolveRecommendationPlanRevision(dir, { execution_plan_revision: 3 });
+    expect(revision).toBe(3);
+  });
+
+  it('should recover revision from plan file when state summary is lost', async () => {
+    await createExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Test recovery',
+      waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      revision: 2,
+    });
+
+    // State has no execution_plan_revision
+    const revision = await resolveRecommendationPlanRevision(dir, {});
+    expect(revision).toBe(2);
+  });
+
+  it('should reject partial clearing (revision only)', async () => {
+    await createExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Test partial clearing',
+      waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+    });
+
+    // State has revision but not execution_plan_hash
+    await expect(
+      resolveRecommendationPlanRevision(dir, { revision: 1 }),
+    ).rejects.toThrow(/partially cleared/i);
+  });
+
+  it('should reject partial clearing (hash only)', async () => {
+    await createExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Test partial clearing hash',
+      waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+    });
+
+    // State has execution_plan_hash but not revision
+    await expect(
+      resolveRecommendationPlanRevision(dir, { execution_plan_hash: 'some-hash' }),
+    ).rejects.toThrow(/partially cleared/i);
+  });
+
+  it('should reject tampered plan (hash mismatch)', async () => {
+    await createExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Test tampered plan',
+      waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+    });
+
+    // Tamper with the plan file
+    const planPath = dir + '/.flow-engine/sflow/execution-plan.json';
+    const planContent = JSON.parse(await readFile(planPath, 'utf-8'));
+    planContent.rationale = 'TAMPERED';
+    await writeFile(planPath, JSON.stringify(planContent, null, 2));
+
+    // Should reject because hash no longer matches content
+    await expect(
+      resolveRecommendationPlanRevision(dir, {}),
+    ).rejects.toThrow(/hash mismatch/i);
+  });
+
+  it('should return null when no plan exists and no state revision', async () => {
+    const revision = await resolveRecommendationPlanRevision(dir, {});
+    expect(revision).toBeNull();
+  });
+});
+
+// ─── Wave 3: P1-1 Review Policy ────────────────────────────────────────────────
+
+describe('P1-1: Review Policy', () => {
+  describe('reviewTargets', () => {
+    it('should return waves for wave policy (default)', () => {
+      const plan: ExecutionPlan = {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'test',
+        waves: [
+          { id: 'W1', strategy: 'parallel', tasks: ['1.1', '1.2'], depends_on: [] },
+          { id: 'W2', strategy: 'serial', tasks: ['2.1'], depends_on: ['W1'] },
+        ],
+        hash: 'sha256:abc',
+        artifacts_hash: 'a',
+        contract_hash: 'c',
+        revision: 1,
+      };
+
+      const targets = reviewTargets(plan);
+      expect(targets).toHaveLength(2);
+      expect(targets[0].id).toBe('W1');
+      expect(targets[1].id).toBe('W2');
+    });
+
+    it('should return single final wave for final policy', () => {
+      const plan: ExecutionPlan = {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'test',
+        waves: [
+          { id: 'W1', strategy: 'parallel', tasks: ['1.1', '1.2'], depends_on: [] },
+          { id: 'W2', strategy: 'serial', tasks: ['2.1'], depends_on: ['W1'] },
+        ],
+        hash: 'sha256:abc',
+        artifacts_hash: 'a',
+        contract_hash: 'c',
+        revision: 1,
+        review_policy: 'final',
+      };
+
+      const targets = reviewTargets(plan);
+      expect(targets).toHaveLength(1);
+      expect(targets[0].id).toBe('final');
+      expect(targets[0].tasks).toEqual(['1.1', '1.2', '2.1']);
+    });
+
+    it('should default to wave policy when review_policy is undefined', () => {
+      const plan: ExecutionPlan = {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'test',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+        hash: 'sha256:abc',
+        artifacts_hash: 'a',
+        contract_hash: 'c',
+        revision: 1,
+      };
+
+      const targets = reviewTargets(plan);
+      expect(targets).toHaveLength(1);
+      expect(targets[0].id).toBe('W1');
+    });
+  });
+
+  describe('ExecutionPlan with review_policy and schema_version', () => {
+    it('should support review_policy field', () => {
+      const plan: ExecutionPlan = {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'test',
+        waves: [],
+        hash: 'sha256:abc',
+        artifacts_hash: 'a',
+        contract_hash: 'c',
+        revision: 1,
+        review_policy: 'final',
+      };
+
+      expect(plan.review_policy).toBe('final');
+    });
+
+    it('should support schema_version field', () => {
+      const plan: ExecutionPlan = {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'test',
+        waves: [],
+        hash: 'sha256:abc',
+        artifacts_hash: 'a',
+        contract_hash: 'c',
+        revision: 1,
+        schema_version: 2,
+      };
+
+      expect(plan.schema_version).toBe(2);
+    });
+  });
+
+  describe('Final policy dependency check', () => {
+    it('should use tasks.md completion for final policy dependency', async () => {
+      // For final policy, the dependency check should verify all tasks are completed
+      // This is tested via reviewTargets returning a single 'final' wave
+      const plan: ExecutionPlan = {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'test',
+        waves: [
+          { id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] },
+          { id: 'W2', strategy: 'serial', tasks: ['2.1'], depends_on: ['W1'] },
+        ],
+        hash: 'sha256:abc',
+        artifacts_hash: 'a',
+        contract_hash: 'c',
+        revision: 1,
+        review_policy: 'final',
+      };
+
+      const targets = reviewTargets(plan);
+      // Final policy: single wave covering all tasks
+      expect(targets).toHaveLength(1);
+      expect(targets[0].id).toBe('final');
+      expect(targets[0].tasks).toEqual(['1.1', '2.1']);
+    });
+  });
+});
+
+// ─── Wave 3: P1-5 Review Base ──────────────────────────────────────────────────
+
+describe('P1-5: Review Base', () => {
+  const dir = tempDir('review-base');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await setupStateJson(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  describe('normalizeCommitSha', () => {
+    it('should return null for empty input', async () => {
+      const result = await normalizeCommitSha(dir, '');
+      expect(result).toBeNull();
+    });
+
+    it('should return null for invalid SHA in non-git directory', async () => {
+      const result = await normalizeCommitSha(dir, 'invalid-sha');
+      expect(result).toBeNull();
+    });
+
+    it('should normalize valid short SHA in git repo', async () => {
+      // Create a git repo with a commit
+      const { execFileSync } = await import('child_process');
+      const run = (args: string[]) =>
+        execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: 'pipe' });
+
+      run(['init', '-q']);
+      run(['config', 'user.email', 'test@example.com']);
+      run(['config', 'user.name', 'Test']);
+      run(['config', 'commit.gpgsign', 'false']);
+      await writeFile(join(dir, 'test.txt'), 'test\n');
+      run(['add', '.']);
+      run(['commit', '-q', '-m', 'test commit']);
+      const fullSha = run(['rev-parse', 'HEAD']).trim();
+      const shortSha = fullSha.slice(0, 7);
+
+      const result = await normalizeCommitSha(dir, shortSha);
+      expect(result).toBe(fullSha);
+    });
+  });
+
+  describe('recordReviewBase', () => {
+    it('should set review_base on the plan (WRITE_ONCE)', async () => {
+      // Create a git repo
+      const { execFileSync } = await import('child_process');
+      const run = (args: string[]) =>
+        execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: 'pipe' });
+
+      run(['init', '-q']);
+      run(['config', 'user.email', 'test@example.com']);
+      run(['config', 'user.name', 'Test']);
+      run(['config', 'commit.gpgsign', 'false']);
+      await writeFile(join(dir, 'test.txt'), 'test\n');
+      run(['add', '.']);
+      run(['commit', '-q', '-m', 'initial commit']);
+      const commitSha = run(['rev-parse', 'HEAD']).trim();
+
+      await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test review_base',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      const result = await recordReviewBase(dir, commitSha);
+      expect(result).toBe(commitSha);
+
+      // Verify plan was updated
+      const plan = await readExecutionPlan(dir);
+      expect(plan?.review_base).toBe(commitSha);
+    });
+
+    it('should not overwrite existing review_base (WRITE_ONCE)', async () => {
+      // Create a git repo
+      const { execFileSync } = await import('child_process');
+      const run = (args: string[]) =>
+        execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: 'pipe' });
+
+      run(['init', '-q']);
+      run(['config', 'user.email', 'test@example.com']);
+      run(['config', 'user.name', 'Test']);
+      run(['config', 'commit.gpgsign', 'false']);
+      await writeFile(join(dir, 'test.txt'), 'test\n');
+      run(['add', '.']);
+      run(['commit', '-q', '-m', 'initial commit']);
+      const commitSha = run(['rev-parse', 'HEAD']).trim();
+
+      await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test WRITE_ONCE',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      // Set review_base
+      await recordReviewBase(dir, commitSha);
+
+      // Try to set again — should return existing value
+      const result = await recordReviewBase(dir, 'different-sha');
+      expect(result).toBe(commitSha); // Still the original
+
+      const plan = await readExecutionPlan(dir);
+      expect(plan?.review_base).toBe(commitSha); // Not changed
+    });
+
+    it('should return null when no SHA provided', async () => {
+      await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test no SHA',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      const result = await recordReviewBase(dir);
+      expect(result).toBeNull();
+    });
+
+    it('should reject invalid SHA', async () => {
+      await createExecutionPlan(dir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test invalid SHA',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+
+      await expect(
+        recordReviewBase(dir, 'not-a-real-sha'),
+      ).rejects.toThrow(/invalid review base SHA/i);
+    });
+  });
+
+  describe('isGitEnvironment', () => {
+    it('should return false for non-git directory', async () => {
+      // Use system temp dir to avoid being inside the project's git repo
+      const nonGitDir = join(import.meta.dir, '..', '__test_workdir__', 'non-git-env');
+      await cleanupDir(nonGitDir);
+      await ensureDir(nonGitDir);
+      try {
+        const result = await isGitEnvironment(nonGitDir);
+        expect(result).toBe(false);
+      } finally {
+        await cleanupDir(nonGitDir);
+      }
+    });
+
+    it('should return true for git directory', async () => {
+      const { execFileSync } = await import('child_process');
+      // Use system temp dir to create an isolated git repo
+      const gitDir = join(import.meta.dir, '..', '__test_workdir__', 'git-env');
+      await cleanupDir(gitDir);
+      await ensureDir(gitDir);
+      try {
+        execFileSync('git', ['init', '-q'], { cwd: gitDir, encoding: 'utf8', stdio: 'pipe' });
+        const result = await isGitEnvironment(gitDir);
+        expect(result).toBe(true);
+      } finally {
+        await cleanupDir(gitDir);
+      }
+    });
+  });
+
+  describe('validateFinalReviewRange', () => {
+    it('should not validate for wave policy', async () => {
+      const plan: ExecutionPlan = {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'test',
+        waves: [],
+        hash: 'sha256:abc',
+        artifacts_hash: 'a',
+        contract_hash: 'c',
+        revision: 1,
+        review_policy: 'wave',
+      };
+
+      // Should not throw for wave policy
+      await expect(
+        validateFinalReviewRange(dir, plan, 'base1', 'head1'),
+      ).resolves.toBeUndefined();
+    });
+
+    it('should not block when review_base is missing for final policy (legacy compat)', async () => {
+      const plan: ExecutionPlan = {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'test',
+        waves: [],
+        hash: 'sha256:abc',
+        artifacts_hash: 'a',
+        contract_hash: 'c',
+        revision: 1,
+        review_policy: 'final',
+        // No review_base — legacy compat, should not block
+      };
+
+      // Should not throw
+      await expect(
+        validateFinalReviewRange(dir, plan, 'base1', 'head1'),
+      ).resolves.toBeUndefined();
+    });
+  });
+});
+
+// ─── Wave 3: Constants ─────────────────────────────────────────────────────────
+
+describe('Wave 3: New Constants', () => {
+  it('should export MAX_ISSUE_REPAIR_FAILURES as 3', () => {
+    expect(MAX_ISSUE_REPAIR_FAILURES).toBe(3);
+  });
+
+  it('should export ISSUE_ID_PATTERN matching valid identifiers', () => {
+    expect(ISSUE_ID_PATTERN.test('BUG-123')).toBe(true);
+    expect(ISSUE_ID_PATTERN.test('issue_456')).toBe(true);
+    expect(ISSUE_ID_PATTERN.test('CVE:2024-1234')).toBe(true);
+    expect(ISSUE_ID_PATTERN.test('')).toBe(false);
+    expect(ISSUE_ID_PATTERN.test('has spaces')).toBe(false);
+    expect(ISSUE_ID_PATTERN.test('a'.repeat(129))).toBe(false);
+  });
+
+  it('should export FULL_COMMIT_SHA matching 40-char hex', () => {
+    expect(FULL_COMMIT_SHA.test('a'.repeat(40))).toBe(true);
+    expect(FULL_COMMIT_SHA.test('0123456789abcdef0123456789abcdef01234567')).toBe(true);
+    expect(FULL_COMMIT_SHA.test('short')).toBe(false);
+    expect(FULL_COMMIT_SHA.test('a'.repeat(41))).toBe(false);
   });
 });

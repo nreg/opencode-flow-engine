@@ -15,6 +15,11 @@ import type {
   ReviewReceipt,
   DP4Result,
   ExecutionPlan,
+  ReviewPolicy,
+  SchemaVersion,
+  Adjudication,
+  AdjudicationLedger,
+  ReviewEvidence,
 } from './execution-plan-types.js';
 
 // ─── Type Alias Tests ────────────────────────────────────────────────────────
@@ -244,5 +249,215 @@ describe('ExecutionPlan interface', () => {
     expect(plan.waves[1].depends_on).toEqual(['W1']);
     expect(plan.waves[2].depends_on).toEqual(['W1', 'W2']);
     expect(plan.revision).toBe(2);
+  });
+});
+
+// ─── Wave 3: New Type Tests ────────────────────────────────────────────────────
+
+describe('ReviewPolicy type alias', () => {
+  it('should accept valid review policies', () => {
+    const wave: ReviewPolicy = 'wave';
+    const final: ReviewPolicy = 'final';
+
+    expect(wave).toBe('wave');
+    expect(final).toBe('final');
+  });
+});
+
+describe('SchemaVersion type alias', () => {
+  it('should accept valid schema versions', () => {
+    const v1: SchemaVersion = 1;
+    const v2: SchemaVersion = 2;
+
+    expect(v1).toBe(1);
+    expect(v2).toBe(2);
+  });
+});
+
+describe('ExecutionPlan with Wave 3 fields', () => {
+  it('should support review_policy field', () => {
+    const plan: ExecutionPlan = {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Final review policy',
+      waves: [],
+      hash: 'sha256:abc',
+      artifacts_hash: 'a',
+      contract_hash: 'c',
+      revision: 1,
+      review_policy: 'final',
+    };
+
+    expect(plan.review_policy).toBe('final');
+  });
+
+  it('should support schema_version field', () => {
+    const plan: ExecutionPlan = {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Schema v2',
+      waves: [],
+      hash: 'sha256:abc',
+      artifacts_hash: 'a',
+      contract_hash: 'c',
+      revision: 1,
+      schema_version: 2,
+    };
+
+    expect(plan.schema_version).toBe(2);
+  });
+
+  it('should support review_base and target_branch fields', () => {
+    const plan: ExecutionPlan = {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'With review base',
+      waves: [],
+      hash: 'sha256:abc',
+      artifacts_hash: 'a',
+      contract_hash: 'c',
+      revision: 1,
+      review_base: 'abc123def456abc123def456abc123def456abc1',
+      target_branch: 'feature/wave3',
+    };
+
+    expect(plan.review_base).toBe('abc123def456abc123def456abc123def456abc1');
+    expect(plan.target_branch).toBe('feature/wave3');
+  });
+
+  it('should support all Wave 3 fields together', () => {
+    const plan: ExecutionPlan = {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Full Wave 3 plan',
+      waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      hash: 'sha256:abc',
+      artifacts_hash: 'a',
+      contract_hash: 'c',
+      revision: 1,
+      review_policy: 'final',
+      schema_version: 2,
+      review_base: 'abc123def456abc123def456abc123def456abc1',
+      target_branch: 'main',
+    };
+
+    expect(plan.review_policy).toBe('final');
+    expect(plan.schema_version).toBe(2);
+    expect(plan.review_base).toBeTruthy();
+    expect(plan.target_branch).toBe('main');
+  });
+});
+
+describe('ReviewReceipt with issue field', () => {
+  it('should support issue field on fail receipt', () => {
+    const receipt: ReviewReceipt = {
+      status: 'fail',
+      base: 'abc123',
+      head: 'def456',
+      report: 'Test failure',
+      recorded_at: '2026-07-15T10:00:00Z',
+      issue: 'BUG-123',
+    };
+
+    expect(receipt.issue).toBe('BUG-123');
+  });
+
+  it('should work without issue field (legacy)', () => {
+    const receipt: ReviewReceipt = {
+      status: 'fail',
+      base: 'abc123',
+      head: 'def456',
+      report: 'Legacy failure',
+      recorded_at: '2026-07-15T10:00:00Z',
+    };
+
+    expect(receipt.issue).toBeUndefined();
+  });
+});
+
+describe('ReviewEvidence with issue field', () => {
+  it('should support issue field', () => {
+    const evidence: ReviewEvidence = {
+      base: 'abc123',
+      head: 'def456',
+      report: 'Failure report',
+      recorded_at: '2026-07-15T10:00:00Z',
+      issue: 'CVE-2024-1234',
+    };
+
+    expect(evidence.issue).toBe('CVE-2024-1234');
+  });
+});
+
+describe('Adjudication interface', () => {
+  it('should have all required fields', () => {
+    const adjudication: Adjudication = {
+      id: 'uuid-1234',
+      status: 'authorized',
+      decision: 'allow-review',
+      confirmed: true,
+      reason: 'Human reviewed the failure chain',
+      failure_count: 5,
+      previous_head: 'abc123',
+      previous_report: 'report.md',
+      failed_receipt: {
+        base: 'abc123',
+        head: 'def456',
+        report: 'report.md',
+        recorded_at: '2026-07-15T10:00:00Z',
+      },
+      authorized_at: '2026-07-15T11:00:00Z',
+    };
+
+    expect(adjudication.id).toBe('uuid-1234');
+    expect(adjudication.status).toBe('authorized');
+    expect(adjudication.decision).toBe('allow-review');
+    expect(adjudication.confirmed).toBe(true);
+  });
+
+  it('should support consumed status', () => {
+    const adjudication: Adjudication = {
+      id: 'uuid-5678',
+      status: 'consumed',
+      decision: 'allow-review',
+      confirmed: true,
+      reason: 'Used authorization',
+      failure_count: 3,
+      previous_head: 'abc123',
+      previous_report: 'report.md',
+      failed_receipt: {
+        base: 'abc123',
+        head: 'def456',
+        report: 'report.md',
+        recorded_at: '2026-07-15T10:00:00Z',
+      },
+      authorized_at: '2026-07-15T11:00:00Z',
+      consumed_at: '2026-07-15T12:00:00Z',
+      review: {
+        base: 'def456',
+        head: 'ghi789',
+        report: 'new-report.md',
+        recorded_at: '2026-07-15T12:00:00Z',
+      },
+    };
+
+    expect(adjudication.status).toBe('consumed');
+    expect(adjudication.consumed_at).toBeTruthy();
+    expect(adjudication.review).toBeDefined();
+  });
+});
+
+describe('AdjudicationLedger interface', () => {
+  it('should have all required fields', () => {
+    const ledger: AdjudicationLedger = {
+      plan_hash: 'sha256:abc',
+      plan_revision: 1,
+      wave_id: 'W1',
+      adjudications: [],
+    };
+
+    expect(ledger.plan_hash).toBe('sha256:abc');
+    expect(ledger.wave_id).toBe('W1');
+    expect(ledger.adjudications).toHaveLength(0);
   });
 });

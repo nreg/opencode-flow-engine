@@ -37,6 +37,20 @@ export {
   updateRepairState,
   // P0-1: 审查区间完整性（Wave 3 终评区间复用）
   assertNonEmptyDiff,
+  // P0-2: Issue-identity circuit breaker
+  issueFailureCount,
+  validateIssueId,
+  adjudicateWave,
+  readActiveAdjudicationAsync,
+  // P0-3: Plan revision recovery
+  resolveRecommendationPlanRevision,
+  // P1-1: Review targets
+  reviewTargets,
+  // P1-5: Review base
+  normalizeCommitSha,
+  recordReviewBase,
+  validateFinalReviewRange,
+  isGitEnvironment,
 } from './review-receipts.js';
 
 // Export all from task-parser.ts（D7: 复选框行单一解析入口）

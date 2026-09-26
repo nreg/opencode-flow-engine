@@ -86,6 +86,26 @@ export const RECEIPT_STATUS = {
  */
 export const MAX_REPAIR_FAILURES = 5;
 
+/**
+ * P0-2: Maximum number of same-issue consecutive repair failures before adjudication.
+ * For schema_version 2 plans with issue-identity circuit breaker.
+ * Default: 3 (stricter than legacy threshold of 5)
+ */
+export const MAX_ISSUE_REPAIR_FAILURES = 3;
+
+/**
+ * P0-2: Valid issue ID pattern for failed review receipts.
+ * Schema_version 2 requires fail receipts to have a stable --issue identifier.
+ * Pattern: 1-128 chars of alphanumeric, underscore, dot, colon, or hyphen.
+ */
+export const ISSUE_ID_PATTERN = /^[a-zA-Z0-9_.:-]{1,128}$/;
+
+/**
+ * P1-5: Full 40-character commit SHA pattern.
+ * Used for review_base normalization.
+ */
+export const FULL_COMMIT_SHA = /^[0-9a-f]{40}$/i;
+
 // ─── Artifact Preflight Gate: State → Required Artifacts ───────────────────
 
 /**

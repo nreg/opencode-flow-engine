@@ -89,6 +89,8 @@ export interface PlanScopedPaths {
   handoffs: string;
   /** Repair state 目录：.flow-engine/sflow/plans/<identity>/repair-state/ */
   repairState: string;
+  /** P0-2: Adjudications 目录：.flow-engine/sflow/plans/<identity>/adjudications/ */
+  adjudications: string;
 }
 
 /**
@@ -112,6 +114,7 @@ export function getPlanScopedPaths(changeDir: string, plan: ExecutionPlan): Plan
     checkpoints: join(planRoot, 'checkpoints'),
     handoffs: join(planRoot, 'handoffs'),
     repairState: join(planRoot, 'repair-state'),
+    adjudications: join(planRoot, 'adjudications'),
   };
 }
 

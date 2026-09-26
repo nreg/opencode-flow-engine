@@ -24,6 +24,12 @@ export type WaveStrategy = 'parallel' | 'serial';
 /** Source of the execution plan decision */
 export type PlanSource = 'user-override' | 'default';
 
+/** Review policy: 'wave' = per-wave review (default), 'final' = single final review */
+export type ReviewPolicy = 'wave' | 'final';
+
+/** Schema version for the execution plan (1 = legacy, 2 = issue-identity + review_policy) */
+export type SchemaVersion = 1 | 2;
+
 /**
  * A wave of tasks within an execution plan.
  * Waves are scheduled according to their dependency graph.
@@ -63,6 +69,8 @@ export interface ReviewReceipt {
   plan_revision?: number;
   /** Optional repair state (T2.5-T2.7: circuit breaker) */
   repair_state?: RepairState;
+  /** P0-2: Issue identifier for failed reviews (schema_version 2: required for fail receipts) */
+  issue?: string;
 }
 
 /**
@@ -78,6 +86,8 @@ export interface ReviewEvidence {
   report: string;
   /** ISO 8601 timestamp of when the review was recorded */
   recorded_at: string;
+  /** P0-2: Issue identifier for this failure (same issue = same failure chain) */
+  issue?: string;
 }
 
 /**
@@ -108,6 +118,53 @@ export interface RepairState {
   updated_at: string;
   /** Resolution evidence (when status is 'resolved') */
   resolution?: ReviewEvidence;
+}
+
+/**
+ * P0-2: Adjudication authorization for a wave.
+ * Stored in .flow-engine/sflow/plans/<identity>/adjudications/<wave-id>.json
+ * One authorization allows exactly one subsequent review.
+ */
+export interface Adjudication {
+  /** Unique authorization ID */
+  id: string;
+  /** Authorization status: 'authorized' | 'consumed' */
+  status: 'authorized' | 'consumed';
+  /** Decision type (always 'allow-review') */
+  decision: 'allow-review';
+  /** Whether the human confirmed review of the failure chain */
+  confirmed: boolean;
+  /** Human-provided reason for the authorization */
+  reason: string;
+  /** Failure count at the time of adjudication */
+  failure_count: number;
+  /** Previous head commit at the time of adjudication */
+  previous_head: string;
+  /** Previous report path at the time of adjudication */
+  previous_report: string;
+  /** Evidence of the failed receipt that triggered adjudication */
+  failed_receipt: ReviewEvidence;
+  /** ISO 8601 timestamp of when the authorization was granted */
+  authorized_at: string;
+  /** ISO 8601 timestamp of when the authorization was consumed (if consumed) */
+  consumed_at?: string;
+  /** The review receipt that consumed this authorization (if consumed) */
+  review?: ReviewEvidence;
+}
+
+/**
+ * P0-2: Adjudication ledger for a wave.
+ * Stores all adjudication authorizations for a wave.
+ */
+export interface AdjudicationLedger {
+  /** Plan hash that this ledger belongs to */
+  plan_hash: string;
+  /** Plan revision number */
+  plan_revision: number;
+  /** Wave ID that this ledger tracks */
+  wave_id: string;
+  /** Array of adjudication authorizations */
+  adjudications: Adjudication[];
 }
 
 /**
@@ -146,4 +203,12 @@ export interface ExecutionPlan {
   contract_hash: string;
   /** Plan revision number (increments on each revise) */
   revision: number;
+  /** P1-1: Review policy — 'wave' (default) per-wave review, 'final' single final review */
+  review_policy?: ReviewPolicy;
+  /** P1-1: Schema version — 1 (legacy) or 2 (issue-identity + review_policy) */
+  schema_version?: SchemaVersion;
+  /** P1-5: Review base commit SHA (WRITE_ONCE: set when entering executing, normalized to 40-char) */
+  review_base?: string;
+  /** P1-5: Target branch name at plan creation time */
+  target_branch?: string;
 }
