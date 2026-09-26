@@ -12,6 +12,7 @@ import { mkdir, rm, writeFile } from 'fs/promises';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
 import { checkReceiptIntegrity, checkWaveDependencies, checkClosingGate } from '../checks/wave-guards.js';
+import { reviewTargets } from '../../../features/execution-plan/review-receipts.js';
 
 function tempDir(name: string): string {
   return join(import.meta.dir, '..', '__test_workdir__', `wave-guards-${name}`);
@@ -147,15 +148,15 @@ describe('P1 fix: checkReceiptIntegrity 按 reviewTargets 判定', () => {
     expect(result.success).toBe(true);
   });
 
-  it('wave 策略：空 waves 计划仍通过（P3 删除冗余空检查后行为不变）', async () => {
+  it('wave 策略：空 waves 计划按 missing receipt 安全语义阻断（P1-1 fail-open 修复）', async () => {
     await writePlan(dir, {
       ...basePlan(),
       waves: [],
     });
 
     const result = await checkReceiptIntegrity(dir, 'sflow');
-    expect(result.success).toBe(true);
-    expect(result.block).toBeUndefined();
+    expect(result.success).toBe(false);
+    expect(result.block).toBe(true);
   });
 });
 
@@ -266,5 +267,58 @@ describe('P1 fix: checkClosingGate 按 reviewTargets 判定', () => {
     expect(result.success).toBe(false);
     expect(result.block).toBe(true);
     expect(result.blockReason).toContain('"W1"');
+  });
+});
+
+// ─── P1-1（fail-open 修复）：畸形 plan 防御 ─────────────────────────────────────
+
+describe('P1-1 fail-open 修复：畸形 plan（缺 waves）防御', () => {
+  const dir = tempDir('receipt-integrity-malformed');
+  let baseSha = '';
+  let headSha = '';
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    initGitRepo(dir);
+    baseSha = await commitFile(dir, 'a.txt', 'a\n');
+    headSha = await commitFile(dir, 'b.txt', 'b\n');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('reviewTargets 对缺 waves 的 plan 返回空数组（不抛错）', () => {
+    const malformed = { ...basePlan(), waves: undefined } as unknown as Parameters<typeof reviewTargets>[0];
+    expect(() => reviewTargets(malformed)).not.toThrow();
+    expect(reviewTargets(malformed)).toEqual([]);
+  });
+
+  it('reviewTargets 对 waves 非数组的 plan 返回空数组', () => {
+    const malformed = { ...basePlan(), waves: 'not-an-array' } as unknown as Parameters<typeof reviewTargets>[0];
+    expect(reviewTargets(malformed)).toEqual([]);
+  });
+
+  it('checkReceiptIntegrity 对缺 waves 的 plan 返回 block:true（不静默通过）', async () => {
+    await writePlan(dir, { ...basePlan(), waves: undefined });
+    const result = await checkReceiptIntegrity(dir, 'sflow');
+    expect(result.success).toBe(false);
+    expect(result.block).toBe(true);
+    expect(result.blockReason).toContain('missing receipt');
+  });
+
+  it('checkClosingGate 对缺 waves 的 plan 返回 block:true（不静默通过）', async () => {
+    await writePlan(dir, { ...basePlan(), waves: undefined });
+    const result = await checkClosingGate(dir, 'sflow');
+    expect(result.success).toBe(false);
+    expect(result.block).toBe(true);
+  });
+
+  it('checkWaveDependencies 对缺 waves 的 plan 返回 block:true（不抛 TypeError）', async () => {
+    await writePlan(dir, { ...basePlan(), waves: undefined });
+    const result = await checkWaveDependencies(dir, 'sflow');
+    expect(result.success).toBe(false);
+    expect(result.block).toBe(true);
   });
 });

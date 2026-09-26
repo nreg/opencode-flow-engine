@@ -12,7 +12,7 @@
  * P1-1: reviewTargets, review_policy support
  */
 import type { ExecutionPlan, ReviewReceipt, RepairState, ReviewEvidence, Adjudication, AdjudicationLedger, ReviewPolicy, Wave } from '../execution-plan-types.js';
-import { ensureDir, readJsonFile, writeJsonFile, atomicWriteJsonFile, fileExists } from '@opencode-flow-engine/shared';
+import { ensureDir, readJsonFile, writeJsonFile, atomicWriteJsonFile, fileExists, stateFileMutex } from '@opencode-flow-engine/shared';
 import { MAX_REPAIR_FAILURES, MAX_ISSUE_REPAIR_FAILURES, ISSUE_ID_PATTERN, FULL_COMMIT_SHA } from '@opencode-flow-engine/core';
 import {
   getOverlayPaths,
@@ -849,15 +849,21 @@ async function consumeAdjudication(
  * @returns Array of review target waves
  */
 export function reviewTargets(plan: ExecutionPlan): Wave[] {
+  // P1-1 fail-open 防御：plan.waves 缺失/非数组时返回空数组，
+  // 由调用方（wave-guards）按"missing receipt"安全语义阻断，而非抛 TypeError
+  // 穿透为 guard 链 fail-open
+  const waves = (plan as { waves?: unknown }).waves;
+  if (!Array.isArray(waves)) return [];
+
   if (plan.review_policy === 'final') {
     return [{
       id: 'final',
       strategy: 'serial',
-      tasks: plan.waves.flatMap(w => w.tasks),
+      tasks: waves.flatMap(w => w?.tasks ?? []),
       depends_on: [],
     }];
   }
-  return plan.waves;
+  return waves;
 }
 
 // ─── P0-3: Resolve Recommendation Plan Revision ────────────────────────────────
@@ -1032,7 +1038,62 @@ export async function recordReviewBase(changeDir: string, sha?: string): Promise
   const planPath = changeDir + '/.flow-engine/sflow/execution-plan.json';
   await writeJsonFile(planPath, updatedPlan);
 
+  // P2-2：改写 plan.hash 后同步 state.execution_plan_hash（派生键失准防御）
+  await syncExecutionPlanHashToState(changeDir, updatedPlan);
+
   return normalizedSha;
+}
+
+/**
+ * P2-2：将 plan.hash 同步到 state.execution_plan_hash。
+ * plan-scoped 目录 identity 以 hash 为键，改写 plan.hash 后必须同步 state 摘要，
+ * 否则派生键失准（plan-scoped 目录无法定位）。
+ */
+export async function syncExecutionPlanHashToState(changeDir: string, plan: ExecutionPlan): Promise<void> {
+  const statePath = changeDir + '/.flow-engine/sflow/state.json';
+  await stateFileMutex.runExclusive(async () => {
+    const state = await readJsonFile<Record<string, unknown>>(statePath);
+    if (state) {
+      state.execution_plan_hash = plan.hash;
+      state.updatedAt = new Date().toISOString();
+      await writeJsonFile(statePath, state);
+    }
+  });
+}
+
+/**
+ * P2-3：executing 阶段创建计划时补写 review_base 锚点。
+ *
+ * record_execution_plan 允许在 executing 阶段创建计划，此时不会再发生
+ * approved-for-build → executing 转换，checkReviewBaseRecording 不会触发，
+ * review_base 锚点将永不写入 → final 区间校验被静默禁用。
+ * 此函数复用 recordReviewBase 的 WRITE_ONCE + SHA 规范化逻辑，
+ * 在 git 环境取 HEAD 作为锚点；非 git 环境降级为 no-op。
+ *
+ * @param changeDir - Project root directory
+ * @returns The recorded review_base SHA, or null if not applicable
+ */
+export async function recordReviewBaseFromHead(changeDir: string): Promise<string | null> {
+  // WRITE_ONCE 由 recordReviewBase 保证：已有 review_base 时为 no-op
+  const plan = await readExecutionPlan(changeDir);
+  if (!plan || plan.review_base) return plan?.review_base ?? null;
+
+  let headSha: string | undefined;
+  try {
+    const { execGitAsync } = await import('../../helpers/git-async.js');
+    headSha = (await execGitAsync(['rev-parse', 'HEAD'], changeDir))?.trim();
+  } catch {
+    // Non-git environment: degrade to no-op
+    return null;
+  }
+  if (!headSha || !FULL_COMMIT_SHA.test(headSha)) return null;
+
+  try {
+    return await recordReviewBase(changeDir, headSha);
+  } catch (error) {
+    Logger.warn(`[P2-3] Failed to record review_base at plan creation: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
 }
 
 /**

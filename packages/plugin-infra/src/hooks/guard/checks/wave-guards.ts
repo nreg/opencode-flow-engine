@@ -83,8 +83,18 @@ export async function checkWaveDependencies(changeDir: string, activeWorkflow: '
   if (!plan) return { success: true };
 
   // P1 fix: iterate reviewTargets (supports review_policy='final' — single 'final' range)
-  // P3: reviewTargets 已保证返回非空数组（final 恒为单元素；空 waves 遍历即为 success），删除冗余空检查
+  // P1-1 fail-open 防御：reviewTargets 对畸形 plan 返回空数组，此处按安全语义阻断而非静默通过
   const waves = reviewTargets(plan);
+  if (!waves || waves.length === 0) {
+    return {
+      success: false,
+      block: true,
+      blockReason: appendGuardFixHint(
+        `[SFLOW] Wave dependency check: execution plan has no waves (missing or empty). Every execution plan must define at least one wave.`,
+        '检查 execution-plan.json 的 waves 字段是否存在且为非空数组',
+      ),
+    };
+  }
 
   // Check for empty waves
   for (const wave of waves) {
@@ -151,8 +161,18 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
   if (!plan) return { success: true };
 
   // P1 fix: iterate reviewTargets (supports review_policy='final' — single 'final' range)
-  // P3: reviewTargets 已保证返回非空数组，删除冗余空检查
+  // P1-1 fail-open 防御：空 waves 按 missing receipt 安全语义阻断
   const waves = reviewTargets(plan);
+  if (!waves || waves.length === 0) {
+    return {
+      success: false,
+      block: true,
+      blockReason: appendGuardFixHint(
+        `[SFLOW] Receipt integrity check: execution plan has no waves — missing receipt for all waves.`,
+        '检查 execution-plan.json 的 waves 字段是否存在且为非空数组',
+      ),
+    };
+  }
 
   const REQUIRED_RECEIPT_FIELDS = ['status', 'base', 'head', 'report'] as const;
 
@@ -319,8 +339,15 @@ export async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow
   if (!plan) return { success: true };
 
   // P1 fix: iterate reviewTargets (supports review_policy='final' — single 'final' range)
-  // P3: reviewTargets 已保证返回非空数组，删除冗余空检查
+  // P1-1 fail-open 防御：空 waves 按 missing receipt 安全语义阻断
   const waves = reviewTargets(plan);
+  if (!waves || waves.length === 0) {
+    return {
+      success: false,
+      block: true,
+      blockReason: `[SFLOW] Closing gate: execution plan has no waves — missing receipt for all waves. All waves must have review receipts before closing.`,
+    };
+  }
 
   for (const wave of waves) {
     const receiptPath = `${changeDir}/.flow-engine/sflow/reviews/${wave.id}.json`;

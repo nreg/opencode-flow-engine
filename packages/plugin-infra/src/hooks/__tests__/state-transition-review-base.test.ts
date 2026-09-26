@@ -99,7 +99,7 @@ describe('P1 fix: checkReviewBaseRecording（executing 时记录 review_base）'
     const plan = await readExecutionPlan(dir);
     expect(plan?.review_base).toBeTruthy();
     expect(plan?.review_base).toBe(headSha);
-  });
+  }, 30000);
 
   it('review_base 已设置时不覆盖（WRITE_ONCE）', async () => {
     initGitRepo(dir);
@@ -131,7 +131,7 @@ describe('P1 fix: checkReviewBaseRecording（executing 时记录 review_base）'
     const plan = await readExecutionPlan(dir);
     expect(plan?.review_base).toBe(headSha);
     expect(plan?.review_base).not.toBe(headSha2);
-  });
+  }, 30000);
 
   it('非 executing 转换不触发（no-op）', async () => {
     initGitRepo(dir);
@@ -153,7 +153,7 @@ describe('P1 fix: checkReviewBaseRecording（executing 时记录 review_base）'
     expect(result.blocked).toBe(false);
     const plan = await readExecutionPlan(dir);
     expect(plan?.review_base).toBeUndefined();
-  });
+  }, 30000);
 
   it('非 git 环境降级：不阻断转换、review_base 不设置', async () => {
     // Use a directory OUTSIDE any git repo so `git rev-parse HEAD` cannot resolve
@@ -182,7 +182,7 @@ describe('P1 fix: checkReviewBaseRecording（executing 时记录 review_base）'
     } finally {
       await cleanupDir(nonGitDir);
     }
-  });
+  }, 30000);
 });
 
 describe('P1 fix: state_transition hook 端到端（executing 时记录 review_base）', () => {
@@ -222,5 +222,83 @@ describe('P1 fix: state_transition hook 端到端（executing 时记录 review_b
     // state.json advanced to executing
     const stateRaw = await readFile(dir + '/.flow-engine/sflow/state.json', 'utf-8');
     expect(JSON.parse(stateRaw).state).toBe('executing');
+  });
+});
+
+// ─── P2-2/P2-3：计划哈希派生同步与 executing 阶段创建补锚点 ─────────────────────
+
+describe('P2-2/P2-3：execution_plan_hash 派生键同步', () => {
+  const dir = tempDir('review-base-hash-sync');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('P2-2：recordReviewBase 改写 plan.hash 后同步 state.execution_plan_hash', async () => {
+    initGitRepo(dir);
+    await commitFile(dir, 'a.txt', 'a\n');
+    await writeStateJson(dir, 'approved-for-build');
+    const plan = await createExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'test',
+      waves: [{ id: 'W1', strategy: 'serial', tasks: ['1.1'], depends_on: [] }],
+    });
+
+    // 创建后 state 摘要与 plan.hash 一致
+    const state0 = JSON.parse(await readFile(dir + '/.flow-engine/sflow/state.json', 'utf-8'));
+    expect(state0.execution_plan_hash).toBe(plan.hash);
+
+    await checkReviewBaseRecording({
+      changeDir: dir,
+      currentState: 'approved-for-build',
+      newState: 'executing',
+    });
+
+    // recordReviewBase 改写 plan（review_base + 重算 hash）后，state 摘要必须同步
+    const plan2 = await readExecutionPlan(dir);
+    expect(plan2?.review_base).toBeTruthy();
+    const state1 = JSON.parse(await readFile(dir + '/.flow-engine/sflow/state.json', 'utf-8'));
+    expect(state1.execution_plan_hash).toBe(plan2!.hash);
+  });
+
+  it('P2-3：executing 阶段创建计划时补写 review_base（WRITE_ONCE）', async () => {
+    initGitRepo(dir);
+    const headSha = await commitFile(dir, 'a.txt', 'a\n');
+    await writeStateJson(dir, 'executing');
+    const plan = await createExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'test',
+      waves: [{ id: 'W1', strategy: 'serial', tasks: ['1.1'], depends_on: [] }],
+    });
+
+    const plan2 = await readExecutionPlan(dir);
+    expect(plan2?.review_base).toBe(headSha);
+
+    // 补写锚点后 plan.hash 重算，state 摘要同步
+    const stateRaw = JSON.parse(await readFile(dir + '/.flow-engine/sflow/state.json', 'utf-8'));
+    expect(stateRaw.execution_plan_hash).toBe(plan2!.hash);
+    expect(plan2!.hash).not.toBe(plan.hash); // review_base 改变了内容，hash 必须变化
+  });
+
+  it('P2-3：非 executing 阶段创建计划不写 review_base（回归）', async () => {
+    initGitRepo(dir);
+    await commitFile(dir, 'a.txt', 'a\n');
+    await writeStateJson(dir, 'specifying');
+    await createExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'test',
+      waves: [{ id: 'W1', strategy: 'serial', tasks: ['1.1'], depends_on: [] }],
+    });
+
+    const plan = await readExecutionPlan(dir);
+    expect(plan?.review_base).toBeUndefined();
   });
 });

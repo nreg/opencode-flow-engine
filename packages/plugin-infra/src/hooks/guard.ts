@@ -207,9 +207,13 @@ export function createGuardHook(): HookHandler {
           warnings: allWarnings.length > 0 ? allWarnings : undefined,
         };
       } catch (error) {
+        // P1-1 fail-closed：guard 链内部异常一律阻断（block:true），
+        // 避免 combined-plugin-factory 只判 block 时异常穿透为 fail-open
         return {
           success: false,
           error: error instanceof Error ? error.message : String(error),
+          block: true,
+          blockReason: `[SFLOW] Guard chain threw an exception — blocking to fail closed: ${error instanceof Error ? error.message : String(error)}`,
         };
       }
     },

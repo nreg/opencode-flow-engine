@@ -232,6 +232,19 @@ export async function createExecutionPlan(
     Logger.warn(`[T2.10] Failed to migrate legacy receipts: ${error instanceof Error ? error.message : String(error)}`);
   }
 
+  // P2-3：executing 阶段创建计划时补写 review_base 锚点（WRITE_ONCE）。
+  // 此时不会再发生 approved-for-build → executing 转换，若不在此补写，
+  // review_base 锚点将永不写入 → final 区间校验被静默禁用。
+  if ((state.state as string | undefined) === 'executing') {
+    try {
+      const { recordReviewBaseFromHead } = await import('./review-receipts.js');
+      await recordReviewBaseFromHead(changeDir);
+    } catch (error) {
+      // 补写失败不应阻止 plan 创建，记录警告即可
+      Logger.warn(`[P2-3] Failed to record review_base at plan creation: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   return plan;
 }
 
