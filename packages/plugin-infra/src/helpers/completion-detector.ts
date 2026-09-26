@@ -193,7 +193,18 @@ export function parseQuotaResetTime(output: string): number | null {
   if (!output) return null;
   const datePattern =
     /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|UTC([+-]\d{1,2}(?::?\d{2})?)?|GMT([+-]\d{1,2}(?::?\d{2})?)?|([+-]\d{2}:?\d{2}))?/i;
-  const parseMatch = (match: RegExpMatchArray): number => {
+  // NP-1: 偏移量按「小时 + 分钟/60」解析为有限数值（Number 语义），
+  // 杜绝 Number("+08:00") → NaN、Number("+0800") → 800 的静默错值。
+  const parseOffset = (raw: string): number => {
+    const m = raw.match(/^([+-])(\d{1,2})(?::?(\d{2}))?$/);
+    if (!m) return 0;
+    const sign = m[1] === '-' ? -1 : 1;
+    const hours = Number(m[2]);
+    const minutes = m[3] ? Number(m[3]) : 0;
+    const offset = sign * (hours + minutes / 60);
+    return Number.isFinite(offset) ? offset : 0;
+  };
+  const parseMatch = (match: RegExpMatchArray): number | null => {
     const [, y, mo, d, h, mi, s, zulu, utcOffsetH, gmtOffsetH, isoOffset] = match;
     const year = Number(y);
     const month = Number(mo) - 1;
@@ -207,22 +218,20 @@ export function parseQuotaResetTime(output: string): number | null {
     // R3-P1: 裸 UTC / GMT（无偏移后缀）按 UTC+0 解释，不落本地时区
     // （如「将在 2026-09-27 12:21:07 UTC 重置」——此前误按本地时区解释，TZ≠UTC 时解析出错）
     if (utcOffsetH !== undefined) {
-      const offsetHours = Number(utcOffsetH);
-      return Date.UTC(year, month, day, hour - offsetHours, minute, second);
+      const offset = parseOffset(utcOffsetH);
+      // NP-1: 偏移以毫秒施加（Bun 的 Date.UTC 会截断小时参数的小数部分，丢分钟偏移）
+      return Date.UTC(year, month, day, hour, minute, second) - Math.round(offset * 3_600_000);
     }
     if (gmtOffsetH !== undefined) {
-      const offsetHours = Number(gmtOffsetH);
-      return Date.UTC(year, month, day, hour - offsetHours, minute, second);
+      const offset = parseOffset(gmtOffsetH);
+      return Date.UTC(year, month, day, hour, minute, second) - Math.round(offset * 3_600_000);
     }
     if (/^(UTC|GMT)$/i.test(zulu ?? '')) {
       return Date.UTC(year, month, day, hour, minute, second);
     }
     if (isoOffset !== undefined) {
-      const sign = isoOffset.startsWith('-') ? -1 : 1;
-      const parts = isoOffset.slice(1).replace(':', '');
-      const offsetHours = Number(parts.slice(0, 2));
-      const offsetMinutes = parts.length > 2 ? Number(parts.slice(2)) : 0;
-      return Date.UTC(year, month, day, hour - sign * offsetHours, minute - sign * offsetMinutes, second);
+      const offset = parseOffset(isoOffset);
+      return Date.UTC(year, month, day, hour, minute, second) - Math.round(offset * 3_600_000);
     }
     // No timezone: assume local time
     return new Date(year, month, day, hour, minute, second).getTime();
@@ -236,14 +245,17 @@ export function parseQuotaResetTime(output: string): number | null {
     const match = segment.match(datePattern);
     if (match) {
       if (isResetSegment || segments.length === 1) {
-        return parseMatch(match);
+        const parsed = parseMatch(match);
+        // NP-1: 非有限值不得进入 resetAt（NaN 会令 Math.max/比较失效，导致模型永久拉黑）
+        return parsed !== null && Number.isFinite(parsed) ? parsed : null;
       }
       // 非重置段的时间戳仅在无重置段匹配时作为兜底
     }
   }
   // 兜底：全文首个时间戳
   const fallbackMatch = output.match(datePattern);
-  return fallbackMatch ? parseMatch(fallbackMatch) : null;
+  const fallback = fallbackMatch ? parseMatch(fallbackMatch) : null;
+  return fallback !== null && Number.isFinite(fallback) ? fallback : null;
 }
 
 /** Quota error classification result (P0-2) */

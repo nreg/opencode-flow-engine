@@ -14,7 +14,7 @@
 import { beforeEach, describe, expect, it, mock, afterEach, afterAll } from 'bun:test';
 import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
 import { createCallFlowAgentTools, resetRunningSubagentCounts, runWithModelFallback, createBackgroundTaskWatcher } from '../call-flow-agent.js';
-import { clearUnavailableModels, markModelUnavailable, isModelAvailable, getAlternativeModel, resolveModelWithFallback, TRANSIENT_COOLDOWN_TTL_MS } from '../../agents/agent-builder.js';
+import { clearUnavailableModels, markModelUnavailable, isModelAvailable, getAlternativeModel, resolveModelWithFallback, TRANSIENT_COOLDOWN_TTL_MS, MIN_QUOTA_COOLDOWN_TTL_MS } from '../../agents/agent-builder.js';
 import { classifyQuotaError, parseQuotaResetTime, matchesModelErrorPatterns, matchesQuotaErrorPattern } from '../../helpers/completion-detector.js';
 
 /** 临时把 Date.now 前进 offsetMs，返回恢复函数 */
@@ -610,8 +610,11 @@ describe('R3-P2-3: pollAndComplete 第三路径错误/配额识别', () => {
   });
 
   it('配额报错（裸 UTC）不判 completed：长冷却拉黑 + 换模', async () => {
+    // NP-2: 使用相对时间构造裸 UTC 报文（避免硬编码未来日期成为测试时间炸弹）。
+    // toISOString 输出 UTC 时间，解析端按 UTC+0 解释（TZ 无关）。
+    const resetInstant = Date.now() + 60 * 60 * 1000;
     const client = createMockClient({
-      pollOutputs: ['您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC 重置', '[TASK_COMPLETE]\nok'],
+      pollOutputs: ['您的使用量已超出频率限制，将在 ' + new Date(resetInstant).toISOString().slice(0, 19).replace('T', ' ') + ' UTC 重置', '[TASK_COMPLETE]\nok'],
     });
     const { tools } = createTools(client);
 
@@ -806,7 +809,12 @@ describe('NEW-P0-B: async watcher 路径配额错误识别与换模', () => {
   }
 
   it('probe 返回配额错误文本：不判 completed、拉黑至重置时间、换 fallback 模型重派', async () => {
-    const { client, promptCalls } = createWatcherClient({ probeOutputs: ['您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC+8 重置'] });
+    // NP-2: 使用相对时间构造配额报文（与 :214-217 早先用例一致，避免硬编码未来日期成为时间炸弹）
+    const resetInstant = Date.now() + 60 * 60 * 1000;
+    const quotaText = '您的使用量已超出频率限制，将在 ' +
+      new Date(resetInstant + 8 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ') +
+      ' UTC+8 重置';
+    const { client, promptCalls } = createWatcherClient({ probeOutputs: [quotaText] });
     const registry: BackgroundTaskRegistry = new Map();
     registry.set('watch-task-1', {
       sessionID: 'watch-session',
@@ -870,5 +878,89 @@ describe('NEW-P0-B: async watcher 路径配额错误识别与换模', () => {
     const task = registry.get('watch-task-2')!;
     expect(task.status).not.toBe('completed');
     expect(task.resolvedModel).toBe('provider/user-chain-fallback');
+  });
+});
+
+// ═══ 第 4 轮修复（REVIEW-20260926-220449）═══
+
+describe('NP-1: 时区偏移解析回归与 NaN 防御', () => {
+  describe('parseQuotaResetTime 偏移格式解析正确性', () => {
+    it('UTC+08:00（含冒号分钟偏移）解析为正确 UTC 时刻，不得为 NaN', () => {
+      // 2026-09-27 12:21:07 UTC+08:00 === 2026-09-27 04:21:07 UTC
+      const resetAt = parseQuotaResetTime('您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC+08:00 重置');
+      expect(resetAt).not.toBeNull();
+      expect(resetAt).toBe(Date.UTC(2026, 8, 27, 4, 21, 7));
+    });
+
+    it('GMT+08:00（含冒号分钟偏移）解析为正确 UTC 时刻，不得为 NaN', () => {
+      const resetAt = parseQuotaResetTime('rate limit exceeded, resets at 2026-09-27 12:21:07 GMT+08:00');
+      expect(resetAt).not.toBeNull();
+      expect(resetAt).toBe(Date.UTC(2026, 8, 27, 4, 21, 7));
+    });
+
+    it('UTC+0800（无冒号分钟偏移）解析为正确偏移 8 小时，不得静默错值 800', () => {
+      const resetAt = parseQuotaResetTime('您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC+0800 重置');
+      expect(resetAt).not.toBeNull();
+      expect(resetAt).toBe(Date.UTC(2026, 8, 27, 4, 21, 7));
+    });
+
+    it('UTC+8:30（半小时偏移）按 小时 + 分钟/60 正确解析', () => {
+      // 2026-09-27 12:21:07 UTC+8:30 === 2026-09-27 03:51:07 UTC
+      const resetAt = parseQuotaResetTime('您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC+8:30 重置');
+      expect(resetAt).not.toBeNull();
+      expect(resetAt).toBe(Date.UTC(2026, 8, 27, 3, 51, 7));
+    });
+
+    it('ISO +08:00 偏移解析为正确 UTC 时刻（回归保护）', () => {
+      const resetAt = parseQuotaResetTime('resets at 2026-09-27T04:21:07+08:00');
+      expect(resetAt).not.toBeNull();
+      expect(resetAt).toBe(Date.UTC(2026, 8, 26, 20, 21, 7));
+    });
+
+    it('负偏移 UTC-05:00 解析为正确 UTC 时刻', () => {
+      // 2026-09-27 12:21:07 UTC-5 === 2026-09-27 17:21:07 UTC
+      const resetAt = parseQuotaResetTime('resets at 2026-09-27 12:21:07 UTC-05:00');
+      expect(resetAt).not.toBeNull();
+      expect(resetAt).toBe(Date.UTC(2026, 8, 27, 17, 21, 7));
+    });
+  });
+
+  describe('markModelUnavailable NaN 防御（不永久拉黑）', () => {
+    beforeEach(() => clearUnavailableModels());
+
+    it('传入 NaN resetAt 不会永久拉黑模型（30min 后可恢复）', () => {
+      markModelUnavailable('provider/nan-reset-model', { resetAt: Number.NaN });
+      // 立即被拉黑（退化为默认 TTL）
+      expect(isModelAvailable('provider/nan-reset-model')).toBe(false);
+      // 推进超过最大兜底 TTL（30min）后必须可恢复——NaN 不得进入 expireAt
+      const restore = advanceClock(MIN_QUOTA_COOLDOWN_TTL_MS + 1000);
+      try {
+        expect(isModelAvailable('provider/nan-reset-model')).toBe(true);
+      } finally {
+        restore();
+      }
+    });
+
+    it('NaN resetAt 不会抹掉在效长冷却（单调合并语义保持）', () => {
+      markModelUnavailable('provider/nan-merge-model', { resetAt: Date.now() + 60 * 60 * 1000 });
+      // NaN resetAt 不得破坏已有长冷却（也不能触发 delete 分支）
+      markModelUnavailable('provider/nan-merge-model', { resetAt: Number.NaN });
+      expect(isModelAvailable('provider/nan-merge-model')).toBe(false);
+      const restore = advanceClock(TRANSIENT_COOLDOWN_TTL_MS + 1000);
+      try {
+        // 原 1h 长冷却仍在效（NaN mark 未覆盖为 5min）
+        expect(isModelAvailable('provider/nan-merge-model')).toBe(false);
+      } finally {
+        restore();
+      }
+    });
+
+    it('classifyQuotaError 对不可解析偏移的报文不产生 NaN resetAt', () => {
+      // 含分钟偏移的报文应被正确解析为有限值（而非 NaN 进入黑名单链路）
+      const info = classifyQuotaError('您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC+08:00 重置');
+      expect(info).not.toBeNull();
+      expect(info!.resetAt).not.toBeNull();
+      expect(Number.isFinite(info!.resetAt)).toBe(true);
+    });
   });
 });

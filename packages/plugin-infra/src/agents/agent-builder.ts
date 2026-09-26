@@ -292,9 +292,16 @@ export function markModelUnavailable(
   opts?: { resetAt?: number | null; ttlMs?: number },
 ): void {
   const now = Date.now();
+  // NP-1: resetAt 非有限值（NaN 等）不得进入黑名单链路——
+  // Math.max(NaN, x) = NaN、Date.now() >= NaN = false 会使模型进程内永久拉黑，
+  // 且后续正确的 mark（max 合并）也无法救回。退化为默认 TTL。
+  const resetAt =
+    opts?.resetAt !== undefined && opts?.resetAt !== null && Number.isFinite(opts.resetAt)
+      ? opts.resetAt
+      : undefined;
   let expireAt = now + (opts?.ttlMs ?? TRANSIENT_COOLDOWN_TTL_MS);
-  if (opts?.resetAt !== undefined && opts.resetAt !== null) {
-    if (opts.resetAt <= now) {
+  if (resetAt !== undefined) {
+    if (resetAt <= now) {
       // R3-P2-2: delete 语义保守化 —— 陈旧/误判（如裸 UTC 落本地时区解释）解析出的
       // 过去时刻 resetAt 不得抹掉在效的长冷却（单调合并语义不被绕过）。
       // 仅当无在效条目（或条目已过期）时才删除。
@@ -307,7 +314,7 @@ export function markModelUnavailable(
       return;
     }
     // Long cooldown: at least MIN_QUOTA_COOLDOWN, until the reset time, capped at MAX
-    expireAt = Math.max(now + MIN_QUOTA_COOLDOWN_TTL_MS, opts.resetAt);
+    expireAt = Math.max(now + MIN_QUOTA_COOLDOWN_TTL_MS, resetAt);
     expireAt = Math.min(expireAt, now + MAX_QUOTA_COOLDOWN_TTL_MS);
   }
   // NEW-P0-A: 单调合并 —— 已记录的更长 TTL 不被后续短 TTL 覆盖
