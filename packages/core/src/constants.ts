@@ -12,7 +12,9 @@ export const VALID_TRANSITIONS: Record<string, string[]> = {
   bridging: ['approved-for-build', 'specifying', 'abandoned'],
   'approved-for-build': ['executing', 'bridging', 'closing', 'abandoned'],
   executing: ['debugging', 'closing', 'abandoned'],
-  debugging: ['executing', 'abandoned'],
+  // P2 (guard-diagnostics): debugging → specifying/bridging 回退合法，但必须显式记录回退原因
+  // （由 state-transition hook 强制，见 checkDebuggingRollbackReason）
+  debugging: ['executing', 'specifying', 'bridging', 'abandoned'],
   closing: ['abandoned'],
   abandoned: [],
 };

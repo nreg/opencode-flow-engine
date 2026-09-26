@@ -12,6 +12,7 @@ import { isContractStale, getContractStalenessReport } from "@opencode-flow-engi
 import { checkIFlowArtifactAndPhaseConsistency } from "../iflow-shared-guards.js";
 import { readArtifactContent, artifactExists } from "../../../features/state-manager/artifact-paths.js";
 import { parseTasks } from "../../../features/execution-plan/task-parser.js";
+import { appendGuardFixHint } from "../../../features/guard-fix-hint.js";
 
 /**
  * Combined artifact existence + phase consistency check.
@@ -72,7 +73,11 @@ export async function checkArtifactAndPhaseConsistency(changeDir: string, active
       return {
         success: false,
         block: true,
-        blockReason: `Phase consistency check failed: ${inconsistencies.join("; ")}`,
+        blockReason: appendGuardFixHint(
+          `Phase consistency check failed: ${inconsistencies.join("; ")}`,
+          `补齐 full 模式必需工件（${inconsistencies.join('；')}）后重试`,
+          'workflow_router(agent="contract-builder")',
+        ),
       };
     }
   }
@@ -145,7 +150,11 @@ export async function checkPresetUpgrade(changeDir: string, activeWorkflow: 'ifl
     return {
       success: false,
       block: true,
-      blockReason: `[SFLOW] Preset upgrade detected: ${mode} -> full. Reason: scope exceeds preset limits (${fileCount} files, ${taskCount} tasks, schema=${hasSchemaChange}, api=${hasApiChange}, crossModule=${hasCrossModule}). Guard blocks: upgrade has not been applied yet. Call state-manager.upgradeMode() to apply the upgrade, then route back to specifying.`,
+      blockReason: appendGuardFixHint(
+        `[SFLOW] Preset upgrade detected: ${mode} -> full. Reason: scope exceeds preset limits (${fileCount} files, ${taskCount} tasks, schema=${hasSchemaChange}, api=${hasApiChange}, crossModule=${hasCrossModule}). Guard blocks: upgrade has not been applied yet.`,
+        `运行 state-manager.upgradeMode() 将 ${mode} 升级为 full 后重试`,
+        'state-manager.upgradeMode()',
+      ),
       data: {
         upgradeFrom: mode,
         upgradeTo: 'full',

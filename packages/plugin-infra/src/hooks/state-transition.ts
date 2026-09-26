@@ -5,6 +5,7 @@ import { checkArtifactPreflight, findPreflightState } from '../features/artifact
 import { writeStateFile } from '../features/state-manager.js';
 import { recommendExecutionMode } from '../features/execution-plan.js';
 import { resolveArtifactLanguage, checkAndDetectLanguage } from '../features/artifact-language.js';
+import { formatGuardFixHint } from '../features/guard-fix-hint.js';
 import { readArtifactContent } from '../features/state-manager/artifact-paths.js';
 import { Logger } from '../utils/logger.js';
 
@@ -46,6 +47,22 @@ export function createStateTransitionHook(): HookHandler {
           };
         }
 
+        // P2 (guard-diagnostics): debugging → specifying/bridging 回退维度显式化
+        // 回退必须显式提供原因；缺原因被拒（报错含 Fix 指引），有原因则记录到 state 转换记录
+        const extra = await checkDebuggingRollbackReason({
+          currentState,
+          newState,
+          data,
+        });
+        if (extra.blocked) {
+          return {
+            success: false,
+            error: 'Debugging rollback requires an explicit reason',
+            block: true,
+            blockReason: extra.blockReason,
+          };
+        }
+
         // P1 fix: Preflight gate — check target state's required artifacts BEFORE transitioning
         const pf = await checkArtifactPreflight({
           changeDir,
@@ -65,13 +82,13 @@ export function createStateTransitionHook(): HookHandler {
         }
 
         // DP-4: Auto-recommend execution mode on bridging→approved-for-build
-        const extra: Record<string, unknown> = {};
+        const dp4extra: Record<string, unknown> = extra.extra || {};
         if (currentState === 'bridging' && newState === 'approved-for-build') {
           try {
             const tasksMdContent = await readArtifactContent(changeDir, 'tasks.md');
             if (tasksMdContent) {
               const dp4Result = recommendExecutionMode(tasksMdContent);
-              extra.dp_4_result = dp4Result;
+              dp4extra.dp_4_result = dp4Result;
             }
           } catch {
           }
@@ -82,10 +99,10 @@ export function createStateTransitionHook(): HookHandler {
         if (currentState === 'exploring' && newState === 'specifying') {
           try {
             const artifactLanguage = await resolveArtifactLanguage({ projectRoot: changeDir });
-            extra.artifact_language = artifactLanguage;
+            dp4extra.artifact_language = artifactLanguage;
           } catch (error) {
             // 检测失败不影响状态转换，使用默认值 'en'
-            extra.artifact_language = 'en';
+            dp4extra.artifact_language = 'en';
             Logger.warn(`[T3.5] Artifact language detection failed, using default "en": ${error instanceof Error ? error.message : String(error)}`);
           }
         }
@@ -98,7 +115,7 @@ export function createStateTransitionHook(): HookHandler {
             const currentLanguage = stateData?.artifact_language as 'zh' | 'en' | undefined;
             const detectedLanguage = await checkAndDetectLanguage(changeDir, currentLanguage);
             if (detectedLanguage) {
-              extra.artifact_language = detectedLanguage;
+              dp4extra.artifact_language = detectedLanguage;
             }
           } catch (error) {
             // 补检测失败不影响状态转换
@@ -106,7 +123,7 @@ export function createStateTransitionHook(): HookHandler {
           }
         }
 
-        await updateState(changeDir, newState, Object.keys(extra).length > 0 ? extra : undefined);
+        await updateState(changeDir, newState, Object.keys(dp4extra).length > 0 ? dp4extra : undefined);
 
         return {
           success: true,
@@ -141,5 +158,45 @@ async function readStateFile(changeDir: string): Promise<Record<string, unknown>
 
 async function updateState(changeDir: string, newState: string, extra?: Record<string, unknown>): Promise<void> {
   await writeStateFile(changeDir, newState, extra);
+}
+
+/**
+ * P2 (guard-diagnostics): debugging → specifying/bridging 回退维度显式化。
+ *
+ * - 回退必须显式提供 data.rollbackReason；缺原因被拒（报错含 Fix 指引）
+ * - 有原因时构造记录字段（rollback_from / rollback_target / rollback_reason），
+ *   由 writeStateFile 写入 state 转换记录，供追溯
+ */
+export function checkDebuggingRollbackReason(input: {
+  currentState: string;
+  newState: string;
+  data?: { rollbackReason?: unknown } & Record<string, unknown>;
+}): { blocked: boolean; blockReason?: string; extra: Record<string, unknown> } {
+  const { currentState, newState, data } = input;
+  const isRollback = currentState === 'debugging' && (newState === 'specifying' || newState === 'bridging');
+  if (!isRollback) return { blocked: false, extra: {} };
+
+  const reason = typeof data?.rollbackReason === 'string' ? data.rollbackReason.trim() : '';
+  if (!reason) {
+    const hint = formatGuardFixHint(
+      '重试状态转换时携带 data.rollbackReason（回退原因与整改摘要）',
+      'state_transition(data.newState=..., data.rollbackReason=...)',
+    );
+    return {
+      blocked: true,
+      blockReason: `[SFLOW] Debugging rollback to "${newState}" requires an explicit rollback reason. Provide data.rollbackReason describing why the rollback is needed (e.g. missing spec boundary, design assumption failure).\n${hint}`,
+      extra: {},
+    };
+  }
+
+  return {
+    blocked: false,
+    extra: {
+      rollback_from: currentState,
+      rollback_target: newState,
+      rollback_reason: reason,
+      rollback_at: new Date().toISOString(),
+    },
+  };
 }
 

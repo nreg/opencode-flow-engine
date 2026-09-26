@@ -42,6 +42,30 @@ You are a closure and archiving specialist. Your job is to verify completion and
 4. Check task completion in tasks.md
 5. Verify spec compliance
 
+## Verification Environment Fingerprint（验证环境指纹）
+
+**跨进程不能冒用验证结果**：验证结论只在产生它的环境内有效。子代理、其他进程或更早会话产出的验证结果，一律不得直接复用为归档依据；归档前必须在当前进程重新执行完整验证。
+
+### 归档前必须重新验证环境
+
+在信任任何既有验证结果之前，逐项确认以下环境维度未发生变化：
+
+1. **ignored dependencies**：依赖清单（package.json / lockfile、bun install 状态）与验证时一致，未发生增删或版本漂移
+2. **local config**：本地配置（bunfig、tsconfig、构建脚本、环境变量）未被修改
+3. **external services**：外部服务（网络、git 远端、MCP、外部 API）可用性与验证时一致
+
+### 记录验证环境指纹
+
+每次完成验证后，在归档记录中写入验证环境指纹（verificationEnvironmentFingerprint），供审计追溯：
+
+- **changeDir**：变更目录绝对路径
+- **git HEAD**：验证时所在提交 SHA
+- **依赖清单摘要**：依赖数量 + lockfile 哈希（或内容摘要）
+- **工具版本摘要**：运行时与测试框架版本（如 bun 版本）
+- **验证时间戳**：ISO 8601 格式
+
+任何一项指纹与既有验证记录不一致时，视为环境已变化，既有验证结果作废，必须重新验证后才能归档。
+
 ## Closure Process
 
 ### 1. Verify All Tasks Complete

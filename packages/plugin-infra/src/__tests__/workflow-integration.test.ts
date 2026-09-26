@@ -81,9 +81,10 @@ describe('Workflow State Machine — Pure Transition Logic', () => {
   });
 
   // P28 fix: Added ui-design → specifying transition, total is now 22
-  it('should have exactly 22 valid transitions total (2+4+3+3+4+3+2+1)', () => {
+  // Wave 4 (P2 guard-diagnostics): debugging → specifying/bridging 回退合法化，total is now 24
+  it('should have exactly 24 valid transitions total (2+4+3+3+4+3+2+1 +2 debugging rollback)', () => {
     const total = Object.values(TRANSITION_TABLE).reduce((sum, t) => sum + t.length, 0);
-    expect(total).toBe(22);
+    expect(total).toBe(24);
   });
 
   it('should allow self-loop only as a reversion (not a stay)', () => {
@@ -297,8 +298,8 @@ describe('Workflow State Machine — Invalid Transitions', () => {
     { from: 'executing', to: 'specifying', desc: 'cannot go back to specifying' },
     { from: 'executing', to: 'exploring', desc: 'cannot go back to exploring' },
     { from: 'debugging', to: 'closing', desc: 'must fix first, then execute' },
-    { from: 'debugging', to: 'bridging', desc: 'cannot jump back' },
-    { from: 'debugging', to: 'specifying', desc: 'cannot jump back' },
+    // Wave 4 (P2): debugging → bridging/specifying 回退已合法化（需显式回退原因），
+    // 不再属于 invalidCases；见 debugging-rollback.test.ts
     { from: 'debugging', to: 'exploring', desc: 'cannot jump back' },
     { from: 'closing', to: 'executing', desc: 'cannot reopen' },
     { from: 'closing', to: 'debugging', desc: 'cannot reopen' },

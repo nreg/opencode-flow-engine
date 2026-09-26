@@ -8,8 +8,16 @@ import { fileExists, directoryExists, readJsonFile } from "@opencode-flow-engine
 import { readExecutionPlan as readExecutionPlanFeature } from "../../../features/execution-plan.js";
 import type { Wave } from "../../../features/execution-plan-types.js";
 import { getStateFilePath } from "../../../features/state-manager.js";
+import { appendGuardFixHint } from "../../../features/guard-fix-hint.js";
 import { GitRangeValidator } from "./git-range-validator.js";
 import { Logger } from "../../../utils/logger.js";
+
+/**
+ * Normalize a path to forward-slash form for comparison.
+ */
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/');
+}
 
 /**
  * Topological sort using Kahn's algorithm (BFS-based).
@@ -83,7 +91,10 @@ export async function checkWaveDependencies(changeDir: string, activeWorkflow: '
       return {
         success: false,
         block: true,
-        blockReason: `[SFLOW] Wave dependency check: wave "${wave.id}" is empty (no tasks). Every wave must have at least one task.`,
+        blockReason: appendGuardFixHint(
+          `[SFLOW] Wave dependency check: wave "${wave.id}" is empty (no tasks). Every wave must have at least one task.`,
+          `在 execution-plan.json 中为 wave "${wave.id}" 补齐至少一个 task`,
+        ),
       };
     }
   }
@@ -96,7 +107,10 @@ export async function checkWaveDependencies(changeDir: string, activeWorkflow: '
         return {
           success: false,
           block: true,
-          blockReason: `[SFLOW] Wave dependency check: wave "${wave.id}" depends on non-existent wave "${depId}". All depends_on references must exist in the execution plan.`,
+          blockReason: appendGuardFixHint(
+          `[SFLOW] Wave dependency check: wave "${wave.id}" depends on non-existent wave "${depId}". All depends_on references must exist in the execution plan.`,
+          `在 execution-plan.json 中为 wave "${wave.id}" 补齐存在的 wave 引用（将 "${depId}" 改为实际存在的 wave ID）`,
+        ),
         };
       }
     }
@@ -109,7 +123,10 @@ export async function checkWaveDependencies(changeDir: string, activeWorkflow: '
     return {
       success: false,
       block: true,
-      blockReason: `[SFLOW] Wave dependency check: ${(err instanceof Error ? err.message : String(err))}`,
+      blockReason: appendGuardFixHint(
+        `[SFLOW] Wave dependency check: ${(err instanceof Error ? err.message : String(err))}`,
+        '修复 wave 依赖图中的循环依赖',
+      ),
     };
   }
 
@@ -145,21 +162,31 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
       return {
         success: false,
         block: true,
-        blockReason: `[SFLOW] Receipt integrity check: missing receipt for wave "${wave.id}". Expected at ${receiptPath}.`,
+        blockReason: appendGuardFixHint(
+          `[SFLOW] Receipt integrity check: missing receipt for wave "${wave.id}". Expected at ${receiptPath}.`,
+          `运行 workflow_router(agent="spec-writer") 补齐 wave "${wave.id}" 的 review receipt`,
+        ),
       };
     }
 
-    // RR-5: Symlink detection using fs.realpathSync
+    // RR-5: Symlink detection using fs.realpathSync.native
+    // P2 (guard-diagnostics): native 版本可还原 Windows 8.3 短名（PROGRA~1），
+    // 以父目录 native 真实路径 + basename 为基准比较，短名路径不会误判为符号链接
     try {
       const fs = await import('fs');
-      const realPath = fs.realpathSync(receiptPath);
-      const expectedPath = receiptPath.replace(/\\/g, '/');
-      const resolvedReal = realPath.replace(/\\/g, '/');
+      const pathMod = await import('path');
+      const realPath = fs.realpathSync.native(receiptPath);
+      const parentReal = fs.realpathSync.native(pathMod.dirname(receiptPath));
+      const expectedPath = normalizePath(pathMod.join(parentReal, pathMod.basename(receiptPath)));
+      const resolvedReal = normalizePath(realPath);
       if (resolvedReal !== expectedPath) {
         return {
           success: false,
           block: true,
-          blockReason: `[SFLOW] Receipt integrity check: symlinked receipt detected for wave "${wave.id}". Receipt path "${expectedPath}" resolves to "${resolvedReal}". Symlinked receipts are not allowed.`,
+          blockReason: appendGuardFixHint(
+            `[SFLOW] Receipt integrity check: symlinked receipt detected for wave "${wave.id}". Receipt path "${expectedPath}" resolves to "${resolvedReal}". Symlinked receipts are not allowed.`,
+            `将 "${expectedPath}" 替换为真实文件（移除符号链接）后重试`,
+          ),
         };
       }
     } catch {
@@ -171,7 +198,10 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
       return {
         success: false,
         block: true,
-        blockReason: `[SFLOW] Receipt integrity check: cannot read receipt for wave "${wave.id}".`,
+        blockReason: appendGuardFixHint(
+          `[SFLOW] Receipt integrity check: cannot read receipt for wave "${wave.id}".`,
+          `检查 "${receiptPath}" 是否为合法 JSON 并修复损坏的收据`,
+        ),
       };
     }
 
@@ -181,7 +211,10 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
         return {
           success: false,
           block: true,
-          blockReason: `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt is missing required field "${field}".`,
+          blockReason: appendGuardFixHint(
+            `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt is missing required field "${field}".`,
+            `在 "${receiptPath}" 中补齐必需字段 "${field}"（status/base/head/report）`,
+          ),
         };
       }
       // Check for empty string values on base/head
@@ -189,7 +222,10 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
         return {
           success: false,
           block: true,
-          blockReason: `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt has empty "${field}" commit hash.`,
+          blockReason: appendGuardFixHint(
+            `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt has empty "${field}" commit hash.`,
+            `在 "${receiptPath}" 中为 "${field}" 填入有效 commit hash`,
+          ),
         };
       }
     }
@@ -215,7 +251,10 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
           return {
             success: false,
             block: true,
-            blockReason: `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt has invalid base commit hash "${baseHash}". Hash not found in git history.`,
+            blockReason: appendGuardFixHint(
+              `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt has invalid base commit hash "${baseHash}". Hash not found in git history.`,
+              `在 "${receiptPath}" 中将 base 替换为 git 历史中存在的 commit hash`,
+            ),
           };
         }
       }
@@ -226,7 +265,10 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
           return {
             success: false,
             block: true,
-            blockReason: `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt has invalid head commit hash "${headHash}". Hash not found in git history.`,
+            blockReason: appendGuardFixHint(
+              `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt has invalid head commit hash "${headHash}". Hash not found in git history.`,
+              `在 "${receiptPath}" 中将 head 替换为 git 历史中存在的 commit hash`,
+            ),
           };
         }
       }
@@ -238,7 +280,10 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
           return {
             success: false,
             block: true,
-            blockReason: `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt base commit "${baseHash}" is not an ancestor of head commit "${headHash}". base must be reachable from head's history.`,
+            blockReason: appendGuardFixHint(
+              `[SFLOW] Receipt integrity check: wave "${wave.id}" receipt base commit "${baseHash}" is not an ancestor of head commit "${headHash}". base must be reachable from head's history.`,
+              `在 "${receiptPath}" 中修正 base 为 head 历史可达的 commit`,
+            ),
           };
         }
       }
