@@ -39,8 +39,16 @@ export const MODE_RANK: Record<ExecutionMode, number> = {
  */
 export async function computeContentHash(plan: ExecutionPlan): Promise<string> {
   // Create a canonical representation with sorted keys
-  // Exclude the hash field itself from the hash computation
-  const { hash: _hash, ...planWithoutHash } = plan;
+  // Exclude the hash field itself from the hash computation.
+  // N-1/N-2: review_base/target_branch 是状态锚点（WRITE_ONCE）而非计划内容，
+  // 不参与 hash 计算——补锚点不再改变 hash，plan-scoped 目录（以 hash 为键）
+  // 不会漂移，createExecutionPlan 返回的 hash 也不会陈旧。
+  const {
+    hash: _hash,
+    review_base: _reviewBase,
+    target_branch: _targetBranch,
+    ...planWithoutHash
+  } = plan;
   const canonical = canonicalJsonStringify(planWithoutHash);
 
   const encoder = new TextEncoder();
@@ -245,7 +253,9 @@ export async function createExecutionPlan(
     }
   }
 
-  return plan;
+  // N-1: 补锚点可能改写磁盘上的计划（写入 review_base/target_branch），
+  // 返回磁盘上的最新快照，避免把补锚点前的陈旧对象交给调用方。
+  return (await readExecutionPlan(changeDir)) ?? plan;
 }
 
 // ─── Task 2.2: readExecutionPlan ──────────────────────────────────────────────
@@ -365,6 +375,8 @@ export async function reviseExecutionPlan(
   const contract_hash = (state.contract_hash as string) || '';
 
   // Build revised plan with incremented revision
+  // N-3: 锚点是开工事实（WRITE_ONCE），修订计划必须原样保留已有的
+  // review_base/target_branch，不得静默清空（否则 final 区间校验被禁用）。
   const revisedPlan: ExecutionPlan = {
     mode: params.mode,
     source: params.source,
@@ -374,6 +386,8 @@ export async function reviseExecutionPlan(
     artifacts_hash,
     contract_hash,
     revision: existingPlan.revision + 1,
+    review_base: existingPlan.review_base,
+    target_branch: existingPlan.target_branch,
   };
 
   // Compute new content hash

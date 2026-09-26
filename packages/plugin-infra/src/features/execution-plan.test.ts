@@ -371,6 +371,47 @@ describe('reviseExecutionPlan', () => {
     expect(revised.revision).toBe(2);
   });
 
+  it('should preserve review_base and target_branch anchors on revise (N-3)', async () => {
+    // N-3: 锚点是开工事实（WRITE_ONCE），计划修订不得静默清空
+    const { execFileSync } = await import('child_process');
+    const run = (args: string[]) =>
+      execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: 'pipe' });
+
+    run(['init', '-q']);
+    run(['config', 'user.email', 'test@example.com']);
+    run(['config', 'user.name', 'Test']);
+    run(['config', 'commit.gpgsign', 'false']);
+    await writeFile(join(dir, 'test.txt'), 'test\n');
+    run(['add', '.']);
+    run(['commit', '-q', '-m', 'initial commit']);
+    const commitSha = run(['rev-parse', 'HEAD']).trim();
+
+    await createExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Initial plan',
+      waves: sampleWaves,
+    });
+
+    // 写入锚点
+    await recordReviewBase(dir, commitSha);
+    const withAnchor = await readExecutionPlan(dir);
+    expect(withAnchor?.review_base).toBe(commitSha);
+
+    // 修订计划 → 锚点必须保留
+    const revised = await reviseExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Updated rationale',
+      waves: sampleWaves,
+    });
+    expect(revised.review_base).toBe(commitSha);
+
+    // 磁盘上的计划同样保留锚点
+    const onDisk = await readExecutionPlan(dir);
+    expect(onDisk?.review_base).toBe(commitSha);
+  }, 30000);
+
   it('should increment revision from 2 to 3', async () => {
     await createExecutionPlan(dir, {
       mode: 'sdd',
@@ -524,6 +565,32 @@ describe('computeContentHash', () => {
     const hash1 = await computeContentHash(plan1);
     const hash2 = await computeContentHash(plan2);
     expect(hash1).not.toBe(hash2);
+  });
+
+  it('should exclude review_base/target_branch anchors from hash (N-1/N-2)', async () => {
+    // 锚点是状态事实而非计划内容：写入锚点不应改变 hash，
+    // 否则补锚点会导致 plan-scoped 目录（以 hash 为键）漂移（N-2），
+    // 且 createExecutionPlan 返回补锚点前的陈旧 hash（N-1）。
+    const basePlan: ExecutionPlan = {
+      mode: 'inline',
+      source: 'default',
+      rationale: 'Anchor test',
+      waves: inlineWaves,
+      hash: '',
+      artifacts_hash: 'a',
+      contract_hash: 'c',
+      revision: 1,
+    };
+
+    const withAnchors: ExecutionPlan = {
+      ...basePlan,
+      review_base: 'abc123def456abc123def456abc123def456abc1',
+      target_branch: 'feature/x',
+    };
+
+    const hashBase = await computeContentHash(basePlan);
+    const hashAnchors = await computeContentHash(withAnchors);
+    expect(hashAnchors).toBe(hashBase);
   });
 
   it('should produce the same hash regardless of key insertion order', async () => {

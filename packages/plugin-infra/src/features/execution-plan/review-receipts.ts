@@ -1031,6 +1031,8 @@ export async function recordReviewBase(changeDir: string, sha?: string): Promise
   };
 
   // Recompute hash since we changed the plan
+  // （N-1/N-2 后 hash 已排除 review_base/target_branch，此处重算结果与原值一致，
+  // 仅保持 syncExecutionPlanHashToState 的幂等同步，不产生目录漂移）
   const { computeContentHash } = await import('./plan-crud.js');
   updatedPlan.hash = await computeContentHash(updatedPlan);
 

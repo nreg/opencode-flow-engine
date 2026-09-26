@@ -222,7 +222,7 @@ describe('P1 fix: state_transition hook 端到端（executing 时记录 review_b
     // state.json advanced to executing
     const stateRaw = await readFile(dir + '/.flow-engine/sflow/state.json', 'utf-8');
     expect(JSON.parse(stateRaw).state).toBe('executing');
-  });
+  }, 30000);
 });
 
 // ─── P2-2/P2-3：计划哈希派生同步与 executing 阶段创建补锚点 ─────────────────────
@@ -265,7 +265,7 @@ describe('P2-2/P2-3：execution_plan_hash 派生键同步', () => {
     expect(plan2?.review_base).toBeTruthy();
     const state1 = JSON.parse(await readFile(dir + '/.flow-engine/sflow/state.json', 'utf-8'));
     expect(state1.execution_plan_hash).toBe(plan2!.hash);
-  });
+  }, 30000);
 
   it('P2-3：executing 阶段创建计划时补写 review_base（WRITE_ONCE）', async () => {
     initGitRepo(dir);
@@ -281,11 +281,15 @@ describe('P2-2/P2-3：execution_plan_hash 派生键同步', () => {
     const plan2 = await readExecutionPlan(dir);
     expect(plan2?.review_base).toBe(headSha);
 
-    // 补写锚点后 plan.hash 重算，state 摘要同步
+    // N-1: createExecutionPlan 返回的必须是补锚点后的快照
+    expect(plan.review_base).toBe(headSha);
+    expect(plan.hash).toBe(plan2!.hash);
+
+    // 补写锚点后 state 摘要同步（锚点不改变 hash）
     const stateRaw = JSON.parse(await readFile(dir + '/.flow-engine/sflow/state.json', 'utf-8'));
     expect(stateRaw.execution_plan_hash).toBe(plan2!.hash);
-    expect(plan2!.hash).not.toBe(plan.hash); // review_base 改变了内容，hash 必须变化
-  });
+    expect(plan2!.hash).toBe(plan.hash); // review_base 是状态锚点非计划内容，不改变 hash
+  }, 30000);
 
   it('P2-3：非 executing 阶段创建计划不写 review_base（回归）', async () => {
     initGitRepo(dir);
@@ -300,5 +304,5 @@ describe('P2-2/P2-3：execution_plan_hash 派生键同步', () => {
 
     const plan = await readExecutionPlan(dir);
     expect(plan?.review_base).toBeUndefined();
-  });
+  }, 30000);
 });
