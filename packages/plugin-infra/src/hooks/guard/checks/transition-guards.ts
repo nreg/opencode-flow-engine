@@ -8,12 +8,62 @@ import { fileExists, readJsonFile, readFile } from "@opencode-flow-engine/shared
 import { getStateFilePath } from "../../../features/state-manager.js";
 import { readExecutionPlan as readExecutionPlanFeature } from "../../../features/execution-plan.js";
 import { readArtifactContent } from "../../../features/state-manager/artifact-paths.js";
+import { formatGuardFixHint, GUARD_FIX_ENTRIES } from "../../../features/guard-fix-hint.js";
+
+/**
+ * Fast-path transition restriction table（快路径准入表）。
+ * 表中的转换**仅**允许列出的 mode；命中表但 mode 不在列表中 → 明确报错，
+ * 不得静默套用 full 主表放行（unknownTransitionFailure 原则，FP-R2）。
+ *
+ * 与 `workflow-recommendation.ts` 的 `WORKFLOW_MODES`（full/hotfix/tweak/quick）保持一致：
+ * - exploring → bridging：仅 hotfix
+ * - exploring → approved-for-build：tweak 与 quick（D2：quick 直达，不新增第五种模式）
+ */
+export const FAST_PATH_RESTRICTIONS: Record<string, string[]> = {
+  'exploring:bridging': ['hotfix'],
+  'exploring:approved-for-build': ['tweak', 'quick'],
+};
+
+/** 未知 / 空 mode 的展示值，保证报错里能看出实际读到了什么。 */
+const EMPTY_MODE_PLACEHOLDER = '(empty)';
+
+function resolveMode(rawMode: unknown): string {
+  if (typeof rawMode === 'string') {
+    const trimmed = rawMode.trim();
+    return trimmed === '' ? EMPTY_MODE_PLACEHOLDER : trimmed;
+  }
+  if (rawMode === undefined || rawMode === null) return 'full';
+  return String(rawMode);
+}
+
+/**
+ * 判定某转换是否在快路径限制表内、以及当前 mode 是否被放行。
+ * 跨批次契约函数（供 workflowPolicy / Wave 2 复用）。
+ *
+ * @returns `{ allowed, allowedModes }`；`allowedModes` 为空数组表示**不受快路径限制**
+ */
+export function isFastPathAllowed(from: string, to: string, mode: string): { allowed: boolean; allowedModes: string[] } {
+  const allowedModes = FAST_PATH_RESTRICTIONS[`${from}:${to}`] ?? [];
+  if (allowedModes.length === 0) return { allowed: true, allowedModes: [] };
+  return { allowed: allowedModes.includes(mode), allowedModes };
+}
+
+/** 各 mode 应走的「正确路径」，用于报错与 Fix 指引。 */
+function properPathFor(mode: string): string {
+  if (mode === 'full') return 'exploring → specifying → bridging → approved-for-build';
+  if (mode === 'quick') return 'exploring → approved-for-build';
+  return 'exploring → bridging → approved-for-build';
+}
 
 /**
  * Block fast-path transitions when the current workflow mode does not allow them.
- * - full mode: block exploring→bridging (hotfix path) and exploring→approved-for-build (tweak path)
- * - hotfix mode: block exploring→approved-for-build (tweak path)
+ * - full mode: block exploring→bridging (hotfix path) and exploring→approved-for-build (tweak/quick path)
+ * - hotfix mode: block exploring→approved-for-build (tweak/quick path)
+ * - quick mode: allow exploring→approved-for-build, block exploring→bridging
  * - tweak mode: all transitions are valid
+ *
+ * 命中限制表但 mode 不匹配时 MUST 明确报错（success:false + block:true），
+ * MUST NOT 静默回落 full 主表；报错含当前 mode、允许集合、正确路径与 `Fix:` 入口。
  */
 export async function checkWorkflowModeTransition(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
   if (!changeDir || !data) return { success: true };
@@ -26,26 +76,19 @@ export async function checkWorkflowModeTransition(changeDir: string, data?: Reco
 
   const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
   const currentState = stateData?.state || 'exploring';
-  const mode = stateData?.mode || 'full';
+  const mode = resolveMode(stateData?.mode);
 
-  const transitionKey = `${currentState}:${newState}`;
+  const { allowed, allowedModes } = isFastPathAllowed(currentState, newState, mode);
 
-  // Fast-path transitions only allowed for specific modes
-  const fastPathRestrictions: Record<string, string[]> = {
-    'exploring:bridging': ['hotfix'],
-    'exploring:approved-for-build': ['tweak'],
-  };
-
-  const allowedModes = fastPathRestrictions[transitionKey];
-  if (allowedModes && !allowedModes.includes(mode)) {
+  // 命中快路径限制表但 mode 不在允许集合 → 明确报错（不套用 full 主表）
+  if (allowedModes.length > 0 && !allowed) {
     const modeNames = allowedModes.join(' or ');
-    const properPath = mode === 'full'
-      ? 'exploring → specifying → bridging → approved-for-build'
-      : 'exploring → bridging → approved-for-build';
+    const properPath = properPathFor(mode);
+    const reason = `[SFLOW] Workflow mode guard: transition "${currentState} → ${newState}" is a ${modeNames}-only fast-path, but current mode is "${mode}". Route through the proper path: ${properPath}.`;
     return {
       success: false,
       block: true,
-      blockReason: `[SFLOW] Workflow mode guard: transition "${currentState} → ${newState}" is a ${modeNames}-only fast-path, but current mode is "${mode}". Route through the proper path: ${properPath}.`,
+      blockReason: `${reason}\n${formatGuardFixHint(`走 ${properPath}`, GUARD_FIX_ENTRIES.contractBuilderRouter)}`,
     };
   }
 

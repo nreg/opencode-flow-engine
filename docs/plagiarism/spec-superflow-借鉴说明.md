@@ -611,3 +611,203 @@ spec-superflow 的 `cmd-validate.mjs`：spec 校验通过后，立即对 canonic
 - Lightweight（路径选择）是**启动前判定**，回答"改动是否纯 tests/docs/test-support 内部变更"
 - Preflight（spec 质量验证）是 **spec 写入后**的验证，服务**会产生 delta spec 的路径**（full/quick 产生 spec 的场景），lightweight 式变更不产生 spec 故不需要 preflight
 - 两者并列列出，实际是独立的两项
+
+---
+
+# spec-superflow 演进分析（305b9e57 → 25d9b0ce）
+
+> **素材源**：`.flow-engine/sflow/subagent-store/agent_1790401615525_iflow-researcher/output.md`（662 行，本轮调研唯一来源）
+> **范围**：v1.2.0 → v2.0.0，132 文件变更，+7577 / -3059 行
+> **方法**：逐提交 `git show` + sFlow 源码对照验证
+> **补记说明**：本节由 2026-09-26 的 build-executor 依据上述素材源重建（上一轮追加内容已随工作区回退丢失），采取**纯追加**方式，不改动本文件既有 613 行。
+
+## 一句话结论
+
+**这是 spec-superflow 自诞生以来最激进的一次重构——从"五路径 + 契约 + DP 问卷"的繁复流程，收敛为"两个入口（direct / planned）+ 一次确认 + 一次终评 + 一次验证"的紧凑流程。** 上游不仅没有废弃我们移植的功能，反而把关键机制（adjudication 熔断、plan-scoped 隔离、spec-publication 收据）**全部保留并加固**；同时新增了一批我们尚未具备的能力。
+
+最重要的一句话：**sFlow 之前借鉴的所有部分都没有被上游废弃或改名，可以放心继续维护。** 但上游新增的机制中，有 3 项（终评范围锚定、review range 强制非空、issue 熔断计数）属于**我们可能存在同类缺陷**的地方，必须同步核查。
+
+## 一、更新主题总览表（T1–T21）
+
+| # | 主题 | 核心提交 | 一句话说明 | 性质 |
+|---|------|---------|-----------|------|
+| **T1** | v2 紧凑执行流（最大） | `05aee08` | 废除五路径 intake，改为 `workflow start --path direct\|planned` + 一次 `workflow complete`；引入 `schema_version: 2` 权威执行计划、`review_policy: final\|wave` | BREAKING |
+| **T2** | Native 默认执行 | `05aee08` | 执行模式推荐恒为 `inline`（"Native"），删除全部 SDD 推荐分支，SDD 需显式授权 | BREAKING |
+| **T3** | 执行计划为唯一事实源 | `05aee08` | v2 计划不再向 state 写摘要；派生 state 摘要**不得否决**计划 | BREAKING |
+| **T4** | 终评范围锚定 + review range 校验 | `05aee08` / `3ff4380` / `25d9b0c` | 终评必须覆盖"变更起点 → HEAD"完整区间；拒绝空范围、截断的 `HEAD~1`、过期快照 | 新能力 |
+| **T5** | issue 身份化熔断计数 | `05aee08` | 失败审查携带稳定 `--issue` ID；**同一 issue 连续 3 次**才 adjudication（原为任意失败累计 5 次） | 改进 |
+| **T6** | plan revision 证据保留 | `05aee08` | mode-only 修订保留适用证据；scope 变更才作废 pass，且**必须保留未解决失败** | 改进 |
+| **T7** | 隔离上下文持久化 | `05aee08` / `3444339` | 隔离元数据写入 `.git/ssf-finish/<name>.json`；默认**特性分支**，worktree 需显式启用 | 改进 |
+| **T8** | finish 物理收尾重做 | `05aee08` | 分阶段收尾 pending → verify-pending → cleanup-pending → complete；`verificationEnvironmentFingerprint()` 防跨进程冒用验证结果 | 改进 |
+| **T9** | closing 可重开（受限） | `05aee08` | 新增 `closing:debugging` 转换，仅 `verify-pending` 时允许 | 改进 |
+| **T10** | accepted-risk 显式收尾 | `05aee08` | 用户可显式接受已知风险结束，但**禁止自动物理集成** | 新能力 |
+| **T11** | 状态跟踪与收口系统性修复 | `a8807bc` | 轻量路径不再被 full 产物要求卡死；fast-path 拒绝表替代 full fallback；5 个 resync 死锁修复 | Bug 修复 |
+| **T12** | Adjudication 恢复 | `16706ea` | `ssf execution adjudicate` 持久化人工授权，一次授权只允许一次后续审查 | 已在上一版评估 |
+| **T13** | state 重建后 plan revision 恢复 | `1571ccc` | state 摘要被清空时从计划文件反查 revision，多种非法态被拒绝 | Bug 修复 |
+| **T14** | runtime guard 推断持久化 workflow | `e7ab1a4` | `--workflow` 缺省时从 state 读取，而非默认 `full` | Bug 修复 |
+| **T15** | Codex/Windows 一致性 | `d527495` | DP timestamp 跨平台；轻量路径免计划调试 | Bug 修复 |
+| **T16** | workflow-policy 统一裁决 | `05aee08` | `workflowPolicy()` 单点决定是否需计划 / 缺收据 / 丢失 direct receipts | 架构 |
+| **T17** | task-parser 单一解析 | `05aee08` | `parseTasks()` / `normalizeTaskCheckboxes()` 统一 checkbox 解析 | 架构 |
+| **T18** | skills 捆绑运行时 | `d653216` | 引入 `SSF` 占位符 token，运行时重写为插件脚本路径 | 分发 |
+| **T19** | WorkBuddy OS temp staging | `3444339` | clone 到 `os.tmpdir()` 子目录，失败清理，不再硬编码 `/tmp` | 分发 |
+| **T20** | 文档清理 / 一致性 | `d728a1f` 等 | 删除 704 行内部开发记录，README 重写 | 文档 |
+| **T21** | v2.0.2 发布尝试与回滚 | `bb1fbee` / `163c854` | 发了一半又 revert（仅版本号），HEAD 停在 2.0.0 | 噪音 |
+
+## 二、可借鉴性评级（P0–P3）
+
+> 评级标准：P0 强烈建议（存在同类缺陷或高价值缺口）/ P1 建议 / P2 按需 / P3 不适用；sFlow 现状基于实际源码验证。
+
+### 🔴 P0 — 强烈建议借鉴（4 项）
+
+| # | 借鉴点 | sFlow 现状（源码实测） | 缺陷 | 工作量 |
+|---|--------|----------------------|------|--------|
+| **P0-1** | review range 强制非空（上游 `assertNonEmptyDiff()` + `pass && base === head → throw`） | `GitRangeValidator` 有 `rev-parse --verify` 与 `merge-base --is-ancestor`，`checkReceiptIntegrity` 只查空字符串；**无 `base === head` 校验、无 `git diff --name-only` 非空校验** | 零改动的 pass receipt 能通过全部校验 → 解锁依赖波次与 closing，是真实的门禁绕过 | 低（约 20 行 + 测试） |
+| **P0-2** | `--issue` 身份化熔断计数 | `MAX_REPAIR_FAILURES = 5`（`packages/core/src/constants.ts:87`），任意失败累计即 `adjudication-required`，且**无 `adjudicateWave` 出口**；`ReviewEvidence` 无 `issue` 字段 | ① 不同缺陷共享预算导致误熔断；② **熔断后无出路**，是单向死锁（比上游旧版更糟） | 中 |
+| **P0-3** | plan revision 恢复（`resolveRecommendationPlanRevision()`） | 有 `restoreState`（处理 state↔artifact 不一致），但**没有"计划摘要丢失后从计划文件反查 revision"**；`ReviewReceipt` 依赖 `plan_hash` / `plan_revision` | state 摘要与计划不同步时收据全部失效，且无正规恢复入口 | 中 |
+| **P0-4** | 轻量路径（quick/direct）不得 fallback 到 full 门禁 | `WORKFLOW_MODES` 已含 `quick`（`workflow-recommendation.ts:97`），而 `transition-guards.ts` 的 `fastPathRestrictions` **只放行 tweak，不含 quick** | quick 走 `exploring → approved-for-build` 被拒 → **quick 在门禁层实际不可用**；与上游 `#114` 是同一个 bug，只是表现位置不同 | 低（改常量数组 + 明确报错） |
+
+### 🟡 P1 — 建议借鉴（5 项）
+
+| # | 借鉴点 | sFlow 现状 | 价值/取舍 | 工作量 |
+|---|--------|-----------|-----------|--------|
+| **P1-1** | `review_policy: final\|wave` | `ExecutionPlan` 无 `review_policy` / `schema_version`；依赖判定基于逐波 receipt | v2 降本核心：一次整体区间审查替代逐波审查。取舍：sFlow 是 agent 编排，上下文管理方式不同，但同样受益 | 中高 |
+| **P1-2** | `writePlanRevision()` 语义化证据保留 | 已做 plan-scoped 双写，**无 `writePlanRevision` 等价物**，计划修订时证据迁移未定义 | 上游 `rebind()`（递归重写 plan_hash/revision）比"删除重建"优雅 | 中 |
+| **P1-3** | `workflowPolicy()` 单点裁决 | 同一概念散落在 `checkWorkflowModeTransition` / `isDirectWorkflowReceipt` / `check-direct-short-path` 三处 | 架构整洁性 + 消除不一致风险——**这正是 P0-4 的根因** | 中 |
+| **P1-4** | `parseTasks()` 单一解析入口 | 已移植 checkbox 规范化，但散落在 `task-tracker.ts` / `execution-plan` / guard 多处 | 低代码量，消除解析分歧 | 低 |
+| **P1-5** | 终评范围锚点 `review_base` | 无 `review_base` 概念；`GitRangeValidator` 只校验 base/head 有效性，不校验"是否完整覆盖变更起点" | 解决"截断审查"（只审 `HEAD~1`）导致多提交工作漏审早期提交 | 中 |
+
+### 🟢 P2 — 按需借鉴（7 项）
+
+| 借鉴点 | 上游做法 | sFlow 现状与判断 |
+|--------|---------|------------------|
+| 隔离上下文持久化 | `.git/ssf-finish/<name>.json` + `resolveIsolationChange()` 的"不静默回退"原则 | `checkGitBranchIsolation` **只是 warning**（`guard.ts:50-90`），仅检查分支名，无持久化上下文。若 sFlow 保持"探索友好"定位，维持 warning 是合理的 |
+| finish 状态机 + 环境指纹 | pending→verify-pending→cleanup-pending→complete + `verificationEnvironmentFingerprint()` | 无 CLI、无物理集成命令，`release-archivist` 承担逻辑收尾。**架构不适用**，但"跨进程不能冒用验证结果"的思想值得记入 prompt |
+| closing → debugging 重开 | 仅 `verify-pending` 允许 | sFlow 的 closing 是绝对终态；不依赖物理 merge / 删除 worktree，故不需要该 escape hatch |
+| accepted-risk 收尾 | `--accept-risk --confirm --reason` | `release-archivist` 有 verdict 概念但无显式出口；引入有被滥用绕过验证的风险 |
+| planning-config 门禁 | `artifactPolicy()` 在 `exploring:specifying` 就校验 `artifacts.skip` 非法组合 | 有 `artifact-preflight.ts` 但无配置合法性前置校验。**低价值**：配置错误迟早暴露 |
+| Windows 路径 native realpath | `realpathSync.native` 解析 8.3 短名 | sFlow 未见 `realpathSync.native`。若 Windows 用户遇到"路径不匹配"，此为根因。工作量极低，可作防御性改进 |
+| debugging 回退维度 | `debugging:specifying` / `debugging:bridging` 显式列出 | sFlow 的调试→计划回退是否合法**未显式定义**，取决于是否支持"发现根因需要改设计"的场景 |
+
+### ⚪ P3 — 不适用（6 项）
+
+| 项目 | 理由 |
+|------|------|
+| 多平台分发（CodeBuddy / WorkBuddy / Qoder / Cursor / Codex） | sFlow 是纯 OpenCode 插件，无安装器；`d653216` 的 `SSF` 重写是 OpenCode 特有问题的解法 |
+| `3444339` OS temp staging | 无释放 clone 流程；但其思想（不硬编码 `/tmp`、用 `os.tmpdir()`、失败清理）作为通用原则值得记入任何临时目录代码 |
+| v2.0.2 发布/回滚（`bb1fbee` + `163c854`） | 纯版本号噪音，且已 revert |
+| `d728a1f` 删除内部开发记录 | 上游清理自家 `docs/plans`，与我们无关 |
+| `60e05fa` marketplace scanner 证据 / `10d5f08`、`65eb736` README 重写 | sFlow 用 npm 发布；上游自己的营销文档 |
+| `16706ea` adjudication 恢复 | 已在上一轮完整评估（`#109`），本轮仅作为 P0-2 的前置依赖被再次触及 |
+
+## 三、需同步修复项（上游 bug 修复 → 我们是否受影响）
+
+| # | 上游修复 | 我们的代码现状 | 是否受影响 | 建议动作 |
+|---|---------|---------------|-----------|---------|
+| **S1** | `e7ab1a4` guard 推断持久化 workflow | guard 从 `readJsonFile(state.json)` 读 `stateData?.mode`（`transition-guards.ts:29`），**已经是**从持久化状态读 | ✅ 不受影响 | 无需动作（架构差异天然正确） |
+| **S2** | `e7ab1a4` 先校验 positionals 再推断 workflow | 无 CLI positionals | ✅ 不适用 | — |
+| **S3** | `d527495` DP timestamp 跨平台 | 全程 TypeScript，用 `new Date().toISOString()` | ✅ 不受影响 | 无需动作 |
+| **S4** | `d527495` 轻量路径免计划调试 | `checkDebuggingState` 只检查 agent 身份，不要求 execution plan | ✅ 不受影响（更宽松） | 无需动作 |
+| **S5** | `1571ccc` plan revision 恢复 | 有 `restoreState` 但无等价 revision 恢复 | ⚠️ 受影响（同源缺陷） | 见 P0-3 |
+| **S6** | `3ff4380` 相对路径双倍解析 | 无 CLI 路径参数处理 | ✅ 不适用 | — |
+| **S7** | `3ff4380` review_base 继承防范围前移 | 无 `review_base` | ⚠️ 不受影响（但也无该保护） | 见 P1-5 |
+| **S8** | `a8807bc` quick 不 fallback full | `fastPathRestrictions` **未含 quick** | 🔴 **受影响，且更严重** | 见 P0-4，立即修复 |
+| **S9** | `a8807bc` tasks checkbox 门禁 hotfix 豁免 | 无此 guard | ✅ 不受影响 | — |
+| **S10** | `a8807bc` 报错带 Fix 提示 | blockReason 较简短 | 🟡 可选改进 | 提升 UX，低成本 |
+| **S11** | `05aee08` resync 时 `execution_plan_hash` 不再必须是 reject 条件 | receipts 双写校验仍依赖 plan_hash/plan_revision 匹配 | 🟡 取决于是否采纳 v2 schema | — |
+| **S12** | `3444339` Windows 8.3 短名 + native realpath | 未见 `realpathSync.native` | 🟡 潜在受影响 | 防御性替换（低风险） |
+| **S13** | `05aee08` finish 跨进程重新验证（env fingerprint） | 无物理收尾 | ✅ 不适用 | 思想写入 release-archivist prompt |
+
+**小结**：13 项中 **1 项确认受影响（S8 / P0-4）、2 项同源缺陷（S5 / P0-3、S12）、1 项潜在（S7）**，其余因架构差异天然免疫。
+
+## 四、已移植部分是否被上游废弃 / 改名的核查结论
+
+| 已移植内容 | 上游 v2 状态 | 证据 |
+|-----------|-------------|------|
+| 8 状态状态机 | ✅ 完全保留，未被精简 | `docs/state-machine.md`（`05aee08` 后）仍列 8 state；`guard.mjs` 的 `TRANSITION_CHECKS` 主表未删项 |
+| DP-0..DP-7 | ✅ 保留（新流程不强制，legacy 仍走） | `docs/decision-points.md` 开头声明保留旧八状态与 DP 协议 |
+| spec-publication receipt（替代 spec_merged） | ✅ 保留且强化 | `checks/specs-merged.mjs:36-44` 仍用 `validatePublicationReceipt` |
+| adjudication 熔断 | ✅ 保留并演化为 issue 计数 | `execution-plan.mjs` `issueFailureCount` |
+| plan-scoped SDD 记录 | ✅ 保留，`writePlanRevision` 进一步利用 | `getPlanScopedPaths` 仍含 adjudications / repair-state |
+| recommendation receipt | ⚠️ 降级为可选（新流程不要求），但未删除 | `validatePlan` 中 `schema_version !== 2` 才要求 |
+| execution-contract.md | ⚠️ 新流程改为机器生成 plan，legacy 保留手写 | README v2 对比表 "handwritten execution contract" → 计划内部 |
+| execution-reviews-passed / tasks-complete / specs-merged / dp-gate-passed / artifacts-exist / schema-valid / contract-fresh | ✅ 全部保留，仅 contract-fresh 内部改为优先读 plan | `git show 05aee08 -- scripts/guard/checks/*.mjs` |
+| isolation / worktree | ⚠️ 语义变化：默认 worktree → 默认特性分支（worktree opt-in） | `ensure-branch.mjs` |
+
+### 🎯 关键结论
+
+> **我们之前移植的所有内容都没有被上游废弃或改名。**
+> v2 的革新集中在**前台入口层**（把五路径问卷压成两个按钮），而非**后台校验层**（八状态、收据、熔断、publication receipt 全部保留并多处加固）。
+> 唯一需要理解的变化是 recommendation receipt 与 execution-contract.md 从"必须"降级为"legacy 专用"——这是**降级而非删除**，sFlow 现有的 `recommendExecutionMode` + DP-4 写入依然安全。
+> **可以放心继续维护，无需担心被上游抛弃。**
+
+## P2 借鉴决策（2026-09-26 确认）
+
+> 前置结论：**P0 全采纳（4 项）、P1 全采纳（5 项）**，落地顺序见执行合约 §2 与 tasks.md 的 Wave 1–4。本节只裁定 P2 层。
+
+### 采纳（5 项）
+
+| # | P2 借鉴点 | 采纳方式 | 落地批次 / Requirement |
+|---|-----------|---------|------------------------|
+| 1 | Windows 路径 `realpathSync.native` | `wave-guards.ts:155` 改用 `fs.realpathSync.native`（全仓唯一调用点），避免 8.3 短名误判；常规路径结论不变、真实符号链接仍拦截、解析异常跳过不崩溃 | Wave 4 / GD-R1 |
+| 2 | `verificationEnvironmentFingerprint` 思想 | **只写思想，不实现真实指纹计算**：`release-archivist` prompt 要求记录环境标识（工作目录 / git HEAD / 测试命令 / 工具版本摘要）并声明跨环境验证结果不可冒用 | Wave 4 / GD-R2 |
+| 3 | debugging 回退维度显式化 | `debugging → specifying / bridging` 显式允许并写入回退原因（根因摘要 + 回退目标）；缺原因被拒并带 Fix 指引；回退之外的转换仍受既有转换表约束 | Wave 4 / GD-R3 |
+| 4 | 报错带 `Fix:` 提示 | 新增统一构造函数 `formatGuardFixHint(reason, entry)`，快路径 / 收据完整性 / 工件三类门禁的 `blockReason` 末行统一追加单行 `Fix: <可执行入口>.`，**禁止「请修复后重试」类空泛措辞** | Wave 1 建函数（FP-R3）/ Wave 4 全面收敛（GD-R4） |
+| 5 | `unknownTransitionFailure` 原则 | 门禁不认识的情况 MUST 明确报错，**MUST NOT 静默回落 full 主表**；落地为快路径命中限制表但模式不匹配时返回 `success:false + block:true`，报错含当前 mode、允许集合与正确路径 | Wave 1 / FP-R2 |
+
+### 不采纳（3 项）
+
+| # | P2 借鉴点 | 不采纳理由 |
+|---|-----------|-----------|
+| 1 | 隔离上下文持久化（`.git/ssf-finish/*.json`） | sFlow 保持"探索友好 / 个人项目友好"的定位；`checkGitBranchIsolation` 维持 warning 语义，不做物理隔离持久化（架构不适用：无 CLI、无 worktree 物理操作） |
+| 2 | finish 物理收尾状态机（pending → verify-pending → cleanup-pending → complete） | sFlow 无 CLI、无 worktree 物理操作，逻辑收尾由 `release-archivist` agent 承担，无需引入物理状态机 |
+| 3 | planning-config 门禁（`artifactPolicy.artifacts.skip` 合法性前置校验） | 低价值：配置错误迟早会在后续门禁暴露，不值得再前置一层校验 |
+
+**同批明确排除**：`closing → debugging` 重开（sFlow 的 closing 保持绝对终态）、accepted-risk 收尾（无显式风险接受出口，避免被滥用绕过验证）、多平台分发与引入 CLI（不适用于 OpenCode 插件架构）。
+
+## 总体结论
+
+### 总体判断
+
+本次更新是 spec-superflow **从"命令驱动的繁复 SDD 引擎"向"以证据收口的紧凑执行流"的转型**。价值不在于新增多少检查（几乎没新增），而在于**大幅削减普通任务的固定开销**——四份规划文档 → 两份、逐波审查 → 一次终评、自动 worktree → 默认分支、独立调试态 → 留在 executing。
+
+对 sFlow 的意义有三层：
+
+1. **确认安全**：我们移植的所有内容都还活着，且被加固
+2. **暴露缺陷**：P0-4（quick 未进 fast-path 白名单）是真实的功能不可用 bug；P0-2（熔断无出路）是真实死锁
+3. **提供方向**：v2 证明"低成本默认 + 显式升级"可行；sFlow 作为 agent 编排架构，成本压力更小，但同样受益于"一次终评"而非"逐波审查"
+
+### 优先行动清单
+
+**立即（Wave 1）**
+
+| 动作 | 工作量 | 理由 |
+|---|------|------|
+| 修复 P0-4：`fastPathRestrictions` 的 `exploring:approved-for-build` 放行 `tweak` + `quick`，并明确报错不回落 full | 1 小时 | quick 模式在 guard 层实际不可用；低风险、纯配置 + 明确报错 |
+
+**短期（Wave 2）**
+
+| 动作 | 工作量 | 理由 |
+|---|------|------|
+| P0-1：`recordReviewReceipt` 增加 `base !== head` + `git diff --name-only` 非空校验 | 2 小时 | 零范围 pass receipt 是真实门禁绕过 |
+| P1-3：抽取 `workflowPolicy()` 单点裁决，统一三处重复语义 | 半天 | 根除 P0-4 类重复实现的温床 |
+| P1-4：统一 `parseTasks()` 解析入口 | 2 小时 | 低代码量，消除解析分歧 |
+
+**中期（Wave 3）**
+
+| 动作 | 工作量 | 理由 |
+|---|------|------|
+| P0-2：`--issue` 身份化熔断 + `adjudicateWave()` 人工授权 | 1-2 天 | 当前熔断是单向死锁（5 次失败后 wave 永久不可审查） |
+| P0-3：`resolvePlanRevision` 等价恢复逻辑 | 1 天 | state↔plan 不同步时的正规恢复入口 |
+| P1-5：`review_base` 开工锚点（WRITE_ONCE） | 1 天 | 防"截断审查"漏审多提交工作的早期提交 |
+| P1-1：`review_policy: final`（需先做产品决策） | 中高 | 若用户抱怨审查轮次多，这是根本解法 |
+
+**观察 / 按需（Wave 4）**
+
+- `realpathSync.native` 防御性替换（已决策采纳）
+- `verificationEnvironmentFingerprint` 思想写入 release-archivist prompt（已决策采纳）
+- debugging 回退显式化（已决策采纳）
+- `Fix:` 提示与 `unknownTransitionFailure` 原则全面收敛（已决策采纳）
+
+### 一句话给决策者
+
+> **本次更新不需要我们重构任何东西，但暴露了 sFlow 一个真实可用性 bug（quick 模式在 guard 层被拒）和一个真实死锁（review 熔断后无出路）。建议先花一天修这两个，再考虑吸收 v2 的 `review_policy: final` 作为降本手段。**
