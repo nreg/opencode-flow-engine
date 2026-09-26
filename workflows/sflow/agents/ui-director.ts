@@ -113,7 +113,7 @@ Output to \`.flow-engine/sflow/ui-design.md\` using template at \`workflows/sflo
 
 **Mandatory**: Fill the \`### Component Visual Rules\` section (under \`## 3. Component Architecture\`) with concrete token references from Step 4 decisions. Must define visual rules for all 5 required component types: Button (all variants), Input/Form Field, Card, Navigation, Typography Hierarchy. Use the design tokens from §2 and interaction patterns from §4 as building blocks.
 
-After writing, call \`validate_ui_design\` tool to verify V1-V8. Fix any issues.
+After writing, call \`validate_ui_design\` tool to verify V1-V8. Fix any issues. **Forward slashes only**: the \`ui_design_path\` argument MUST use forward slashes \`/\` and be fully double-quoted — e.g. CORRECT \`{"ui_design_path": "E:/work/nreg/.flow-engine/sflow/ui-design.md"}\` vs WRONG \`{"ui_design_path": E:\\work\\nreg\\.flow-engine\\sflow\\ui-design.md"}\` (unquoted + backslashes). The \`<Change_Dir>\` tag arrives with Windows backslashes — replace every \`\\\\\` with \`/\` before using it.
 
 ### Step 7 — Anti-AI-Slop Self-Check
 
@@ -125,8 +125,23 @@ Run 8-category 43-rule check from the skill file (Section 5). All violations mus
 - \`glob\` / \`grep\` — Search codebase for design tokens, styles, components
 - \`bash\` — Run analysis commands
 - \`skill\` — Load UI skills (design-reference, ui-ux-pro-max)
-- \`validate_ui_design\` — Post-write V1-V7 validation
+- \`validate_ui_design\` — Post-write V1-V8 validation (pass ui_design_path with forward slashes, fully double-quoted)
 - \`agnes_image_understand\` — Analyze existing UI screenshots
+
+### Path Argument Format (MANDATORY)
+
+**Forward slashes only**: Every path passed as a tool argument MUST use forward slashes \`/\`. NEVER write a backslash \`\\\\\` in a tool argument.
+
+The path value MUST be wrapped in a complete pair of double quotes \`"\`. Copy the path whole — never hand-assemble it from fragments.
+
+Tool arguments are parsed as JSON **before** the tool executes. A backslash starts a JSON escape sequence and an unquoted value is not valid JSON — either one makes the call fail at the host argument-parsing layer with \`Unexpected identifier "E"\`, so the tool never runs and no validation result is produced. Getting the path right is the difference between a real validation report and a silent no-op.
+
+**Change_Dir conversion**: The \`<Change_Dir>\` tag arrives with Windows-style backslashes. Before using it in any tool argument, mechanically replace every \`\\\\\` with \`/\`. Example:
+Given: \`<Change_Dir>E:\\work\\nreg\\.flow-engine\\sflow</Change_Dir>\` → Use: \`"E:/work/nreg/.flow-engine/sflow"\`
+
+Examples:
+- WRONG: \`{"ui_design_path": E:\\work\\nreg\\.flow-engine\\sflow\\ui-design.md"}\` (value not quoted)
+- CORRECT: \`{"ui_design_path": "E:/work/nreg/.flow-engine/sflow/ui-design.md"}\`
 
 ## Guardrails
 
@@ -145,7 +160,7 @@ Run 8-category 43-rule check from the skill file (Section 5). All violations mus
 - No empty state element flash (use v-if/conditional rendering)
 - Always respect existing brownfield vocabulary
 - Always ensure WCAG AA compliance and prefers-reduced-motion fallback
-- Always call \`validate_ui_design\` after writing ui-design.md`,
+- Always call \`validate_ui_design\` after writing ui-design.md — with the path in forward-slash form and fully double-quoted`,
     temperature: options?.temperature ?? 0.7,
     tools: getAgentTools('ui-director'),
   };

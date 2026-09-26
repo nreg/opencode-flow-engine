@@ -265,7 +265,22 @@ You have access to:
 - \`write\` - Write verification report and archive
 - \`bash\` - Run tests and commands
 - \`glob\` - Search for files
-- \`artifact_inspector\` - Inspect planning artifacts for decision-point audit
+- \`artifact_inspector\` - Inspect planning artifacts for decision-point audit (pass artifact_path with forward slashes)
+
+### Path Argument Format (MANDATORY)
+
+**Forward slashes only**: Every path passed as a tool argument MUST use forward slashes \`/\`. NEVER write a backslash \`\\\\\` in a tool argument.
+
+The path value MUST be wrapped in a complete pair of double quotes \`"\`. Copy the path whole — never hand-assemble it from fragments.
+
+Tool arguments are parsed as JSON **before** the tool executes. A backslash starts a JSON escape sequence and an unquoted value is not valid JSON — either one makes the call fail at the host argument-parsing layer with \`Unexpected identifier "E"\`, so the tool never runs and no validation result is produced. Getting the path right is the difference between a real validation report and a silent no-op.
+
+**Change_Dir conversion**: The \`<Change_Dir>\` tag arrives with Windows-style backslashes. Before using it in any tool argument, mechanically replace every \`\\\\\` with \`/\`. Example:
+Given: \`<Change_Dir>E:\\work\\nreg\\.flow-engine\\sflow</Change_Dir>\` → Use: \`"E:/work/nreg/.flow-engine/sflow"\`
+
+Examples:
+- WRONG: \`{"artifact_path": E:\\work\\nreg\\.flow-engine\\sflow"}\` (value not quoted)
+- CORRECT: \`{"artifact_path": "E:/work/nreg/.flow-engine/sflow"}\`
 
 ### Archive Cleanup Execution
 

@@ -129,12 +129,28 @@ The \`validate_proposal\` tool expects:
 
 ### Running Validation
 
+#### Path Argument Format (MANDATORY)
+
+**Forward slashes only**: Every path passed as a tool argument MUST use forward slashes \`/\`. NEVER write a backslash \`\\\\\` in a tool argument.
+
+The path value MUST be wrapped in a complete pair of double quotes \`"\`. Copy the path whole — never hand-assemble it from fragments.
+
+Tool arguments are parsed as JSON **before** the tool executes. A backslash starts a JSON escape sequence and an unquoted value is not valid JSON — either one makes the call fail at the host argument-parsing layer with \`Unexpected identifier "E"\`, so the tool never runs and no validation result is produced. Getting the path right is the difference between a real validation report and a silent no-op.
+
+**Change_Dir conversion**: The \`<Change_Dir>\` tag arrives with Windows-style backslashes. Before using it in any tool argument, mechanically replace every \`\\\\\` with \`/\`. \`<change-dir-fs>\` below means the \`<Change_Dir>\` content with every \`\\\\\` replaced by \`/\`. Example:
+Given: \`<Change_Dir>E:\\work\\nreg\\.flow-engine\\sflow</Change_Dir>\` → Use: \`"E:/work/nreg/.flow-engine/sflow"\`
+
 Use these tools to validate each artifact:
-- \`validate_spec(spec_path="<change-dir>/specs/<file>.md")\` for spec files
-- \`validate_tasks(tasks_path="<change-dir>/tasks.md")\` for tasks
-- \`validate_design(design_path="<change-dir>/design.md")\` for design
-- \`validate_proposal(proposal_path="<change-dir>/proposal.md")\` for proposal
-- \`artifact_inspector(artifact_path="<change-dir>")\` for bulk inspection of all artifacts
+- \`validate_spec(spec_path="<change-dir-fs>/specs/<file>.md")\` for spec files
+- \`validate_tasks(tasks_path="<change-dir-fs>/tasks.md")\` for tasks
+- \`validate_design(design_path="<change-dir-fs>/design.md")\` for design
+- \`validate_proposal(proposal_path="<change-dir-fs>/proposal.md")\` for proposal
+- \`artifact_inspector(artifact_path="<change-dir-fs>")\` for bulk inspection of all artifacts
+
+Examples:
+- WRONG: \`{"spec_path": E:\\work\\nreg\\.flow-engine\\sflow\\specs\\auth-service.md"}\` (value not quoted)
+- WRONG: \`{"spec_path": "E:\\\\work\\\\nreg\\\\.flow-engine\\\\sflow\\\\specs\\\\auth-service.md"}\` (escaped backslashes, error-prone quoting)
+- CORRECT: \`{"spec_path": "E:/work/nreg/.flow-engine/sflow/specs/auth-service.md"}\`
 
 Fix any errors before proceeding.
 
@@ -196,6 +212,9 @@ You have access to:
 - \`edit\` - Edit artifacts
 - \`bash\` - Run validation scripts
 - \`skill\` - Access frontend-design skill for UI design guidance
+- \`validate_spec\` / \`validate_tasks\` / \`validate_design\` / \`validate_proposal\` — Schema validation for each artifact
+- \`artifact_inspector\` — Bulk inspection of all artifacts
+- All five accept a path argument: it MUST use forward slashes and be fully double-quoted (see "Path Argument Format")
 
 Use validation scripts and frontend-design skill to ensure quality.
 

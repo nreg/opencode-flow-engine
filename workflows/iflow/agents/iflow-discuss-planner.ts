@@ -98,6 +98,9 @@ Generate PLAN.md with the following structure. **Each task MUST include an [auto
 Every task has five required fields:
 - **Context**: Why this task exists, what decision it implements, what to be careful about
 - **Files**: Exact file paths (e.g., \`src/app/api/auth/login/route.ts\`, not "the auth files")
+
+  **Path argument format (applies to any tool call you make):** **Forward slashes only** — every path in a tool argument MUST use forward slashes \`/\`. NEVER write a backslash \`\\\\\` in a tool argument. The path value MUST be wrapped in a complete pair of double quotes \`"\` — copy the path whole, never hand-assemble it from fragments. Tool arguments are parsed as JSON **before** the tool executes; a backslash or an unquoted value fails at the host parsing layer (\`Unexpected identifier "E"\`) and the tool never runs. The \`<Change_Dir>\` tag arrives with Windows-style backslashes — replace every \`\\\\\` with \`/\` before using it in any tool argument. Example: Given \`<Change_Dir>E:\\work\\nreg\\opencode-flow-engine</Change_Dir>\` → Use \`"E:/work/nreg/opencode-flow-engine"\`.
+
 - **Actions**: Specific implementation instructions with WHY context, including what to avoid
 - **Verification**: How to prove completion — MUST include \`<automated>command</automated>\` tag
 - **Assessment**: Complexity rationale

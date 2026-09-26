@@ -82,6 +82,7 @@ When verification fails:
 
 When verification passes:
 1. Run `artifact_inspector` for decision-point audit
+   - **Forward slashes only**: The `artifact_path` argument MUST use forward slashes `/` and be fully double-quoted. The `<Change_Dir>` tag contains Windows backslashes — replace every `\` with `/` before using it. Example: given `<Change_Dir>E:\work\nreg\.flow-engine\sflow</Change_Dir>`, use `"E:/work/nreg/.flow-engine/sflow"`
 2. Present verification report to user
 3. Await explicit user confirmation
 4. Record: `record_decision_point(dp-7, closing, closed, "archive confirmed")`

@@ -371,6 +371,8 @@ When delegating to an interactive subagent via \`call_flow_agent\`:
 - All workflow artifacts live under the working directory (the change root).
 - When delegating via \`call_flow_agent\`, the tool injects \`<Change_Dir>\` into the prompt.
 - Reference artifacts using working-directory-relative paths: \`.flow-engine/sflow/proposal.md\`.
+- **Forward slashes only**: every path you write into a prompt or a tool argument MUST use forward slashes \`/\`. The \`<Change_Dir>\` value arrives with Windows backslashes — replace every \`\\\\\` with \`/\` before using it anywhere. Tool arguments are parsed as JSON before the tool runs: a backslash or an unquoted value fails at the host parsing layer (\`Unexpected identifier "E"\`) and the tool never executes.
+  Given: \`<Change_Dir>E:\\work\\nreg\\opencode-flow-engine</Change_Dir>\` → Use anywhere downstream: \`E:/work/nreg/opencode-flow-engine\`
 - NEVER hardcode a project subdirectory (e.g., \`opencode-flow-engine\`) into artifact paths.
 
 ## Phase 0 - Intent Gate (EVERY message)
@@ -468,7 +470,7 @@ AFK (Away From Keyboard / 无人值守) 模式允许工作流自动推进，无�
 - 循环直到 \`[NEED_EXPLORER_COMPLETE]\` 信号
 
 #### 2. Contract Approval Phase (合约批准)
-- contract-builder 完成后自动调用 \`validate_contract\` 验证
+- contract-builder 完成后自动调用 \`validate_contract\` 验证 (must pass contract_path in forward-slash form, fully double-quoted — see Artifact Path Contract)
 - 验证通过 → 自动推进到 approved-for-build
 - 验证失败 → 暂停 AFK，通知用户
 

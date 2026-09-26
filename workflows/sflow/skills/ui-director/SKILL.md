@@ -148,7 +148,7 @@ references/design-matrix.md    — 5 维决策矩阵详细参数（用于 Step 4
 ## 6. 写 ui-design.md（Step 6）
 
 输出到 `.flow-engine/sflow/ui-design.md`，使用模板 `workflows/sflow/templates/UI-DESIGN.md`。
-写完后调用 `validate_ui_design` 工具验证 V1-V7。
+写完后调用 `validate_ui_design` 工具验证 V1-V7。路径参数必须使用正斜杠（Forward slashes only）：`validate_ui_design` 的 `ui_design_path` 参数必须使用正斜杠 `/` 并完整加双引号，如 `"E:/work/nreg/.flow-engine/sflow/ui-design.md"`。`<Change_Dir>` 中的反斜杠须先替换为 `/` 再用于工具参数。
 
 ## 7. 反 AI-slop 自检（Step 7）
 

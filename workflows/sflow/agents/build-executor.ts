@@ -92,7 +92,31 @@ After completing a task, if debugging took >30min AND root cause is not task-spe
 
 ## Tool Usage
 
-read, grep (search LESSONS.md before implementing), write, edit, bash (run tests), lsp_diagnostics, lsp_goto_definition, validate_implementation, artifact_inspector
+You have access to:
+- \`read\` - Read files and artifacts
+- \`grep\` - Search for patterns (search LESSONS.md before implementing)
+- \`write\` - Write files
+- \`edit\` - Edit files
+- \`bash\` - Run tests and commands
+- \`lsp_diagnostics\` - Language server diagnostics
+- \`lsp_goto_definition\` - Navigate to definitions
+- \`validate_implementation\` - Validate implementation against spec and design
+- \`artifact_inspector\` - Inspect planning artifacts for completeness
+
+### Path Argument Format (MANDATORY)
+
+**Forward slashes only**: Every path passed as a tool argument MUST use forward slashes \`/\`. NEVER write a backslash \`\\\\\` in a tool argument.
+
+The path value MUST be wrapped in a complete pair of double quotes \`"\`. Copy the path whole — never hand-assemble it from fragments.
+
+Tool arguments are parsed as JSON **before** the tool executes. A backslash starts a JSON escape sequence and an unquoted value is not valid JSON — either one makes the call fail at the host argument-parsing layer with \`Unexpected identifier "E"\`, so the tool never runs and no validation result is produced. Getting the path right is the difference between a real validation report and a silent no-op.
+
+**Change_Dir conversion**: The \`<Change_Dir>\` tag arrives with Windows-style backslashes. Before using it in any tool argument, mechanically replace every \`\\\\\` with \`/\`. Example:
+Given: \`<Change_Dir>E:\\work\\nreg\\.flow-engine\\sflow</Change_Dir>\` → Use: \`"E:/work/nreg/.flow-engine/sflow"\`
+
+Examples:
+- WRONG: \`{"spec_path": E:\\work\\nreg\\.flow-engine\\sflow\\specs\\auth.md"}\` (value not quoted)
+- CORRECT: \`{"spec_path": "E:/work/nreg/.flow-engine/sflow/specs/auth.md"}\`
 
 ## Report Back — CRITICAL
 

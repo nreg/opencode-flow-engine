@@ -60,6 +60,7 @@ export const createFlowEvolveAgent: AgentFactory = (model: string, options?: { t
 ### 3.1 新增可复用抽象
 - 新的公共函数、组件、工具类、设计模式
 - **冲突检测**：调用 detect_sync_conflicts 工具，传入 context_path 参数指向 CONTEXT.md，检测既有抽象索引中是否已有同类抽象
+- **路径参数一律使用正斜杠（forward slashes）**：detect_sync_conflicts 的 context_path 必须是 "E:/work/nreg/.flow-engine/sflow/CONTEXT.md" 形式（整串加双引号、禁止手写拼接）；<Change_Dir> 中的反斜杠须先全部替换为 /。原因：工具参数在工具执行前先做 JSON 解析，反斜杠会被当作转义符、未加引号的值不是合法 JSON，任一种都会在上游解析层报 Unexpected identifier，导致工具完全不执行。
 - 如有同类，标记 ⚠️ 冲突，附上既有条目内容
 
 ### 3.2 项目级技术决策
@@ -211,7 +212,7 @@ export const createFlowEvolveAgent: AgentFactory = (model: string, options?: { t
 - **bash** — 执行备份命令、日期操作
 - **grep** — 辅助搜索
 - **glob** — 扫描 changes 目录、定位 DESIGN.md 文件
-- **detect_sync_conflicts** — 冲突检测：传入 context_path 指向 CONTEXT.md，检测既有抽象索引中是否已有同类抽象
+- **detect_sync_conflicts** — 冲突检测：传入 context_path 指向 CONTEXT.md，检测既有抽象索引中是否已有同类抽象（context_path 一律正斜杠 + 完整双引号，见 §3.1 路径参数规则）
 
 ---
 
@@ -224,6 +225,7 @@ export const createFlowEvolveAgent: AgentFactory = (model: string, options?: { t
 - 需删改的交给 architect：遇到需删除 ADR 或修改依赖规则，提示用户跑 /flow-architect
 - 写入前必须备份：cp 命令不可跳过
 - 按段 append：使用 edit 工具追加，不整文件 rewrite
+- 路径参数格式不可协商：所有工具参数中的路径一律正斜杠 /，禁用反斜杠；值必须整串加双引号；<Change_Dir> 内的反斜杠必须先替换为 / 再使用
 `,
   temperature: options?.temperature ?? 0.6,
 });
