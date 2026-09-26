@@ -7,6 +7,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdir, rm, writeFile, readFile } from 'fs/promises';
+import { execFileSync } from 'child_process';
+import { existsSync } from 'fs';
 import { join } from 'path';
 import {
   createExecutionPlan,
@@ -1027,6 +1029,117 @@ describe('Repair Circuit Breaker', () => {
       expect(repairState).not.toBeNull();
       expect(repairState?.status).toBe('resolved');
       expect(typeof repairState?.previous_report).toBe('string');
+    });
+  });
+
+  // P0-1: 零范围收据拒绝（review-receipt-integrity）
+  describe('P0-1: Zero-range review receipt rejection', () => {
+    /** 构造一个本地 git 仓库：base 为首次提交，head 为空 diff 提交（--allow-empty）。 */
+    async function initGitRepoWithEmptySecondCommit(workDir: string): Promise<{ base: string; head: string }> {
+      await ensureDir(workDir);
+      const run = (args: string[]) =>
+        execFileSync('git', args, { cwd: workDir, encoding: 'utf8', stdio: 'pipe' });
+
+      run(['init', '-q']);
+      run(['config', 'user.email', 'guard-test@example.com']);
+      run(['config', 'user.name', 'guard-test']);
+      run(['config', 'commit.gpgsign', 'false']);
+      await writeFile(join(workDir, 'seed.txt'), 'seed\n');
+      run(['add', '.']);
+      run(['commit', '-q', '-m', 'base commit']);
+      const base = run(['rev-parse', 'HEAD']).trim();
+      // 第二次提交为空 diff：base..head 之间 `git diff --name-only` 无输出
+      run(['commit', '-q', '--allow-empty', '-m', 'empty commit']);
+      const head = run(['rev-parse', 'HEAD']).trim();
+      return { base, head };
+    }
+
+    async function createPlan(workDir: string): Promise<void> {
+      await setupStateJson(workDir);
+      await createExecutionPlan(workDir, {
+        mode: 'sdd',
+        source: 'default',
+        rationale: 'Test zero-range receipt rejection',
+        waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      });
+    }
+
+    it('should reject a pass receipt whose base equals head', async () => {
+      const workDir = tempDir('zero-range-same-sha');
+      await cleanupDir(workDir);
+      await createPlan(workDir);
+      const { head } = await initGitRepoWithEmptySecondCommit(workDir);
+
+      await expect(
+        recordReviewReceipt(workDir, 'W1', {
+          status: 'pass',
+          base: head,
+          head,
+          report: 'Zero-range pass',
+        }),
+      ).rejects.toThrow(/non-empty review range/i);
+
+      // 拒绝后磁盘上不得产生任何收据
+      expect(existsSync(`${workDir}/.flow-engine/sflow/reviews/W1.json`)).toBe(false);
+
+      await cleanupDir(workDir);
+    });
+
+    it('should reject a pass receipt covering an empty git diff', async () => {
+      const workDir = tempDir('zero-range-empty-diff');
+      await cleanupDir(workDir);
+      await createPlan(workDir);
+      const { base, head } = await initGitRepoWithEmptySecondCommit(workDir);
+
+      await expect(
+        recordReviewReceipt(workDir, 'W1', {
+          status: 'pass',
+          base,
+          head,
+          report: 'Empty diff pass',
+        }),
+      ).rejects.toThrow(/non-empty Git diff/i);
+
+      expect(existsSync(`${workDir}/.flow-engine/sflow/reviews/W1.json`)).toBe(false);
+
+      await cleanupDir(workDir);
+    });
+
+    it('should allow a fail receipt over the same zero-length range', async () => {
+      const workDir = tempDir('zero-range-fail-allowed');
+      await cleanupDir(workDir);
+      await createPlan(workDir);
+      const { base, head } = await initGitRepoWithEmptySecondCommit(workDir);
+
+      const receipt = await recordReviewReceipt(workDir, 'W1', {
+        status: 'fail',
+        base,
+        head,
+        report: 'Fail over empty range',
+      });
+
+      expect(receipt.status).toBe('fail');
+      expect(existsSync(`${workDir}/.flow-engine/sflow/reviews/W1.json`)).toBe(true);
+
+      await cleanupDir(workDir);
+    });
+
+    it('should skip diff validation (not throw) when git is unavailable for the range', async () => {
+      const workDir = tempDir('zero-range-non-git');
+      await cleanupDir(workDir);
+      await createPlan(workDir);
+      // 不初始化 git：git diff 对这两个伪 SHA 必然失败 → 优雅降级跳过
+      const receipt = await recordReviewReceipt(workDir, 'W1', {
+        status: 'pass',
+        base: '0000000000000000000000000000000000000000',
+        head: '1111111111111111111111111111111111111111',
+        report: 'Non-git environment pass',
+      });
+
+      expect(receipt.status).toBe('pass');
+      expect(existsSync(`${workDir}/.flow-engine/sflow/reviews/W1.json`)).toBe(true);
+
+      await cleanupDir(workDir);
     });
   });
 });

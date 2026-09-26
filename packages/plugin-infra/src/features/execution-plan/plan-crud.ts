@@ -8,6 +8,7 @@ import type { ExecutionPlan, ExecutionMode, PlanSource, Wave, DP4Result } from '
 import { ensureDir, readJsonFile, writeJsonFile, stateFileMutex } from '@opencode-flow-engine/shared';
 import { EXECUTION_MODE_THRESHOLDS } from '@opencode-flow-engine/core';
 import { Logger } from '../../utils/logger.js';
+import { incompleteTasks } from './task-parser.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -421,9 +422,9 @@ const DEPENDENCY_KEYWORDS = [
  * @returns DP4Result with the recommended mode and rationale
  */
 export function recommendExecutionMode(tasksMdContent: string): DP4Result {
-  // Count tasks: lines starting with "- [ ]" (unchecked task items)
-  const taskLines = tasksMdContent.split('\n').filter(line => /^\s*-\s*\[\s*\]/.test(line));
-  const taskCount = taskLines.length;
+  // Count tasks: 复选框行统一走 parseTasks 单入口（D7），阈值语义不变——仍未勾选的任务
+  const pendingTasks = incompleteTasks(tasksMdContent);
+  const taskCount = pendingTasks.length;
 
   // Detect dependencies by scanning for keywords
   const lowerContent = tasksMdContent.toLowerCase();

@@ -35,4 +35,13 @@ export {
   readRepairState,
   validateRepairContinuity,
   updateRepairState,
+  // P0-1: 审查区间完整性（Wave 3 终评区间复用）
+  assertNonEmptyDiff,
 } from './review-receipts.js';
+
+// Export all from task-parser.ts（D7: 复选框行单一解析入口）
+export {
+  parseTasks,
+  incompleteTasks,
+  type ParsedTask,
+} from './task-parser.js';

@@ -32,6 +32,8 @@ import {
   checkAbstractionGrepGuard,
 } from "./guard/checks/index.js";
 import type { SchemaMigrationGuardOptions } from "./guard/checks/index.js";
+import { checkDirectShortPath, isDirectShortPathTransition } from "../features/guard-checks/check-direct-short-path.js";
+import { formatGuardFixHint, GUARD_FIX_ENTRIES } from "../features/guard-fix-hint.js";
 
 export async function detectActiveWorkflow(changeDir: string): Promise<'iflow' | 'sflow' | 'none'> {
   const iflowExists = await directoryExists(`${changeDir}/.flow-engine/iflow`);
@@ -106,6 +108,47 @@ async function getIFlowGuards(changeDir: string, data?: Record<string, unknown>,
 }
 
 /**
+ * Direct 短路径门禁（编排挂载版，F2 死代码修复）。
+ *
+ * `checkDirectShortPath` 此前只有函数级单测、从未出现在 `createGuardHook()` 的检查数组里，
+ * 属于「写好了但没生效」的死代码（lessons L-002）。本函数把它接入编排：
+ * - 仅 sflow 工作流、且转换属于 direct short path（quick/tweak/hotfix 的快路径）时参与判定
+ * - 证据裁决统一来自 `workflowPolicy`，本函数只负责把结论翻译成 HookResult
+ * - 非快路径场景（如 full 的常规转换）直接放行，不误伤
+ */
+async function checkDirectShortPathGuard(
+  changeDir: string,
+  data: Record<string, unknown> | undefined,
+  activeWorkflow: 'iflow' | 'sflow' | 'none',
+): Promise<HookResult> {
+  if (!changeDir || !data) return { success: true };
+  if (activeWorkflow !== 'sflow') return { success: true };
+
+  const newState = data.newState as string | undefined;
+  if (!newState) return { success: true };
+
+  const stateData = await readJsonFile<{ state?: string; mode?: string; workflow?: string }>(
+    `${changeDir}/${getStateFilePath('sflow')}`,
+  );
+  const currentState = stateData?.state || 'exploring';
+  const workflow = String(stateData?.workflow ?? stateData?.mode ?? '').trim() || 'full';
+
+  if (!isDirectShortPathTransition(currentState, newState, workflow)) return { success: true };
+
+  const result = await checkDirectShortPath(changeDir, workflow);
+  if (result.pass) return { success: true };
+
+  return {
+    success: false,
+    block: true,
+    blockReason: `[SFLOW] direct-short-path guard: ${result.failures.join('; ')}\n${formatGuardFixHint(
+      `补齐 ${workflow} 工作流所需的 workflow-selection 收据`,
+      GUARD_FIX_ENTRIES.contractBuilderRouter,
+    )}`,
+  };
+}
+
+/**
  * Create the guard hook
  */
 export function createGuardHook(): HookHandler {
@@ -123,6 +166,7 @@ export function createGuardHook(): HookHandler {
           await checkPresetUpgrade(changeDir, activeWorkflow),
           await checkContractStalenessGuard(changeDir, activeWorkflow),
           await checkWorkflowModeTransition(changeDir, data, activeWorkflow),
+          await checkDirectShortPathGuard(changeDir, data, activeWorkflow),
           await checkTaskCompletion(changeDir, activeWorkflow),
           await checkWaveDependencies(changeDir, activeWorkflow),
           await checkReceiptIntegrity(changeDir, activeWorkflow),

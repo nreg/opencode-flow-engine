@@ -9,8 +9,11 @@
  * 参考：source/spec-superflow/scripts/guard/guard.mjs (DIRECT_SHORT_PATH_CHECKS)
  */
 
-import { readWorkflowSelection, isDirectWorkflowReceipt } from '../workflow-recommendation.js';
+import { workflowPolicy, resolveWorkflowMode, type WorkflowPolicyState } from '../workflow-policy.js';
 import { readJsonFile } from '@opencode-flow-engine/shared';
+
+/** 拥有 direct 收据概念的工作流（tweak 走轻量路径，无 direct 收据）。 */
+const DIRECT_RECEIPT_WORKFLOWS = ['quick', 'hotfix'];
 
 /**
  * Guard 检查结果
@@ -23,9 +26,9 @@ export interface GuardCheckResult {
 /**
  * 读取工作流状态
  */
-async function readWorkflowState(changeDir: string): Promise<{ workflow?: string } | null> {
+async function readWorkflowState(changeDir: string): Promise<WorkflowPolicyState | null> {
   const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
-  return await readJsonFile<{ workflow?: string }>(statePath);
+  return await readJsonFile<WorkflowPolicyState>(statePath);
 }
 
 /**
@@ -42,49 +45,46 @@ export async function checkDirectShortPath(
   changeDir: string,
   workflow: string
 ): Promise<GuardCheckResult> {
-  // 读取 workflow selection receipt
-  const receipt = await readWorkflowSelection(changeDir);
-  
-  // 读取当前 state
-  const state = await readWorkflowState(changeDir);
-  
-  // 验证 receipt 有效性
-  if (!receipt.valid) {
+  // 读取当前 state；证据裁决统一交给 workflowPolicy（spec: workflow-policy / 单点裁决）
+  const state = (await readWorkflowState(changeDir)) || {};
+  const policy = await workflowPolicy(changeDir, { ...state, workflow: state.workflow ?? workflow });
+
+  if (DIRECT_RECEIPT_WORKFLOWS.includes(workflow)) {
+    // quick / hotfix 必须由 direct 收据授权
+    if (!policy.directShortPath) {
+      return {
+        pass: false,
+        failures: [
+          policy.missingDirectReceipt
+            ? `valid direct receipt is required for this short-path transition: ${workflow} workflow has no valid workflow-selection receipt`
+            : 'a valid direct receipt matching the current workflow is required for this short-path transition',
+        ],
+      };
+    }
+
+    // 收据有效但 state 声明的工作流与期望不符
+    if (resolveWorkflowMode(state) !== workflow) {
+      return {
+        pass: false,
+        failures: [
+          `workflow mismatch: state.workflow="${state?.workflow}" but expected "${workflow}"`,
+        ],
+      };
+    }
+
+    return { pass: true, failures: [] };
+  }
+
+  // tweak 等轻量路径：仅在裁决结论明确缺少收据（如 debugging 缺 debug 收据）时阻断
+  if (policy.missingDebugReceipt) {
     return {
       pass: false,
       failures: [
-        `valid direct receipt is required for this short-path transition: ${receipt.failures.join('; ')}`,
+        `valid direct receipt is required for this short-path transition: debugging ${workflow} workflow has no planless debug receipt`,
       ],
     };
   }
-  
-  if (!receipt.record) {
-    return {
-      pass: false,
-      failures: ['valid direct receipt is required for this short-path transition: record is null'],
-    };
-  }
-  
-  // 验证 isDirectWorkflowReceipt
-  if (!isDirectWorkflowReceipt(receipt.record, state || {})) {
-    return {
-      pass: false,
-      failures: [
-        'a valid direct receipt matching the current workflow is required for this short-path transition',
-      ],
-    };
-  }
-  
-  // 验证 workflow 匹配
-  if (state?.workflow !== workflow) {
-    return {
-      pass: false,
-      failures: [
-        `workflow mismatch: state.workflow="${state?.workflow}" but expected "${workflow}"`,
-      ],
-    };
-  }
-  
+
   return { pass: true, failures: [] };
 }
 

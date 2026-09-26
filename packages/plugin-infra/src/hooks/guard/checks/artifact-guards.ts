@@ -11,6 +11,7 @@ import { sharedValidator, HOTFIX_UPGRADE_THRESHOLDS, TWEAK_UPGRADE_THRESHOLDS } 
 import { isContractStale, getContractStalenessReport } from "@opencode-flow-engine/shared";
 import { checkIFlowArtifactAndPhaseConsistency } from "../iflow-shared-guards.js";
 import { readArtifactContent, artifactExists } from "../../../features/state-manager/artifact-paths.js";
+import { parseTasks } from "../../../features/execution-plan/task-parser.js";
 
 /**
  * Combined artifact existence + phase consistency check.
@@ -104,7 +105,8 @@ export async function checkPresetUpgrade(changeDir: string, activeWorkflow: 'ifl
 
   // C2: Use tasks.md to infer file count (parse file references from task descriptions)
   // instead of git diff which counts unrelated changes
-  const taskLines = tasksContent.split("\n").filter((line: string) => line.match(/^-\s*\[.\]\s+/));
+  // D7: 复选框解析统一走 parseTasks；fileRefs 扫描用原始行，避免丢失缩进信息
+  const taskLines = parseTasks(tasksContent).map((task) => task.line);
   const taskCount = taskLines.length;
 
   // Count unique file mentions across all task lines

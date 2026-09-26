@@ -17,8 +17,66 @@ import {
   ensureReceiptDir,
 } from '../plan-scoped-paths.js';
 import { readExecutionPlan } from './plan-crud.js';
+import { Logger } from '../../utils/logger.js';
 
 const REVIEWS_DIR = '.flow-engine/sflow/reviews';
+
+// ─── P0-1: 审查区间完整性（移植上游 review-range.mjs:assertNonEmptyDiff）────────
+
+/** 日志与报错里展示的短 SHA（7 位），避免整行 40 位哈希污染可读性。 */
+function shortSha(value: string): string {
+  const trimmed = String(value ?? '').trim();
+  return trimmed.length > 7 ? trimmed.slice(0, 7) : trimmed;
+}
+
+/**
+ * 校验审查区间覆盖一段非空的 Git diff。
+ *
+ * 语义（spec: review-receipt-integrity / 零范围收据拒绝）：
+ * - `base === head` → 抛错（零范围收据不可能证明任何改动）
+ * - `git diff --name-only base head --` 无输出 → 抛错
+ * - git 不可用或非 git 仓库 → **降级跳过**并告警，绝不因命令失败阻断流程
+ *
+ * 仅约束**新写入的 pass 收据**；fail 收据不要求证明改动量（调用方负责分流）。
+ *
+ * @param changeDir 项目根目录
+ * @param base 审查区间起点 commit
+ * @param head 审查区间终点 commit
+ */
+export async function assertNonEmptyDiff(changeDir: string, base: string, head: string): Promise<void> {
+  const baseSha = String(base ?? '').trim();
+  const headSha = String(head ?? '').trim();
+
+  // 缺字段的旧收据不做追溯性判定（spec: 校验只在写入时生效）
+  if (!baseSha || !headSha) return;
+
+  if (baseSha === headSha) {
+    throw new Error(
+      `Passing review receipt requires a non-empty review range: base and head are identical (${shortSha(baseSha)}).`,
+    );
+  }
+
+  let output = '';
+  try {
+    const { execFileSync } = await import('child_process');
+    output = execFileSync('git', ['-C', changeDir, 'diff', '--name-only', baseSha, headSha, '--'], {
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    Logger.warn(
+      `[P0-1] Skipping non-empty diff validation (${shortSha(baseSha)}..${shortSha(headSha)}): git unavailable for ${changeDir} — ${reason}`,
+    );
+    return;
+  }
+
+  if (output.trim() === '') {
+    throw new Error(
+      `Passing review must cover a non-empty Git diff: git diff --name-only ${shortSha(baseSha)} ${shortSha(headSha)} produced no changes.`,
+    );
+  }
+}
 
 // ─── T2.10: 自动迁移旧收据 ──────────────────────────────────────────────────────
 
@@ -184,6 +242,11 @@ export async function recordReviewReceipt(
 
   // T2.7: Validate repair continuity
   validateRepairContinuity(previousReceipt, previousRepair, receipt);
+
+  // P0-1: 仅 pass 收据需要证明「审查了真实改动」；fail 收据不受非空限制
+  if (receipt.status === 'pass') {
+    await assertNonEmptyDiff(changeDir, receipt.base, receipt.head);
+  }
 
   // 构建完整收据（包含 plan scope 信息）
   const fullReceipt: ReviewReceipt = {

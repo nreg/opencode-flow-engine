@@ -7,6 +7,7 @@
 
 import { readFile } from "@opencode-flow-engine/shared";
 import { readArtifactContent } from "../../features/state-manager/artifact-paths.js";
+import { parseTasks } from "../../features/execution-plan/task-parser.js";
 
 export interface BoundaryCacheEntry {
   contractHash: string;
@@ -213,10 +214,11 @@ export async function getActiveTaskId(changeDir: string): Promise<string | null>
   }
   const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
   if (tasksContent) {
-    const firstUnchecked = tasksContent.match(/^-\s*\[\s*\]\s*(?:T\d+\s*[—-]?\s*)?(.+)/m);
-    if (firstUnchecked) {
-      const idMatch = firstUnchecked[0].match(/(T\d+)/);
-      if (idMatch && idMatch[1]) return idMatch[1].toUpperCase();
+    // D7: 复选框解析统一走 parseTasks，与门禁 / 计划推荐同源
+    for (const task of parseTasks(tasksContent)) {
+      if (task.complete) continue;
+      const idMatch = task.line.match(/(T\d+)/i);
+      if (idMatch?.[1]) return idMatch[1].toUpperCase();
     }
   }
   return null;

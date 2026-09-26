@@ -9,6 +9,8 @@ import { getStateFilePath } from "../../../features/state-manager.js";
 import { readExecutionPlan as readExecutionPlanFeature } from "../../../features/execution-plan.js";
 import { readArtifactContent } from "../../../features/state-manager/artifact-paths.js";
 import { formatGuardFixHint, GUARD_FIX_ENTRIES } from "../../../features/guard-fix-hint.js";
+import { workflowPolicy } from "../../../features/workflow-policy.js";
+import { incompleteTasks as parseIncompleteTasks } from "../../../features/execution-plan/task-parser.js";
 
 /**
  * Fast-path transition restriction table（快路径准入表）。
@@ -78,20 +80,30 @@ export async function checkWorkflowModeTransition(changeDir: string, data?: Reco
   const currentState = stateData?.state || 'exploring';
   const mode = resolveMode(stateData?.mode);
 
+  // 工作流证据（direct 收据 / debug 收据）由 workflowPolicy 单点裁决，门禁不再各自解读
+  const policy = await workflowPolicy(changeDir, stateData);
+
   const { allowed, allowedModes } = isFastPathAllowed(currentState, newState, mode);
 
-  // 命中快路径限制表但 mode 不在允许集合 → 明确报错（不套用 full 主表）
+  // 命中快路径限制表但 mode 不匹配 → 明确报错（不套用 full 主表）
   if (allowedModes.length > 0 && !allowed) {
     const modeNames = allowedModes.join(' or ');
     const properPath = properPathFor(mode);
+    const missingEvidence = [
+      policy.missingDirectReceipt ? 'valid direct receipt (workflow-selection.json)' : null,
+      policy.missingDebugReceipt ? 'planless debug receipt' : null,
+    ].filter((item): item is string => item !== null);
+
     const reason = `[SFLOW] Workflow mode guard: transition "${currentState} → ${newState}" is a ${modeNames}-only fast-path, but current mode is "${mode}". Route through the proper path: ${properPath}.`;
+    const evidence = missingEvidence.length > 0 ? ` Missing workflow evidence: ${missingEvidence.join(', ')}.` : '';
     return {
       success: false,
       block: true,
-      blockReason: `${reason}\n${formatGuardFixHint(`走 ${properPath}`, GUARD_FIX_ENTRIES.contractBuilderRouter)}`,
+      blockReason: `${reason}${evidence}\n${formatGuardFixHint(`走 ${properPath}`, GUARD_FIX_ENTRIES.contractBuilderRouter)}`,
     };
   }
 
+  // 快路径被放行后，direct 收据是否齐备由编排中的 checkDirectShortPath 统一裁决（单点，避免两处各判一次）
   return { success: true };
 }
 
@@ -134,14 +146,19 @@ export async function checkTaskCompletion(changeDir: string, activeWorkflow: 'if
   const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
   if (!tasksContent) return { success: true };
 
-  const taskLines = tasksContent.split("\n").filter((line: string) => line.match(/^-\s*\[.\]\s+/));
-  const incompleteTasks = taskLines.filter((line: string) => line.match(/^-\s*\[\s\]\s+/));
+  // D7: 复选框解析统一走 parseTasks（与 plan-crud / artifact-guards / boundary 同一入口）
+  const pending = parseIncompleteTasks(tasksContent);
 
-  if (incompleteTasks.length > 0) {
+  if (pending.length > 0) {
+    const listed = pending
+      .slice(0, 5)
+      .map((task) => (task.id ? `${task.id}: ${task.text}` : task.text))
+      .join('; ');
+    const more = pending.length > 5 ? ` (+${pending.length - 5} more)` : '';
     return {
       success: false,
       block: true,
-      blockReason: `${incompleteTasks.length} task(s) are incomplete. Complete all tasks before closing.`,
+      blockReason: `${pending.length} task(s) are incomplete. Complete all tasks before closing. Pending: ${listed}${more}`,
     };
   }
 
