@@ -13,9 +13,18 @@
 
 import { beforeEach, describe, expect, it, mock, afterEach } from 'bun:test';
 import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
-import { createCallFlowAgentTools, resetRunningSubagentCounts, runWithModelFallback } from '../call-flow-agent.js';
-import { clearUnavailableModels, markModelUnavailable, isModelAvailable, getAlternativeModel, resolveModelWithFallback } from '../../agents/agent-builder.js';
-import { classifyQuotaError, parseQuotaResetTime } from '../../helpers/completion-detector.js';
+import { createCallFlowAgentTools, resetRunningSubagentCounts, runWithModelFallback, createBackgroundTaskWatcher } from '../call-flow-agent.js';
+import { clearUnavailableModels, markModelUnavailable, isModelAvailable, getAlternativeModel, resolveModelWithFallback, TRANSIENT_COOLDOWN_TTL_MS } from '../../agents/agent-builder.js';
+import { classifyQuotaError, parseQuotaResetTime, matchesModelErrorPatterns, matchesQuotaErrorPattern } from '../../helpers/completion-detector.js';
+
+/** 临时把 Date.now 前进 offsetMs，返回恢复函数 */
+function advanceClock(offsetMs: number): () => void {
+  const realNow = Date.now;
+  Date.now = () => realNow() + offsetMs;
+  return () => {
+    Date.now = realNow;
+  };
+}
 
 // ─── P0-2: quota error classification ────────────────────────────────────────
 
@@ -192,8 +201,10 @@ describe('P0-1/P0-2/P0-4: runWithModelFallback 成功判定与换模', () => {
 
   it('quota error text from poll is NOT success: model blacklisted (long cooldown) and fallback model used', async () => {
     const c = makeClient({ outputs: [] });
+    // UTC+8 显示时间 = resetInstant + 8h 的 UTC 时钟（语义正确的 UTC+8 表示）
+    const resetInstant = Date.now() + 60 * 60 * 1000;
     const quotaText = '您的使用量已超出频率限制，将在 ' +
-      new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ') +
+      new Date(resetInstant + 8 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ') +
       ' UTC+8 重置';
     let pollCount = 0;
     const poll = async () => {
@@ -263,6 +274,30 @@ describe('P0-1/P0-2/P0-4: runWithModelFallback 成功判定与换模', () => {
     expect(result.success).toBe(true);
     expect(result.model).not.toBe('provider/first-model');
     expect(isModelAvailable('provider/first-model')).toBe(false);
+  });
+
+  it('sync E2E：配额错误拉黑后 5min+1s 仍 blocked（长冷却不被 :351 覆盖）', async () => {
+    const c = makeClient({ outputs: [] });
+    // UTC+8 显示时间 = resetInstant + 8h 的 UTC 时钟（语义正确的 UTC+8 表示）
+    const resetInstant = Date.now() + 60 * 60 * 1000;
+    const quotaText = '您的使用量已超出频率限制，将在 ' +
+      new Date(resetInstant + 8 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ') +
+      ' UTC+8 重置';
+    let pollCount = 0;
+    const poll = async () => {
+      pollCount++;
+      return pollCount === 1 ? quotaText : '[TASK_COMPLETE]\nDone';
+    };
+    const result = await runWithModelFallback({ ...baseParams(c, poll) });
+    expect(result.success).toBe(true);
+    expect(isModelAvailable('provider/first-model')).toBe(false);
+    // 5min+1s 后仍 blocked（长冷却不被 :351 覆盖）
+    const restore = advanceClock(TRANSIENT_COOLDOWN_TTL_MS + 1000);
+    try {
+      expect(isModelAvailable('provider/first-model')).toBe(false);
+    } finally {
+      restore();
+    }
   });
 });
 
@@ -403,5 +438,239 @@ describe('P0-3: 无 model_type 默认路径查黑名单', () => {
     // The prompt was sent to a fallback model, not the blacklisted one
     const usedModel = promptCalls[0]?.body?.model as { modelID: string } | undefined;
     expect(usedModel?.modelID).not.toBe('test-model');
+  });
+});
+
+// ═══ 第 2 轮修复（REVIEW-20260926-205542）═══
+
+describe('NEW-P0-A: 长冷却 TTL 不被无条件 markModelUnavailable 覆盖', () => {
+  beforeEach(() => clearUnavailableModels());
+
+  it('quota 拉黑后再调用默认 mark，5min+1s 后仍 blocked（取 max 语义）', () => {
+    const resetAt = Date.now() + 60 * 60 * 1000; // 重置时间在 1 小时后
+    markModelUnavailable('provider/ttl-model', { resetAt });
+    // 模拟 :351 的无条件默认 markModelUnavailable（5min TTL）
+    markModelUnavailable('provider/ttl-model');
+    // 前进 5min+1s（超过 transient TTL）：模型必须仍被拉黑，直到重置时间
+    const restore = advanceClock(TRANSIENT_COOLDOWN_TTL_MS + 1000);
+    try {
+      expect(isModelAvailable('provider/ttl-model')).toBe(false);
+    } finally {
+      restore();
+    }
+    // 前进到重置时间之后：释放
+    const restore2 = advanceClock(61 * 60 * 1000);
+    try {
+      expect(isModelAvailable('provider/ttl-model')).toBe(true);
+    } finally {
+      restore2();
+    }
+  });
+
+  it('无重置时间的配额错误给默认长 TTL（30min），5min+1s 后仍 blocked', () => {
+    markModelUnavailable('provider/quota-no-reset', { resetAt: null, ttlMs: 30 * 60_000 });
+    const restore = advanceClock(TRANSIENT_COOLDOWN_TTL_MS + 1000);
+    try {
+      expect(isModelAvailable('provider/quota-no-reset')).toBe(false);
+    } finally {
+      restore();
+    }
+    const restore2 = advanceClock(31 * 60 * 1000);
+    try {
+      expect(isModelAvailable('provider/quota-no-reset')).toBe(true);
+    } finally {
+      restore2();
+    }
+  });
+});
+
+describe('NEW-P1-C: 错误/配额模式收紧（正常产出不误判）', () => {
+  it('含 quota/限流/429 的长报告文本不判配额错误', () => {
+    const report = '审查报告：本模块管理 quota 表与 rate limit 中间件。\n' +
+      ('行 429 是端口配置，限流中间件已实现。' .repeat(40));
+    expect(report.length).toBeGreaterThan(500);
+    expect(matchesQuotaErrorPattern(report)).toBe(false);
+    expect(classifyQuotaError(report)).toBeNull();
+  });
+
+  it('短文本中的弱配额词（无错误语境）不判配额错误', () => {
+    expect(classifyQuotaError('This module manages the quota table. quota is a column.')).toBeNull();
+    expect(classifyQuotaError('第 429 行是端口配置，rate limit 中间件已实现')).toBeNull();
+  });
+
+  it('"Error: none found. All checks passed." 不判模型错误', () => {
+    expect(matchesModelErrorPatterns('Error: none found. All checks passed.')).toBe(false);
+  });
+
+  it('长报告（含 Error: 与堆栈）不判模型错误（任务层错误 ≠ 模型层错误）', () => {
+    const failingTestOutput = 'Running tests...\n' +
+      ('some assertion detail line\n'.repeat(40)) +
+      'Error: expect(received).toBe(expected)\n    at Object.<anonymous> (test.ts:12:5)';
+    expect(failingTestOutput.length).toBeGreaterThan(500);
+    expect(matchesModelErrorPatterns(failingTestOutput)).toBe(false);
+  });
+
+  it('明确的短错误文本仍判模型错误（既有行为保留）', () => {
+    expect(matchesModelErrorPatterns('Error: internal provider failure (code: 500)')).toBe(true);
+    expect(matchesModelErrorPatterns('Failed: model unavailable')).toBe(true);
+  });
+});
+
+describe('NEW-P1-D: attempt>0 回显比对对正确对象（实际发送文本）', () => {
+  function makeClientLocal(sendFailures?: Array<number | null>) {
+    let sendIdx = 0;
+    return {
+      client: {
+        session: {
+          prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+            if (sendIdx < (sendFailures?.length ?? 0)) {
+              const f = sendFailures![sendIdx];
+              sendIdx++;
+              if (f !== null) {
+                const err = new Error(`HTTP ${f}: request failed`);
+                (err as unknown as { cause: unknown }).cause = { status: f, body: {} };
+                throw err;
+              }
+            } else {
+              sendIdx++;
+            }
+          }),
+          messages: mock(async () => ({ data: [] })),
+          status: mock(async () => ({ data: {} })),
+          create: mock(async () => ({ data: { id: 's1' } })),
+          abort: mock(async () => {}),
+        },
+      },
+    };
+  }
+
+  it('换模后第 2 轮 poll 回显所发 prompt（含接管声明）不算成功', async () => {
+    const c = makeClientLocal([429]);
+    let pollCount = 0;
+    const poll = async () => {
+      pollCount++;
+      if (pollCount === 1) {
+        // 回显第 2 轮实际发送文本（接管声明 + base prompt），不含错误模式
+        return '【第 1 次接管轮次】前一个失败模型为 provider/first-model。不要重复前次已完成的工作，直接从失败处继续 —— 前次模型调用失败未产生有效输出。\n\ndo the work';
+      }
+      return '[TASK_COMPLETE]\nreal output';
+    };
+    const result = await runWithModelFallback({
+      client: c.client as never,
+      sessionID: 's1',
+      agentName: 'build-executor',
+      basePrompt: 'do the work',
+      initialModel: 'provider/first-model',
+      maxWaitMs: 100,
+      directory: '',
+      poll,
+    });
+    expect(result.success).toBe(true);
+    expect(result.fallbacks.length).toBeGreaterThanOrEqual(1);
+    // 第二个尝试的模型（换模后）不应被判成功后直接返回回显
+    expect(result.model).not.toBe('provider/first-model');
+    expect(result.output).toContain('TASK_COMPLETE');
+  });
+});
+
+describe('NEW-P0-B: async watcher 路径配额错误识别与换模', () => {
+  beforeEach(() => clearUnavailableModels());
+  afterEach(() => {
+    resetRunningSubagentCounts();
+    clearUnavailableModels();
+  });
+
+  function createWatcherClient(opts: { probeOutputs: string[] }) {
+    let msgIdx = 0;
+    const promptCalls: Array<{ id: string; body: Record<string, unknown> }> = [];
+    return {
+      promptCalls,
+      client: {
+        session: {
+          create: mock(async () => ({ data: { id: 'watch-session' } })),
+          prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+            promptCalls.push({ id: args.path.id, body: args.body });
+          }),
+          messages: mock(async () => {
+            const output = opts.probeOutputs[Math.min(msgIdx, opts.probeOutputs.length - 1)];
+            msgIdx++;
+            return {
+              data: [
+                { parts: [{ type: 'text', text: 'user prompt' }] },
+                { info: { role: 'assistant' }, parts: [{ type: 'text', text: output }] },
+              ],
+            };
+          }),
+          status: mock(async () => ({ data: { 'watch-session': { type: 'idle' } } })),
+          abort: mock(async () => {}),
+        },
+      },
+    };
+  }
+
+  it('probe 返回配额错误文本：不判 completed、拉黑至重置时间、换 fallback 模型重派', async () => {
+    const { client, promptCalls } = createWatcherClient({ probeOutputs: ['您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC+8 重置'] });
+    const registry: BackgroundTaskRegistry = new Map();
+    registry.set('watch-task-1', {
+      sessionID: 'watch-session',
+      subagentType: 'build-executor',
+      status: 'running',
+      createdAt: Date.now(),
+      changeDir: '',
+      resolvedModel: 'provider/quota-primary',
+    });
+    const watcher = createBackgroundTaskWatcher({
+      client: client as never,
+      registry,
+      pollIntervalMs: 20,
+      extraFallbacks: ['provider/watch-fallback'],
+    });
+    watcher.start();
+    // 等待 watcher tick 完成故障转移
+    await new Promise((r) => setTimeout(r, 400));
+    watcher.stop();
+
+    const task = registry.get('watch-task-1')!;
+    // 不判 completed
+    expect(task.status).not.toBe('completed');
+    // 换模：resolvedModel 变为 fallback 链中的模型
+    expect(task.resolvedModel).toBe('provider/watch-fallback');
+    // 发送了接管 prompt（故障转移重派调用）
+    expect(promptCalls.length).toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify(promptCalls[0]?.body ?? {})).toContain('接管');
+    // 原模型被拉黑且 TTL 为长冷却（5min+1s 后仍 blocked）
+    expect(isModelAvailable('provider/quota-primary')).toBe(false);
+    const restore = advanceClock(TRANSIENT_COOLDOWN_TTL_MS + 1000);
+    try {
+      expect(isModelAvailable('provider/quota-primary')).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('watcher 传入 extraFallbacks（用户 fallback 链被使用）', async () => {
+    const { client } = createWatcherClient({ probeOutputs: ['Error: provider crashed'] });
+    const registry: BackgroundTaskRegistry = new Map();
+    registry.set('watch-task-2', {
+      sessionID: 'watch-session',
+      subagentType: 'build-executor',
+      status: 'running',
+      createdAt: Date.now(),
+      changeDir: '',
+      resolvedModel: 'provider/broken-model',
+    });
+    const watcher = createBackgroundTaskWatcher({
+      client: client as never,
+      registry,
+      pollIntervalMs: 20,
+      extraFallbacks: ['provider/user-chain-fallback'],
+    });
+    watcher.start();
+    await new Promise((r) => setTimeout(r, 400));
+    watcher.stop();
+
+    const task = registry.get('watch-task-2')!;
+    expect(task.status).not.toBe('completed');
+    expect(task.resolvedModel).toBe('provider/user-chain-fallback');
   });
 });

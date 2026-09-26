@@ -281,10 +281,16 @@ export async function runWithModelFallback(params: {
     }
     attemptedModels.push(currentModel);
 
+    // NEW-P1-D: 记录实际发送文本，回显比对以实际发送的（含接管声明的）prompt 为基准
+    const sentText = buildAttemptPrompt(
+      basePrompt,
+      attempt,
+      attempt > 0 ? attemptedModels[attempt - 1] : undefined,
+    );
     const send = await sendPromptOnce(client, {
       sessionID,
       agent: agentName,
-      text: buildAttemptPrompt(basePrompt, attempt, attempt > 0 ? attemptedModels[attempt - 1] : undefined),
+      text: sentText,
       model: parsed,
     });
     if (!send.ok) {
@@ -322,11 +328,15 @@ export async function runWithModelFallback(params: {
       // P0-1: 实质性产出校验（结合 completion-detector 的错误模式识别）——
       // 错误文本 / 用户 prompt 回显 / 配额报错不算成功，转入 model-failure 分支
       const quotaOnPoll = classifyQuotaError(output);
-      const echoFailure = output.trim() === basePrompt.trim();
+      const echoFailure = output.trim() === sentText.trim();
       if (quotaOnPoll || matchesModelErrorPatterns(output) || echoFailure) {
         if (quotaOnPoll) {
-          // P0-2: 长冷却配额识别——立即标记 unavailable（按重置时间 TTL）并触发换模
-          markModelUnavailable(currentModel, { resetAt: quotaOnPoll.resetAt });
+          // P0-2: 长冷却配额识别——立即标记 unavailable（按重置时间 TTL）并触发换模。
+          // NEW-P3-G: 无重置时间的配额错误给默认长 TTL（30min），不落 5min transient。
+          markModelUnavailable(currentModel, {
+            resetAt: quotaOnPoll.resetAt,
+            ttlMs: quotaOnPoll.resetAt ? undefined : MIN_QUOTA_COOLDOWN_TTL_MS,
+          });
         }
         // P0-4: 错误识别接入换模——落入下方 model-failure 分支（markModelUnavailable + getAlternativeModel）
       } else {
@@ -423,8 +433,10 @@ async function tryAsyncModelFallback(params: {
   changeDir: string;
   /** P1-1: 用户配置 fallback 链（configOverrides/modelProfiles 构建结果） */
   extraFallbacks?: string[];
+  /** NEW-P0-B: 配额错误信息（长冷却 TTL 语义）；kind='error' 时走默认短冷却 */
+  quota?: { resetAt: number | null } | null;
 }): Promise<{ retried: true; nextModel: string } | { retried: false }> {
-  const { client, registry, taskId, changeDir, extraFallbacks } = params;
+  const { client, registry, taskId, changeDir, extraFallbacks, quota } = params;
   const task = registry.get(taskId);
   if (!task || !task.resolvedModel) return { retried: false };
 
@@ -434,8 +446,13 @@ async function tryAsyncModelFallback(params: {
   const attempted = taskModelAttempts.get(taskId) ?? [task.resolvedModel];
   if (!attempted.includes(task.resolvedModel)) attempted.push(task.resolvedModel);
 
-  // D-8：拉黑当前失败模型
-  markModelUnavailable(task.resolvedModel);
+  // D-8：拉黑当前失败模型。
+  // NEW-P0-B: 配额错误（有重置时间）→ 长冷却到重置时间；无重置时间 → 默认长 TTL（30min）；
+  // 非 5min transient，且不会被后续默认 mark 覆盖（markModelUnavailable 单调取 max）。
+  markModelUnavailable(task.resolvedModel, {
+    resetAt: quota?.resetAt ?? null,
+    ttlMs: quota && !quota.resetAt ? MIN_QUOTA_COOLDOWN_TTL_MS : undefined,
+  });
 
   // D-3：换模型（禁止 resolveModelWithFallback）
   const next = getAlternativeModel(task.resolvedModel, task.subagentType, extraFallbacks);
@@ -509,11 +526,48 @@ export interface CreateWatcherOptions {
   client: SFlowClient;
   registry: BackgroundTaskRegistry;
   pollIntervalMs?: number;
+  /** NEW-P0-B: 用户配置 fallback 链（静态数组或按 subagent_type 解析的函数），故障转移时补传 */
+  extraFallbacks?: string[] | ((subagentType: string) => string[] | undefined);
 }
 
 export function createBackgroundTaskWatcher(options: CreateWatcherOptions): BackgroundTaskWatcher {
   const { client, registry, pollIntervalMs = 200 } = options;
   let intervalId: ReturnType<typeof setInterval> | null = null;
+
+  // P1-1/NEW-P0-B: 解析用户 fallback 链（静态数组或按 subagent_type 的函数）
+  const resolveWatcherFallbacks = (subagentType: string): string[] | undefined => {
+    const fb = options.extraFallbacks;
+    if (!fb) return undefined;
+    return typeof fb === 'function' ? fb(subagentType) : fb;
+  };
+
+  // NEW-P0-B: async 路径与 sync 路径相同的失败识别——配额报错 / 模型错误文本不算成功
+  const classifyAsyncFailure = (
+    text: string,
+  ): { kind: 'quota'; resetAt: number | null } | { kind: 'error'; resetAt: null } | null => {
+    const quota = classifyQuotaError(text);
+    if (quota) return { kind: 'quota', resetAt: quota.resetAt };
+    if (matchesModelErrorPatterns(text)) return { kind: 'error', resetAt: null };
+    return null;
+  };
+
+  /** NEW-P0-B: 模型错误 → 故障转移（quota 长冷却 + 用户 fallback 链）；耗尽返回 false */
+  const attemptWatcherFallback = async (
+    taskId: string,
+    task: BackgroundTaskEntry,
+    failure: { kind: 'quota'; resetAt: number | null } | { kind: 'error'; resetAt: null },
+  ): Promise<boolean> => {
+    const fb = await tryAsyncModelFallback({
+      client,
+      registry,
+      taskId,
+      changeDir: task.changeDir || '',
+      // P1-1 残留: 补传用户 fallback 链
+      extraFallbacks: resolveWatcherFallbacks(task.subagentType),
+      quota: failure.kind === 'quota' ? { resetAt: failure.resetAt } : null,
+    });
+    return fb.retried;
+  };
 
   async function checkTasks(): Promise<void> {
     const runningTasks = Array.from(registry.entries()).filter(
@@ -549,7 +603,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
         if (probeResult === null) {
           // Wave 2 Task 5：尝试模型故障转移（换模型重 prompt），直至成功/耗尽。
           // 设计：保持 running、不释放并发槽位；耗尽后才走原错误路径（D-4 未命中前不宣告失败）。
-          let fb = await tryAsyncModelFallback({ client, registry, taskId, changeDir: task.changeDir || '' });
+          let fb = { retried: (await attemptWatcherFallback(taskId, task, { kind: 'error', resetAt: null })) } as { retried: boolean };
           // 使用 live registry 条目而非 L483 的过期 task 快照，避免覆盖故障转移已写入的 resolvedModel/attemptedModels
           const baseEntry = registry.get(taskId) ?? task;
           let fallbackCompletedOutput: string | null = null;
@@ -572,12 +626,22 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
               break;
             }
             if (reProbe !== null) {
+              // NEW-P0-B: 换模型后的回显校验——错误文本/配额报错不算成功，继续故障转移
+              const reFailure = classifyAsyncFailure(reProbe as string);
+              if (reFailure) {
+                const retried = await attemptWatcherFallback(taskId, task, reFailure);
+                if (!retried) {
+                  fb = { retried: false } as { retried: false };
+                  break;
+                }
+                continue;
+              }
               // 换模型后已完成
               fallbackCompletedOutput = reProbe as string;
               fb = { retried: false } as { retried: false };
               break;
             }
-            fb = await tryAsyncModelFallback({ client, registry, taskId, changeDir: task.changeDir || '' });
+            fb = { retried: (await attemptWatcherFallback(taskId, task, { kind: 'error', resetAt: null })) } as { retried: boolean };
           }
 
           if (fallbackCompletedOutput !== null) {
@@ -691,6 +755,42 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
           // probeResult is string (session idle, task completed)
           // Type guard: at this point probeResult is guaranteed to be string
           const output = probeResult as string;
+
+          // NEW-P0-B: 与 sync 路径相同的失败识别——错误文本 / 配额报错不算成功。
+          // 命中时：标记 unavailable（quota 长冷却）→ 换 fallback 模型重派；
+          // 耗尽才走下方 error 路径，绝不把错误文本判为 completed。
+          const failure = classifyAsyncFailure(output);
+          if (failure) {
+            const retried = await attemptWatcherFallback(taskId, task, failure);
+            if (retried) {
+              // 已换模型重派：保持 running，交给下一轮 tick 复查
+              const live = registry.get(taskId);
+              if (live) {
+                live._processing = false;
+                registry.set(taskId, live);
+              }
+              continue;
+            }
+            // 故障转移耗尽 → 走 error 路径
+            const now = Date.now();
+            const baseEntryForError = registry.get(taskId) ?? task;
+            const updated: BackgroundTaskEntry = {
+              ...baseEntryForError,
+              status: 'error',
+              error: 'Task output was a model error/quota text; model fallback exhausted',
+              completedAt: now,
+              slotReleased: baseEntryForError.slotReleased ?? false,
+            };
+            registry.set(taskId, updated);
+            if (!updated.slotReleased && updated.status !== 'running') {
+              releaseSubagentSlot(task.subagentType);
+              updated.slotReleased = true;
+              registry.set(taskId, updated);
+            }
+            taskModelAttempts.delete(taskId);
+            continue;
+          }
+
           const asyncHasSignal = hasCompletionSignal(output);
           const now = Date.now();
           const updated: BackgroundTaskEntry = {
@@ -1861,6 +1961,9 @@ export function createCallFlowAgentTools(
     client,
     registry: backgroundTaskRegistry,
     pollIntervalMs: 200,
+    // P1-1/NEW-P0-B: 后台 watcher 故障转移补传用户配置 fallback 链（按 subagent_type 解析）
+    extraFallbacks: (subagentType: string) =>
+      buildAgentFallbackChain(subagentType as BuiltinAgentName, configOverrides, modelProfiles),
   });
   watcher.start();
 

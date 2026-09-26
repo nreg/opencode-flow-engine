@@ -283,6 +283,9 @@ export const MAX_QUOTA_COOLDOWN_TTL_MS = 7 * 24 * 3600_000;
  * P0-2: quota/rate-limit failures pass the parsed `resetAt` (epoch ms) so the
  * model stays blacklisted until the reset time (long cooldown), instead of a
  * fixed short TTL. Transient failures use the default short TTL.
+ *
+ * NEW-P0-A: 单调合并语义 —— 同一模型多次 markModelUnavailable 时取更长的
+ * expireAt（max），短冷却不会覆盖已写入的长冷却（配额错误 → 重置时间）。
  */
 export function markModelUnavailable(
   model: string,
@@ -293,14 +296,16 @@ export function markModelUnavailable(
   if (opts?.resetAt !== undefined && opts.resetAt !== null) {
     if (opts.resetAt <= now) {
       // Reset time already passed — the cooldown is over, model is available
-      UNAVAILABLE_MODELS.set(model, now);
+      UNAVAILABLE_MODELS.delete(model);
       return;
     }
     // Long cooldown: at least MIN_QUOTA_COOLDOWN, until the reset time, capped at MAX
     expireAt = Math.max(now + MIN_QUOTA_COOLDOWN_TTL_MS, opts.resetAt);
     expireAt = Math.min(expireAt, now + MAX_QUOTA_COOLDOWN_TTL_MS);
   }
-  UNAVAILABLE_MODELS.set(model, expireAt);
+  // NEW-P0-A: 单调合并 —— 已记录的更长 TTL 不被后续短 TTL 覆盖
+  const existing = UNAVAILABLE_MODELS.get(model) ?? 0;
+  UNAVAILABLE_MODELS.set(model, Math.max(existing, expireAt));
 }
 
 /**

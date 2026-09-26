@@ -93,47 +93,83 @@ export const DEFAULT_COMPLETION_ENABLED_AGENTS: string[] = [
 /**
  * Model error patterns — output matching any of these is NOT a success signal.
  * Reused by hasSubstantialOutput (error suppression) and runWithModelFallback (success validation).
+ *
+ * NEW-P1-C: 仅匹配「行首错误声明」（以 error:/failed:/fail: 等开头），
+ * 长报告中的堆栈、测试失败输出（任务层错误）不应等同模型调用失败——
+ * 由 matchesModelErrorPatterns 的首行 + 长度守卫约束。
  */
 export const MODEL_ERROR_PATTERNS: RegExp[] = [
-  /^error:/im,
-  /^failed:/im,
-  /^Error:/m,
-  /^FAIL:/im,
+  /^error:/i,
+  /^failed:/i,
+  /^Error:/i,
+  /^FAIL:/i,
+  /^fatal:/i,
+  /^exception:/i,
   /"error"\s*:\s*"/i,
-  /Error:\s.*\n\s+at /s,
 ];
+
+/** NEW-P1-C: 明确的「无错误」声明不算错误（如 "Error: none found. All checks passed."） */
+const MODEL_ERROR_NEGATION_PATTERN =
+  /(none found|all (checks? )?(passed|pass|ok)|0 (errors?|failures?)|no errors?)/i;
+
+/** NEW-P1-C: 长度守卫——完整报告/审查文档（天然含 Error: 与堆栈）不是传输层错误 */
+const MODEL_ERROR_MAX_TEXT_LENGTH = 500;
 
 /**
  * Quota / rate-limit error patterns（P0-2 长冷却配额识别）。
- * Output matching any of these indicates the model hit a rate/quota limit —
- * a long-cooldown condition, NOT a transient retry condition.
+ * NEW-P1-C: 弱 token（429 / quota / rate limit / 限流）必须伴随错误语境词
+ * （exceeded / 超出 / 错误 / 失败等）才算配额错误，避免领域文本误判。
  */
 export const QUOTA_ERROR_PATTERNS: RegExp[] = [
+  /超出频率限制/,
+  /使用量.*超出/,
+  /usage.*exceed/i,
   /\b429\b/,
   /rate.?limit/i,
   /RATE_LIMITED/,
   /quota/i,
   /频率限制/,
-  /超出频率限制/,
   /限流/,
-  /使用量.*超出/,
-  /usage.*exceed/i,
 ];
+
+/** NEW-P1-C: 弱配额 token 的错误语境词（必须与 token 同现） */
+const QUOTA_CONTEXT_PATTERN = /(exceed|exhaust|too many|error|fail|http|超出|超|错误|失败|耗尽|稍后再试|重置)/i;
+
+/** NEW-P1-C: 长度守卫——报告/审查文档不是配额错误 */
+const QUOTA_MAX_TEXT_LENGTH = 500;
 
 /**
  * Check whether output matches model error patterns (P0-1: 错误文本不算成功).
+ *
+ * NEW-P1-C 收紧：
+ * - 仅当文本较短（≤ 500 字符）时才判模型错误——长报告/审查文档是任务层产出；
+ * - 仅当首行命中行首错误声明时才算——正文中的 "Error:" 与堆栈不算；
+ * - 首行命中「无错误」声明（none found / all passed）时不算。
  */
 export function matchesModelErrorPatterns(output: string): boolean {
   if (!output) return false;
-  return MODEL_ERROR_PATTERNS.some((pattern) => pattern.test(output));
+  const trimmed = output.trim();
+  if (trimmed.length > MODEL_ERROR_MAX_TEXT_LENGTH) return false;
+  const firstLine = trimmed.split('\n')[0] ?? '';
+  if (MODEL_ERROR_NEGATION_PATTERN.test(firstLine)) return false;
+  return MODEL_ERROR_PATTERNS.some((pattern) => pattern.test(firstLine));
 }
 
 /**
  * Check whether output matches quota / rate-limit patterns (P0-2).
+ *
+ * NEW-P1-C 收紧：
+ * - 长文本（> 500 字符）不判配额错误；
+ * - 弱 token（429 / quota / rate limit / 限流）必须伴随错误语境词才算；
+ * - 强 token（超出频率限制 / 使用量.*超出 / usage.*exceed）单独命中即可。
  */
 export function matchesQuotaErrorPattern(output: string): boolean {
   if (!output) return false;
-  return QUOTA_ERROR_PATTERNS.some((pattern) => pattern.test(output));
+  if (output.length > QUOTA_MAX_TEXT_LENGTH) return false;
+  const strong = QUOTA_ERROR_PATTERNS.slice(0, 3);
+  if (strong.some((pattern) => pattern.test(output))) return true;
+  const weak = QUOTA_ERROR_PATTERNS.slice(3);
+  return weak.some((token) => token.test(output) && QUOTA_CONTEXT_PATTERN.test(output));
 }
 
 /**
@@ -143,31 +179,64 @@ export function matchesQuotaErrorPattern(output: string): boolean {
  * - 「您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC+8 重置」
  * - "rate limit exceeded, resets at 2026-09-27T04:21:07Z"
  * - "resets at 2026-09-27 04:21:07"
+ * - ISO offset: "resets at 2026-09-27T04:21:07+08:00"
+ * - GMT offset: "resets at 2026-09-27 12:21:07 GMT+8"
+ *
+ * NEW-P3-G: 优先匹配 reset/重置 关键词邻近的时间戳（多日期文本取对时间）；
+ * 支持 UTC+n / UTC+HH:MM / GMT±n / ISO ±HH:MM 偏移。
  *
  * @returns epoch milliseconds of the reset time, or null when no absolute time found
  */
 export function parseQuotaResetTime(output: string): number | null {
   if (!output) return null;
-  const match = output.match(
-    /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|UTC([+-]\d{1,2}))?/i,
-  );
-  if (!match) return null;
-  const [, y, mo, d, h, mi, s, zulu, utcOffset] = match;
-  const year = Number(y);
-  const month = Number(mo) - 1;
-  const day = Number(d);
-  const hour = Number(h);
-  const minute = Number(mi);
-  const second = s ? Number(s) : 0;
-  if (zulu === 'Z') {
-    return Date.UTC(year, month, day, hour, minute, second);
+  const datePattern =
+    /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|UTC([+-]\d{1,2})(?::?\d{2})?|GMT([+-]\d{1,2})(?::?\d{2})?|([+-]\d{2}:?\d{2}))?/i;
+  const parseMatch = (match: RegExpMatchArray): number => {
+    const [, y, mo, d, h, mi, s, zulu, utcOffsetH, gmtOffsetH, isoOffset] = match;
+    const year = Number(y);
+    const month = Number(mo) - 1;
+    const day = Number(d);
+    const hour = Number(h);
+    const minute = Number(mi);
+    const second = s ? Number(s) : 0;
+    if (zulu === 'Z') {
+      return Date.UTC(year, month, day, hour, minute, second);
+    }
+    if (utcOffsetH !== undefined) {
+      const offsetHours = Number(utcOffsetH);
+      return Date.UTC(year, month, day, hour - offsetHours, minute, second);
+    }
+    if (gmtOffsetH !== undefined) {
+      const offsetHours = Number(gmtOffsetH);
+      return Date.UTC(year, month, day, hour - offsetHours, minute, second);
+    }
+    if (isoOffset !== undefined) {
+      const sign = isoOffset.startsWith('-') ? -1 : 1;
+      const parts = isoOffset.slice(1).replace(':', '');
+      const offsetHours = Number(parts.slice(0, 2));
+      const offsetMinutes = parts.length > 2 ? Number(parts.slice(2)) : 0;
+      return Date.UTC(year, month, day, hour - sign * offsetHours, minute - sign * offsetMinutes, second);
+    }
+    // No timezone: assume local time
+    return new Date(year, month, day, hour, minute, second).getTime();
+  };
+
+  // NEW-P3-G: 优先取 reset/重置 关键词邻近的时间戳
+  const resetAnchor = /(reset|重置)/i;
+  const segments = output.split(/(?=reset|重置)/i);
+  for (const segment of segments) {
+    const isResetSegment = resetAnchor.test(segment);
+    const match = segment.match(datePattern);
+    if (match) {
+      if (isResetSegment || segments.length === 1) {
+        return parseMatch(match);
+      }
+      // 非重置段的时间戳仅在无重置段匹配时作为兜底
+    }
   }
-  if (utcOffset !== undefined) {
-    const offsetHours = Number(utcOffset);
-    return Date.UTC(year, month, day, hour - offsetHours, minute, second);
-  }
-  // No timezone: assume local time
-  return new Date(year, month, day, hour, minute, second).getTime();
+  // 兜底：全文首个时间戳
+  const fallbackMatch = output.match(datePattern);
+  return fallbackMatch ? parseMatch(fallbackMatch) : null;
 }
 
 /** Quota error classification result (P0-2) */
