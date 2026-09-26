@@ -1078,7 +1078,8 @@ describe('Repair Circuit Breaker', () => {
       });
     }
 
-    it('should reject a pass receipt whose base equals head', async () => {
+    // 全量并发下 Windows git execFileSync 较慢，显式放宽超时避免全量跑挂超时误报（P2 加固）
+    it('should reject a pass receipt whose base equals head', { timeout: 20000 }, async () => {
       const workDir = tempDir('zero-range-same-sha');
       await cleanupDir(workDir);
       await createPlan(workDir);
@@ -1099,7 +1100,7 @@ describe('Repair Circuit Breaker', () => {
       await cleanupDir(workDir);
     });
 
-    it('should reject a pass receipt covering an empty git diff', async () => {
+    it('should reject a pass receipt covering an empty git diff', { timeout: 20000 }, async () => {
       const workDir = tempDir('zero-range-empty-diff');
       await cleanupDir(workDir);
       await createPlan(workDir);
@@ -1119,7 +1120,7 @@ describe('Repair Circuit Breaker', () => {
       await cleanupDir(workDir);
     });
 
-    it('should allow a fail receipt over the same zero-length range', async () => {
+    it('should allow a fail receipt over the same zero-length range', { timeout: 20000 }, async () => {
       const workDir = tempDir('zero-range-fail-allowed');
       await cleanupDir(workDir);
       await createPlan(workDir);
@@ -2053,5 +2054,117 @@ describe('Wave 3: New Constants', () => {
     expect(FULL_COMMIT_SHA.test('0123456789abcdef0123456789abcdef01234567')).toBe(true);
     expect(FULL_COMMIT_SHA.test('short')).toBe(false);
     expect(FULL_COMMIT_SHA.test('a'.repeat(41))).toBe(false);
+  });
+});
+
+// ─── P1 fix batch: cross-workflow rejection + final review range robustness ────
+
+describe('P1 fix: resolveRecommendationPlanRevision cross-workflow rejection', () => {
+  const dir = tempDir('plan-revision-cross-workflow');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await setupStateJson(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should reject legacy plan when state workflow is not full (cross-workflow)', async () => {
+    await createExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Cross-workflow plan',
+      waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+    });
+
+    await expect(
+      resolveRecommendationPlanRevision(dir, { workflow: 'iflow' }),
+    ).rejects.toThrow(/cross-workflow/i);
+  });
+
+  it('should reject legacy plan for any non-full workflow in state', async () => {
+    await createExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Cross-workflow plan hotfix',
+      waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+    });
+
+    await expect(
+      resolveRecommendationPlanRevision(dir, { workflow: 'hotfix' }),
+    ).rejects.toThrow(/cross-workflow/i);
+  });
+
+  it('should allow recovery when state workflow is full', async () => {
+    await createExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Same workflow plan',
+      waves: [{ id: 'W1', strategy: 'parallel', tasks: ['1.1'], depends_on: [] }],
+      revision: 2,
+    });
+
+    const revision = await resolveRecommendationPlanRevision(dir, { workflow: 'full' });
+    expect(revision).toBe(2);
+  });
+});
+
+describe('P1 fix: validateFinalReviewRange truncated HEAD range', () => {
+  const dir = tempDir('final-review-range-head');
+
+  beforeEach(async () => {
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await setupStateJson(dir);
+  });
+
+  afterEach(async () => {
+    await cleanupDir(dir);
+  });
+
+  it('should reject HEAD~1 head in a git repo (truncated range)', async () => {
+    const { execFileSync } = await import('child_process');
+    const run = (args: string[]) =>
+      execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: 'pipe' });
+
+    run(['init', '-q']);
+    run(['config', 'user.email', 'test@example.com']);
+    run(['config', 'user.name', 'Test']);
+    run(['config', 'commit.gpgsign', 'false']);
+    await writeFile(join(dir, 'a.txt'), 'a\n');
+    run(['add', '.']);
+    run(['commit', '-q', '-m', 'first']);
+    const baseSha = run(['rev-parse', 'HEAD']).trim();
+    await writeFile(join(dir, 'b.txt'), 'b\n');
+    run(['add', '.']);
+    run(['commit', '-q', '-m', 'second']);
+    const headSha = run(['rev-parse', 'HEAD']).trim();
+    const headParentSha = run(['rev-parse', 'HEAD~1']).trim();
+
+    const plan: ExecutionPlan = {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'final policy',
+      waves: [],
+      hash: 'sha256:abc',
+      artifacts_hash: 'a',
+      contract_hash: 'c',
+      revision: 1,
+      review_policy: 'final',
+      review_base: baseSha,
+    };
+
+    // HEAD~1 is a truncated range — must be rejected (not silently skipped)
+    await expect(
+      validateFinalReviewRange(dir, plan, baseSha, headParentSha),
+    ).rejects.toThrow(/must be HEAD|Truncated/i);
+
+    // Correct HEAD passes
+    await expect(
+      validateFinalReviewRange(dir, plan, baseSha, headSha),
+    ).resolves.toBeUndefined();
   });
 });

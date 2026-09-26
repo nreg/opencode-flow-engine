@@ -5,7 +5,7 @@
 
 import type { HookResult } from "../../types.js";
 import { fileExists, directoryExists, readJsonFile } from "@opencode-flow-engine/shared";
-import { readExecutionPlan as readExecutionPlanFeature } from "../../../features/execution-plan.js";
+import { readExecutionPlan as readExecutionPlanFeature, reviewTargets } from "../../../features/execution-plan.js";
 import type { Wave } from "../../../features/execution-plan-types.js";
 import { getStateFilePath } from "../../../features/state-manager.js";
 import { appendGuardFixHint } from "../../../features/guard-fix-hint.js";
@@ -82,7 +82,8 @@ export async function checkWaveDependencies(changeDir: string, activeWorkflow: '
   const plan = await readExecutionPlanFeature(changeDir);
   if (!plan) return { success: true };
 
-  const waves = plan.waves;
+  // P1 fix: iterate reviewTargets (supports review_policy='final' — single 'final' range)
+  const waves = reviewTargets(plan);
   if (!waves || waves.length === 0) return { success: true };
 
   // Check for empty waves
@@ -149,7 +150,8 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
   const plan = await readExecutionPlanFeature(changeDir);
   if (!plan) return { success: true };
 
-  const waves = plan.waves;
+  // P1 fix: iterate reviewTargets (supports review_policy='final' — single 'final' range)
+  const waves = reviewTargets(plan);
   if (!waves || waves.length === 0) return { success: true };
 
   const REQUIRED_RECEIPT_FIELDS = ['status', 'base', 'head', 'report'] as const;
@@ -316,7 +318,8 @@ export async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow
   const plan = await readExecutionPlanFeature(changeDir);
   if (!plan) return { success: true };
 
-  const waves = plan.waves;
+  // P1 fix: iterate reviewTargets (supports review_policy='final' — single 'final' range)
+  const waves = reviewTargets(plan);
   if (!waves || waves.length === 0) return { success: true };
 
   for (const wave of waves) {

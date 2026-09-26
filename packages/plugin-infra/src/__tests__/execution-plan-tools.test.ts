@@ -627,3 +627,324 @@ describe('Integration: execution plan + review receipt flow', () => {
     await cleanupDir(integrationDir);
   });
 });
+
+// ─── P1 fix: record_review_receipt issue passthrough + adjudicate_wave tool ────
+
+describe('P1 fix: record_review_receipt issue passthrough', () => {
+  const mockClient = {
+    session: {
+      create: async () => ({ data: { id: 'test-session' } }),
+      prompt: async () => ({}),
+      abort: async () => ({}),
+    },
+  };
+
+  it('should expose optional issue arg in the zod args schema', async () => {
+    const { createSFlowTools } = await import('../sflow-plugin-factory.js');
+    const tools = createSFlowTools(mockClient as any);
+    const args = tools.record_review_receipt.args;
+    expect(args).toBeDefined();
+    const schemaKeys = Object.keys(args as Record<string, unknown>);
+    expect(schemaKeys).toContain('issue');
+  });
+
+  it('should persist issue on fail receipt for schema_version 2 plan', async () => {
+    const { createSFlowTools } = await import('../sflow-plugin-factory.js');
+    const tools = createSFlowTools(mockClient as any);
+
+    const issueDir = tempDir('receipt-issue-passthrough');
+    await cleanupDir(issueDir);
+    await ensureDir(issueDir);
+    await writeStateFile(issueDir, {
+      state: 'executing',
+      mode: 'full',
+      artifacts_hash: 'abc123',
+      contract_hash: 'def456',
+    });
+    await writeContractFile(issueDir);
+
+    await createExecutionPlan(issueDir, {
+      mode: 'inline',
+      source: 'default',
+      rationale: 'schema v2 plan',
+      waves: [{ id: 'W1', strategy: 'serial', tasks: ['1.1'], depends_on: [] }],
+    });
+
+    // Upgrade plan to schema_version 2
+    const planPath = issueDir + '/.flow-engine/sflow/execution-plan.json';
+    const plan = JSON.parse(await readFile(planPath, 'utf-8'));
+    plan.schema_version = 2;
+    await writeFile(planPath, JSON.stringify(plan, null, 2));
+
+    const result = await tools.record_review_receipt.execute(
+      {
+        waveId: 'W1',
+        status: 'fail',
+        base: 'abc1234',
+        head: 'def5678',
+        report: 'CRITICAL: logic defect in W1',
+        issue: 'BUG-001',
+      },
+      { directory: issueDir } as any,
+    );
+
+    const parsed = JSON.parse(result.output);
+    expect(parsed.success).toBe(true);
+
+    const written = await readJsonFileContent(issueDir + '/.flow-engine/sflow/reviews/W1.json');
+    expect(written).not.toBeNull();
+    expect(written!.issue).toBe('BUG-001');
+
+    await cleanupDir(issueDir);
+  });
+
+  it('should reject fail receipt without issue on schema_version 2 plan', async () => {
+    const { createSFlowTools } = await import('../sflow-plugin-factory.js');
+    const tools = createSFlowTools(mockClient as any);
+
+    const noIssueDir = tempDir('receipt-issue-missing');
+    await cleanupDir(noIssueDir);
+    await ensureDir(noIssueDir);
+    await writeStateFile(noIssueDir, {
+      state: 'executing',
+      mode: 'full',
+      artifacts_hash: 'abc123',
+      contract_hash: 'def456',
+    });
+    await writeContractFile(noIssueDir);
+
+    await createExecutionPlan(noIssueDir, {
+      mode: 'inline',
+      source: 'default',
+      rationale: 'schema v2 plan',
+      waves: [{ id: 'W1', strategy: 'serial', tasks: ['1.1'], depends_on: [] }],
+    });
+
+    const planPath = noIssueDir + '/.flow-engine/sflow/execution-plan.json';
+    const plan = JSON.parse(await readFile(planPath, 'utf-8'));
+    plan.schema_version = 2;
+    await writeFile(planPath, JSON.stringify(plan, null, 2));
+
+    const result = await tools.record_review_receipt.execute(
+      {
+        waveId: 'W1',
+        status: 'fail',
+        base: 'abc1234',
+        head: 'def5678',
+        report: 'CRITICAL: no issue id provided',
+      },
+      { directory: noIssueDir } as any,
+    );
+
+    const parsed = JSON.parse(result.output);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toMatch(/issue/i);
+
+    await cleanupDir(noIssueDir);
+  });
+});
+
+describe('P1 fix: adjudicate_wave tool', () => {
+  const mockClient = {
+    session: {
+      create: async () => ({ data: { id: 'test-session' } }),
+      prompt: async () => ({}),
+      abort: async () => ({}),
+    },
+  };
+
+  async function setupAdjudicationDir(name: string): Promise<string> {
+    const { createSFlowTools } = await import('../sflow-plugin-factory.js');
+    const tools = createSFlowTools(mockClient as any);
+
+    const dir = tempDir(name);
+    await cleanupDir(dir);
+    await ensureDir(dir);
+    await writeStateFile(dir, {
+      state: 'executing',
+      mode: 'full',
+      artifacts_hash: 'abc123',
+      contract_hash: 'def456',
+    });
+    await writeContractFile(dir);
+
+    await createExecutionPlan(dir, {
+      mode: 'inline',
+      source: 'default',
+      rationale: 'schema v2 plan',
+      waves: [{ id: 'W1', strategy: 'serial', tasks: ['1.1'], depends_on: [] }],
+    });
+
+    const planPath = dir + '/.flow-engine/sflow/execution-plan.json';
+    const plan = JSON.parse(await readFile(planPath, 'utf-8'));
+    plan.schema_version = 2;
+    await writeFile(planPath, JSON.stringify(plan, null, 2));
+
+    // 3 consecutive fail receipts with the same issue → adjudication-required
+    // (repair ranges must be continuous: each fail's base equals the previous fail's head)
+    const ranges = [
+      { base: 'abc1234', head: 'def5678' },
+      { base: 'def5678', head: 'hij9012' },
+      { base: 'hij9012', head: 'klm3456' },
+    ];
+    for (let i = 0; i < 3; i++) {
+      const result = await tools.record_review_receipt.execute(
+        {
+          waveId: 'W1',
+          status: 'fail',
+          base: ranges[i].base,
+          head: ranges[i].head,
+          report: `CRITICAL: failure ${i}`,
+          issue: 'BUG-001',
+        },
+        { directory: dir } as any,
+      );
+      const parsed = JSON.parse(result.output);
+      expect(parsed.success).toBe(true);
+    }
+    return dir;
+  }
+
+  it('should be registered in createSFlowTools output with args schema', async () => {
+    const { createSFlowTools } = await import('../sflow-plugin-factory.js');
+    const tools = createSFlowTools(mockClient as any);
+    expect(tools.adjudicate_wave).toBeDefined();
+    expect(typeof tools.adjudicate_wave.description).toBe('string');
+    const schemaKeys = Object.keys(tools.adjudicate_wave.args as Record<string, unknown>);
+    expect(schemaKeys).toContain('waveId');
+    expect(schemaKeys).toContain('decision');
+    expect(schemaKeys).toContain('confirmed');
+    expect(schemaKeys).toContain('reason');
+  });
+
+  it('should authorize one additional review end-to-end (fail chain → adjudicate → pass)', async () => {
+    const { createSFlowTools } = await import('../sflow-plugin-factory.js');
+    const tools = createSFlowTools(mockClient as any);
+    const dir = await setupAdjudicationDir('adjudicate-wave-e2e');
+
+    // Wave is now adjudication-required: further reviews blocked without adjudication
+    const blocked = await tools.record_review_receipt.execute(
+      {
+        waveId: 'W1',
+        status: 'fail',
+        base: 'klm3456',
+        head: 'mno7890',
+        report: 'CRITICAL: still failing',
+        issue: 'BUG-001',
+      },
+      { directory: dir } as any,
+    );
+    expect(JSON.parse(blocked.output).success).toBe(false);
+
+    // Adjudicate via tool
+    const adjResult = await tools.adjudicate_wave.execute(
+      {
+        waveId: 'W1',
+        decision: 'allow-review',
+        confirmed: true,
+        reason: 'Human reviewed the failure chain, authorizing one more attempt',
+      },
+      { directory: dir } as any,
+    );
+    const adjParsed = JSON.parse(adjResult.output);
+    expect(adjParsed.success).toBe(true);
+
+    // The authorized review can now be recorded
+    const retry = await tools.record_review_receipt.execute(
+      {
+        waveId: 'W1',
+        status: 'fail',
+        base: 'klm3456',
+        head: 'mno7890',
+        report: 'CRITICAL: attempt 4',
+        issue: 'BUG-001',
+      },
+      { directory: dir } as any,
+    );
+    expect(JSON.parse(retry.output).success).toBe(true);
+
+    // A second review without a new adjudication is blocked again (1 auth = 1 review)
+    const blockedAgain = await tools.record_review_receipt.execute(
+      {
+        waveId: 'W1',
+        status: 'fail',
+        base: 'mno7890',
+        head: 'pqr1234',
+        report: 'CRITICAL: attempt 5',
+        issue: 'BUG-001',
+      },
+      { directory: dir } as any,
+    );
+    expect(JSON.parse(blockedAgain.output).success).toBe(false);
+
+    await cleanupDir(dir);
+  });
+
+  it('should return error when wave is not adjudication-required', async () => {
+    const { createSFlowTools } = await import('../sflow-plugin-factory.js');
+    const tools = createSFlowTools(mockClient as any);
+    const dir = await setupAdjudicationDir('adjudicate-wave-not-required');
+
+    // Adjudicate first (fail4 requires an active authorization), consume it with
+    // an authorized fail; the wave re-enters adjudication-required (same-issue
+    // count 4 ≥ 3), so adjudicate again, then resolve with a pass so the wave is
+    // no longer adjudication-required
+    const adjResult0 = await tools.adjudicate_wave.execute(
+      {
+        waveId: 'W1',
+        decision: 'allow-review',
+        confirmed: true,
+        reason: 'First authorization for fail 4',
+      },
+      { directory: dir } as any,
+    );
+    expect(JSON.parse(adjResult0.output).success).toBe(true);
+    await tools.record_review_receipt.execute(
+      {
+        waveId: 'W1',
+        status: 'fail',
+        base: 'klm3456',
+        head: 'mno7890',
+        report: 'CRITICAL: attempt 4',
+        issue: 'BUG-001',
+      },
+      { directory: dir } as any,
+    );
+    const adjResult2 = await tools.adjudicate_wave.execute(
+      {
+        waveId: 'W1',
+        decision: 'allow-review',
+        confirmed: true,
+        reason: 'Second authorization to allow the resolving pass',
+      },
+      { directory: dir } as any,
+    );
+    expect(JSON.parse(adjResult2.output).success).toBe(true);
+    const passResult = await tools.record_review_receipt.execute(
+      {
+        waveId: 'W1',
+        status: 'pass',
+        base: 'mno7890',
+        head: 'pqr1234',
+        report: 'All tests passed after fix',
+      },
+      { directory: dir } as any,
+    );
+    expect(JSON.parse(passResult.output).success).toBe(true);
+
+    const adjResult = await tools.adjudicate_wave.execute(
+      {
+        waveId: 'W1',
+        decision: 'allow-review',
+        confirmed: true,
+        reason: 'Should fail: not adjudication-required',
+      },
+      { directory: dir } as any,
+    );
+    const parsed = JSON.parse(adjResult.output);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toMatch(/not adjudication-required/i);
+
+    await cleanupDir(dir);
+  });
+});

@@ -11,7 +11,7 @@
  * P1-5: review_base WRITE_ONCE, normalization
  * P1-1: reviewTargets, review_policy support
  */
-import type { ExecutionPlan, ReviewReceipt, RepairState, ReviewEvidence, Adjudication, AdjudicationLedger, ReviewPolicy } from '../execution-plan-types.js';
+import type { ExecutionPlan, ReviewReceipt, RepairState, ReviewEvidence, Adjudication, AdjudicationLedger, ReviewPolicy, Wave } from '../execution-plan-types.js';
 import { ensureDir, readJsonFile, writeJsonFile, atomicWriteJsonFile, fileExists } from '@opencode-flow-engine/shared';
 import { MAX_REPAIR_FAILURES, MAX_ISSUE_REPAIR_FAILURES, ISSUE_ID_PATTERN, FULL_COMMIT_SHA } from '@opencode-flow-engine/core';
 import {
@@ -767,23 +767,6 @@ async function writeAdjudicationLedger(
 }
 
 /**
- * P0-2: Read the active (unconsumed) adjudication authorization for a wave.
- * Returns null if no active authorization exists.
- */
-export function readActiveAdjudication(
-  changeDir: string,
-  plan: ExecutionPlan,
-  waveId: string,
-  repair: RepairState | null,
-  receipt: ReviewReceipt | null,
-): Adjudication | null {
-  // This is a synchronous wrapper that reads from disk
-  // For the async version used in adjudicateWave, we use readAdjudicationLedger directly
-  // This function is provided for the recordReviewReceipt flow
-  return null; // Placeholder - actual implementation uses async version
-}
-
-/**
  * P0-2: Async version of readActiveAdjudication.
  * Reads the adjudication ledger and returns the latest active authorization.
  */
@@ -866,7 +849,7 @@ async function consumeAdjudication(
  * @param plan - The execution plan
  * @returns Array of review target waves
  */
-export function reviewTargets(plan: ExecutionPlan): Array<{ id: string; strategy: string; tasks: string[]; depends_on: string[] }> {
+export function reviewTargets(plan: ExecutionPlan): Wave[] {
   if (plan.review_policy === 'final') {
     return [{
       id: 'final',
@@ -929,11 +912,13 @@ export async function resolveRecommendationPlanRevision(
     }
   }
 
-  // Reject cross-workflow plan
+  // Reject cross-workflow plan: legacy plan (schema_version 1) recovered under a
+  // different workflow than 'full' cannot be trusted for recommendation
   const stateWorkflow = state.workflow as string | null;
   if (plan.review_policy === undefined && stateWorkflow && stateWorkflow !== 'full') {
-    // Legacy plan check: if the state has a workflow, the plan should be compatible
-    // For now, we just check if the plan was created in the same workflow context
+    failures.push(
+      `cross-workflow execution plan (legacy plan recovered under non-full workflow: ${stateWorkflow})`,
+    );
   }
 
   if (failures.length > 0) {
@@ -1079,26 +1064,25 @@ export async function validateFinalReviewRange(
     );
   }
 
-  // Reject truncated range (HEAD~1)
+  // Resolve HEAD commit first (non-git environment → skip validation gracefully)
+  let headCommit: string | null = null;
   try {
     const { execFileSync } = await import('child_process');
-    const headCommit = execFileSync('git', ['-C', changeDir, 'rev-parse', 'HEAD'], {
+    headCommit = execFileSync('git', ['-C', changeDir, 'rev-parse', 'HEAD'], {
       encoding: 'utf8',
       stdio: 'pipe',
     }).trim();
-
-    if (head !== headCommit) {
-      throw new Error(
-        `Final review head must be HEAD (${headCommit.slice(0, 7)}), ` +
-        `but head is ${head.slice(0, 7)}. Truncated ranges like HEAD~1 are not allowed.`,
-      );
-    }
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('Final review head must be')) {
-      throw error;
-    }
-    // Non-git environment: skip validation
+  } catch {
     Logger.warn('[P1-5] Could not validate final review range: git unavailable');
+    return;
+  }
+
+  // Compare outside try — a truncated range must throw, never be swallowed
+  if (head !== headCommit) {
+    throw new Error(
+      `Final review head must be HEAD (${headCommit.slice(0, 7)}), ` +
+      `but head is ${head.slice(0, 7)}. Truncated ranges like HEAD~1 are not allowed.`,
+    );
   }
 }
 

@@ -3,7 +3,7 @@ import { isValidTransition, getValidTransitions } from '@opencode-flow-engine/co
 import { fileExists, directoryExists, readJsonFile, readFile } from '@opencode-flow-engine/shared';
 import { checkArtifactPreflight, findPreflightState } from '../features/artifact-preflight.js';
 import { writeStateFile } from '../features/state-manager.js';
-import { recommendExecutionMode } from '../features/execution-plan.js';
+import { recommendExecutionMode, recordReviewBase } from '../features/execution-plan.js';
 import { resolveArtifactLanguage, checkAndDetectLanguage } from '../features/artifact-language.js';
 import { formatGuardFixHint } from '../features/guard-fix-hint.js';
 import { readArtifactContent } from '../features/state-manager/artifact-paths.js';
@@ -123,6 +123,18 @@ export function createStateTransitionHook(): HookHandler {
           }
         }
 
+        // P1-5: Record review_base when entering executing (WRITE_ONCE)
+        const rb = await checkReviewBaseRecording({ changeDir, currentState, newState, data });
+        if (rb.blocked) {
+          return {
+            success: false,
+            error: 'Failed to record review base',
+            block: true,
+            blockReason: rb.blockReason,
+          };
+        }
+        Object.assign(dp4extra, rb.extra);
+
         await updateState(changeDir, newState, Object.keys(dp4extra).length > 0 ? dp4extra : undefined);
 
         return {
@@ -198,5 +210,70 @@ export function checkDebuggingRollbackReason(input: {
       rollback_at: new Date().toISOString(),
     },
   };
+}
+
+/**
+ * P1-5: Resolve the current HEAD commit SHA in a git environment.
+ * Returns undefined when git is unavailable (non-git environment).
+ */
+async function resolveHeadSha(changeDir: string): Promise<string | undefined> {
+  try {
+    const { execFileSync } = await import('child_process');
+    return execFileSync('git', ['-C', changeDir, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+      stdio: 'pipe',
+    }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * P1-5 (spec: execution-plan review_base): 进入 executing 时记录 review_base（WRITE_ONCE）。
+ *
+ * - 仅 approved-for-build → executing 转换触发；其他转换为 no-op
+ * - base SHA 优先取 data.reviewBase（显式提供），否则在 git 环境取 HEAD
+ * - 非 git 环境或无 execution plan：降级为 no-op，绝不阻断状态转换
+ * - data.reviewBase 无效时阻断（显式提供的 SHA 无法解析是调用方错误）
+ */
+export async function checkReviewBaseRecording(input: {
+  changeDir: string;
+  currentState: string;
+  newState: string;
+  data?: { reviewBase?: unknown } & Record<string, unknown>;
+}): Promise<{ blocked: boolean; blockReason?: string; extra: Record<string, unknown> }> {
+  const { changeDir, currentState, newState, data } = input;
+
+  // Only wire on approved-for-build → executing
+  if (!(currentState === 'approved-for-build' && newState === 'executing')) {
+    return { blocked: false, extra: {} };
+  }
+
+  // Resolve the base SHA: explicit data.reviewBase wins, else HEAD in git environments
+  const explicitSha = typeof data?.reviewBase === 'string' && data.reviewBase.trim()
+    ? data.reviewBase.trim()
+    : undefined;
+  const sha = explicitSha ?? await resolveHeadSha(changeDir);
+
+  try {
+    const reviewBase = await recordReviewBase(changeDir, sha);
+    return {
+      blocked: false,
+      extra: reviewBase ? { review_base: reviewBase } : {},
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    // Explicit SHA provided but invalid → block (caller error must surface)
+    if (explicitSha) {
+      return {
+        blocked: true,
+        blockReason: `[SFLOW] Failed to record review base: ${reason}`,
+        extra: {},
+      };
+    }
+    // Non-git environment or no execution plan: degrade gracefully
+    Logger.warn(`[P1-5] Skipping review_base recording: ${reason}`);
+    return { blocked: false, extra: {} };
+  }
 }
 

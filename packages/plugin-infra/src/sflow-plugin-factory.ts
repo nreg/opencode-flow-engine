@@ -52,7 +52,7 @@ import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
 import { registerFlowCommands } from '../../../workflows/shared/slash-commands.js';
 import { createAgnesTools } from './agnes-tools.js';
 import { getCurrentWorkflowState, executeContractValidator, executeArtifactInspector } from './sflow-tool-helpers.js';
-import { createExecutionPlan, reviseExecutionPlan, readExecutionPlan, recordReviewReceipt } from './features/execution-plan.js';
+import { createExecutionPlan, reviseExecutionPlan, readExecutionPlan, recordReviewReceipt, adjudicateWave } from './features/execution-plan.js';
 import { fileExists, readJsonFile } from '@opencode-flow-engine/shared';
 import { applyTokenBudgetToContent } from './features/token-budget-limiter.js';
 import { resolveChangeDir } from './helpers/resolve-change-dir.js';
@@ -299,19 +299,27 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
         base: z.string().describe('Git commit hash of the review base'),
         head: z.string().describe('Git commit hash of the review head'),
         report: z.string().describe('Review report content or path'),
+        issue: z.string().optional().describe('Stable issue identifier for the unresolved finding (required for fail receipts on schema_version 2 plans, e.g. "BUG-123")'),
       },
       execute: async (args, context) => {
         const changeDir = resolveChangeDir(undefined, context.directory);
-        const { waveId, status, base, head, report } = args as {
+        const { waveId, status, base, head, report, issue } = args as {
           waveId: string;
           status: 'pass' | 'fail';
           base: string;
           head: string;
           report: string;
+          issue?: string;
         };
 
         try {
-          const receipt = await recordReviewReceipt(changeDir, waveId, { status, base, head, report });
+          const receipt = await recordReviewReceipt(changeDir, waveId, {
+            status,
+            base,
+            head,
+            report,
+            ...(issue ? { issue } : {}),
+          });
 
           return {
             title: 'Record Review Receipt',
@@ -322,6 +330,7 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
                 status: receipt.status,
                 base: receipt.base,
                 head: receipt.head,
+                ...(receipt.issue ? { issue: receipt.issue } : {}),
                 recorded_at: receipt.recorded_at,
               },
             }, null, 2),
@@ -329,6 +338,50 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
         } catch (error) {
           return {
             title: 'Record Review Receipt',
+            output: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            }, null, 2),
+          };
+        }
+      },
+    },
+
+    adjudicate_wave: {
+      description: 'Record an explicit human decision (adjudication) that authorizes exactly one additional review for a wave whose repair chain requires adjudication. One authorization = one review attempt.',
+      args: {
+        waveId: z.string().describe('The wave ID to adjudicate (e.g. "W1" or "final")'),
+        decision: z.literal('allow-review').describe('Adjudication decision: must be "allow-review"'),
+        confirmed: z.boolean().describe('Whether the human has reviewed the failure chain'),
+        reason: z.string().describe('Reason for the adjudication (required, no control characters)'),
+      },
+      execute: async (args, context) => {
+        const changeDir = resolveChangeDir(undefined, context.directory);
+        const { waveId, decision, confirmed, reason } = args as {
+          waveId: string;
+          decision: string;
+          confirmed: boolean;
+          reason: string;
+        };
+
+        try {
+          const authorization = await adjudicateWave(changeDir, waveId, { decision, confirmed, reason });
+          return {
+            title: 'Adjudicate Wave',
+            output: JSON.stringify({
+              success: true,
+              adjudication: {
+                waveId,
+                id: authorization.id,
+                status: authorization.status,
+                decision: authorization.decision,
+                authorized_at: authorization.authorized_at,
+              },
+            }, null, 2),
+          };
+        } catch (error) {
+          return {
+            title: 'Adjudicate Wave',
             output: JSON.stringify({
               success: false,
               error: error instanceof Error ? error.message : String(error),
