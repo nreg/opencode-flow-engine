@@ -2,7 +2,7 @@
  * Tests for CompletionDetector — P3: Completion Enforcement & System Reminder
  *
  * Covers:
- * - hasCompletionSignal: [TASK_COMPLETE] marker detection
+ * - hasCompletionSignal: [TASK_COMPLETE] marker detection (case-insensitive)
  * - hasCompletionSignal: JSON code fence detection
  * - hasCompletionSignal: bare JSON object detection
  * - hasCompletionSignal: empty output → false
@@ -44,6 +44,33 @@ describe('hasCompletionSignal', () => {
 
     it('should detect [TASK_COMPLETE] as entire output', () => {
       const output = '[TASK_COMPLETE]';
+      expect(hasCompletionSignal(output)).toBe(true);
+    });
+
+    // ─── Case-insensitive variant detection ──────────────────────────────
+
+    it('should detect [Task_Complete] mixed-case marker', () => {
+      const output = '所有任务已完成 [Task_Complete]';
+      expect(hasCompletionSignal(output)).toBe(true);
+    });
+
+    it('should detect [task_complete] lowercase marker', () => {
+      const output = '所有任务已完成 [task_complete]';
+      expect(hasCompletionSignal(output)).toBe(true);
+    });
+
+    it('should detect mixed-case marker in Chinese output without error', () => {
+      const output = '代码修改完成，测试通过 [Task_Complete]';
+      expect(hasCompletionSignal(output)).toBe(true);
+    });
+
+    it('should detect lowercase marker at start of output', () => {
+      const output = '[task_complete] 任务已完成';
+      expect(hasCompletionSignal(output)).toBe(true);
+    });
+
+    it('should detect mixed-case marker as entire output', () => {
+      const output = '[Task_Complete]';
       expect(hasCompletionSignal(output)).toBe(true);
     });
   });
@@ -134,8 +161,18 @@ describe('hasCompletionSignal', () => {
       expect(hasCompletionSignal(output)).toBe(false);
     });
 
-    it('should return false for partial [TASK_COMPLETE] marker', () => {
+    it('should return false for partial [TASK_COMPLETE] marker (no brackets)', () => {
       const output = '任务进行中 TASK_COMPLETE';
+      expect(hasCompletionSignal(output)).toBe(false);
+    });
+
+    it('should return false for lowercase bare marker without brackets', () => {
+      const output = '任务进行中 task_complete';
+      expect(hasCompletionSignal(output)).toBe(false);
+    });
+
+    it('should return false for mixed-case bare marker without brackets', () => {
+      const output = '任务进行中 Task_Complete';
       expect(hasCompletionSignal(output)).toBe(false);
     });
 

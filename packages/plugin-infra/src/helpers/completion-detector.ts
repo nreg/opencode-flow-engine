@@ -6,7 +6,7 @@
  *
  * Detection strategies (by agent type):
  * 1. STRICT agents (spec-writer, contract-builder):
- *    - [TASK_COMPLETE] marker → true
+ *    - [TASK_COMPLETE] marker (case-insensitive) → true
  *    - JSON code fence (```json ... ```) → true
  *    - Bare JSON object ({...}) → true
  *    - Empty / null output → false
@@ -43,12 +43,12 @@ export interface CompletionEnforcementConfig {
   /** Warning message when max retries are exhausted */
   warningMessage: string;
   /** Agent types that SHOULD have completion enforcement (opt-in).
-   *  Only agents that output [TASK_COMPLETE] should be listed here.
+   *  Only agents that output [TASK_COMPLETE] (case-insensitive) should be listed here.
    *  All other agents are automatically exempt. */
   enabledAgents?: string[];
 }
 
-/** STRICT completion agents — require [TASK_COMPLETE] marker or JSON output.
+/** STRICT completion agents — require [TASK_COMPLETE] marker (case-insensitive) or JSON output.
  *  These agents output structured completion signals and must be strictly enforced.
  */
 export const STRICT_COMPLETION_AGENTS: string[] = [
@@ -79,7 +79,7 @@ export const LOOSE_COMPLETION_AGENTS: string[] = [
 ];
 
 /** Combined list of all agents with completion enforcement enabled.
- *  STRICT agents use hasCompletionSignal ([TASK_COMPLETE] or JSON).
+ *  STRICT agents use hasCompletionSignal ([TASK_COMPLETE] case-insensitive or JSON).
  *  LOOSE agents use hasSubstantialOutput (report keywords or substantial length).
  *  All other agents are automatically exempt.
  */
@@ -112,7 +112,9 @@ export const COMPLETION_ENFORCEMENT_CONFIG: CompletionEnforcementConfig = {
   enabledAgents: DEFAULT_COMPLETION_ENABLED_AGENTS,
 };
 
-/** System reminder message injected when subagent output lacks completion signal */
+/** System reminder message injected when subagent output lacks completion signal.
+ *  Note: The reminder instructs subagents to include [TASK_COMPLETE] (canonical form),
+ *  but detection is case-insensitive per hasCompletionSignal. */
 export const REMINDER_MESSAGE: ReminderMessage = {
   type: 'system',
   parts: [{
@@ -127,11 +129,12 @@ export const REMINDER_MESSAGE: ReminderMessage = {
  * Check whether subagent output contains a completion signal.
  *
  * Completion signals include:
- * 1. [TASK_COMPLETE] marker
+ * 1. [TASK_COMPLETE] marker (case-insensitive: [TASK_COMPLETE], [Task_Complete], [task_complete])
  * 2. JSON code fence (```json ... ```)
  * 3. Bare JSON object ({...})
  *
  * Empty or null output is treated as incomplete (returns false).
+ * Bare markers without brackets (e.g. "TASK_COMPLETE") are NOT detected — brackets are required.
  *
  * @param output - The raw output text from the subagent
  * @returns true if a completion signal is detected, false otherwise
@@ -142,8 +145,8 @@ export function hasCompletionSignal(output: string): boolean {
     return false;
   }
 
-  // 1. Detect [TASK_COMPLETE] marker
-  if (output.includes('[TASK_COMPLETE]')) {
+  // 1. Detect [TASK_COMPLETE] marker (case-insensitive: [TASK_COMPLETE], [Task_Complete], [task_complete])
+  if (/\[task_complete\]/i.test(output)) {
     return true;
   }
 
@@ -225,7 +228,7 @@ export function hasSubstantialOutput(output: string): boolean {
  * Perform completion enforcement retry logic.
  *
  * Detection strategy by agent type:
- * - STRICT agents (spec-writer, contract-builder): Use hasCompletionSignal ([TASK_COMPLETE] or JSON)
+ * - STRICT agents (spec-writer, contract-builder): Use hasCompletionSignal ([TASK_COMPLETE] case-insensitive or JSON)
  * - LOOSE agents (build-executor, etc.): Use hasSubstantialOutput (report keywords or substantial length)
  * - Other agents: No retry (automatically exempt)
  *
