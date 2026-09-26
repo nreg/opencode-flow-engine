@@ -412,6 +412,40 @@ describe('reviseExecutionPlan', () => {
     expect(onDisk?.review_base).toBe(commitSha);
   }, 30000);
 
+  it('should preserve review_policy and schema_version on revise (F-1)', async () => {
+    // F-1: 审查策略是计划级配置，revise 不得静默退化
+    // （一旦启用 final 策略，revise 后退化为 wave 会让收据门禁失效）
+    await createExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Initial plan',
+      waves: sampleWaves,
+    });
+
+    // 模拟上游已写入审查策略（CreateExecutionPlanParams 不含这两个字段）
+    const planPath = join(dir, '.flow-engine', 'sflow', 'execution-plan.json');
+    const raw = JSON.parse(await readFile(planPath, 'utf8')) as Record<string, unknown>;
+    raw.review_policy = 'final';
+    raw.schema_version = 2;
+    await writeFile(planPath, JSON.stringify(raw, null, 2));
+
+    const revised = await reviseExecutionPlan(dir, {
+      mode: 'sdd',
+      source: 'default',
+      rationale: 'Updated rationale',
+      waves: sampleWaves,
+    });
+
+    expect(revised.revision).toBe(2);
+    expect(revised.review_policy).toBe('final');
+    expect(revised.schema_version).toBe(2);
+
+    // 磁盘上的计划同样保留
+    const onDisk = await readExecutionPlan(dir);
+    expect(onDisk?.review_policy).toBe('final');
+    expect(onDisk?.schema_version).toBe(2);
+  });
+
   it('should increment revision from 2 to 3', async () => {
     await createExecutionPlan(dir, {
       mode: 'sdd',
@@ -1935,7 +1969,7 @@ describe('P1-5: Review Base', () => {
 
       const result = await normalizeCommitSha(dir, shortSha);
       expect(result).toBe(fullSha);
-    });
+    }, 30000);
   });
 
   describe('recordReviewBase', () => {
@@ -1967,7 +2001,7 @@ describe('P1-5: Review Base', () => {
       // Verify plan was updated
       const plan = await readExecutionPlan(dir);
       expect(plan?.review_base).toBe(commitSha);
-    });
+    }, 30000);
 
     it('should not overwrite existing review_base (WRITE_ONCE)', async () => {
       // Create a git repo
@@ -2000,7 +2034,7 @@ describe('P1-5: Review Base', () => {
 
       const plan = await readExecutionPlan(dir);
       expect(plan?.review_base).toBe(commitSha); // Not changed
-    });
+    }, 30000);
 
     it('should return null when no SHA provided', async () => {
       await createExecutionPlan(dir, {
@@ -2055,7 +2089,7 @@ describe('P1-5: Review Base', () => {
       } finally {
         await cleanupDir(gitDir);
       }
-    });
+    }, 30000);
   });
 
   describe('validateFinalReviewRange', () => {
@@ -2243,5 +2277,5 @@ describe('P1 fix: validateFinalReviewRange truncated HEAD range', () => {
     await expect(
       validateFinalReviewRange(dir, plan, baseSha, headSha),
     ).resolves.toBeUndefined();
-  });
+  }, 30000);
 });

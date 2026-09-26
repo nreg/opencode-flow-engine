@@ -377,6 +377,8 @@ export async function reviseExecutionPlan(
   // Build revised plan with incremented revision
   // N-3: 锚点是开工事实（WRITE_ONCE），修订计划必须原样保留已有的
   // review_base/target_branch，不得静默清空（否则 final 区间校验被禁用）。
+  // F-1: 同理，review_policy/schema_version 是计划级配置，修订时必须原样继承，
+  // 否则启用 final 策略后 revise 一次就会静默退化为 wave（收据门禁失效）。
   const revisedPlan: ExecutionPlan = {
     mode: params.mode,
     source: params.source,
@@ -386,6 +388,8 @@ export async function reviseExecutionPlan(
     artifacts_hash,
     contract_hash,
     revision: existingPlan.revision + 1,
+    review_policy: existingPlan.review_policy,
+    schema_version: existingPlan.schema_version,
     review_base: existingPlan.review_base,
     target_branch: existingPlan.target_branch,
   };
