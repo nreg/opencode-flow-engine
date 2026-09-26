@@ -295,7 +295,14 @@ export function markModelUnavailable(
   let expireAt = now + (opts?.ttlMs ?? TRANSIENT_COOLDOWN_TTL_MS);
   if (opts?.resetAt !== undefined && opts.resetAt !== null) {
     if (opts.resetAt <= now) {
-      // Reset time already passed — the cooldown is over, model is available
+      // R3-P2-2: delete 语义保守化 —— 陈旧/误判（如裸 UTC 落本地时区解释）解析出的
+      // 过去时刻 resetAt 不得抹掉在效的长冷却（单调合并语义不被绕过）。
+      // 仅当无在效条目（或条目已过期）时才删除。
+      const existing = UNAVAILABLE_MODELS.get(model);
+      if (existing !== undefined && existing > now) {
+        return;
+      }
+      // Reset time already passed and no active cooldown — model is available
       UNAVAILABLE_MODELS.delete(model);
       return;
     }

@@ -181,16 +181,18 @@ export function matchesQuotaErrorPattern(output: string): boolean {
  * - "resets at 2026-09-27 04:21:07"
  * - ISO offset: "resets at 2026-09-27T04:21:07+08:00"
  * - GMT offset: "resets at 2026-09-27 12:21:07 GMT+8"
+ * - R3-P1 裸 UTC/GMT（无偏移）: "将在 2026-09-27 12:21:07 UTC 重置"（按 UTC+0 解释）
  *
  * NEW-P3-G: 优先匹配 reset/重置 关键词邻近的时间戳（多日期文本取对时间）；
  * 支持 UTC+n / UTC+HH:MM / GMT±n / ISO ±HH:MM 偏移。
+ * 语义明确：无时区标记的时间戳按本地时间解释（不是 UTC）。
  *
  * @returns epoch milliseconds of the reset time, or null when no absolute time found
  */
 export function parseQuotaResetTime(output: string): number | null {
   if (!output) return null;
   const datePattern =
-    /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|UTC([+-]\d{1,2})(?::?\d{2})?|GMT([+-]\d{1,2})(?::?\d{2})?|([+-]\d{2}:?\d{2}))?/i;
+    /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|UTC([+-]\d{1,2}(?::?\d{2})?)?|GMT([+-]\d{1,2}(?::?\d{2})?)?|([+-]\d{2}:?\d{2}))?/i;
   const parseMatch = (match: RegExpMatchArray): number => {
     const [, y, mo, d, h, mi, s, zulu, utcOffsetH, gmtOffsetH, isoOffset] = match;
     const year = Number(y);
@@ -202,6 +204,8 @@ export function parseQuotaResetTime(output: string): number | null {
     if (zulu === 'Z') {
       return Date.UTC(year, month, day, hour, minute, second);
     }
+    // R3-P1: 裸 UTC / GMT（无偏移后缀）按 UTC+0 解释，不落本地时区
+    // （如「将在 2026-09-27 12:21:07 UTC 重置」——此前误按本地时区解释，TZ≠UTC 时解析出错）
     if (utcOffsetH !== undefined) {
       const offsetHours = Number(utcOffsetH);
       return Date.UTC(year, month, day, hour - offsetHours, minute, second);
@@ -209,6 +213,9 @@ export function parseQuotaResetTime(output: string): number | null {
     if (gmtOffsetH !== undefined) {
       const offsetHours = Number(gmtOffsetH);
       return Date.UTC(year, month, day, hour - offsetHours, minute, second);
+    }
+    if (/^(UTC|GMT)$/i.test(zulu ?? '')) {
+      return Date.UTC(year, month, day, hour, minute, second);
     }
     if (isoOffset !== undefined) {
       const sign = isoOffset.startsWith('-') ? -1 : 1;

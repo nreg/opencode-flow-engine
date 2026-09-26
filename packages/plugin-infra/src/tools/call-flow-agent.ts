@@ -1593,6 +1593,7 @@ export function createCallFlowAgentTools(
             { maxWaitMs: DEFAULT_MAX_WAIT_MS, directory: changeDir },
           );
 
+
           const now = Date.now();
 
           // Wave 2 Task 5：尝试模型故障转移（换模型重 prompt），循环直至成功/耗尽。
@@ -1600,7 +1601,31 @@ export function createCallFlowAgentTools(
           // P1-2：output !== null（poll 已成功）时不触发 fallback——避免误拉黑健康模型
           // 并向同一 session 重复注入接管 prompt（对照 watcher 路径的 probeResult === null 守卫）。
           let fb: { retried: true; nextModel: string } | { retried: false } = { retried: false };
-          if (output === null) {
+          // R3-P2-3: 第三路径（pollAndComplete 非 null 输出）接入错误/配额识别——
+          // 与 sync 路径（runWithModelFallback）及 async watcher 路径对齐：
+          // 错误文本/配额报错不算成功产出 → 换模型重 prompt 或结构化错误，不判 completed。
+          // P1-2 守卫保留：正常产出（含 completion signal）仍不触发 fallback。
+          let identifiedErrorKind: 'quota' | 'model' | null = null;
+          let activeQuota: { resetAt: number | null } | null = null;
+          if (typeof output === 'string') {
+            const identifiedQuota = classifyQuotaError(output);
+            const identifiedModelError = !identifiedQuota && matchesModelErrorPatterns(output);
+            if (identifiedQuota || identifiedModelError) {
+              identifiedErrorKind = identifiedQuota ? 'quota' : 'model';
+              activeQuota = identifiedQuota ? { resetAt: identifiedQuota.resetAt } : null;
+              fb = await tryAsyncModelFallback({
+                client,
+                registry: backgroundTaskRegistry,
+                taskId: task_id,
+                changeDir,
+                extraFallbacks: buildAgentFallbackChain(task.subagentType as BuiltinAgentName, configOverrides, modelProfiles),
+                quota: activeQuota,
+              });
+              // 无效产出：置空交由下方 while 循环 re-poll；耗尽时走结构化错误路径
+              output = null;
+            }
+          }
+          if (output === null && identifiedErrorKind === null) {
             fb = await tryAsyncModelFallback({
               client,
               registry: backgroundTaskRegistry,
@@ -1618,9 +1643,22 @@ export function createCallFlowAgentTools(
               { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS, directory: changeDir },
             );
             if (rePoll !== null) {
-              output = rePoll as string;
-              fb = { retried: false } as { retried: false };
-              break;
+              // R3-P2-3: 换模后的 re-poll 输出同样做错误/配额识别——错误文本不算成功，继续换模
+              // Type guard: in pollAndComplete (no probeMode), rePoll is string
+              const reOutput = rePoll as string;
+              const reQuota = classifyQuotaError(reOutput);
+              const reModelError = !reQuota && matchesModelErrorPatterns(reOutput);
+              if (reQuota || reModelError) {
+                identifiedErrorKind = reQuota ? 'quota' : 'model';
+                activeQuota = reQuota ? { resetAt: reQuota.resetAt } : null;
+                output = null;
+              } else {
+                output = reOutput;
+                fb = { retried: false } as { retried: false };
+                break;
+              }
+            } else {
+              output = null;
             }
             fb = await tryAsyncModelFallback({
               client,
@@ -1628,6 +1666,7 @@ export function createCallFlowAgentTools(
               taskId: task_id,
               changeDir,
               extraFallbacks: buildAgentFallbackChain(task.subagentType as BuiltinAgentName, configOverrides, modelProfiles),
+              quota: activeQuota,
             });
           }
 
@@ -1648,10 +1687,14 @@ export function createCallFlowAgentTools(
 
           let updated: BackgroundTaskEntry;
           if (output === null) {
+            // R3-P2-3: 耗尽时若识别出错误/配额，错误信息注明识别结果（结构化错误，不判 completed）
+            const identifiedNote = identifiedErrorKind
+              ? `async output identified as ${identifiedErrorKind === 'quota' ? 'quota/rate-limit' : 'model'} error; model fallback exhausted`
+              : 'Session retry exhausted or polling failed';
             updated = {
               ...task,
               status: 'error',
-              error: 'Session retry exhausted or polling failed',
+              error: identifiedNote,
               completedAt: now,
               slotReleased: task.slotReleased ?? false,
             };
@@ -1670,7 +1713,7 @@ export function createCallFlowAgentTools(
                 subagent: task.subagentType,
                 task_id,
                 session_id: task.sessionID,
-                summary: 'Task failed: session retry exhausted or polling failed',
+                summary: `Task failed: ${identifiedNote}`,
               });
             } catch (err) {
               Logger.warn(`[CallFlowAgent] 异步模式写入错误通知失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -1685,7 +1728,7 @@ export function createCallFlowAgentTools(
                 await asyncStore.appendEvent(matchedAgent.agent_id, {
                   timestamp: new Date().toISOString(),
                   event_type: 'error',
-                  detail: `Async task ${task_id} failed: session retry exhausted or polling failed`,
+                  detail: `Async task ${task_id} failed: ${identifiedNote}`,
                 });
               }
             } catch (err) {
@@ -1699,6 +1742,7 @@ export function createCallFlowAgentTools(
           // Type guard: in pollAndComplete (no probeMode), output is string
           const asyncOutput = output as string;
           const asyncHasSignal = hasCompletionSignal(asyncOutput);
+
           const finalOutput = asyncOutput || '(no output)';
           updated = {
             ...task,
