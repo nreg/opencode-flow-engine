@@ -474,10 +474,17 @@ describe('R3-P1: parseQuotaResetTime 裸 UTC 支持', () => {
 
   it('裸 UTC 配额报文 → 长冷却写入且 expireAt 正确', () => {
     clearUnavailableModels();
-    const info = classifyQuotaError('您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC 重置');
+    // 相对时间构造报文，消除壁钟依赖：报文时间在未来约 1 小时，
+    // 即使 advanceClock 前进后（±1s 偏移）仍保持正确的前后关系
+    const resetInstant = Date.now() + 60 * 60 * 1000;
+    const quotaText = '您的使用量已超出频率限制，将在 ' +
+      new Date(resetInstant).toISOString().slice(0, 19).replace('T', ' ') +
+      ' UTC 重置';
+    const info = classifyQuotaError(quotaText);
     expect(info).not.toBeNull();
     const resetAt = info!.resetAt;
-    expect(resetAt).toBe(Date.UTC(2026, 8, 27, 12, 21, 7));
+    // 裸 UTC 报文按 UTC+0 解析，应还原出原始时刻（容许秒级截断误差）
+    expect(Math.abs(resetAt - resetInstant)).toBeLessThan(1000);
     markModelUnavailable('provider/bare-utc-model', { resetAt });
     expect(isModelAvailable('provider/bare-utc-model')).toBe(false);
     // expireAt 精确到重置时间：重置前 blocked
