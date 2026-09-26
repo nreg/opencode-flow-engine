@@ -32,9 +32,13 @@ export class PollingLogger {
     }
 
     // 插件初始化时清空旧日志文件，防止无限增长
+    // P1-fix: 将 clear 串入 writeQueue，避免与首次 log 写入竞争
+    // （fire-and-forget 的异步 clear 可能在首次 appendFile 之后到达，导致日志被清空）
     if (!PollingLogger._cleared) {
       PollingLogger._cleared = true;
-      PollingLogger.clear(this.logFilePath).catch(() => {});
+      this.writeQueue = this.writeQueue
+        .then(() => PollingLogger.clear(this.logFilePath))
+        .catch(() => {});
     }
   }
 

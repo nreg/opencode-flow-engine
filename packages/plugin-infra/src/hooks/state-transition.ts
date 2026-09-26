@@ -217,15 +217,10 @@ export function checkDebuggingRollbackReason(input: {
  * Returns undefined when git is unavailable (non-git environment).
  */
 async function resolveHeadSha(changeDir: string): Promise<string | undefined> {
-  try {
-    const { execFileSync } = await import('child_process');
-    return execFileSync('git', ['-C', changeDir, 'rev-parse', 'HEAD'], {
-      encoding: 'utf8',
-      stdio: 'pipe',
-    }).trim();
-  } catch {
-    return undefined;
-  }
+  // P3: 异步 execGitAsync 替代 execFileSync，避免阻塞事件循环
+  const { execGitAsync } = await import('../helpers/git-async.js');
+  const stdout = await execGitAsync(['rev-parse', 'HEAD'], changeDir);
+  return stdout?.trim();
 }
 
 /**

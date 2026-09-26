@@ -2110,6 +2110,16 @@ describe('P1 fix: resolveRecommendationPlanRevision cross-workflow rejection', (
     const revision = await resolveRecommendationPlanRevision(dir, { workflow: 'full' });
     expect(revision).toBe(2);
   });
+
+  it('should enforce type-level constraint on state fields (P3)', () => {
+    // 类型安全约束：拼错/重命名后的字段名应在编译期报错，而非静默失效
+    // 该闭包运行时不执行；bun run typecheck 时以下 @ts-expect-error 必须被命中，否则视为失效
+    const typeCheckOnly = () => {
+      // @ts-expect-error "wofkflow" 不是 RecommendationStateInput 的字段（上游重命名应编译报错）
+      resolveRecommendationPlanRevision(dir, { wofkflow: 'iflow' });
+    };
+    expect(typeof typeCheckOnly).toBe('function');
+  });
 });
 
 describe('P1 fix: validateFinalReviewRange truncated HEAD range', () => {

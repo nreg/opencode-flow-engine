@@ -44,6 +44,7 @@ export {
   readActiveAdjudicationAsync,
   // P0-3: Plan revision recovery
   resolveRecommendationPlanRevision,
+  type RecommendationStateInput,
   // P1-1: Review targets
   reviewTargets,
   // P1-5: Review base

@@ -146,6 +146,17 @@ describe('P1 fix: checkReceiptIntegrity 按 reviewTargets 判定', () => {
     const result = await checkReceiptIntegrity(dir, 'sflow');
     expect(result.success).toBe(true);
   });
+
+  it('wave 策略：空 waves 计划仍通过（P3 删除冗余空检查后行为不变）', async () => {
+    await writePlan(dir, {
+      ...basePlan(),
+      waves: [],
+    });
+
+    const result = await checkReceiptIntegrity(dir, 'sflow');
+    expect(result.success).toBe(true);
+    expect(result.block).toBeUndefined();
+  });
 });
 
 describe('P1 fix: checkWaveDependencies 按 reviewTargets 判定', () => {

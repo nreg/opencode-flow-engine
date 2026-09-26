@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import {
   createAgent,
   createAllAgents,
@@ -15,9 +15,28 @@ import {
   clearUnavailableModels,
   AGENT_PROFILES,
   resolveModelWithFallback,
+  clearConfigCache,
 } from './agent-builder.js';
+import { USER_CONFIG_FILE } from './config-loader.js';
+import { join } from 'path';
+
+// 隔离真实用户配置（~/.config/opencode/opencode-flow-engine.json），
+// 指向不存在的临时文件，使测试结果确定性
+const ISOLATED_USER_CONFIG = join(
+  process.env.TEMP || '/tmp',
+  'opencode-flow-engine-test-isolated.json',
+);
 
 describe('Agent Builder', () => {
+  beforeEach(() => {
+    process.env.FLOW_ENGINE_USER_CONFIG_FILE = ISOLATED_USER_CONFIG;
+    clearConfigCache();
+  });
+
+  afterEach(() => {
+    delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+    clearConfigCache();
+  });
   describe('createAgent', () => {
     it('should create sFlow agent', async () => {
       const agent = await createAgent('sFlow', 'gpt-5.5');
@@ -116,7 +135,9 @@ describe('Agent Builder', () => {
 
     it('should use default model when not specified', async () => {
       const agent = await createAgent('sFlow');
-      expect(agent.model).toBe('atomcode/deepseek-v4-flash');
+      // 已隔离用户配置：sFlow 无 AGENT_PROFILES 绑定，未指定 model 时
+      // 走 fallback 链，第一个可用 fallback 为 DEFAULT_FALLBACKS.sFlow[0]
+      expect(agent.model).toBe('provider/glm-5.1');
     });
   });
 

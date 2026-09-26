@@ -83,8 +83,8 @@ export async function checkWaveDependencies(changeDir: string, activeWorkflow: '
   if (!plan) return { success: true };
 
   // P1 fix: iterate reviewTargets (supports review_policy='final' — single 'final' range)
+  // P3: reviewTargets 已保证返回非空数组（final 恒为单元素；空 waves 遍历即为 success），删除冗余空检查
   const waves = reviewTargets(plan);
-  if (!waves || waves.length === 0) return { success: true };
 
   // Check for empty waves
   for (const wave of waves) {
@@ -151,8 +151,8 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
   if (!plan) return { success: true };
 
   // P1 fix: iterate reviewTargets (supports review_policy='final' — single 'final' range)
+  // P3: reviewTargets 已保证返回非空数组，删除冗余空检查
   const waves = reviewTargets(plan);
-  if (!waves || waves.length === 0) return { success: true };
 
   const REQUIRED_RECEIPT_FIELDS = ['status', 'base', 'head', 'report'] as const;
 
@@ -319,8 +319,8 @@ export async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow
   if (!plan) return { success: true };
 
   // P1 fix: iterate reviewTargets (supports review_policy='final' — single 'final' range)
+  // P3: reviewTargets 已保证返回非空数组，删除冗余空检查
   const waves = reviewTargets(plan);
-  if (!waves || waves.length === 0) return { success: true };
 
   for (const wave of waves) {
     const receiptPath = `${changeDir}/.flow-engine/sflow/reviews/${wave.id}.json`;

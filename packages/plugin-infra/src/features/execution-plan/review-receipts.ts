@@ -60,17 +60,16 @@ export async function assertNonEmptyDiff(changeDir: string, base: string, head: 
     );
   }
 
-  let output = '';
-  try {
-    const { execFileSync } = await import('child_process');
-    output = execFileSync('git', ['-C', changeDir, 'diff', '--name-only', baseSha, headSha, '--'], {
-      encoding: 'utf8',
-      stdio: 'pipe',
-    });
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+  // P3: 异步 execGitAsync 替代 execFileSync，避免阻塞事件循环
+  const { execGitAsync } = await import('../../helpers/git-async.js');
+  const output = await execGitAsync(
+    ['diff', '--name-only', baseSha, headSha, '--'],
+    changeDir,
+  );
+
+  if (output === undefined) {
     Logger.warn(
-      `[P0-1] Skipping non-empty diff validation (${shortSha(baseSha)}..${shortSha(headSha)}): git unavailable for ${changeDir} — ${reason}`,
+      `[P0-1] Skipping non-empty diff validation (${shortSha(baseSha)}..${shortSha(headSha)}): git unavailable for ${changeDir}`,
     );
     return;
   }
@@ -864,6 +863,17 @@ export function reviewTargets(plan: ExecutionPlan): Wave[] {
 // ─── P0-3: Resolve Recommendation Plan Revision ────────────────────────────────
 
 /**
+ * P0-3: state.json 中与本函数相关的字段（类型安全约束）。
+ * 上游字段重命名时，调用方会在此接口层面编译报错，而非静默失效。
+ */
+export interface RecommendationStateInput {
+  execution_plan_revision?: number | null;
+  revision?: number | null;
+  execution_plan_hash?: string | null;
+  workflow?: string | null;
+}
+
+/**
  * P0-3: Recover execution plan revision when state summary is lost.
  *
  * When state.execution_plan_revision is null but the plan file exists,
@@ -879,11 +889,11 @@ export function reviewTargets(plan: ExecutionPlan): Wave[] {
  */
 export async function resolveRecommendationPlanRevision(
   changeDir: string,
-  state: Record<string, unknown>,
+  state: RecommendationStateInput,
 ): Promise<number | null> {
   // If state has the revision, return it directly
   if (state.execution_plan_revision != null) {
-    return state.execution_plan_revision as number;
+    return state.execution_plan_revision;
   }
 
   // Try to recover from plan file
@@ -902,8 +912,9 @@ export async function resolveRecommendationPlanRevision(
   }
 
   // Reject partial clearing: if revision or hash is set in state but not both
-  const stateRevision = state.revision as number | null;
-  const statePlanHash = state.execution_plan_hash as string | null;
+  // 类型安全：字段已由 RecommendationStateInput 约束，无需 as 断言
+  const stateRevision = state.revision ?? null;
+  const statePlanHash = state.execution_plan_hash ?? null;
 
   if (stateRevision != null || statePlanHash != null) {
     // At least one is set — if both aren't set together, it's partial clearing
@@ -914,7 +925,7 @@ export async function resolveRecommendationPlanRevision(
 
   // Reject cross-workflow plan: legacy plan (schema_version 1) recovered under a
   // different workflow than 'full' cannot be trusted for recommendation
-  const stateWorkflow = state.workflow as string | null;
+  const stateWorkflow = state.workflow ?? null;
   if (plan.review_policy === undefined && stateWorkflow && stateWorkflow !== 'full') {
     failures.push(
       `cross-workflow execution plan (legacy plan recovered under non-full workflow: ${stateWorkflow})`,
@@ -947,14 +958,11 @@ export async function normalizeCommitSha(changeDir: string, sha: string): Promis
   if (!trimmed) return null;
 
   try {
-    const { execFileSync } = await import('child_process');
-    const result = execFileSync('git', ['-C', changeDir, 'rev-parse', '--verify', trimmed], {
-      encoding: 'utf8',
-      stdio: 'pipe',
-    }).trim();
+    const { execGitAsync } = await import('../../helpers/git-async.js');
+    const result = (await execGitAsync(['rev-parse', '--verify', trimmed], changeDir))?.trim();
 
     // Verify it's a valid 40-char SHA
-    if (FULL_COMMIT_SHA.test(result)) {
+    if (result && FULL_COMMIT_SHA.test(result)) {
       return result;
     }
     return null;
@@ -1002,11 +1010,8 @@ export async function recordReviewBase(changeDir: string, sha?: string): Promise
   // Get target branch
   let targetBranch: string | undefined;
   try {
-    const { execFileSync } = await import('child_process');
-    targetBranch = execFileSync('git', ['-C', changeDir, 'rev-parse', '--abbrev-ref', 'HEAD'], {
-      encoding: 'utf8',
-      stdio: 'pipe',
-    }).trim();
+    const { execGitAsync } = await import('../../helpers/git-async.js');
+    targetBranch = (await execGitAsync(['rev-parse', '--abbrev-ref', 'HEAD'], changeDir))?.trim();
   } catch {
     // Non-git environment: target_branch is undefined
     Logger.warn('[P1-5] Could not determine target branch: git unavailable');
@@ -1065,14 +1070,10 @@ export async function validateFinalReviewRange(
   }
 
   // Resolve HEAD commit first (non-git environment → skip validation gracefully)
-  let headCommit: string | null = null;
-  try {
-    const { execFileSync } = await import('child_process');
-    headCommit = execFileSync('git', ['-C', changeDir, 'rev-parse', 'HEAD'], {
-      encoding: 'utf8',
-      stdio: 'pipe',
-    }).trim();
-  } catch {
+  // execGitAsync 失败时返回 undefined（不抛异常），与降级语义一致
+  const { execGitAsync } = await import('../../helpers/git-async.js');
+  const headCommit = (await execGitAsync(['rev-parse', 'HEAD'], changeDir))?.trim();
+  if (headCommit === undefined) {
     Logger.warn('[P1-5] Could not validate final review range: git unavailable');
     return;
   }
