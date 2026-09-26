@@ -88,6 +88,113 @@ export const DEFAULT_COMPLETION_ENABLED_AGENTS: string[] = [
   ...LOOSE_COMPLETION_AGENTS,
 ];
 
+// ─── Model Failure Classification（P0-1/P0-2/P0-4 模型故障识别）──────────────
+
+/**
+ * Model error patterns — output matching any of these is NOT a success signal.
+ * Reused by hasSubstantialOutput (error suppression) and runWithModelFallback (success validation).
+ */
+export const MODEL_ERROR_PATTERNS: RegExp[] = [
+  /^error:/im,
+  /^failed:/im,
+  /^Error:/m,
+  /^FAIL:/im,
+  /"error"\s*:\s*"/i,
+  /Error:\s.*\n\s+at /s,
+];
+
+/**
+ * Quota / rate-limit error patterns（P0-2 长冷却配额识别）。
+ * Output matching any of these indicates the model hit a rate/quota limit —
+ * a long-cooldown condition, NOT a transient retry condition.
+ */
+export const QUOTA_ERROR_PATTERNS: RegExp[] = [
+  /\b429\b/,
+  /rate.?limit/i,
+  /RATE_LIMITED/,
+  /quota/i,
+  /频率限制/,
+  /超出频率限制/,
+  /限流/,
+  /使用量.*超出/,
+  /usage.*exceed/i,
+];
+
+/**
+ * Check whether output matches model error patterns (P0-1: 错误文本不算成功).
+ */
+export function matchesModelErrorPatterns(output: string): boolean {
+  if (!output) return false;
+  return MODEL_ERROR_PATTERNS.some((pattern) => pattern.test(output));
+}
+
+/**
+ * Check whether output matches quota / rate-limit patterns (P0-2).
+ */
+export function matchesQuotaErrorPattern(output: string): boolean {
+  if (!output) return false;
+  return QUOTA_ERROR_PATTERNS.some((pattern) => pattern.test(output));
+}
+
+/**
+ * Parse the quota reset time from an error message.
+ *
+ * Supported formats:
+ * - 「您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC+8 重置」
+ * - "rate limit exceeded, resets at 2026-09-27T04:21:07Z"
+ * - "resets at 2026-09-27 04:21:07"
+ *
+ * @returns epoch milliseconds of the reset time, or null when no absolute time found
+ */
+export function parseQuotaResetTime(output: string): number | null {
+  if (!output) return null;
+  const match = output.match(
+    /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|UTC([+-]\d{1,2}))?/i,
+  );
+  if (!match) return null;
+  const [, y, mo, d, h, mi, s, zulu, utcOffset] = match;
+  const year = Number(y);
+  const month = Number(mo) - 1;
+  const day = Number(d);
+  const hour = Number(h);
+  const minute = Number(mi);
+  const second = s ? Number(s) : 0;
+  if (zulu === 'Z') {
+    return Date.UTC(year, month, day, hour, minute, second);
+  }
+  if (utcOffset !== undefined) {
+    const offsetHours = Number(utcOffset);
+    return Date.UTC(year, month, day, hour - offsetHours, minute, second);
+  }
+  // No timezone: assume local time
+  return new Date(year, month, day, hour, minute, second).getTime();
+}
+
+/** Quota error classification result (P0-2) */
+export interface QuotaErrorInfo {
+  kind: 'quota';
+  /** Parsed reset time (epoch ms), or null when not parseable */
+  resetAt: number | null;
+  /** Matched error detail for logging */
+  detail: string;
+}
+
+/**
+ * Classify quota / rate-limit errors (P0-2).
+ *
+ * Returns QuotaErrorInfo when the text matches quota patterns (429 / rate limit /
+ * quota / 频率限制 etc.), with the reset time parsed when present.
+ * Returns null for non-quota text.
+ */
+export function classifyQuotaError(output: string): QuotaErrorInfo | null {
+  if (!matchesQuotaErrorPattern(output)) return null;
+  return {
+    kind: 'quota',
+    resetAt: parseQuotaResetTime(output),
+    detail: output.slice(0, 200),
+  };
+}
+
 /** Result of the completion retry process */
 export interface CompletionRetryResult {
   /** The final output text (may be from a retry attempt) */

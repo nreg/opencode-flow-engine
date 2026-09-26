@@ -3103,7 +3103,7 @@ describe('模型级故障转移 (model fallback)', () => {
 
     // 断言 2：第 2 次 prompt 使用 fallback 模型（build-executor 的第一个 fallback = provider/glm-5）
     const secondModel = promptCalls[1].body.model as { providerID: string; modelID: string };
-    expect(secondModel.modelID).toBe('glm-5');
+    expect(secondModel.modelID).toBe('glm-5.1');
 
     // 断言 3：第 2 次 prompt 文本含"接管"字样（D-5）
     const secondParts = promptCalls[1].body.parts as Array<{ type: string; text: string }>;
@@ -3111,7 +3111,7 @@ describe('模型级故障转移 (model fallback)', () => {
 
     // 断言 4：最终成功
     expect(data.success).toBe(true);
-    expect(data.model).toContain('glm-5');
+    expect(data.model).toContain('glm-5.1');
   });
 
   it('F-2: 拉黑生效（故障模型不再被选中）', async () => {
@@ -3141,10 +3141,10 @@ describe('模型级故障转移 (model fallback)', () => {
     // 验证方式：把所有 fallback 也拉黑后，getAlternativeModel 应返回 null
     // 先验证 glm-5 仍可用（F-1 只拉黑了 test-model）
     const alt1 = getAlternativeModel('provider/test-model', 'build-executor');
-    expect(alt1).toBe('provider/glm-5'); // 第一个可用 fallback
+    expect(alt1).toBe('provider/glm-5.1'); // 第一个可用 fallback
 
     // 再拉黑 glm-5，验证 kimi-k2.6 被选中
-    markModelUnavailable('provider/glm-5');
+    markModelUnavailable('provider/glm-5.1');
     const alt2 = getAlternativeModel('provider/test-model', 'build-executor');
     expect(alt2).toBe('provider/kimi-k2.6');
 
@@ -3196,13 +3196,13 @@ describe('模型级故障转移 (model fallback)', () => {
     // 断言 5：3 次 prompt 使用的模型依次为 test-model → glm-5 → kimi-k2.6
     const models = promptCalls.map(c => (c.body.model as { providerID: string; modelID: string }).modelID);
     expect(models[0]).toBe('test-model');
-    expect(models[1]).toBe('glm-5');
+    expect(models[1]).toBe('glm-5.1');
     expect(models[2]).toBe('kimi-k2.6');
   });
 
   it('F-4: 无可用替代模型（getAlternativeModel 返回 null，立即终止）', async () => {
     // 预先拉黑 build-executor 的全部 fallback
-    markModelUnavailable('provider/glm-5');
+    markModelUnavailable('provider/glm-5.1');
     markModelUnavailable('provider/kimi-k2.6');
 
     const client = createMockClient({
@@ -3270,7 +3270,7 @@ describe('模型级故障转移 (model fallback)', () => {
 
     // 断言 4：模型未被拉黑（getAlternativeModel 仍能返回 fallback）
     const alt = getAlternativeModel('provider/test-model', 'build-executor');
-    expect(alt).toBe('provider/glm-5'); // 若未被拉黑，第一个 fallback 仍可用
+    expect(alt).toBe('provider/glm-5.1'); // 若未被拉黑，第一个 fallback 仍可用
   });
 
   it('F-6a: 前置校验失败 HTTP 400 不换模型', async () => {
@@ -3380,11 +3380,11 @@ describe('模型级故障转移 (model fallback)', () => {
 
     // 断言 3：第 2 次 prompt 使用 fallback 模型
     const secondModel = promptCalls[1].body.model as { providerID: string; modelID: string };
-    expect(secondModel.modelID).toBe('glm-5');
+    expect(secondModel.modelID).toBe('glm-5.1');
 
     // 断言 4：registry 中 resolvedModel 已变为 fallback 模型
     const task = options.backgroundTaskRegistry.get(taskId);
     expect(task).toBeDefined();
-    expect(task?.resolvedModel).toContain('glm-5');
+    expect(task?.resolvedModel).toContain('glm-5.1');
   });
 });

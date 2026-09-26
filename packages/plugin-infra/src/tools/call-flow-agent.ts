@@ -13,6 +13,8 @@ import {
   hasCompletionSignal,
   performCompletionRetry,
   REMINDER_MESSAGE,
+  classifyQuotaError,
+  matchesModelErrorPatterns,
 } from '../helpers/completion-detector.js';
 import { extractJsonBlock, getSchemaHint } from '../helpers/output-extractor.js';
 import {
@@ -34,9 +36,14 @@ import {
   resolveModelWithFallback,
   getAlternativeModel,
   markModelUnavailable,
+  buildAgentFallbackChain,
+  isModelAvailable,
+  MIN_QUOTA_COOLDOWN_TTL_MS,
   VALID_MODEL_TIERS,
   type ModelTier,
 } from '../agents/agent-builder.js';
+import type { AgentOverrides } from '../agents/types.js';
+import type { SFlowConfig } from '../agents/config-loader.js';
 import type { BuiltinAgentName } from '../agents/types.js';
 import { Logger } from '../utils/logger.js';
 
@@ -239,7 +246,7 @@ interface RunFallbackResult {
  *
  * MAX_MODEL_RETRIES = 2 语义：首模型 + 最多 2 次换模型 = 最多 3 次 prompt 调用（非"最多 2 次调用"）。
  */
-async function runWithModelFallback(params: {
+export async function runWithModelFallback(params: {
   client: SFlowClient;
   sessionID: string;
   agentName: string;
@@ -247,13 +254,17 @@ async function runWithModelFallback(params: {
   initialModel: string;
   maxWaitMs: number;
   directory: string;
+  /** P1-1: 用户配置 fallback 链（configOverrides/modelProfiles 构建结果） */
+  extraFallbacks?: string[];
   poll: (sessionID: string, model: string) => Promise<string | null>;
   onFallback?: (info: { from: string; to: string; attempt: number; reason: string }) => Promise<void> | void;
 }): Promise<RunFallbackResult> {
-  const { client, sessionID, agentName, basePrompt, initialModel, poll, onFallback } = params;
+  const { client, sessionID, agentName, basePrompt, initialModel, poll, onFallback, extraFallbacks } = params;
   let currentModel = initialModel;
   const attemptedModels: string[] = [];
   const fallbacks: Array<{ from: string; to: string; reason: string }> = [];
+  // P0-4/P1-1: 换模时同时读用户配置 fallback 链（getAlternativeModel 融合 DEFAULT_FALLBACKS）
+  const userFallbackChain: string[] = extraFallbacks ?? [];
 
   // MAX_MODEL_RETRIES = 2 ⇒ 最多 3 次 prompt：首次 + 2 次换模型。
   for (let attempt = 0; ; attempt++) {
@@ -277,6 +288,22 @@ async function runWithModelFallback(params: {
       model: parsed,
     });
     if (!send.ok) {
+      // P0-2: 429 / 配额类 HTTP 失败 → 长冷却黑名单 + 立即换模（不走 fatal 终止、不走 5 次短重试）
+      const quotaOnSend = classifyQuotaError(send.message ?? '');
+      if (send.status === 429 || quotaOnSend) {
+        markModelUnavailable(currentModel, {
+          resetAt: quotaOnSend?.resetAt ?? null,
+          ttlMs: quotaOnSend ? undefined : MIN_QUOTA_COOLDOWN_TTL_MS,
+        });
+        const nextOnSend = getAlternativeModel(currentModel, agentName, userFallbackChain);
+        if (nextOnSend && !attemptedModels.includes(nextOnSend) && attemptedModels.length <= MAX_MODEL_RETRIES) {
+          const reason = quotaOnSend ? `quota/rate-limit (HTTP ${send.status ?? 'unknown'})` : 'HTTP 429';
+          fallbacks.push({ from: currentModel, to: nextOnSend, reason });
+          await onFallback?.({ from: currentModel, to: nextOnSend, attempt: attempt + 1, reason });
+          currentModel = nextOnSend;
+          continue;
+        }
+      }
       // D-7：前置校验失败（HTTP 400/404：SessionBusy / model not found / agent 不存在）直接终止，
       // 不拉黑、不换模型。
       return {
@@ -292,7 +319,19 @@ async function runWithModelFallback(params: {
 
     const output = await poll(sessionID, currentModel);
     if (output !== null) {
-      return { success: true, output, model: currentModel, attemptedModels, fallbacks };
+      // P0-1: 实质性产出校验（结合 completion-detector 的错误模式识别）——
+      // 错误文本 / 用户 prompt 回显 / 配额报错不算成功，转入 model-failure 分支
+      const quotaOnPoll = classifyQuotaError(output);
+      const echoFailure = output.trim() === basePrompt.trim();
+      if (quotaOnPoll || matchesModelErrorPatterns(output) || echoFailure) {
+        if (quotaOnPoll) {
+          // P0-2: 长冷却配额识别——立即标记 unavailable（按重置时间 TTL）并触发换模
+          markModelUnavailable(currentModel, { resetAt: quotaOnPoll.resetAt });
+        }
+        // P0-4: 错误识别接入换模——落入下方 model-failure 分支（markModelUnavailable + getAlternativeModel）
+      } else {
+        return { success: true, output, model: currentModel, attemptedModels, fallbacks };
+      }
     }
 
     // D-6：ContextOverflow —— 不拉黑、不换模型，交给 runtime auto-compaction
@@ -324,8 +363,9 @@ async function runWithModelFallback(params: {
       };
     }
 
-    // 终止条件 ①：无可用替代模型（D-3：必须用 getAlternativeModel，不得用 resolveModelWithFallback）
-    const next = getAlternativeModel(currentModel, agentName);
+    // 终止条件 ①：无可用替代模型（D-3：必须用 getAlternativeModel，不得用 resolveModelWithFallback；
+    // P1-1：同时传入用户配置 fallback 链）
+    const next = getAlternativeModel(currentModel, agentName, userFallbackChain);
     if (!next) {
       return {
         success: false,
@@ -381,8 +421,10 @@ async function tryAsyncModelFallback(params: {
   registry: BackgroundTaskRegistry;
   taskId: string;
   changeDir: string;
+  /** P1-1: 用户配置 fallback 链（configOverrides/modelProfiles 构建结果） */
+  extraFallbacks?: string[];
 }): Promise<{ retried: true; nextModel: string } | { retried: false }> {
-  const { client, registry, taskId, changeDir } = params;
+  const { client, registry, taskId, changeDir, extraFallbacks } = params;
   const task = registry.get(taskId);
   if (!task || !task.resolvedModel) return { retried: false };
 
@@ -396,7 +438,7 @@ async function tryAsyncModelFallback(params: {
   markModelUnavailable(task.resolvedModel);
 
   // D-3：换模型（禁止 resolveModelWithFallback）
-  const next = getAlternativeModel(task.resolvedModel, task.subagentType);
+  const next = getAlternativeModel(task.resolvedModel, task.subagentType, extraFallbacks);
   if (!next) return { retried: false }; // 终止条件 ①
 
   // D-4：重复模型 / 超限检测
@@ -992,7 +1034,23 @@ export function createCallFlowAgentTools(
               `No model configured for subagent "${subagent_type}". Available agents: ${Object.keys(agentModelMap).join(', ')}`,
             );
           }
-          subagentModel = modelFromMap;
+          // P0-3: 模型解析时查黑名单——unavailable 模型跳过，走 fallback 链
+          // （黑名单按 TTL 过期：长冷却配额按重置时间过期）
+          if (isModelAvailable(modelFromMap)) {
+            subagentModel = modelFromMap;
+          } else {
+            const fallbackNext = getAlternativeModel(
+              modelFromMap,
+              subagent_type as string,
+              buildAgentFallbackChain(subagent_type as BuiltinAgentName, configOverrides, modelProfiles),
+            );
+            if (!fallbackNext) {
+              return await formatToolError(
+                `Model "${modelFromMap}" is currently unavailable (cooldown) and no alternative model is available for "${subagent_type}".`,
+              );
+            }
+            subagentModel = fallbackNext;
+          }
         }
 
         // P1: Resume 模式 — 传入 agent_id 时从 subagent-store 恢复上下文
@@ -1148,6 +1206,8 @@ export function createCallFlowAgentTools(
         const fallbackResult = await runWithModelFallback({
           client,
           sessionID,
+          // P1-1: 传入用户配置 fallback 链（换模时同时读用户配置 + DEFAULT_FALLBACKS）
+          extraFallbacks: buildAgentFallbackChain(subagent_type as BuiltinAgentName, configOverrides, modelProfiles),
           agentName: subagent_type as string,
           basePrompt: finalPrompt,
           initialModel: subagentModel,
@@ -1437,7 +1497,18 @@ export function createCallFlowAgentTools(
 
           // Wave 2 Task 5：尝试模型故障转移（换模型重 prompt），循环直至成功/耗尽。
           // 设计：保持 running、不释放并发槽位；耗尽后才走原错误路径（D-4 未命中前不宣告失败）。
-          let fb = await tryAsyncModelFallback({ client, registry: backgroundTaskRegistry, taskId: task_id, changeDir });
+          // P1-2：output !== null（poll 已成功）时不触发 fallback——避免误拉黑健康模型
+          // 并向同一 session 重复注入接管 prompt（对照 watcher 路径的 probeResult === null 守卫）。
+          let fb: { retried: true; nextModel: string } | { retried: false } = { retried: false };
+          if (output === null) {
+            fb = await tryAsyncModelFallback({
+              client,
+              registry: backgroundTaskRegistry,
+              taskId: task_id,
+              changeDir,
+              extraFallbacks: buildAgentFallbackChain(task.subagentType as BuiltinAgentName, configOverrides, modelProfiles),
+            });
+          }
           let fbSafety = 0;
           while (fb.retried && fbSafety <= MAX_MODEL_RETRIES + 2) {
             fbSafety++;
@@ -1451,7 +1522,13 @@ export function createCallFlowAgentTools(
               fb = { retried: false } as { retried: false };
               break;
             }
-            fb = await tryAsyncModelFallback({ client, registry: backgroundTaskRegistry, taskId: task_id, changeDir });
+            fb = await tryAsyncModelFallback({
+              client,
+              registry: backgroundTaskRegistry,
+              taskId: task_id,
+              changeDir,
+              extraFallbacks: buildAgentFallbackChain(task.subagentType as BuiltinAgentName, configOverrides, modelProfiles),
+            });
           }
 
           if (fb.retried) {

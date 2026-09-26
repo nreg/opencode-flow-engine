@@ -97,7 +97,7 @@ const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
   sFlow: 'provider/deepseek-v4-flash',
   'need-explorer': 'provider/kimi-k2.6',
   'spec-writer': 'provider/glm-5.1',
-  'contract-builder': 'provider/glm-5',
+  'contract-builder': 'provider/glm-5.1',
   'build-executor': 'provider/glm-5.1',
   'bug-investigator': 'provider/minimax-m2.7',
   'code-reviewer': 'provider/deepseek-v4-flash',
@@ -133,7 +133,7 @@ const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
   'need-explorer': ['provider/glm-5.1', 'provider/deepseek-v4-flash'],
   'spec-writer': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
   'contract-builder': ['provider/glm-5.1', 'provider/deepseek-v4-flash'],
-  'build-executor': ['provider/glm-5', 'provider/kimi-k2.6'],
+  'build-executor': ['provider/glm-5.1', 'provider/kimi-k2.6'],
   'bug-investigator': ['provider/deepseek-v4-flash', 'provider/glm-5.1'],
   'code-reviewer': ['provider/glm-5.1', 'provider/kimi-k2.6'],
   'release-archivist': ['provider/mimo-v2.5', 'provider/glm-5.1'],
@@ -258,17 +258,49 @@ export function clearConfigCache(): void {
 }
 
 /**
- * Set of known-unavailable models (populated at runtime when a model request fails).
+ * Known-unavailable models with TTL (populated at runtime when a model request fails).
+ * Key: model string, Value: expireAt epoch ms (TTL-based, see markModelUnavailable).
  * External callers can register a model as unavailable via markModelUnavailable().
+ *
+ * P0-2/P1-4: TTL-based blacklist — transient errors get a short cooldown;
+ * quota/rate-limit errors (with reset time) get a long cooldown until the reset time.
  */
-const UNAVAILABLE_MODELS = new Set<string>();
+const UNAVAILABLE_MODELS = new Map<string, number>();
+
+/** Default cooldown TTL for transient model failures (5 minutes) */
+export const TRANSIENT_COOLDOWN_TTL_MS = 5 * 60_000;
+/** Minimum long-cooldown TTL for quota/rate-limit failures (30 minutes) */
+export const MIN_QUOTA_COOLDOWN_TTL_MS = 30 * 60_000;
+/** Maximum long-cooldown TTL cap (7 days) — guards against absurd reset times */
+export const MAX_QUOTA_COOLDOWN_TTL_MS = 7 * 24 * 3600_000;
 
 /**
  * Mark a model as unavailable (e.g. after an API error).
- * Once marked, resolveModelWithFallback will skip it and try fallbacks.
+ *
+ * Once marked, resolveModelWithFallback / isModelAvailable will skip it and
+ * try fallbacks until the cooldown TTL expires.
+ *
+ * P0-2: quota/rate-limit failures pass the parsed `resetAt` (epoch ms) so the
+ * model stays blacklisted until the reset time (long cooldown), instead of a
+ * fixed short TTL. Transient failures use the default short TTL.
  */
-export function markModelUnavailable(model: string): void {
-  UNAVAILABLE_MODELS.add(model);
+export function markModelUnavailable(
+  model: string,
+  opts?: { resetAt?: number | null; ttlMs?: number },
+): void {
+  const now = Date.now();
+  let expireAt = now + (opts?.ttlMs ?? TRANSIENT_COOLDOWN_TTL_MS);
+  if (opts?.resetAt !== undefined && opts.resetAt !== null) {
+    if (opts.resetAt <= now) {
+      // Reset time already passed — the cooldown is over, model is available
+      UNAVAILABLE_MODELS.set(model, now);
+      return;
+    }
+    // Long cooldown: at least MIN_QUOTA_COOLDOWN, until the reset time, capped at MAX
+    expireAt = Math.max(now + MIN_QUOTA_COOLDOWN_TTL_MS, opts.resetAt);
+    expireAt = Math.min(expireAt, now + MAX_QUOTA_COOLDOWN_TTL_MS);
+  }
+  UNAVAILABLE_MODELS.set(model, expireAt);
 }
 
 /**
@@ -280,9 +312,16 @@ export function clearUnavailableModels(): void {
 
 /**
  * Check whether a model is currently considered available.
+ * Lazily removes entries whose TTL has expired (P1-4: 黑名单按 TTL 过期).
  */
-function isModelAvailable(model: string): boolean {
-  return !UNAVAILABLE_MODELS.has(model);
+export function isModelAvailable(model: string): boolean {
+  const expireAt = UNAVAILABLE_MODELS.get(model);
+  if (expireAt === undefined) return true;
+  if (Date.now() >= expireAt) {
+    UNAVAILABLE_MODELS.delete(model);
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -378,13 +417,17 @@ export function resolveModelWithFallback(
   const programmaticModel = overrides?.[name]?.model;
   const configModel = configOverrides?.[name]?.model;
 
+  // P1-3: override/param/system-default branches must respect the blacklist —
+  // unavailable models fall through to the next priorities instead of being
+  // returned blindly (otherwise every dispatch keeps using the failed model).
+
   // Priority 1: Programmatic override
-  if (programmaticModel) {
+  if (programmaticModel && isModelAvailable(programmaticModel)) {
     return { model: programmaticModel, provenance: 'override' };
   }
 
   // Priority 2: model parameter
-  if (model) {
+  if (model && isModelAvailable(model)) {
     return { model, provenance: 'override' };
   }
 
@@ -483,8 +526,21 @@ export function resolveModelWithFallback(
     }
   }
 
-  // Priority 7: System default
+  // Priority 7: System default (P1-3: blacklist-aware "last resort" branch)
   const systemDefault = DEFAULT_MODELS[name];
+  if (isModelAvailable(systemDefault)) {
+    return {
+      model: systemDefault,
+      provenance: 'system-default',
+      fallbackAttempted: attempted.length > 0 ? attempted : undefined,
+    };
+  }
+  // System default itself blacklisted — try the full fallback chain one last time
+  const lastChain = buildAgentFallbackChain(name, configOverrides, profileOptions?.modelProfiles);
+  const lastResult = tryFallbackChain(systemDefault, lastChain);
+  if (lastResult) {
+    return { model: lastResult.model, provenance: 'provider-fallback', fallbackAttempted: lastResult.attempted };
+  }
   return {
     model: systemDefault,
     provenance: 'system-default',
@@ -665,23 +721,61 @@ export function getAllDefaultFallbacks(): Record<BuiltinAgentName, string[]> {
 }
 
 /**
- * Get an alternative model for cross-model spot-check.
+ * Get an alternative model for cross-model spot-check / fallback.
  *
- * Looks up the agent's fallback list in DEFAULT_FALLBACKS and returns the first
- * model that differs from `currentModel`. Returns null when no alternative exists
- * (unknown agent or all fallbacks match the current model).
+ * P1-1: reads BOTH the user-configured fallback chain (extraFallbacks, built from
+ * configOverrides/modelProfiles via buildAgentFallbackChain) AND DEFAULT_FALLBACKS.
+ * Returns the first model that differs from `currentModel` and passes
+ * isModelAvailable (blacklist check). Returns null when no alternative exists.
  *
- * Primary use-case: review-engineer spot-check — run a second review pass on a
- * different model to reduce single-model blind spots.
+ * Primary use-cases: review-engineer spot-check and runWithModelFallback
+ * model switching (P0-4).
  */
-export function getAlternativeModel(currentModel: string, agentName: string): string | null {
-  const fallbacks = DEFAULT_FALLBACKS[agentName as BuiltinAgentName];
-  if (!fallbacks) return null;
-
-  for (const fb of fallbacks) {
+export function getAlternativeModel(
+  currentModel: string,
+  agentName: string,
+  extraFallbacks?: string[],
+): string | null {
+  // User-configured chain first (per docs/模型路由体系.md §四), then DEFAULT_FALLBACKS
+  const chain = dedupeModels([...(extraFallbacks ?? []), ...(DEFAULT_FALLBACKS[agentName as BuiltinAgentName] ?? [])]);
+  for (const fb of chain) {
     if (fb !== currentModel && isModelAvailable(fb)) {
       return fb;
     }
   }
   return null;
+}
+
+/**
+ * Dedupe a model list while preserving order.
+ */
+function dedupeModels(models: string[]): string[] {
+  return [...new Set(models)];
+}
+
+/**
+ * Build the complete user-configurable fallback chain for an agent
+ * (per docs/模型路由体系.md §四 order):
+ * per-agent config fallbacks → user tier fallbacks → default tier fallbacks → DEFAULT_FALLBACKS.
+ *
+ * Used by getAlternativeModel callers (call-flow-agent) so model switching
+ * respects the same fallback sources as resolveModelWithFallback.
+ */
+export function buildAgentFallbackChain(
+  name: BuiltinAgentName,
+  configOverrides?: AgentOverrides,
+  modelProfiles?: ModelProfileConfig,
+): string[] {
+  const profile = AGENT_PROFILES[name];
+  const configFallbackList = normalizeFallbackList(configOverrides?.[name]?.fallback_models);
+  const userTierFallbacks = profile
+    ? normalizeFallbackList(modelProfiles?.[profile]?.fallback_models)
+    : [];
+  const defaultTierFallbacks = profile
+    ? DEFAULT_PROFILE_MODELS[profile]?.fallback_models || []
+    : [];
+  const defaultFallbackList = DEFAULT_FALLBACKS[name] || [];
+  return dedupeModels(
+    buildFallbackChain(configFallbackList, userTierFallbacks, defaultTierFallbacks, defaultFallbackList),
+  );
 }
