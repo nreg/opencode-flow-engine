@@ -29,7 +29,6 @@ const globalLogger = new PollingLogger();
  * @example
  * ```ts
  * const event = input.event;
- * await logger.log('hook', `event hook received: type=${event.type}`);
  *
  * if (event.type === 'session.created' || event.type === 'session.deleted') {
  *   // Handle workflow-specific hooks
@@ -49,9 +48,6 @@ export async function handleSessionIdleEvent(
     // P0-3: 防御性检查 - 确保 properties 和 sessionID 存在
     const properties = event.properties as { sessionID?: string } | undefined;
     if (properties?.sessionID) {
-      // 诊断日志：记录 hook 收到事件
-      await logger.log(properties.sessionID, `event hook received session.idle: type=${event.type}`, { prefix });
-
       // 派发到全局事件总线
       const eventBus = getGlobalEventBus();
       const matched = eventBus.dispatch(properties.sessionID, event);
@@ -61,7 +57,6 @@ export async function handleSessionIdleEvent(
 
       return matched;
     } else {
-      await logger.log(prefix, 'event hook received session.idle without sessionID, ignored');
       return false;
     }
   } else if (event.type === 'session.status') {
@@ -69,8 +64,6 @@ export async function handleSessionIdleEvent(
     // 检查 status.type === 'idle' 且 sessionID 匹配时也派发到事件总线
     const statusData = event.properties as { sessionID?: string; status?: { type?: string } };
     if (statusData.status?.type === 'idle' && statusData.sessionID) {
-      await logger.log(statusData.sessionID, 'event hook received session.status idle', { prefix });
-
       // 派发到全局事件总线（转换为 session.idle 事件格式）
       const eventBus = getGlobalEventBus();
       const idleEvent = {

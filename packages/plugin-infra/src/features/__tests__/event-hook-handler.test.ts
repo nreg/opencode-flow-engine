@@ -84,10 +84,11 @@ describe('P1-2: handleSessionIdleEvent 共享函数', () => {
 
         await handleSessionIdleEvent(idleEvent as Event, prefix, logger);
 
-        // 验证 logger.log 被调用，且消息包含正确的前缀
+        // 日志前缀验证：噪音日志「event hook received」已删除，
+        // 改为断言保留的派发结果日志仍携带正确前缀
         expect(logger.log).toHaveBeenCalledWith(
           expect.any(String),
-          expect.stringContaining('event hook received session.idle'),
+          expect.stringContaining('eventBus.dispatch result: matched='),
           expect.objectContaining({ prefix })
         );
       }

@@ -143,8 +143,6 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
       // event hook: session lifecycle events
       event: async (input) => {
         const event = input.event;
-        // P0-1: 诊断日志 - 记录所有收到的事件类型
-        await globalLogger.log('iFlow', `event hook received: type=${event.type}`);
 
         if (event.type === 'session.created') {
           const sessionStartHook = hookComposer.getHook('session_start');

@@ -495,8 +495,6 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
 
         event: async (input) => {
           const event = input.event;
-          // P0-1: 诊断日志 - 记录所有收到的事件类型
-          await globalLogger.log('sFlow', `event hook received: type=${event.type}`);
 
           if (event.type === 'session.created') {
             // P0: 主 agent 启动时消费未读通知

@@ -235,8 +235,6 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
 
     event: async (input) => {
       const event = input.event;
-      // P0-1: 诊断日志 - 记录所有收到的事件类型
-      await globalLogger.log('Combined', `event hook received: type=${event.type}`);
 
       if (event.type === 'session.created') {
         const sessionStartHook = hookComposer.getHook('session_start');
