@@ -14,7 +14,7 @@ import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
 import { createCallFlowAgentTools, resetRunningSubagentCounts } from '../call-flow-agent.js';
 import { DEFAULT_PROFILE_MODELS } from '../../agents/config-loader.js';
 import { resetGlobalEventBus, getGlobalEventBus } from '../../features/event-bus.js';
-import { clearUnavailableModels, markModelUnavailable, getAlternativeModel } from '../../agents/agent-builder.js';
+import { clearUnavailableModels, markModelUnavailable, getAlternativeModel, isModelAvailable } from '../../agents/agent-builder.js';
 
 // ─── Test helpers ──────────────────────────────────────────────────────────
 
@@ -3306,7 +3306,7 @@ describe('模型级故障转移 (model fallback)', () => {
     expect(output).toContain('未触发模型故障转移');
   });
 
-  it('F-6b: 前置校验失败 HTTP 404 不换模型', async () => {
+  it('F-6b: 前置校验失败 HTTP 404 → 模型级错误，换模拉黑（错误码驱动分类）', async () => {
     const client = createMockClient({
       pollOutputs: ['irrelevant'],
       promptCalls,
@@ -3326,16 +3326,12 @@ describe('模型级故障转移 (model fallback)', () => {
       { sessionID: 'parent-session', directory: '/test' },
     );
 
-    const output = result.output;
-
-    // 断言 1：仅 1 次 prompt
-    expect(promptCalls.length).toBe(1);
-
-    // 断言 2：返回错误
-    expect(output).toContain('HTTP 404');
-
-    // 断言 3：明确"未触发模型故障转移"
-    expect(output).toContain('未触发模型故障转移');
+    // 404（model not found）是模型级错误：立即换模 + 拉黑（不再 fatal 终止）。
+    // promptCalls ≥ 2（初始 404 失败 + 换模重试；mock 输出 'irrelevant' 无完成信号，
+    // 可能额外触发 completion-enforcement 重试注入）
+    expect(promptCalls.length).toBeGreaterThanOrEqual(2);
+    expect(isModelAvailable('provider/test-model')).toBe(false);
+    expect(result.output).not.toContain('未触发模型故障转移');
   });
 
   it('F-7: async pollAndComplete 路径换模型重 prompt（保持 running、不释放槽位）', async () => {

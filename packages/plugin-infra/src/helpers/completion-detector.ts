@@ -132,8 +132,8 @@ export const QUOTA_ERROR_PATTERNS: RegExp[] = [
   /限流/,
 ];
 
-/** NEW-P1-C: 弱配额 token 的错误语境词（必须与 token 同现） */
-const QUOTA_CONTEXT_PATTERN = /(exceed|exhaust|too many|error|fail|http|超出|超|错误|失败|耗尽|稍后再试|重置)/i;
+/** NEW-P1-C: 弱配额 token 的错误语境词（必须与 token 同现）；补英文 used up/reset（真实事故样例语境） */
+const QUOTA_CONTEXT_PATTERN = /(exceed|exhaust|used up|reset|too many|error|fail|http|超出|超|错误|失败|耗尽|稍后再试|重置)/i;
 
 /** NEW-P1-C: 长度守卫——报告/审查文档不是配额错误 */
 const QUOTA_MAX_TEXT_LENGTH = 500;
@@ -281,6 +281,102 @@ export function classifyQuotaError(output: string): QuotaErrorInfo | null {
     resetAt: parseQuotaResetTime(output),
     detail: output.slice(0, 200),
   };
+}
+
+// ─── Error-code Driven Model Error Classification（错误码驱动分类，主判据）──────
+
+/**
+ * 错误码驱动分类结果三档：
+ * - 'non-transient'：非瞬态（402/403/401/404 或配额语义文本）→ 立即换模 + 拉黑
+ * - 'transient'：瞬态（429/408/409/5xx）→ 立即换模 + 5min 短拉黑
+ * - 'none'：非错误 → 返回 null，继续既有逻辑（文本模式 classifyQuotaError /
+ *   matchesModelErrorPatterns 降级为二级判据兜底）
+ */
+export type ModelErrorCodeClass = 'non-transient' | 'transient' | 'none';
+
+export interface ModelErrorCodeInfo {
+  kind: ModelErrorCodeClass;
+  /** 识别出的 HTTP 状态码（文本嵌入形态或入参 status） */
+  status?: number;
+  /** 配额重置时间（epoch ms），仅 non-transient 且文本可解析时非空 */
+  resetAt: number | null;
+}
+
+/** 嵌入状态码形态：`"code":"402"` / `"code":402`（JSON 错误体内嵌，参照真实事故样例） */
+const EMBEDDED_CODE_PATTERN = /"code"\s*:\s*"?(401|402|403|404|408|409|429|5\d\d)"?/i;
+/** HTTP 前缀形态：`HTTP 402` */
+const HTTP_CODE_PATTERN = /\bHTTP\s*\/?[\d.]*\s*(401|402|403|404|408|409|429|5\d\d)\b/i;
+/** 括号形态：`(code: 500)` */
+const PAREN_CODE_PATTERN = /\(code:\s*(401|402|403|404|408|409|429|5\d\d)\)/i;
+/** status 字段形态：`status: 429` / `"status":"503"` */
+const STATUS_FIELD_PATTERN = /\bstatus\s*[:=]\s*"?(401|402|403|404|408|409|429|5\d\d)"?/i;
+/** 错误 type 字段（无 code 时）：ModelServiceRateLimit / *Quota* 等 → 按非瞬态 403 处理 */
+const ERROR_TYPE_PATTERN = /"type"\s*:\s*"[^"]*(RateLimit|Quota|PaymentRequired)[^"]*"/i;
+/** 配额语义文本（无状态码时）：used up your quota / exceeded your quota 等（真实事故样例形态） */
+const QUOTA_SEMANTIC_PATTERN =
+  /((used up|exceeded|exhaust(ed)?)\s+(your\s+)?(free\s+)?quota)|((your\s+)?(free\s+)?quota[^.]{0,60}(used up|exceeded|exhaust(ed)?|is over|has been reached))/i;
+
+/** 配额语义文本长度守卫（与既有文本模式一致）：长报告/审查文档不是传输层错误 */
+const QUOTA_SEMANTIC_MAX_TEXT_LENGTH = 500;
+
+/**
+ * 错误码驱动的模型错误分类（主判据）。
+ *
+ * 依据 provider-scaffold 提供商错误码规范：
+ * - 瞬态错误（408/409/429/5xx）：isRetryable=true，OpenCode 指数重试（约 3 次）；
+ *   重试耗尽仍失败 → 触发 fallback（5min 短拉黑）
+ * - 非瞬态错误（配额耗尽/参数/账号级持久错误）：提供商统一归一化为 402
+ *   （401/403 保留原状态码）→ isRetryable=false → 立即 fallback（重试无意义，
+ *   长冷却拉黑：可解析出重置时间则冷却至重置，否则短 TTL 30min）
+ * - 404（model not found）虽属请求形态错误，但同样是模型级错误 → 换模拉黑更合理
+ * - 400（SessionBusy 等请求级错误）不分类，交由上层 fatal 分支处理
+ *
+ * 状态码提取顺序：嵌入 code 字段 → HTTP 前缀 → (code: N) → status 字段 →
+ * 错误 type 字段（无 code）→ 入参 status（message 无码时兜底）。
+ * 全部未命中时做配额语义文本判断（长度守卫内），均未命中返回 null（none）。
+ */
+export function classifyModelErrorByCode(text: string, status?: number): ModelErrorCodeInfo | null {
+  const raw = text ?? '';
+  let code: number | undefined;
+
+  const codeMatch = raw.match(EMBEDDED_CODE_PATTERN);
+  const httpMatch = !codeMatch ? raw.match(HTTP_CODE_PATTERN) : null;
+  const parenMatch = !codeMatch && !httpMatch ? raw.match(PAREN_CODE_PATTERN) : null;
+  const statusMatch =
+    !codeMatch && !httpMatch && !parenMatch ? raw.match(STATUS_FIELD_PATTERN) : null;
+  const typeMatch = raw.match(ERROR_TYPE_PATTERN);
+
+  if (codeMatch) {
+    code = Number(codeMatch[1]);
+  } else if (httpMatch) {
+    code = Number(httpMatch[1]);
+  } else if (parenMatch) {
+    code = Number(parenMatch[1]);
+  } else if (statusMatch) {
+    code = Number(statusMatch[1]);
+  } else if (typeMatch) {
+    code = 403; // ModelServiceRateLimit / *Quota* type → 非瞬态
+  }
+  if (code === undefined && status !== undefined) {
+    code = status;
+  }
+
+  if (code !== undefined) {
+    if (code === 401 || code === 402 || code === 403 || code === 404) {
+      return { kind: 'non-transient', status: code, resetAt: parseQuotaResetTime(raw) };
+    }
+    if (code === 429 || code === 408 || code === 409 || (code >= 500 && code < 600)) {
+      return { kind: 'transient', status: code, resetAt: null };
+    }
+    // 400 等请求级错误 → none
+    return null;
+  }
+
+  // 无状态码：配额语义文本判断（长度守卫内）
+  if (raw.length <= QUOTA_SEMANTIC_MAX_TEXT_LENGTH && QUOTA_SEMANTIC_PATTERN.test(raw)) {
+    return { kind: 'non-transient', resetAt: parseQuotaResetTime(raw) };
+  }
+  return null;
 }
 
 /** Result of the completion retry process */

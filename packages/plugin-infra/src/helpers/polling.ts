@@ -10,7 +10,7 @@ import {
 } from '../types.js';
 import { PollingLogger } from '../features/polling-logger.js';
 import { getGlobalEventBus } from '../features/event-bus.js';
-import { classifyQuotaError, matchesModelErrorPatterns } from './completion-detector.js';
+import { classifyQuotaError, classifyModelErrorByCode, matchesModelErrorPatterns } from './completion-detector.js';
 
 const logger = new PollingLogger();
 
@@ -176,9 +176,13 @@ export async function pollSessionCompletion(
           return await logExit('retry_error', null);
         }
         // NEW-P0-B: 配额/模型错误引起的 retry 不应无限 PROBE_PENDING——
-        // 回传错误文本，让 watcher 识别并触发模型故障转移（与 sync 路径一致）
+        // 回传错误文本，让 watcher 识别并触发模型故障转移（与 sync 路径一致）。
+        // 错误码驱动分类（主判据）→ 文本模式兜底
         const retryMsg = statusEntry.message ?? '';
-        if (retryMsg && (classifyQuotaError(retryMsg) || matchesModelErrorPatterns(retryMsg))) {
+        if (
+          retryMsg &&
+          (classifyModelErrorByCode(retryMsg) !== null || classifyQuotaError(retryMsg) || matchesModelErrorPatterns(retryMsg))
+        ) {
           return await logExit('retry_quota', retryMsg);
         }
         return await logExit('probe_pending', PROBE_PENDING);
