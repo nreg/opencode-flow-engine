@@ -88,92 +88,10 @@ export const DEFAULT_COMPLETION_ENABLED_AGENTS: string[] = [
   ...LOOSE_COMPLETION_AGENTS,
 ];
 
-// ─── Model Failure Classification（P0-1/P0-2/P0-4 模型故障识别）──────────────
+// ─── Model Failure Classification（错误码驱动，主判据）──────────────────────
 
 /**
- * Model error patterns — output matching any of these is NOT a success signal.
- * Reused by hasSubstantialOutput (error suppression) and runWithModelFallback (success validation).
- *
- * NEW-P1-C: 仅匹配「行首错误声明」（以 error:/failed:/fail: 等开头），
- * 长报告中的堆栈、测试失败输出（任务层错误）不应等同模型调用失败——
- * 由 matchesModelErrorPatterns 的首行 + 长度守卫约束。
- */
-export const MODEL_ERROR_PATTERNS: RegExp[] = [
-  /^error:/i,
-  /^failed:/i,
-  /^Error:/i,
-  /^FAIL:/i,
-  /^fatal:/i,
-  /^exception:/i,
-  /"error"\s*:\s*"/i,
-];
-
-/** NEW-P1-C: 明确的「无错误」声明不算错误（如 "Error: none found. All checks passed."） */
-const MODEL_ERROR_NEGATION_PATTERN =
-  /(none found|all (checks? )?(passed|pass|ok)|0 (errors?|failures?)|no errors?)/i;
-
-/** NEW-P1-C: 长度守卫——完整报告/审查文档（天然含 Error: 与堆栈）不是传输层错误 */
-const MODEL_ERROR_MAX_TEXT_LENGTH = 500;
-
-/**
- * Quota / rate-limit error patterns（P0-2 长冷却配额识别）。
- * NEW-P1-C: 弱 token（429 / quota / rate limit / 限流）必须伴随错误语境词
- * （exceeded / 超出 / 错误 / 失败等）才算配额错误，避免领域文本误判。
- */
-export const QUOTA_ERROR_PATTERNS: RegExp[] = [
-  /超出频率限制/,
-  /使用量.*超出/,
-  /usage.*exceed/i,
-  /\b429\b/,
-  /rate.?limit/i,
-  /RATE_LIMITED/,
-  /quota/i,
-  /频率限制/,
-  /限流/,
-];
-
-/** NEW-P1-C: 弱配额 token 的错误语境词（必须与 token 同现）；补英文 used up/reset（真实事故样例语境） */
-const QUOTA_CONTEXT_PATTERN = /(exceed|exhaust|used up|reset|too many|error|fail|http|超出|超|错误|失败|耗尽|稍后再试|重置)/i;
-
-/** NEW-P1-C: 长度守卫——报告/审查文档不是配额错误 */
-const QUOTA_MAX_TEXT_LENGTH = 500;
-
-/**
- * Check whether output matches model error patterns (P0-1: 错误文本不算成功).
- *
- * NEW-P1-C 收紧：
- * - 仅当文本较短（≤ 500 字符）时才判模型错误——长报告/审查文档是任务层产出；
- * - 仅当首行命中行首错误声明时才算——正文中的 "Error:" 与堆栈不算；
- * - 首行命中「无错误」声明（none found / all passed）时不算。
- */
-export function matchesModelErrorPatterns(output: string): boolean {
-  if (!output) return false;
-  const trimmed = output.trim();
-  if (trimmed.length > MODEL_ERROR_MAX_TEXT_LENGTH) return false;
-  const firstLine = trimmed.split('\n')[0] ?? '';
-  if (MODEL_ERROR_NEGATION_PATTERN.test(firstLine)) return false;
-  return MODEL_ERROR_PATTERNS.some((pattern) => pattern.test(firstLine));
-}
-
-/**
- * Check whether output matches quota / rate-limit patterns (P0-2).
- *
- * NEW-P1-C 收紧：
- * - 长文本（> 500 字符）不判配额错误；
- * - 弱 token（429 / quota / rate limit / 限流）必须伴随错误语境词才算；
- * - 强 token（超出频率限制 / 使用量.*超出 / usage.*exceed）单独命中即可。
- */
-export function matchesQuotaErrorPattern(output: string): boolean {
-  if (!output) return false;
-  if (output.length > QUOTA_MAX_TEXT_LENGTH) return false;
-  const strong = QUOTA_ERROR_PATTERNS.slice(0, 3);
-  if (strong.some((pattern) => pattern.test(output))) return true;
-  const weak = QUOTA_ERROR_PATTERNS.slice(3);
-  return weak.some((token) => token.test(output) && QUOTA_CONTEXT_PATTERN.test(output));
-}
-
-/**
- * Parse the quota reset time from an error message.
+ * Quota / rate-limit reset time parsing（parseQuotaResetTime）。
  *
  * Supported formats:
  * - 「您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC+8 重置」
@@ -258,39 +176,14 @@ export function parseQuotaResetTime(output: string): number | null {
   return fallback !== null && Number.isFinite(fallback) ? fallback : null;
 }
 
-/** Quota error classification result (P0-2) */
-export interface QuotaErrorInfo {
-  kind: 'quota';
-  /** Parsed reset time (epoch ms), or null when not parseable */
-  resetAt: number | null;
-  /** Matched error detail for logging */
-  detail: string;
-}
-
-/**
- * Classify quota / rate-limit errors (P0-2).
- *
- * Returns QuotaErrorInfo when the text matches quota patterns (429 / rate limit /
- * quota / 频率限制 etc.), with the reset time parsed when present.
- * Returns null for non-quota text.
- */
-export function classifyQuotaError(output: string): QuotaErrorInfo | null {
-  if (!matchesQuotaErrorPattern(output)) return null;
-  return {
-    kind: 'quota',
-    resetAt: parseQuotaResetTime(output),
-    detail: output.slice(0, 200),
-  };
-}
-
 // ─── Error-code Driven Model Error Classification（错误码驱动分类，主判据）──────
 
 /**
  * 错误码驱动分类结果三档：
  * - 'non-transient'：非瞬态（402/403/401/404 或配额语义文本）→ 立即换模 + 拉黑
  * - 'transient'：瞬态（429/408/409/5xx）→ 立即换模 + 5min 短拉黑
- * - 'none'：非错误 → 返回 null，继续既有逻辑（文本模式 classifyQuotaError /
- *   matchesModelErrorPatterns 降级为二级判据兜底）
+ * - 'none'：非错误 / 无机器可读错误码 → 返回 null，继续既有逻辑
+ *   （无码报错无法分类是可接受的已知限制，不做文本措辞兜底）
  */
 export type ModelErrorCodeClass = 'non-transient' | 'transient' | 'none';
 
@@ -312,12 +205,8 @@ const PAREN_CODE_PATTERN = /\(code:\s*(401|402|403|404|408|409|429|5\d\d)\)/i;
 const STATUS_FIELD_PATTERN = /\bstatus\s*[:=]\s*"?(401|402|403|404|408|409|429|5\d\d)"?/i;
 /** 错误 type 字段（无 code 时）：ModelServiceRateLimit / *Quota* 等 → 按非瞬态 403 处理 */
 const ERROR_TYPE_PATTERN = /"type"\s*:\s*"[^"]*(RateLimit|Quota|PaymentRequired)[^"]*"/i;
-/** 配额语义文本（无状态码时）：used up your quota / exceeded your quota 等（真实事故样例形态） */
-const QUOTA_SEMANTIC_PATTERN =
-  /((used up|exceeded|exhaust(ed)?)\s+(your\s+)?(free\s+)?quota)|((your\s+)?(free\s+)?quota[^.]{0,60}(used up|exceeded|exhaust(ed)?|is over|has been reached))/i;
-
-/** 配额语义文本长度守卫（与既有文本模式一致）：长报告/审查文档不是传输层错误 */
-const QUOTA_SEMANTIC_MAX_TEXT_LENGTH = 500;
+/** 行首前缀码形态：`401：Token refresh failed` / `429 - too many requests`（用户真实样例） */
+const LINE_PREFIX_CODE_PATTERN = /^(?:\[?error\]?\s*[：:]?\s*)?(401|402|403|404|408|409|429|5\d\d)\s*[：:\-–—]\s*/;
 
 /**
  * 错误码驱动的模型错误分类（主判据）。
@@ -332,8 +221,8 @@ const QUOTA_SEMANTIC_MAX_TEXT_LENGTH = 500;
  * - 400（SessionBusy 等请求级错误）不分类，交由上层 fatal 分支处理
  *
  * 状态码提取顺序：嵌入 code 字段 → HTTP 前缀 → (code: N) → status 字段 →
- * 错误 type 字段（无 code）→ 入参 status（message 无码时兜底）。
- * 全部未命中时做配额语义文本判断（长度守卫内），均未命中返回 null（none）。
+ * 行首前缀码（401：/402: 等）→ 错误 type 字段（无 code）→ 入参 status（message 无码时兜底）。
+ * 仅错误码驱动：全部未命中返回 null（none），无码报错无法分类是可接受的已知限制。
  */
 export function classifyModelErrorByCode(text: string, status?: number): ModelErrorCodeInfo | null {
   const raw = text ?? '';
@@ -344,6 +233,8 @@ export function classifyModelErrorByCode(text: string, status?: number): ModelEr
   const parenMatch = !codeMatch && !httpMatch ? raw.match(PAREN_CODE_PATTERN) : null;
   const statusMatch =
     !codeMatch && !httpMatch && !parenMatch ? raw.match(STATUS_FIELD_PATTERN) : null;
+  const linePrefixMatch =
+    !codeMatch && !httpMatch && !parenMatch && !statusMatch ? raw.match(LINE_PREFIX_CODE_PATTERN) : null;
   const typeMatch = raw.match(ERROR_TYPE_PATTERN);
 
   if (codeMatch) {
@@ -354,6 +245,8 @@ export function classifyModelErrorByCode(text: string, status?: number): ModelEr
     code = Number(parenMatch[1]);
   } else if (statusMatch) {
     code = Number(statusMatch[1]);
+  } else if (linePrefixMatch) {
+    code = Number(linePrefixMatch[1]);
   } else if (typeMatch) {
     code = 403; // ModelServiceRateLimit / *Quota* type → 非瞬态
   }
@@ -372,10 +265,8 @@ export function classifyModelErrorByCode(text: string, status?: number): ModelEr
     return null;
   }
 
-  // 无状态码：配额语义文本判断（长度守卫内）
-  if (raw.length <= QUOTA_SEMANTIC_MAX_TEXT_LENGTH && QUOTA_SEMANTIC_PATTERN.test(raw)) {
-    return { kind: 'non-transient', resetAt: parseQuotaResetTime(raw) };
-  }
+  // 已知限制：无任何机器可读错误码的报错文本不做分类（文本措辞兜底已删除）——
+  // 无穷无尽的提供商报错文案无法穷举，无码报错无法分类是可接受的限制。
   return null;
 }
 

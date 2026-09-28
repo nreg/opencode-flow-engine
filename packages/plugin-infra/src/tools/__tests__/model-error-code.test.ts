@@ -14,13 +14,16 @@ import { beforeEach, describe, expect, it, mock, afterEach } from 'bun:test';
 import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
 import { createCallFlowAgentTools, resetRunningSubagentCounts, runWithModelFallback, createBackgroundTaskWatcher } from '../call-flow-agent.js';
 import { clearUnavailableModels, isModelAvailable, TRANSIENT_COOLDOWN_TTL_MS } from '../../agents/agent-builder.js';
-import { classifyModelErrorByCode, classifyQuotaError } from '../../helpers/completion-detector.js';
+import { classifyModelErrorByCode } from '../../helpers/completion-detector.js';
 
-/** 真实事故样例：iFlow 子代理英文配额报文（原文） */
+/** 真实事故样例：iFlow 子代理英文配额报文（原文，无错误码） */
 const REAL_QUOTA_SAMPLE =
   'You have used up your free quota for the current cycle (used 10083874 tokens). ' +
   'Your quota will automatically reset at 2026-09-30 00:00:00. ' +
   'For a higher quota, please complete real-name verification.';
+
+/** 行首前缀码形态（402:）的同一样例：错误码驱动分类的唯一可靠形态 */
+const CODED_QUOTA_SAMPLE = `402: ${REAL_QUOTA_SAMPLE}`;
 
 function advanceClock(offsetMs: number): () => void {
   const realNow = Date.now;
@@ -41,12 +44,23 @@ async function waitFor(pred: () => boolean, timeoutMs = 3000): Promise<void> {
 // ─── 分类器单元 ───────────────────────────────────────────────────────────────
 
 describe('classifyModelErrorByCode: 错误码驱动分类', () => {
-  it('真实事故样例：英文配额报文 → non-transient + 解析重置时间', () => {
-    const info = classifyModelErrorByCode(REAL_QUOTA_SAMPLE);
+  it('已知限制：无错误码的英文配额报文 → null（不换模，不做文本兜底）', () => {
+    // 文本模式分类已删除：无 code 的报错无法分类是可接受的已知限制
+    expect(classifyModelErrorByCode(REAL_QUOTA_SAMPLE)).toBeNull();
+  });
+
+  it('行首前缀码：402: <英文配额报文> → non-transient + 解析重置时间', () => {
+    const info = classifyModelErrorByCode(CODED_QUOTA_SAMPLE);
     expect(info).not.toBeNull();
     expect(info!.kind).toBe('non-transient');
     // "2026-09-30 00:00:00" 无时区标记 → 按本地时间解释
     expect(info!.resetAt).toBe(new Date(2026, 8, 30, 0, 0, 0).getTime());
+  });
+
+  it('行首前缀码：401：Token refresh failed → non-transient（用户真实样例）', () => {
+    const info = classifyModelErrorByCode('401：Token refresh failed. Please re-login.');
+    expect(info).not.toBeNull();
+    expect(info!.kind).toBe('non-transient');
   });
 
   it('嵌入 JSON（type=ModelServiceRateLimit, code=403）→ non-transient', () => {
@@ -102,10 +116,11 @@ describe('classifyModelErrorByCode: 错误码驱动分类', () => {
     expect(info!.kind).toBe('non-transient');
   });
 
-  it('文本模式兜底：分类器 none 时 classifyQuotaError 补英文 used up/reset 语境', () => {
+  it('已知限制固化：无 code 的英文配额报文不再换模（文本模式兜底已删除）', () => {
     const text = 'You have used up your quota for this cycle. It will reset at a later time.';
-    expect(classifyModelErrorByCode(text)?.kind ?? classifyQuotaError(text)).toBeTruthy();
-    expect(classifyQuotaError(text)).not.toBeNull();
+    expect(classifyModelErrorByCode(text)).toBeNull();
+    // 带 code 的同语义报文 → non-transient
+    expect(classifyModelErrorByCode(`402: ${text}`)?.kind).toBe('non-transient');
   });
 });
 
@@ -216,7 +231,7 @@ describe('错误码驱动: send 阶段接线（runWithModelFallback）', () => {
     let pollCount = 0;
     const poll = async () => {
       pollCount++;
-      return pollCount === 1 ? REAL_QUOTA_SAMPLE : '[TASK_COMPLETE]\nDone';
+      return pollCount === 1 ? CODED_QUOTA_SAMPLE : '[TASK_COMPLETE]\nDone';
     };
     const result = await runWithModelFallback({ ...baseParams(c, poll) });
     expect(result.success).toBe(true);
@@ -271,8 +286,8 @@ describe('错误码驱动: async watcher 路径接线', () => {
     };
   }
 
-  it('probe 返回真实事故样例：不判 completed、长冷却拉黑、换 fallback 模型重派', async () => {
-    const { client, promptCalls } = createWatcherClient({ probeOutputs: [REAL_QUOTA_SAMPLE] });
+  it('probe 返回行首前缀码配额报文：不判 completed、长冷却拉黑、换 fallback 模型重派', async () => {
+    const { client, promptCalls } = createWatcherClient({ probeOutputs: [CODED_QUOTA_SAMPLE] });
     const registry: BackgroundTaskRegistry = new Map();
     registry.set('code-watch-task', {
       sessionID: 'watch-session',
@@ -384,9 +399,9 @@ describe('错误码驱动: pollAndComplete 第三路径接线', () => {
     clearUnavailableModels();
   });
 
-  it('真实事故样例不判 completed：长冷却拉黑 + 换 fallback 模型重 prompt 后完成', async () => {
+  it('行首前缀码配额报文不判 completed：长冷却拉黑 + 换 fallback 模型重 prompt 后完成', async () => {
     const client = createMockClient({
-      pollOutputs: [REAL_QUOTA_SAMPLE, '[TASK_COMPLETE]\nrecovered'],
+      pollOutputs: [CODED_QUOTA_SAMPLE, '[TASK_COMPLETE]\nrecovered'],
     });
     const { tools, backgroundTaskRegistry } = createTools(client);
 

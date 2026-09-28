@@ -13,9 +13,7 @@ import {
   hasCompletionSignal,
   performCompletionRetry,
   REMINDER_MESSAGE,
-  classifyQuotaError,
   classifyModelErrorByCode,
-  matchesModelErrorPatterns,
 } from '../helpers/completion-detector.js';
 import { extractJsonBlock, getSchemaHint } from '../helpers/output-extractor.js';
 import {
@@ -320,13 +318,11 @@ export async function runWithModelFallback(params: {
 
     const output = await poll(sessionID, currentModel);
     if (output !== null) {
-      // P0-1: 实质性产出校验——错误码驱动分类（主判据）→ 文本模式兜底（classifyQuotaError /
-      // matchesModelErrorPatterns）。错误文本 / 用户 prompt 回显 / 配额报错不算成功，
-      // 转入 model-failure 分支。
+      // P0-1: 实质性产出校验——错误码驱动分类（唯一判据）。错误码报错 / 用户 prompt 回显
+      // 不算成功，转入 model-failure 分支。无错误码的报错无法分类是可接受的已知限制。
       const codeOnPoll = classifyModelErrorByCode(output);
-      const quotaOnPoll = codeOnPoll ? null : classifyQuotaError(output);
       const echoFailure = output.trim() === sentText.trim();
-      if (codeOnPoll || quotaOnPoll || matchesModelErrorPatterns(output) || echoFailure) {
+      if (codeOnPoll || echoFailure) {
         if (codeOnPoll?.kind === 'non-transient') {
           // 非瞬态：长冷却（重置时间 TTL；无重置时间给默认长 TTL 30min）+ 立即换模
           markModelUnavailable(currentModel, {
@@ -336,13 +332,6 @@ export async function runWithModelFallback(params: {
         } else if (codeOnPoll?.kind === 'transient') {
           // 瞬态：5min 短拉黑 + 立即换模
           markModelUnavailable(currentModel, { ttlMs: TRANSIENT_COOLDOWN_TTL_MS });
-        } else if (quotaOnPoll) {
-          // P0-2: 长冷却配额识别（文本模式兜底）——立即标记 unavailable（按重置时间 TTL）并触发换模。
-          // NEW-P3-G: 无重置时间的配额错误给默认长 TTL（30min），不落 5min transient。
-          markModelUnavailable(currentModel, {
-            resetAt: quotaOnPoll.resetAt,
-            ttlMs: quotaOnPoll.resetAt ? undefined : MIN_QUOTA_COOLDOWN_TTL_MS,
-          });
         }
         // P0-4: 错误识别接入换模——落入下方 model-failure 分支（markModelUnavailable + getAlternativeModel）
       } else {
@@ -547,17 +536,14 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
     return typeof fb === 'function' ? fb(subagentType) : fb;
   };
 
-  // NEW-P0-B: async 路径与 sync 路径相同的失败识别——错误码驱动分类（主判据）→
-  // 文本模式兜底（classifyQuotaError / matchesModelErrorPatterns）。配额报错 / 模型错误文本不算成功
+  // NEW-P0-B: async 路径与 sync 路径相同的失败识别——错误码驱动分类（唯一判据）。
+  // 配额报错（带码）/ 模型错误码不算成功；无码报错无法分类是可接受的已知限制
   const classifyAsyncFailure = (
     text: string,
   ): { kind: 'quota'; resetAt: number | null } | { kind: 'error'; resetAt: null } | null => {
     const code = classifyModelErrorByCode(text);
     if (code?.kind === 'non-transient') return { kind: 'quota', resetAt: code.resetAt };
     if (code?.kind === 'transient') return { kind: 'error', resetAt: null };
-    const quota = classifyQuotaError(text);
-    if (quota) return { kind: 'quota', resetAt: quota.resetAt };
-    if (matchesModelErrorPatterns(text)) return { kind: 'error', resetAt: null };
     return null;
   };
 
@@ -1618,23 +1604,14 @@ export function createCallFlowAgentTools(
           let identifiedErrorKind: 'quota' | 'model' | null = null;
           let activeQuota: { resetAt: number | null } | null = null;
           if (typeof output === 'string') {
-            // 错误码驱动分类（主判据）→ 文本模式兜底（classifyQuotaError / matchesModelErrorPatterns）
+            // 错误码驱动分类（唯一判据）：错误码报错不算成功 → 换模型重 prompt 或结构化错误。
+            // 无码报错无法分类是可接受的已知限制（文本模式兜底已删除）。
             const identifiedCode = classifyModelErrorByCode(output);
-            const identifiedQuota = identifiedCode ? null : classifyQuotaError(output);
-            const identifiedModelError = !identifiedCode && !identifiedQuota && matchesModelErrorPatterns(output);
-            if (identifiedCode || identifiedQuota || identifiedModelError) {
-              identifiedErrorKind = identifiedCode
-                ? identifiedCode.kind === 'non-transient'
-                  ? 'quota'
-                  : 'model'
-                : identifiedQuota
-                  ? 'quota'
-                  : 'model';
-              activeQuota = identifiedCode
-                ? { resetAt: identifiedCode.kind === 'non-transient' ? identifiedCode.resetAt : null }
-                : identifiedQuota
-                  ? { resetAt: identifiedQuota.resetAt }
-                  : null;
+            if (identifiedCode) {
+              identifiedErrorKind = identifiedCode.kind === 'non-transient' ? 'quota' : 'model';
+              activeQuota = identifiedCode.kind === 'non-transient'
+                ? { resetAt: identifiedCode.resetAt }
+                : null;
               fb = await tryAsyncModelFallback({
                 client,
                 registry: backgroundTaskRegistry,
@@ -1665,26 +1642,15 @@ export function createCallFlowAgentTools(
               { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS, directory: changeDir },
             );
             if (rePoll !== null) {
-              // R3-P2-3: 换模后的 re-poll 输出同样做错误/配额识别（错误码驱动主判据 + 文本模式兜底）
-              // ——错误文本不算成功，继续换模
+              // R3-P2-3: 换模后的 re-poll 输出同样做错误码识别（唯一判据）——错误码报错不算成功，继续换模
               // Type guard: in pollAndComplete (no probeMode), rePoll is string
               const reOutput = rePoll as string;
               const reCode = classifyModelErrorByCode(reOutput);
-              const reQuota = reCode ? null : classifyQuotaError(reOutput);
-              const reModelError = !reCode && !reQuota && matchesModelErrorPatterns(reOutput);
-              if (reCode || reQuota || reModelError) {
-                identifiedErrorKind = reCode
-                  ? reCode.kind === 'non-transient'
-                    ? 'quota'
-                    : 'model'
-                  : reQuota
-                    ? 'quota'
-                    : 'model';
-                activeQuota = reCode
-                  ? { resetAt: reCode.kind === 'non-transient' ? reCode.resetAt : null }
-                  : reQuota
-                    ? { resetAt: reQuota.resetAt }
-                    : null;
+              if (reCode) {
+                identifiedErrorKind = reCode.kind === 'non-transient' ? 'quota' : 'model';
+                activeQuota = reCode.kind === 'non-transient'
+                  ? { resetAt: reCode.resetAt }
+                  : null;
                 output = null;
               } else {
                 output = reOutput;

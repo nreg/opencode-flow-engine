@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it, mock, afterEach, afterAll } from 'bun
 import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
 import { createCallFlowAgentTools, resetRunningSubagentCounts, runWithModelFallback, createBackgroundTaskWatcher } from '../call-flow-agent.js';
 import { clearUnavailableModels, markModelUnavailable, isModelAvailable, getAlternativeModel, resolveModelWithFallback, TRANSIENT_COOLDOWN_TTL_MS, MIN_QUOTA_COOLDOWN_TTL_MS } from '../../agents/agent-builder.js';
-import { classifyQuotaError, parseQuotaResetTime, matchesModelErrorPatterns, matchesQuotaErrorPattern } from '../../helpers/completion-detector.js';
+import { parseQuotaResetTime, classifyModelErrorByCode } from '../../helpers/completion-detector.js';
 
 /** 临时把 Date.now 前进 offsetMs，返回恢复函数 */
 function advanceClock(offsetMs: number): () => void {
@@ -45,18 +45,6 @@ describe('P0-2: 配额/频率限制错误分类', () => {
     // 2026-09-27 12:21:07 UTC+8 === 2026-09-27 04:21:07 UTC
     const expected = Date.UTC(2026, 8, 27, 4, 21, 7);
     expect(resetAt).toBe(expected);
-  });
-
-  it('classifies quota messages (429 / rate limit / quota / 频率限制)', () => {
-    expect(classifyQuotaError('您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC+8 重置')).not.toBeNull();
-    expect(classifyQuotaError('HTTP 429: too many requests')).not.toBeNull();
-    expect(classifyQuotaError('rate limit exceeded')).not.toBeNull();
-    expect(classifyQuotaError('quota exceeded for this model')).not.toBeNull();
-    expect(classifyQuotaError('Error: 频率限制，请稍后再试')).not.toBeNull();
-    // Non-quota errors / normal output → null
-    expect(classifyQuotaError('Error: model not found')).toBeNull();
-    expect(classifyQuotaError('normal output text')).toBeNull();
-    expect(classifyQuotaError('')).toBeNull();
   });
 });
 
@@ -212,7 +200,7 @@ describe('P0-1/P0-2/P0-4: runWithModelFallback 成功判定与换模', () => {
     const c = makeClient({ outputs: [] });
     // UTC+8 显示时间 = resetInstant + 8h 的 UTC 时钟（语义正确的 UTC+8 表示）
     const resetInstant = Date.now() + 60 * 60 * 1000;
-    const quotaText = '您的使用量已超出频率限制，将在 ' +
+    const quotaText = '402: 您的使用量已超出频率限制，将在 ' +
       new Date(resetInstant + 8 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ') +
       ' UTC+8 重置';
     let pollCount = 0;
@@ -289,7 +277,7 @@ describe('P0-1/P0-2/P0-4: runWithModelFallback 成功判定与换模', () => {
     const c = makeClient({ outputs: [] });
     // UTC+8 显示时间 = resetInstant + 8h 的 UTC 时钟（语义正确的 UTC+8 表示）
     const resetInstant = Date.now() + 60 * 60 * 1000;
-    const quotaText = '您的使用量已超出频率限制，将在 ' +
+    const quotaText = '402: 您的使用量已超出频率限制，将在 ' +
       new Date(resetInstant + 8 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ') +
       ' UTC+8 重置';
     let pollCount = 0;
@@ -480,8 +468,10 @@ describe('R3-P1: parseQuotaResetTime 裸 UTC 支持', () => {
     const quotaText = '您的使用量已超出频率限制，将在 ' +
       new Date(resetInstant).toISOString().slice(0, 19).replace('T', ' ') +
       ' UTC 重置';
-    const info = classifyQuotaError(quotaText);
+    // 错误码驱动：行首前缀码 402: → non-transient + parseQuotaResetTime 提取重置时长
+    const info = classifyModelErrorByCode(`402: ${quotaText}`);
     expect(info).not.toBeNull();
+    expect(info!.kind).toBe('non-transient');
     const resetAt = info!.resetAt;
     // 裸 UTC 报文按 UTC+0 解析，应还原出原始时刻（容许秒级截断误差）
     expect(Math.abs(resetAt - resetInstant)).toBeLessThan(1000);
@@ -616,12 +606,12 @@ describe('R3-P2-3: pollAndComplete 第三路径错误/配额识别', () => {
     expect(task?.resolvedModel).not.toBe('provider/test-model');
   });
 
-  it('配额报错（裸 UTC）不判 completed：长冷却拉黑 + 换模', async () => {
+  it('配额报错（裸 UTC + 行首前缀码 402:）不判 completed：长冷却拉黑 + 换模', async () => {
     // NP-2: 使用相对时间构造裸 UTC 报文（避免硬编码未来日期成为测试时间炸弹）。
     // toISOString 输出 UTC 时间，解析端按 UTC+0 解释（TZ 无关）。
     const resetInstant = Date.now() + 60 * 60 * 1000;
     const client = createMockClient({
-      pollOutputs: ['您的使用量已超出频率限制，将在 ' + new Date(resetInstant).toISOString().slice(0, 19).replace('T', ' ') + ' UTC 重置', '[TASK_COMPLETE]\nok'],
+      pollOutputs: ['402: 您的使用量已超出频率限制，将在 ' + new Date(resetInstant).toISOString().slice(0, 19).replace('T', ' ') + ' UTC 重置', '[TASK_COMPLETE]\nok'],
     });
     const { tools } = createTools(client);
 
@@ -691,35 +681,13 @@ describe('NEW-P0-A: 长冷却 TTL 不被无条件 markModelUnavailable 覆盖', 
   });
 });
 
-describe('NEW-P1-C: 错误/配额模式收紧（正常产出不误判）', () => {
-  it('含 quota/限流/429 的长报告文本不判配额错误', () => {
+describe('错误码驱动: 无错误码报错为已知限制（文本模式分类已删除）', () => {
+  it('无 code 的长报告 / 弱配额词 / 行首 error 文本 → 不分类（不做文本兜底）', () => {
     const report = '审查报告：本模块管理 quota 表与 rate limit 中间件。\n' +
       ('行 429 是端口配置，限流中间件已实现。' .repeat(40));
-    expect(report.length).toBeGreaterThan(500);
-    expect(matchesQuotaErrorPattern(report)).toBe(false);
-    expect(classifyQuotaError(report)).toBeNull();
-  });
-
-  it('短文本中的弱配额词（无错误语境）不判配额错误', () => {
-    expect(classifyQuotaError('This module manages the quota table. quota is a column.')).toBeNull();
-    expect(classifyQuotaError('第 429 行是端口配置，rate limit 中间件已实现')).toBeNull();
-  });
-
-  it('"Error: none found. All checks passed." 不判模型错误', () => {
-    expect(matchesModelErrorPatterns('Error: none found. All checks passed.')).toBe(false);
-  });
-
-  it('长报告（含 Error: 与堆栈）不判模型错误（任务层错误 ≠ 模型层错误）', () => {
-    const failingTestOutput = 'Running tests...\n' +
-      ('some assertion detail line\n'.repeat(40)) +
-      'Error: expect(received).toBe(expected)\n    at Object.<anonymous> (test.ts:12:5)';
-    expect(failingTestOutput.length).toBeGreaterThan(500);
-    expect(matchesModelErrorPatterns(failingTestOutput)).toBe(false);
-  });
-
-  it('明确的短错误文本仍判模型错误（既有行为保留）', () => {
-    expect(matchesModelErrorPatterns('Error: internal provider failure (code: 500)')).toBe(true);
-    expect(matchesModelErrorPatterns('Failed: model unavailable')).toBe(true);
+    expect(classifyModelErrorByCode(report)).toBeNull();
+    expect(classifyModelErrorByCode('This module manages the quota table. quota is a column.')).toBeNull();
+    expect(classifyModelErrorByCode('Error: none found. All checks passed.')).toBeNull();
   });
 });
 
@@ -815,10 +783,10 @@ describe('NEW-P0-B: async watcher 路径配额错误识别与换模', () => {
     };
   }
 
-  it('probe 返回配额错误文本：不判 completed、拉黑至重置时间、换 fallback 模型重派', async () => {
+  it('probe 返回行首前缀码配额报文：不判 completed、拉黑至重置时间、换 fallback 模型重派', async () => {
     // NP-2: 使用相对时间构造配额报文（与 :214-217 早先用例一致，避免硬编码未来日期成为时间炸弹）
     const resetInstant = Date.now() + 60 * 60 * 1000;
-    const quotaText = '您的使用量已超出频率限制，将在 ' +
+    const quotaText = '402: 您的使用量已超出频率限制，将在 ' +
       new Date(resetInstant + 8 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ') +
       ' UTC+8 重置';
     const { client, promptCalls } = createWatcherClient({ probeOutputs: [quotaText] });
@@ -861,7 +829,7 @@ describe('NEW-P0-B: async watcher 路径配额错误识别与换模', () => {
   });
 
   it('watcher 传入 extraFallbacks（用户 fallback 链被使用）', async () => {
-    const { client } = createWatcherClient({ probeOutputs: ['Error: provider crashed'] });
+    const { client } = createWatcherClient({ probeOutputs: ['Error: provider crashed (code: 500)'] });
     const registry: BackgroundTaskRegistry = new Map();
     registry.set('watch-task-2', {
       sessionID: 'watch-session',
@@ -962,9 +930,9 @@ describe('NP-1: 时区偏移解析回归与 NaN 防御', () => {
       }
     });
 
-    it('classifyQuotaError 对不可解析偏移的报文不产生 NaN resetAt', () => {
+    it('classifyModelErrorByCode 对不可解析偏移的报文不产生 NaN resetAt', () => {
       // 含分钟偏移的报文应被正确解析为有限值（而非 NaN 进入黑名单链路）
-      const info = classifyQuotaError('您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC+08:00 重置');
+      const info = classifyModelErrorByCode('402: 您的使用量已超出频率限制，将在 2026-09-27 12:21:07 UTC+08:00 重置');
       expect(info).not.toBeNull();
       expect(info!.resetAt).not.toBeNull();
       expect(Number.isFinite(info!.resetAt)).toBe(true);
