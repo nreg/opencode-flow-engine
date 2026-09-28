@@ -751,14 +751,14 @@ describe('NEW-P1-D: attempt>0 回显比对对正确对象（实际发送文本�
     };
   }
 
-  it('换模后第 2 轮 poll 回显所发 prompt（含接管声明）不算成功', async () => {
+  it('换模后第 2 轮 poll 回显所发 prompt（重试原样重发，不含接管声明）不算成功', async () => {
     const c = makeClientLocal([429]);
     let pollCount = 0;
     const poll = async () => {
       pollCount++;
       if (pollCount === 1) {
-        // 回显第 2 轮实际发送文本（接管声明 + base prompt），不含错误模式
-        return '【第 1 次接管轮次】前一个失败模型为 provider/first-model。不要重复前次已完成的工作，直接从失败处继续 —— 前次模型调用失败未产生有效输出。\n\ndo the work';
+        // 回显第 2 轮实际发送文本 —— 与 basePrompt 原样一致，不含任何接管声明
+        return 'do the work';
       }
       return '[TASK_COMPLETE]\nreal output';
     };

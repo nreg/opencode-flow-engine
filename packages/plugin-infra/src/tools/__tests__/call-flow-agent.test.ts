@@ -3105,9 +3105,10 @@ describe('模型级故障转移 (model fallback)', () => {
     const secondModel = promptCalls[1].body.model as { providerID: string; modelID: string };
     expect(secondModel.modelID).toBe('glm-5.1');
 
-    // 断言 3：第 2 次 prompt 文本含"接管"字样（D-5）
+    // 断言 3：第 2 次 prompt 原样重发 basePrompt（D-5：不含接管声明，上下文由 session 承载）
     const secondParts = promptCalls[1].body.parts as Array<{ type: string; text: string }>;
-    expect(secondParts[0].text).toContain('接管');
+    expect(secondParts[0].text).toContain('Build the feature');
+    expect(secondParts[0].text).not.toContain('接管');
 
     // 断言 4：最终成功
     expect(data.success).toBe(true);

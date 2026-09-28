@@ -166,24 +166,13 @@ async function sendPromptOnce(
 }
 
 /**
- * 构造接管轮次的 prompt 文本（D-5）。
+ * D-5：fallback 换模型重试**原样重发** basePrompt（直通，不拼接任何前置声明）。
  *
- * 当 attemptIndex > 0 时，在 basePrompt 前置一段接管声明，包含：
- *  - "第 N 次接管轮次"
- *  - 前一个失败模型名
- *  - "不要重复前次已完成的工作，直接从失败处继续 —— 前次模型调用失败未产生有效输出"
- *
- * attemptIndex === 0 时**原样返回** basePrompt（保证既有 65 个测试的 prompt 断言不受影响）。
+ * 重试是同 session 换 model 重新 prompt，session 本身已携带全部上下文，
+ * 因此无需"接管轮次"声明。此函数保留为直通函数，便于集中维护重试发送策略。
  */
-function buildAttemptPrompt(basePrompt: string, attemptIndex: number, previousModel?: string): string {
-  if (attemptIndex === 0) {
-    return basePrompt;
-  }
-  const previous = previousModel ? `前一个失败模型为 ${previousModel}` : '前一个模型未知';
-  const header =
-    `【第 ${attemptIndex} 次接管轮次】${previous}。` +
-    `不要重复前次已完成的工作，直接从失败处继续 —— 前次模型调用失败未产生有效输出。\n\n`;
-  return `${header}${basePrompt}`;
+function buildAttemptPrompt(basePrompt: string, _attemptIndex: number, _previousModel?: string): string {
+  return basePrompt;
 }
 
 // ─── Wave 2 (Task 3): 模型故障转移编排器 ───────────────────────────────────────
@@ -239,7 +228,7 @@ interface RunFallbackResult {
  * 循环：send → poll。poll 返回 null（OpenCode 已在同一模型重试 5 次后确认失败）即最强"该模型不可用"判据。
  *  - D-3：换模型只用 `getAlternativeModel`（禁用 `resolveModelWithFallback` 的 P1/P2/P7 无黑名单检查分支）
  *  - D-4：三重终止 —— ① 无替代模型 ② 重复模型 ③ `attemptedModels.length > MAX_MODEL_RETRIES`
- *  - D-5：同 session 换 model 重新 prompt，prompt 文本声明"接管轮次"
+ *  - D-5：同 session 换 model 重新 prompt，重试**原样重发** basePrompt，上下文由 session 承载
  *  - D-6：ContextOverflowError 既不拉黑也不换模型
  *  - D-7：前置校验失败（send 不 ok）直接终止，不拉黑不换模型
  *  - D-8：模型故障 → `markModelUnavailable` 拉黑
@@ -281,7 +270,7 @@ export async function runWithModelFallback(params: {
     }
     attemptedModels.push(currentModel);
 
-    // NEW-P1-D: 记录实际发送文本，回显比对以实际发送的（含接管声明的）prompt 为基准
+    // NEW-P1-D: 记录实际发送文本，回显比对以实际发送的 prompt 为基准（重试原样重发）
     const sentText = buildAttemptPrompt(
       basePrompt,
       attempt,
