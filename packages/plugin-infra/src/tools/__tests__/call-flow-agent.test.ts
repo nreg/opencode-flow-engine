@@ -195,9 +195,12 @@ describe('P3: 异步模式 completion enforcement', () => {
     );
 
     const outputData = JSON.parse(outputResult.output);
-    expect(outputData.success).toBe(true);
-    // Async mode does NOT retry → no warning, result returned as-is
-    expect(outputData.warning).toBeUndefined();
+    // P0-1 语义变更（specs/output-verdict.md 产出正向判定，DP-2 批准）：
+    // 异步产出无完成信号（无 [TASK_COMPLETE]、无 JSON、无报告关键词/Markdown 标题）
+    // 不再被判为成功，而是按 no-valid-output 失败终结（原文保留在 result 中）
+    expect(outputData.success).toBe(false);
+    expect(outputData.status).toBe('error');
+    expect(outputData.error).toContain('no completion signal');
     expect(outputData.result).toContain('我正在处理这个任务');
   });
 
@@ -373,7 +376,11 @@ describe('P3: 异步模式 completion enforcement', () => {
     );
 
     const outputData = JSON.parse(outputResult.output);
-    expect(outputData.success).toBe(true);
+    // P0-1 语义变更（specs/output-verdict.md 产出正向判定，DP-2 批准）：'partial output 1'
+    // 无完成信号与结构化证据 → 不判 completed，按 no-valid-output 失败终结，原文保留
+    expect(outputData.success).toBe(false);
+    expect(outputData.status).toBe('error');
+    expect(outputData.error).toContain('no completion signal');
     // Async mode does NOT apply P3 completion enforcement → no warning
     expect(outputData.warning).toBeUndefined();
   });
@@ -495,9 +502,11 @@ describe('NH-3: structured 提取失败 warning 传播', () => {
 
   it('sync mode: completionWarning + structuredWarning 应合并为 warnings 数组', async () => {
     // Use spec-writer (in enabled list) so P3 completion retry triggers
-    // and produces a warning alongside the structured extraction failure warning
+    // and produces a warning alongside the structured extraction failure warning.
+    // P0-1 夹具对齐：产出需带报告证据（Summary）才能作为"真实产出"走 P3 重试与 warnings 合并；
+    // 仍不含 [TASK_COMPLETE] 与 JSON，故本用例"无完成信号"的被测前提保持不变。
     const client = createMockClient({
-      pollOutputs: ['partial output without signal or json', 'still no signal or json after retry'],
+      pollOutputs: ['Summary: partial output without signal or json', 'Summary: still no signal or json after retry'],
       promptCalls,
     });
 
@@ -529,7 +538,6 @@ describe('NH-3: structured 提取失败 warning 传播', () => {
     );
 
     const data = JSON.parse(result.output);
-    expect(data.success).toBe(true);
     // Both warnings should be merged into warnings array
     expect(data.warnings).toBeDefined();
     expect(Array.isArray(data.warnings)).toBe(true);
@@ -544,6 +552,47 @@ describe('NH-3: structured 提取失败 warning 传播', () => {
         w.includes('completion signal'),
     );
     expect(hasCompletionWarning).toBe(true);
+  });
+
+  it('sync mode: 无完成信号且无结构化证据的产出 → no-valid-output 失败返回（P0-1 新语义）', async () => {
+    // P0-1 语义变更（specs/output-verdict.md 产出正向判定，DP-2 批准）：
+    // 无 [TASK_COMPLETE]、无 JSON、无报告关键词/Markdown 标题的产出不再判成功，
+    // 同步路径返回失败并保留原文（raw_output），不拉黑模型、不触发故障转移。
+    const client = createMockClient({
+      pollOutputs: ['partial output without signal or json'],
+      promptCalls,
+    });
+
+    const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
+    const backgroundTaskCounter = { value: 0 };
+    const agentModelMap: AgentModelMap = { 'spec-writer': 'provider/test-model' };
+
+    const options = {
+      client: client as unknown as import('../../types.js').SFlowClient,
+      backgroundTaskRegistry,
+      backgroundTaskCounter,
+      agentModelMap,
+      sessionLabelPrefix: 'sFlow',
+      validateAgent: async (_subagentType: string) => null,
+      workflowName: 'sFlow',
+    };
+
+    const tools = createTestTools(options);
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'spec-writer',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(false);
+    expect(data.raw_output).toBe('partial output without signal or json');
+    expect(data.error).toContain('no completion signal');
   });
 
   it('sync mode: last_message 模式不应产生 structured warning', async () => {
@@ -1521,11 +1570,14 @@ describe('F-1: pollAndComplete exception handling', () => {
     );
 
     const outputData = JSON.parse(outputResult.output);
-    
-    // Task should complete successfully (task exists in this test scenario)
-    // The G1 fix ensures that IF task were missing, it would return error instead of resurrecting
-    expect(outputData.success).toBe(true);
-    expect(outputData.status).toBe('completed');
+
+    // P0-1 语义变更（specs/output-verdict.md 产出正向判定，DP-2 批准）：夹具产出 'Task completed'
+    // 无完成信号（无 [TASK_COMPLETE]、无 JSON）且无报告关键词/Markdown 标题 → 按失败终结，
+    // 原文保留在 result 中；G1 的"任务缺失时返回 error 而非复活"防御语义不受影响。
+    expect(outputData.success).toBe(false);
+    expect(outputData.status).toBe('error');
+    expect(outputData.error).toContain('no completion signal');
+    expect(outputData.result).toContain('Task completed');
   });
 });
 
@@ -1606,8 +1658,11 @@ describe('F-2: watcher catch state refresh', () => {
     await new Promise(resolve => setTimeout(resolve, 500));
 
     // F-2: Task should remain completed, not be overwritten by error handling
+    // P0-1 语义变更（specs/output-verdict.md 产出正向判定，DP-2 批准）：夹具产出 'Task completed'
+    // 无完成信号与结构化证据 → watcher 按 no-valid-output 失败终结（早于本用例模拟的并发完成），
+    // 且终结后不被后续周期再次改写（F-2 防御语义保留）。
     const finalTask = options.backgroundTaskRegistry.get(taskId);
-    expect(finalTask?.status).toBe('completed');
+    expect(finalTask?.status).toBe('error');
     // The result might be "Task completed" (from watcher) or "Concurrent completion" (from manual set)
     // The key is that status should be 'completed', not 'error'
   });

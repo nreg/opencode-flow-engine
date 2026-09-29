@@ -21,7 +21,7 @@ import {
   DEFAULT_COMPLETION_ENABLED_AGENTS,
   STRICT_COMPLETION_AGENTS,
   LOOSE_COMPLETION_AGENTS,
-  hasSubstantialOutput,
+  hasStructuredReportEvidence,
 } from '../completion-detector.js';
 
 // ─── Agent Type Whitelist Tests ───────────────────────────────────────────────
@@ -304,54 +304,55 @@ describe('STRICT_COMPLETION_AGENTS and LOOSE_COMPLETION_AGENTS', () => {
   });
 });
 
-// ─── hasSubstantialOutput (Loose Completion Detection) ───────────────────────
+// ─── hasStructuredReportEvidence (Loose Completion Detection) ───────────────────────
 
-describe('hasSubstantialOutput', () => {
+describe('hasStructuredReportEvidence', () => {
   it('should return false for empty output', () => {
-    expect(hasSubstantialOutput('')).toBe(false);
+    expect(hasStructuredReportEvidence('')).toBe(false);
   });
 
   it('should return false for whitespace-only output', () => {
-    expect(hasSubstantialOutput('   \n  \t  ')).toBe(false);
+    expect(hasStructuredReportEvidence('   \n  \t  ')).toBe(false);
   });
 
   it('should return false for very short output (< 100 chars)', () => {
-    expect(hasSubstantialOutput('Task done')).toBe(false);
+    expect(hasStructuredReportEvidence('Task done')).toBe(false);
   });
 
   it('should return true for output with report keywords (Summary)', () => {
     const output = 'Summary: All tasks completed successfully. Test Results: all pass.';
-    expect(hasSubstantialOutput(output)).toBe(true);
+    expect(hasStructuredReportEvidence(output)).toBe(true);
   });
 
   it('should return true for output with report keywords (完成)', () => {
     const output = '任务已全部完成。共修改 5 个文件，测试全部通过。';
-    expect(hasSubstantialOutput(output)).toBe(true);
+    expect(hasStructuredReportEvidence(output)).toBe(true);
   });
 
   it('should return true for output with report keywords (Test Results)', () => {
     const output = 'Test Results: 42 tests passed, 0 failed. Coverage: 95%.';
-    expect(hasSubstantialOutput(output)).toBe(true);
+    expect(hasStructuredReportEvidence(output)).toBe(true);
   });
 
   it('should return true for output with report keywords (Batch Status)', () => {
     const output = 'Batch Status: Completed 3/3 tasks. No errors encountered.';
-    expect(hasSubstantialOutput(output)).toBe(true);
+    expect(hasStructuredReportEvidence(output)).toBe(true);
   });
 
   it('should return true for output with report keywords (Files)', () => {
     const output = 'Files modified: src/a.ts, src/b.ts, src/c.ts. All changes applied.';
-    expect(hasSubstantialOutput(output)).toBe(true);
+    expect(hasStructuredReportEvidence(output)).toBe(true);
   });
 
-  it('should return true for substantial output without keywords (length >= 200)', () => {
+  // P0-1 收紧：纯长度不再是成功依据（无报告关键词、无 Markdown 结构的长文本不算证据）
+  it('should return false for long output without keywords or structure (length is no longer evidence)', () => {
     const output = 'A'.repeat(250);
-    expect(hasSubstantialOutput(output)).toBe(true);
+    expect(hasStructuredReportEvidence(output)).toBe(false);
   });
 
   it('should return false for short output without keywords', () => {
     const output = 'Working on the task...';
-    expect(hasSubstantialOutput(output)).toBe(false);
+    expect(hasStructuredReportEvidence(output)).toBe(false);
   });
 
   it('should return false for long error message with "error:" at line start (>= 200 chars)', () => {
@@ -364,10 +365,12 @@ Detailed error report:
 
 Please fix these issues before proceeding.`;
     expect(output.length).toBeGreaterThanOrEqual(200);
-    expect(hasSubstantialOutput(output)).toBe(false);
+    expect(hasStructuredReportEvidence(output)).toBe(false);
   });
 
-  it('should return false for long error message with "failed:" at line start', () => {
+  // P0-1 语义变更：删除 errorPatterns 负向猜测后，真实失败报告属真实产出
+  // （任务成败由编排器判断，不由产出判定越权）；"Test Results" 是正向报告证据。
+  it('should return true for failure report containing "Test Results" (task outcome is not judged here)', () => {
     const output = `failed: Test suite execution failed
 
 Test Results:
@@ -378,20 +381,22 @@ Test Results:
 All tests have failed. Please review the test output for details.
 Check the logs for more information about the failures.`;
     expect(output.length).toBeGreaterThanOrEqual(200);
-    expect(hasSubstantialOutput(output)).toBe(false);
+    expect(hasStructuredReportEvidence(output)).toBe(true);
   });
 
   it('should return false for long error message with "❌" emoji', () => {
+    // P0-1 夹具修正：原文 "Multiple files have syntax errors" 会误命中 Files 关键词，
+    // 改为 modules 以保留本用例意图（错误文案本身不构成正向证据）
     const output = `❌ Critical error detected
 
 The build process encountered a critical error and cannot proceed.
-Multiple files have syntax errors that need to be fixed.
+Multiple modules have syntax errors that need to be fixed.
 
 Error details:
 - Syntax error in src/index.ts
 - Missing closing brace in config.ts`;
     expect(output.length).toBeGreaterThanOrEqual(200);
-    expect(hasSubstantialOutput(output)).toBe(false);
+    expect(hasStructuredReportEvidence(output)).toBe(false);
   });
 
   it('should return false for long error message with "FAIL" marker', () => {
@@ -404,7 +409,7 @@ Test suite: User Authentication
 
 All integration tests have failed. Please check the test logs.`;
     expect(output.length).toBeGreaterThanOrEqual(200);
-    expect(hasSubstantialOutput(output)).toBe(false);
+    expect(hasStructuredReportEvidence(output)).toBe(false);
   });
 
   it('should return false for long error message with "Error:" at line start', () => {
@@ -415,7 +420,7 @@ Please ensure all dependencies are installed correctly.
 
 Run 'npm install' to install missing dependencies.`;
     expect(output.length).toBeGreaterThanOrEqual(200);
-    expect(hasSubstantialOutput(output)).toBe(false);
+    expect(hasStructuredReportEvidence(output)).toBe(false);
   });
 
   it('should still return true for successful report with "Test Results: all pass"', () => {
@@ -426,7 +431,7 @@ Batch Status: Completed 3/3 tasks
 Test Results: all pass
 
 Files modified: src/a.ts, src/b.ts`;
-    expect(hasSubstantialOutput(output)).toBe(true);
+    expect(hasStructuredReportEvidence(output)).toBe(true);
   });
 
   it('should still return true for successful report with "Summary:" keyword', () => {
@@ -434,7 +439,7 @@ Files modified: src/a.ts, src/b.ts`;
 
 All tests passed. No errors encountered.
 Files modified: 5 files changed.`;
-    expect(hasSubstantialOutput(output)).toBe(true);
+    expect(hasStructuredReportEvidence(output)).toBe(true);
   });
 
   it('should NOT false positive on "error" word in successful context', () => {
@@ -442,7 +447,7 @@ Files modified: 5 files changed.`;
 
 Test Results: all pass
 All validation checks passed successfully.`;
-    expect(hasSubstantialOutput(output)).toBe(true);
+    expect(hasStructuredReportEvidence(output)).toBe(true);
   });
 
   // P1-3: Enhanced error pattern detection
@@ -454,12 +459,12 @@ All validation checks passed successfully.`;
   "timestamp": "2024-01-15T10:30:00Z",
   "details": "Additional error information to make output longer"
 }`;
-    expect(hasSubstantialOutput(output)).toBe(false);
+    expect(hasStructuredReportEvidence(output)).toBe(false);
   });
 
   it('should return false for JSON error field with different spacing (P1-3)', () => {
     const output = `Response: {"error":"something went wrong","code":500,"data":null}`;
-    expect(hasSubstantialOutput(output)).toBe(false);
+    expect(hasStructuredReportEvidence(output)).toBe(false);
   });
 
   it('should return false for multi-line stack trace (P1-3)', () => {
@@ -471,7 +476,7 @@ All validation checks passed successfully.`;
     at Function.Module._load (internal/modules/cjs/loader.js:776:14)
     at Function.executeUserEntryPoint [as runMain] (internal/modules/run_main.js:72:12)
     at internal/main/run_main_module.js:17:47`;
-    expect(hasSubstantialOutput(output)).toBe(false);
+    expect(hasStructuredReportEvidence(output)).toBe(false);
   });
 
   it('should return false for stack trace with nested error (P1-3)', () => {
@@ -481,7 +486,7 @@ Error: Database connection failed
     at async Application.init (src/app.js:23:5)
     at async main (src/index.js:10:1)
     at processTicksAndRejections (internal/process/task_queues.js:95:5)`;
-    expect(hasSubstantialOutput(output)).toBe(false);
+    expect(hasStructuredReportEvidence(output)).toBe(false);
   });
 
   it('should NOT false positive on JSON without error field (P1-3)', () => {
@@ -490,7 +495,7 @@ Error: Database connection failed
 Result: {"status": "success", "data": {"count": 42}}
 
 All operations completed successfully.`;
-    expect(hasSubstantialOutput(output)).toBe(true);
+    expect(hasStructuredReportEvidence(output)).toBe(true);
   });
 });
 
@@ -536,8 +541,9 @@ Files modified: src/a.ts, src/b.ts.
       expect(result.warning).toBeUndefined();
     });
 
-    it('should NOT trigger retry when output has substantial content (>= 200 chars)', async () => {
-      const output = 'A'.repeat(250);
+    it('should NOT trigger retry when long report carries structured evidence (>= 200 chars)', async () => {
+      // P0-1 夹具修正：纯长度已不再是证据，保留"长报告不重试"意图需给出报告关键词
+      const output = `Summary: ${'A'.repeat(250)}`;
 
       const result = await performCompletionRetry(
         output,

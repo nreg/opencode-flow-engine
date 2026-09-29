@@ -56,11 +56,11 @@ export const STRICT_COMPLETION_AGENTS: string[] = [
   'contract-builder',
 ];
 
-/** LOOSE completion agents — use substantial output detection.
+/** LOOSE completion agents — use structured report evidence detection.
  *  These agents output human-readable reports and should use loose completion detection:
  *  - Output non-empty and contains report keywords (Summary, 完成, Test Results, etc.)
- *  - OR output length >= 200 characters (substantial content)
- *  - Only retry when output is empty/very short/obviously truncated
+ *  - OR output contains a Markdown heading line (structured report shape)
+ *  - 纯长度不再作为证据；只对"像真实产出"的结构做正向判定，不匹配错误文案
  */
 export const LOOSE_COMPLETION_AGENTS: string[] = [
   'build-executor',
@@ -80,7 +80,7 @@ export const LOOSE_COMPLETION_AGENTS: string[] = [
 
 /** Combined list of all agents with completion enforcement enabled.
  *  STRICT agents use hasCompletionSignal ([TASK_COMPLETE] case-insensitive or JSON).
- *  LOOSE agents use hasSubstantialOutput (report keywords or substantial length).
+ *  LOOSE agents use hasStructuredReportEvidence（报告关键词或 Markdown 标题行）.
  *  All other agents are automatically exempt.
  */
 export const DEFAULT_COMPLETION_ENABLED_AGENTS: string[] = [
@@ -341,21 +341,31 @@ export function hasCompletionSignal(output: string): boolean {
   return false;
 }
 
+/** Markdown 标题行：真实报告是结构化 Markdown，provider 错误文案是单段纯文本 */
+const MARKDOWN_HEADING_PATTERN = /^\s{0,3}#{1,6}\s+\S/m;
+
 /**
- * Check whether subagent output is substantial (loose completion detection).
+ * "完成"的否定形态。命中时"完成"不计入正向证据（其余证据不受影响）。
+ * 该规则只做正向关键词的歧义消解，不得被扩展为错误文案枚举。
+ */
+const COMPLETION_NEGATION_PATTERN =
+  /未完成|未能完成|无法完成|尚未完成|not\s+completed|did\s+not\s+complete/i;
+
+/**
+ * Check whether subagent output carries structured report evidence (loose completion detection).
  *
- * Used for execution-type agents that output human-readable reports.
+ * 正向判定：只找"像真实产出"的证据，不匹配任何错误文案，也不以纯长度作为依据。
  * Returns true if output:
- * 1. Is non-empty and contains report keywords (Summary, 完成, Test Results, Batch Status, Files)
- * 2. OR has substantial length (>= 200 characters)
+ * 1. Contains report keywords (Summary, 完成, Test Results, Batch Status, Files) —
+ *    "完成"命中否定形态时不计入证据
+ * 2. OR contains a Markdown heading line (structured report shape)
  *
- * Returns false for empty, whitespace-only, or very short outputs.
- * Also returns false if output contains explicit error patterns (error:, failed:, ❌, FAIL, Error:).
+ * Returns false for empty, whitespace-only, keyword-less or structure-less outputs.
  *
  * @param output - The raw output text from the subagent
- * @returns true if output is substantial, false otherwise
+ * @returns true if output carries structured report evidence, false otherwise
  */
-export function hasSubstantialOutput(output: string): boolean {
+export function hasStructuredReportEvidence(output: string): boolean {
   // Empty / null check
   if (!output || typeof output !== 'string' || output.trim().length === 0) {
     return false;
@@ -363,29 +373,11 @@ export function hasSubstantialOutput(output: string): boolean {
 
   const trimmed = output.trim();
 
-  const errorPatterns = [
-    /^error:/im,
-    /^failed:/im,
-    /^❌/m,
-    /^FAIL:/im,
-    /^Error:/m,
-    /"error"\s*:\s*"/i,
-    /Error:\s.*\n\s+at /s,
-  ];
-
-  const hasErrorPattern = errorPatterns.some(pattern => pattern.test(trimmed));
-  if (hasErrorPattern) {
-    return false;
-  }
-
-  // Check for report keywords (case-insensitive)
-  const reportKeywords = [
-    'Summary',
-    '完成',
-    'Test Results',
-    'Batch Status',
-    'Files',
-  ];
+  // Check for report keywords (case-insensitive)；"完成"需先做否定消解
+  const completionNegated = COMPLETION_NEGATION_PATTERN.test(trimmed);
+  const reportKeywords = completionNegated
+    ? ['Summary', 'Test Results', 'Batch Status', 'Files']
+    : ['Summary', '完成', 'Test Results', 'Batch Status', 'Files'];
 
   const hasKeywords = reportKeywords.some(keyword => 
     trimmed.toLowerCase().includes(keyword.toLowerCase())
@@ -395,9 +387,36 @@ export function hasSubstantialOutput(output: string): boolean {
     return true;
   }
 
-  // Check for substantial length (>= 200 characters)
-  const SUBSTANTIAL_LENGTH_THRESHOLD = 200;
-  if (trimmed.length >= SUBSTANTIAL_LENGTH_THRESHOLD) {
+  // Check for Markdown heading line (structured report shape)
+  if (MARKDOWN_HEADING_PATTERN.test(trimmed)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * 统一的产出正向判定入口：判断子代理产出是否为"真实产出"。
+ *
+ * 判定顺序（单一规则，不区分 agent 类型，不引入任何错误文案匹配）：
+ * 1. 空 / 非字符串 / 仅空白 → false
+ * 2. 完成信号（[TASK_COMPLETE] 或 JSON）→ true
+ * 3. 结构化报告证据（报告关键词 / Markdown 标题行）→ true
+ * 4. 其余 → false
+ *
+ * @param output - The raw output text from the subagent
+ * @returns true if the output is real agent output, false otherwise
+ */
+export function hasRealOutput(output: string): boolean {
+  if (!output || typeof output !== 'string' || output.trim().length === 0) {
+    return false;
+  }
+
+  if (hasCompletionSignal(output)) {
+    return true;
+  }
+
+  if (hasStructuredReportEvidence(output)) {
     return true;
   }
 
@@ -411,7 +430,7 @@ export function hasSubstantialOutput(output: string): boolean {
  *
  * Detection strategy by agent type:
  * - STRICT agents (spec-writer, contract-builder): Use hasCompletionSignal ([TASK_COMPLETE] case-insensitive or JSON)
- * - LOOSE agents (build-executor, etc.): Use hasSubstantialOutput (report keywords or substantial length)
+ * - LOOSE agents (build-executor, etc.): Use hasStructuredReportEvidence（报告关键词或 Markdown 标题行）
  * - Other agents: No retry (automatically exempt)
  *
  * If the initial output passes the detection check, returns immediately.
@@ -448,10 +467,10 @@ export async function performCompletionRetry(
   }
 
   // Check initial output with appropriate detection strategy
-  // For LOOSE agents: check hasCompletionSignal first (higher priority), then hasSubstantialOutput
+  // For LOOSE agents: check hasCompletionSignal first (higher priority), then hasStructuredReportEvidence
   const hasCompletion = isStrictAgent 
     ? hasCompletionSignal(currentOutput)
-    : (hasCompletionSignal(currentOutput) || hasSubstantialOutput(currentOutput));
+    : (hasCompletionSignal(currentOutput) || hasStructuredReportEvidence(currentOutput));
 
   if (hasCompletion) {
     return { output: currentOutput };
@@ -477,10 +496,10 @@ export async function performCompletionRetry(
     }
 
     // Check if completion signal appeared (use appropriate detection strategy)
-    // For LOOSE agents: check hasCompletionSignal first, then hasSubstantialOutput
+    // For LOOSE agents: check hasCompletionSignal first, then hasStructuredReportEvidence
     const hasCompletionNow = isStrictAgent
       ? hasCompletionSignal(currentOutput)
-      : (hasCompletionSignal(currentOutput) || hasSubstantialOutput(currentOutput));
+      : (hasCompletionSignal(currentOutput) || hasStructuredReportEvidence(currentOutput));
 
     if (hasCompletionNow) {
       return { output: currentOutput };

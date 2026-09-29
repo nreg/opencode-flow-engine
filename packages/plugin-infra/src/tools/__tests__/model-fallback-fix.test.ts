@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it, mock, afterEach, afterAll } from 'bun
 import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
 import { createCallFlowAgentTools, resetRunningSubagentCounts, runWithModelFallback, createBackgroundTaskWatcher } from '../call-flow-agent.js';
 import { clearUnavailableModels, markModelUnavailable, isModelAvailable, getAlternativeModel, resolveModelWithFallback, TRANSIENT_COOLDOWN_TTL_MS, MIN_QUOTA_COOLDOWN_TTL_MS } from '../../agents/agent-builder.js';
-import { parseQuotaResetTime, classifyModelErrorByCode } from '../../helpers/completion-detector.js';
+import { parseQuotaResetTime, classifyModelErrorByCode, hasRealOutput, hasStructuredReportEvidence } from '../../helpers/completion-detector.js';
 
 /** 临时把 Date.now 前进 offsetMs，返回恢复函数 */
 function advanceClock(offsetMs: number): () => void {
@@ -954,5 +954,448 @@ describe('NP-1: 时区偏移解析回归与 NaN 防御', () => {
       expect(info!.resetAt).not.toBeNull();
       expect(Number.isFinite(info!.resetAt)).toBe(true);
     });
+  });
+});
+
+// ═══ 修复轮（REVIEW-20260930-005829）：P0-1 产出正向判定 + P1-1 send 失败语义 ═══
+
+describe('FIX-P0-1: 产出正向判定', () => {
+  // ── 判定层（8 条）──
+  it('D1: 纯文本过载错误（无完成信号、无结构化证据）判为非真实产出', () => {
+    expect(hasRealOutput('Service overloaded, please try again later')).toBe(false);
+  });
+
+  it('D2: 纯文本配额错误判为非真实产出', () => {
+    expect(hasRealOutput('Your account has run out of credits')).toBe(false);
+  });
+
+  it('D3: 完成标记文本判为真实产出', () => {
+    expect(hasRealOutput('[TASK_COMPLETE]\nSummary: all done')).toBe(true);
+  });
+
+  it('D4: JSON 代码围栏判为真实产出', () => {
+    expect(hasRealOutput('```json\n{"status":"ok"}\n```')).toBe(true);
+  });
+
+  it('D5: 纯长度不再是依据（250 字符无证据文本判为非真实产出）', () => {
+    expect(hasStructuredReportEvidence('A'.repeat(250))).toBe(false);
+    expect(hasRealOutput('A'.repeat(250))).toBe(false);
+  });
+
+  it('D6: 完成的否定形态不计入正向证据', () => {
+    expect(hasRealOutput('任务未能完成，请稍后重试')).toBe(false);
+    expect(hasStructuredReportEvidence('任务未能完成，请稍后重试')).toBe(false);
+  });
+
+  it('D7: Markdown 标题作为结构化证据判为真实产出', () => {
+    expect(hasRealOutput('## Wave 1 Batch 1.1 完成报告\n\n### 改动文件清单')).toBe(true);
+  });
+
+  it('D8: 真实失败报告仍属真实产出（任务成败由编排器判断）', () => {
+    expect(hasRealOutput('failed: Test suite execution failed\n\nTest Results:\n- 15 tests failed')).toBe(true);
+  });
+
+  // ── 端到端（6 条）──
+  describe('端到端接线', () => {
+    beforeEach(() => clearUnavailableModels());
+    afterEach(() => {
+      resetRunningSubagentCounts();
+      clearUnavailableModels();
+    });
+
+    function makeClient(opts: { sendFailures?: Array<number | null> }) {
+      let sendIdx = 0;
+      const promptCalls: Array<{ model?: { providerID: string; modelID: string } }> = [];
+      return {
+        promptCalls,
+        client: {
+          session: {
+            prompt: mock(async (args: { path: { id: string }; body: { model?: { providerID: string; modelID: string } } }) => {
+              promptCalls.push({ model: args.body.model });
+              if (sendIdx < (opts.sendFailures?.length ?? 0)) {
+                const f = opts.sendFailures![sendIdx];
+                sendIdx++;
+                if (f !== null) {
+                  const err = new Error(`HTTP ${f}: request failed`);
+                  (err as unknown as { cause: unknown }).cause = { status: f, body: {} };
+                  throw err;
+                }
+              } else {
+                sendIdx++;
+              }
+            }),
+            messages: mock(async () => ({ data: [] })),
+            status: mock(async () => ({ data: {} })),
+            create: mock(async () => ({ data: { id: 's1' } })),
+            abort: mock(async () => {}),
+          },
+        },
+      };
+    }
+
+    const baseParams = (
+      c: ReturnType<typeof makeClient>,
+      poll: (sid: string, m: string) => Promise<string | null>,
+    ) => ({
+      client: c.client as never,
+      sessionID: 's1',
+      agentName: 'build-executor',
+      basePrompt: 'do the work',
+      initialModel: 'provider/first-model',
+      maxWaitMs: 100,
+      directory: '',
+      extraFallbacks: ['provider/alt-model'],
+      poll,
+    });
+
+    /** async 工具层 harness（pollOutputs[0] 亦为 pollSessionCompletion 的初始消息计数返回值） */
+    function createAsyncTools(pollOutputs: string[]) {
+      let msgCallCount = 0;
+      const promptCalls: Array<{ id: string; body: Record<string, unknown> }> = [];
+      const client = {
+        session: {
+          create: mock(async () => ({ data: { id: 'test-session-001' } })),
+          prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+            promptCalls.push({ id: args.path.id, body: args.body });
+          }),
+          messages: mock(async () => {
+            const callIdx = msgCallCount++;
+            const idx = callIdx === 0 ? 0 : Math.min(callIdx - 1, pollOutputs.length - 1);
+            return {
+              data: [
+                { parts: [{ type: 'text', text: 'user prompt' }] },
+                { info: { role: 'assistant' }, parts: [{ type: 'text', text: pollOutputs[idx] }] },
+              ],
+            };
+          }),
+          status: mock(async () => ({ data: { 'test-session-001': { type: 'idle' } } })),
+          abort: mock(async () => {}),
+        },
+      };
+      const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
+      const tools = createCallFlowAgentTools({
+        client: client as unknown as import('../../types.js').SFlowClient,
+        backgroundTaskRegistry,
+        backgroundTaskCounter: { value: 0 },
+        agentModelMap: { 'build-executor': 'provider/test-model' } as AgentModelMap,
+        configOverrides: { 'build-executor': { fallback_models: ['provider/alt-model'] } },
+        sessionLabelPrefix: 'sFlow',
+        validateAgent: async () => null,
+        workflowName: 'sFlow',
+      });
+      return { tools, backgroundTaskRegistry, promptCalls };
+    }
+
+    it('E1: sync 无信号产出 → no-valid-output 失败返回，原文保留且不拉黑不换模', async () => {
+      const c = makeClient({});
+      const overloadText = 'Service overloaded, please try again later';
+      const result = await runWithModelFallback({ ...baseParams(c, async () => overloadText) });
+      expect(result.success).toBe(false);
+      expect(result.failureReason).toBe('no-valid-output');
+      expect(result.output).toBe(overloadText);
+      expect(result.detail).toBe('output has no completion signal; treated as failure (raw output preserved)');
+      expect(isModelAvailable('provider/first-model')).toBe(true);
+      expect(c.promptCalls.length).toBe(1);
+      expect(result.fallbacks.length).toBe(0);
+    });
+
+    it('E2: sync 带完成信号产出 → success', async () => {
+      const c = makeClient({});
+      const result = await runWithModelFallback({ ...baseParams(c, async () => '[TASK_COMPLETE]\nDone') });
+      expect(result.success).toBe(true);
+      expect(result.fallbacks.length).toBe(0);
+    });
+
+    it('E3: sync 带 (code: 500) 产出 → 仍走既有 model-failure（不落入 no-valid-output）', async () => {
+      const c = makeClient({});
+      let pollCount = 0;
+      const poll = async () => {
+        pollCount++;
+        return pollCount === 1 ? 'Error: upstream failure (code: 500)' : '[TASK_COMPLETE]\nDone';
+      };
+      const result = await runWithModelFallback({ ...baseParams(c, poll) });
+      expect(result.success).toBe(true);
+      expect(result.failureReason).toBeUndefined();
+      expect(result.fallbacks.length).toBeGreaterThanOrEqual(1);
+      expect(isModelAvailable('provider/first-model')).toBe(false);
+    });
+
+    it('E4: watcher 无信号输出 → error 条目 + result 原文 + 未换模未拉黑', async () => {
+      const creditsText = 'Your account has run out of credits';
+      let probeIdx = 0;
+      const promptCalls: Array<{ id: string; body: Record<string, unknown> }> = [];
+      const client = {
+        session: {
+          create: mock(async () => ({ data: { id: 'watch-session' } })),
+          prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+            promptCalls.push({ id: args.path.id, body: args.body });
+          }),
+          messages: mock(async () => {
+            const output = [creditsText][Math.min(probeIdx, 0)];
+            probeIdx++;
+            return {
+              data: [
+                { parts: [{ type: 'text', text: 'user prompt' }] },
+                { info: { role: 'assistant' }, parts: [{ type: 'text', text: output }] },
+              ],
+            };
+          }),
+          status: mock(async () => ({ data: { 'watch-session': { type: 'idle' } } })),
+          abort: mock(async () => {}),
+        },
+      };
+      const registry: BackgroundTaskRegistry = new Map();
+      registry.set('watch-task-no-signal', {
+        sessionID: 'watch-session',
+        subagentType: 'build-executor',
+        status: 'running',
+        createdAt: Date.now(),
+        changeDir: '',
+        resolvedModel: 'provider/no-signal-primary',
+      });
+      const watcher = createBackgroundTaskWatcher({
+        client: client as never,
+        registry,
+        pollIntervalMs: 20,
+        extraFallbacks: ['provider/watch-fallback'],
+      });
+      watcher.start();
+      await waitFor(() => registry.get('watch-task-no-signal')?.status === 'error');
+      watcher.stop();
+
+      const task = registry.get('watch-task-no-signal')!;
+      expect(task.status).toBe('error');
+      expect(task.result).toBe(creditsText);
+      expect(task.error).toContain('no completion signal');
+      expect(isModelAvailable('provider/no-signal-primary')).toBe(true);
+      expect(promptCalls.length).toBe(0);
+    });
+
+    it('E5: pollAndComplete 无信号输出 → error 条目 + result 原文 + 未换模未拉黑', async () => {
+      const overloadText = 'Service overloaded, please try again later';
+      const { tools, backgroundTaskRegistry, promptCalls } = createAsyncTools([overloadText]);
+
+      const startResult = await tools.call_flow_agent.execute(
+        { description: 't', prompt: 'work', subagent_type: 'build-executor', run_in_background: true },
+        { sessionID: 'parent', directory: '' },
+      );
+      const startData = JSON.parse(startResult.output);
+      expect(startData.success).toBe(true);
+
+      await tools.flowagent_output.execute(
+        { task_id: startData.task_id, block: true },
+        { sessionID: 'parent', directory: '' },
+      );
+
+      const entry = backgroundTaskRegistry.get(startData.task_id)!;
+      expect(entry.status).toBe('error');
+      expect(entry.result).toBe(overloadText);
+      expect(entry.error).toContain('no completion signal');
+      expect(isModelAvailable('provider/test-model')).toBe(true);
+      expect(promptCalls.length).toBe(1);
+    });
+
+    it('E6: async 正常 Markdown 报告 → completed', async () => {
+      const report = '## Wave 1 Batch 1.1 完成报告\n\n### 改动文件清单\n\n- completion-detector.ts';
+      const { tools, backgroundTaskRegistry } = createAsyncTools([report]);
+
+      const startResult = await tools.call_flow_agent.execute(
+        { description: 't', prompt: 'work', subagent_type: 'build-executor', run_in_background: true },
+        { sessionID: 'parent', directory: '' },
+      );
+      const startData = JSON.parse(startResult.output);
+
+      const outResult = await tools.flowagent_output.execute(
+        { task_id: startData.task_id, block: true },
+        { sessionID: 'parent', directory: '' },
+      );
+      const outData = JSON.parse(outResult.output);
+
+      expect(outData.success).toBe(true);
+      expect(backgroundTaskRegistry.get(startData.task_id)?.status).toBe('completed');
+      expect(backgroundTaskRegistry.get(startData.task_id)?.result).toContain('Wave 1 Batch 1.1');
+    });
+  });
+
+  // ── 上层与既有语义（2 条）──
+  describe('上层与既有语义', () => {
+    beforeEach(() => clearUnavailableModels());
+    afterEach(() => {
+      resetRunningSubagentCounts();
+      clearUnavailableModels();
+    });
+
+    it('U1: sync no-valid-output 返回体携带 raw_output 与 no completion signal 文案', async () => {
+      const creditsText = 'Your account has run out of credits';
+      let msgCallCount = 0;
+      const client = {
+        session: {
+          create: mock(async () => ({ data: { id: 'sync-session' } })),
+          prompt: mock(async () => {}),
+          messages: mock(async () => {
+            const callIdx = msgCallCount++;
+            return {
+              data: [
+                { parts: [{ type: 'text', text: 'user prompt' }] },
+                { info: { role: 'assistant' }, parts: [{ type: 'text', text: creditsText }] },
+                ...(callIdx === 0 ? [] : []),
+              ],
+            };
+          }),
+          status: mock(async () => ({ data: { 'sync-session': { type: 'idle' } } })),
+          abort: mock(async () => {}),
+        },
+      };
+      const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
+      const tools = createCallFlowAgentTools({
+        client: client as unknown as import('../../types.js').SFlowClient,
+        backgroundTaskRegistry,
+        backgroundTaskCounter: { value: 0 },
+        agentModelMap: { 'build-executor': 'provider/test-model' } as AgentModelMap,
+        sessionLabelPrefix: 'sFlow',
+        validateAgent: async () => null,
+        workflowName: 'sFlow',
+      });
+
+      const result = await tools.call_flow_agent.execute(
+        { description: 't', prompt: 'work', subagent_type: 'build-executor', run_in_background: false },
+        { sessionID: 'parent', directory: '' },
+      );
+      const data = JSON.parse(result.output);
+      expect(data.success).toBe(false);
+      expect(data.raw_output).toBe(creditsText);
+      expect(data.error).toContain('no completion signal');
+    });
+
+    it('U2: prompt 回显语义不变 → 仍走 model-failure 分支（不落入 no-valid-output）', async () => {
+      const echoText = '<Change_Dir>/x</Change_Dir>\n\ndo the work';
+      let sendIdx = 0;
+      const promptCalls: Array<{ model?: { providerID: string; modelID: string } }> = [];
+      const client = {
+        session: {
+          prompt: mock(async (args: { path: { id: string }; body: { model?: { providerID: string; modelID: string } } }) => {
+            promptCalls.push({ model: args.body.model });
+            sendIdx++;
+          }),
+          messages: mock(async () => ({ data: [] })),
+          status: mock(async () => ({ data: {} })),
+          create: mock(async () => ({ data: { id: 's1' } })),
+          abort: mock(async () => {}),
+        },
+      };
+      let pollCount = 0;
+      const result = await runWithModelFallback({
+        client: client as never,
+        sessionID: 's1',
+        agentName: 'build-executor',
+        basePrompt: echoText,
+        initialModel: 'provider/first-model',
+        maxWaitMs: 100,
+        directory: '',
+        extraFallbacks: ['provider/alt-model'],
+        poll: async () => {
+          pollCount++;
+          return pollCount === 1 ? echoText : '[TASK_COMPLETE]\nreal output';
+        },
+      });
+      expect(result.success).toBe(true);
+      expect(result.model).not.toBe('provider/first-model');
+      expect(result.failureReason).not.toBe('no-valid-output');
+      expect(promptCalls.length).toBe(2);
+    });
+  });
+});
+
+describe('FIX-P1-1: send 失败语义分离', () => {
+  beforeEach(() => clearUnavailableModels());
+  afterEach(() => clearUnavailableModels());
+
+  function makeClient(opts: { sendFailures?: Array<number | null> }) {
+    let sendIdx = 0;
+    return {
+      client: {
+        session: {
+          prompt: mock(async () => {
+            if (sendIdx < (opts.sendFailures?.length ?? 0)) {
+              const f = opts.sendFailures![sendIdx];
+              sendIdx++;
+              if (f !== null) {
+                const err = new Error(`HTTP ${f}: request failed`);
+                (err as unknown as { cause: unknown }).cause = { status: f, body: {} };
+                throw err;
+              }
+            } else {
+              sendIdx++;
+            }
+          }),
+          messages: mock(async () => ({ data: [] })),
+          status: mock(async () => ({ data: {} })),
+          create: mock(async () => ({ data: { id: 's1' } })),
+          abort: mock(async () => {}),
+        },
+      },
+    };
+  }
+
+  const baseParams = (
+    c: ReturnType<typeof makeClient>,
+    poll: (sid: string, m: string) => Promise<string | null>,
+  ) => ({
+    client: c.client as never,
+    sessionID: 's1',
+    agentName: 'build-executor',
+    basePrompt: 'do the work',
+    initialModel: 'provider/first-model',
+    maxWaitMs: 100,
+    directory: '',
+    extraFallbacks: ['provider/alt-model'],
+    poll,
+  });
+
+  it('1: send 402 + 唯一候选已尝试 → exhausted（detail 含 model error (HTTP 402) 与已尝试说明）', async () => {
+    const c = makeClient({ sendFailures: [402] });
+    const result = await runWithModelFallback({
+      ...baseParams(c, async () => '[TASK_COMPLETE]\nDone'),
+      initialModel: 'provider/alt-model',
+      extraFallbacks: ['provider/alt-model'],
+    });
+    expect(result.success).toBe(false);
+    expect(result.failureReason).toBe('exhausted');
+    expect(result.detail).toContain('model error (HTTP 402)');
+    expect(result.detail).toContain('fallback chain exhausted or model already attempted');
+    expect(result.attemptedModels).toContain('provider/alt-model');
+  });
+
+  it('2: send 402 + 无候选 → exhausted 且保留 fallbacks / attemptedModels', async () => {
+    const c = makeClient({ sendFailures: [402] });
+    const result = await runWithModelFallback({
+      ...baseParams(c, async () => '[TASK_COMPLETE]\nDone'),
+      extraFallbacks: [],
+    });
+    expect(result.success).toBe(false);
+    expect(result.failureReason).toBe('exhausted');
+    expect(result.fallbacks).toEqual([]);
+    expect(result.attemptedModels).toContain('provider/first-model');
+  });
+
+  it('3: send 400（SessionBusy）仍为 fatal', async () => {
+    const c = makeClient({ sendFailures: [400] });
+    const result = await runWithModelFallback({ ...baseParams(c, async () => '[TASK_COMPLETE]\nDone') });
+    expect(result.success).toBe(false);
+    expect(result.failureReason).toBe('fatal');
+  });
+
+  it('4: send 429 + 有候选 → 换模成功，首模型 5min 短冷却拉黑', async () => {
+    const c = makeClient({ sendFailures: [429] });
+    const result = await runWithModelFallback({ ...baseParams(c, async () => '[TASK_COMPLETE]\nDone') });
+    expect(result.success).toBe(true);
+    expect(result.fallbacks.length).toBe(1);
+    expect(isModelAvailable('provider/first-model')).toBe(false);
+    const restore = advanceClock(TRANSIENT_COOLDOWN_TTL_MS + 1000);
+    try {
+      expect(isModelAvailable('provider/first-model')).toBe(true);
+    } finally {
+      restore();
+    }
   });
 });

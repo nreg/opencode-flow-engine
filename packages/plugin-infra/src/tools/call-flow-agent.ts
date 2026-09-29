@@ -11,6 +11,7 @@ import { createNotificationManager } from '../features/notification-manager.js';
 import { createSubagentStore } from '../features/subagent-store.js';
 import {
   hasCompletionSignal,
+  hasRealOutput,
   performCompletionRetry,
   REMINDER_MESSAGE,
   classifyModelErrorByCode,
@@ -212,13 +213,17 @@ async function readLastAssistantErrorName(client: SFlowClient, sessionID: string
   }
 }
 
+/** P0-1：产出无完成信号时的统一失败说明（原文在 output / result / raw_output 中保留） */
+const NO_VALID_OUTPUT_DETAIL =
+  'output has no completion signal; treated as failure (raw output preserved)';
+
 interface RunFallbackResult {
   success: boolean;
   output: string | null;
   model: string;
   attemptedModels: string[];
   fallbacks: Array<{ from: string; to: string; reason: string }>;
-  failureReason?: 'exhausted' | 'context-overflow' | 'fatal' | 'invalid-model';
+  failureReason?: 'exhausted' | 'context-overflow' | 'fatal' | 'invalid-model' | 'no-valid-output';
   detail?: string;
 }
 
@@ -303,9 +308,20 @@ export async function runWithModelFallback(params: {
           currentModel = nextOnSend;
           continue;
         }
+        // P1-1：模型错误（有码）但换模不可行（无替代 / 已尝试 / 超上限）→ exhausted，
+        // 与"请求级错误"的 fatal 语义分离，排障方向不再被误引向配置问题
+        return {
+          success: false,
+          failureReason: 'exhausted',
+          detail: `model error (HTTP ${codeOnSend.status ?? send.status ?? 'unknown'}); fallback chain exhausted or model already attempted`,
+          attemptedModels,
+          fallbacks,
+          model: currentModel,
+          output: null,
+        };
       }
       // D-7：前置校验失败（HTTP 400：SessionBusy / agent 不存在等请求级错误，或无法换模）直接终止，
-      // 不拉黑、不换模型。
+      // 不拉黑、不换模型。仅在无错误码（kind === 'none'）时到达。
       return {
         success: false,
         failureReason: 'fatal',
@@ -335,6 +351,18 @@ export async function runWithModelFallback(params: {
           markModelUnavailable(currentModel, { ttlMs: TRANSIENT_COOLDOWN_TTL_MS });
         }
         // P0-4: 错误识别接入换模——落入下方 model-failure 分支（markModelUnavailable + getAlternativeModel）
+      } else if (!hasRealOutput(output)) {
+        // P0-1：无机器可读错误码 + 无完成信号 → 不判成功，按失败返回（原文保留供编排器参考）。
+        // 不拉黑、不换模、不重发：产出本身无信号并非模型故障证据。
+        return {
+          success: false,
+          failureReason: 'no-valid-output',
+          detail: NO_VALID_OUTPUT_DETAIL,
+          output,
+          model: currentModel,
+          attemptedModels,
+          fallbacks,
+        };
       } else {
         return { success: true, output, model: currentModel, attemptedModels, fallbacks };
       }
@@ -783,6 +811,36 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
               releaseSubagentSlot(task.subagentType);
               updated.slotReleased = true;
               registry.set(taskId, updated);
+            }
+            taskModelAttempts.delete(taskId);
+            continue;
+          }
+
+          // P0-1：无错误码 且 无完成信号 → 不判 completed（不拉黑、不换模、不重发）。
+          // 产出原文保留在 result 中供编排器参考。
+          if (!hasRealOutput(output)) {
+            // F-2 防御：处理期间状态可能已被其他路径改写（如并发完成），此时不覆盖、直接跳过
+            const liveBeforeNoSignal = registry.get(taskId);
+            if (liveBeforeNoSignal && liveBeforeNoSignal.status !== 'running') {
+              liveBeforeNoSignal._processing = false;
+              registry.set(taskId, liveBeforeNoSignal);
+              continue;
+            }
+            const now = Date.now();
+            const baseEntryNoSignal = liveBeforeNoSignal ?? task;
+            const noSignalEntry: BackgroundTaskEntry = {
+              ...baseEntryNoSignal,
+              status: 'error',
+              result: output,
+              error: NO_VALID_OUTPUT_DETAIL,
+              completedAt: now,
+              slotReleased: baseEntryNoSignal.slotReleased ?? false,
+            };
+            registry.set(taskId, noSignalEntry);
+            if (!noSignalEntry.slotReleased) {
+              releaseSubagentSlot(task.subagentType);
+              noSignalEntry.slotReleased = true;
+              registry.set(taskId, noSignalEntry);
             }
             taskModelAttempts.delete(taskId);
             continue;
@@ -1359,6 +1417,23 @@ export function createCallFlowAgentTools(
               `模型调用失败 (${fallbackResult.detail ?? 'unknown'})：前置校验失败或模型格式非法，未触发模型故障转移。`,
             );
           }
+          if (fallbackResult.failureReason === 'no-valid-output') {
+            return {
+              title: sessionLabel,
+              output: JSON.stringify(
+                {
+                  success: false,
+                  subagent: subagent_type,
+                  sessionID,
+                  error: `产出无完成信号（no completion signal），未判为成功（原始文本见 raw_output）；未拉黑模型、未触发故障转移`,
+                  raw_output: fallbackResult.output ?? '',
+                  attempted_models: fallbackResult.attemptedModels,
+                },
+                null,
+                2,
+              ),
+            };
+          }
           if (fallbackResult.failureReason === 'context-overflow') {
             return {
               title: sessionLabel,
@@ -1641,6 +1716,27 @@ export function createCallFlowAgentTools(
               });
               // 无效产出：置空交由下方 while 循环 re-poll；耗尽时走结构化错误路径
               output = null;
+            } else if (!hasRealOutput(output)) {
+              // P0-1：无错误码 且 无完成信号 → 不判 completed，也不换模重发（不拉黑）。
+              // 产出原文保留在 result 中供编排器参考。
+              const noSignalEntry: BackgroundTaskEntry = {
+                ...task,
+                status: 'error',
+                result: output,
+                error: NO_VALID_OUTPUT_DETAIL,
+                completedAt: Date.now(),
+                slotReleased: task.slotReleased ?? false,
+              };
+              backgroundTaskRegistry.set(task_id, noSignalEntry);
+
+              if (!noSignalEntry.slotReleased) {
+                releaseSubagentSlot(task.subagentType);
+                noSignalEntry.slotReleased = true;
+                backgroundTaskRegistry.set(task_id, noSignalEntry);
+              }
+
+              taskModelAttempts.delete(task_id);
+              return noSignalEntry;
             }
           }
           if (output === null && identifiedErrorKind === null) {
