@@ -65,21 +65,26 @@ let backgroundTaskCounter = { value: 0 };
 
 /**
  * AGENT_MODEL_MAP stores the resolved model for each agent.
- * 
+ *
  * Population logic (during config hook):
- * 1. For each agent, call resolveModelWithFallback with full priority chain:
- *    - configOverrides per-agent override (highest priority)
- *    - AGENT_PROFILES static binding → tier resolution
- *    - modelProfiles user-configured tier model
- *    - DEFAULT_PROFILE_MODELS tier model
- *    - Fallback chain (per-agent → tier → DEFAULT_PROFILE_MODELS → DEFAULT_FALLBACKS)
- * 2. Store the resolved model in AGENT_MODEL_MAP[agentName]
- * 
+ * 1. For each agent, createAgent runs resolveModelWithFallback without model_type:
+ *    - per-agent user config model (agents.<name>.model, highest priority)
+ *    - AGENT_PROFILES static tier binding → user-configured modelProfiles[tier].model
+ *    - undefined when nothing is configured (provenance 'unconfigured')
+ * 2. Only write to AGENT_MODEL_MAP[agentName] when a model was actually resolved.
+ *
+ * Model resolution only follows user configuration — there are no built-in defaults.
+ * When no user model is configured, no `model` field is injected into cfg.agent[name]
+ * and OpenCode falls back to its own default model.
+ *
+ * The fallback chain comes from user configuration only:
+ * per-agent fallback_models + the user-configured tier fallback_models.
+ *
  * Usage:
  * - call_flow_agent uses AGENT_MODEL_MAP when model_type is NOT specified
  * - When model_type IS specified, call_flow_agent calls resolveModelWithFallback directly
  *   to respect the per-call model_type override
- * 
+ *
  * This ensures:
  * - Consistency: All agents use the same resolution logic
  * - Traceability: Model resolution happens once during config, not per-call

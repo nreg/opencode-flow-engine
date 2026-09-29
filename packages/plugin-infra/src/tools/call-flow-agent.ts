@@ -30,7 +30,6 @@ import type {
 } from '../types.js';
 import { formatToolError, generateTaskId, PROBE_PENDING } from '../types.js';
 import type { LocalToolDefinition } from '../types/local-tool-definition.js';
-import { DEFAULT_PROFILE_MODELS } from '../agents/config-loader.js';
 import {
   resolveModelWithFallback,
   getAlternativeModel,
@@ -54,7 +53,8 @@ const MAX_CONCURRENT_SUBAGENTS = 3;
  * 模型故障转移次数上限（Wave 1 定义，Wave 2 的循环使用）。
  * 语义：首模型 + 最多 2 次换模型 = 最多 3 次 prompt 尝试。
  * 理由：OpenCode 已在同一模型上重试 5 次，插件层叠加过多会显著拉长等待；
- * DEFAULT_FALLBACKS 每个 agent 仅 2 个 fallback，超过 2 次换模型必然退化为重复。
+ * 换模次数必须封顶以避免无限换模循环与成本失控。注意：候选 fallback 链长度现由
+ * 用户配置决定（已无内置 fallback 列表），因此上限只能由本常量显式固定。
  */
 const MAX_MODEL_RETRIES = 2;
 
@@ -252,7 +252,8 @@ export async function runWithModelFallback(params: {
   let currentModel = initialModel;
   const attemptedModels: string[] = [];
   const fallbacks: Array<{ from: string; to: string; reason: string }> = [];
-  // P0-4/P1-1: 换模时同时读用户配置 fallback 链（getAlternativeModel 融合 DEFAULT_FALLBACKS）
+  // P0-4/P1-1: 换模时读取用户配置 fallback 链（getAlternativeModel 只在用户配置的候选内挑选；
+  // 已无内置 fallback 列表，用户未配置时无候选可换）
   const userFallbackChain: string[] = extraFallbacks ?? [];
 
   // MAX_MODEL_RETRIES = 2 ⇒ 最多 3 次 prompt：首次 + 2 次换模型。
@@ -383,7 +384,7 @@ export async function runWithModelFallback(params: {
       };
     }
 
-    // 终止条件 ②：重复模型检测（防 P7 system-default 退化导致的无限循环）
+    // 终止条件 ②：重复模型检测（防 P7 退化到 unconfigured 后反复重试导致的无限循环）
     if (attemptedModels.includes(next)) {
       return {
         success: false,
@@ -1100,13 +1101,16 @@ export function createCallFlowAgentTools(
         // - Otherwise: use agentModelMap (pre-resolved during config hook)
         let subagentModel: string;
         if (model_type) {
-          // Use resolveModelWithFallback for model_type routing
-          // This ensures model_type routing respects the full priority chain:
-          // 1. configOverrides per-agent override (highest priority)
-          // 2. model_type explicit parameter (tier signal)
-          // 3. modelProfiles user-configured tier model
-          // 4. DEFAULT_PROFILE_MODELS tier model
-          // 5. Fallback chain (per-agent → tier → DEFAULT_PROFILE_MODELS → DEFAULT_FALLBACKS)
+          // Wave 2: model_type 路由只读取用户配置（modelProfiles / configOverrides），
+          // 不再回退任何内置默认模型 / 内置 fallback 列表（相关内置常量已移除，解析只认用户配置）。
+          // 优先级链（高→低，与 agent-builder.ts resolveModelWithFallback 头注释保持一致）：
+          //   1. programmatic override（overrides[name].model）
+          //   2. model 参数
+          //   3. model_type 显式 tier 信号（本分支入口，优先级高于 per-agent 覆盖）
+          //   4. configOverrides per-agent 覆盖（configModel）
+          //   5. AGENT_PROFILES 静态绑定 → 用户 tier 模型
+          //   6. fallback 链（per-agent 配置 → 用户 tier fallback）
+          //   7. 链尾 → { model: undefined, provenance: 'unconfigured' }
 
           // activeWorkflow is intentionally a constant 'sflow' here (no dynamic directory
           // detection): the gate condition (activeWorkflow === 'sflow' || 'iflow') treats
@@ -1121,6 +1125,21 @@ export function createCallFlowAgentTools(
             { modelProfiles, activeWorkflow: 'sflow' },
             model_type as string | undefined,
           );
+          if (!result.model) {
+            // Wave 3 (P2-4)："未配置该 tier" 属于配置缺失而非系统故障 —— 先记录降级诊断日志
+            // （Logger 目前无 debug 级别，LOG 为最低级别），再保留显式报错：既不注入假模型，
+            // 也不静默回退。不带 model_type 调用时 agent 将使用 OpenCode 默认模型；
+            // 需要指定模型时请在 modelProfiles / configOverrides 中配置该 tier。
+            Logger.log(
+              `[CallFlowAgent] model_type "${model_type}" 对 agent "${subagent_type}" 无用户配置` +
+                `（provenance: ${result.provenance}）：不注入任何模型；不带 model_type 调用时 agent 将使用 OpenCode 默认模型。` +
+                `如需指定模型，请在 modelProfiles / configOverrides 中配置该 tier。`,
+            );
+            // Wave 2: 无用户配置时降级为 unconfigured，明确报错而非注入假模型
+            return await formatToolError(
+              `No model configured for model_type "${model_type}". Provide modelProfiles/configOverrides for this tier or use agentModelMap.`,
+            );
+          }
           subagentModel = result.model;
         } else {
           // Use pre-resolved model from agentModelMap (populated during config hook)
@@ -1207,7 +1226,7 @@ export function createCallFlowAgentTools(
         const parsedModel = parseModelString(subagentModel);
         if (!parsedModel) {
           return await formatToolError(
-            `Invalid model format: "${subagentModel}". Expected "provider/modelID" (e.g., "provider/glm-5")`,
+            `Invalid model format: "${subagentModel}". Expected "provider/modelID" (e.g., "provider/example-model")`,
           );
         }
 
@@ -1302,7 +1321,7 @@ export function createCallFlowAgentTools(
         const fallbackResult = await runWithModelFallback({
           client,
           sessionID,
-          // P1-1: 传入用户配置 fallback 链（换模时同时读用户配置 + DEFAULT_FALLBACKS）
+          // P1-1: 传入用户配置 fallback 链（换模候选完全来自用户配置，无内置 fallback）
           extraFallbacks: buildAgentFallbackChain(subagent_type as BuiltinAgentName, configOverrides, modelProfiles),
           agentName: subagent_type as string,
           basePrompt: finalPrompt,

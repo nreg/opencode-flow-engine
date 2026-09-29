@@ -41,7 +41,6 @@ export {
   loadCascadedSFlowConfig,
   agentOverridesFromConfig,
   mergeOverrides,
-  generateConfigTemplate,
   USER_CONFIG_FILE,
 } from './config-loader.js';
 
@@ -54,8 +53,6 @@ export {
   getPrimaryAgents,
   getSubagentAgents,
   agentExists,
-  getDefaultModel,
-  getAllDefaultModels,
   clearConfigCache,
   getAlternativeModel,
   resolveModelWithFallback,

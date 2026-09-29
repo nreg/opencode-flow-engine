@@ -11,8 +11,6 @@ import {
 } from '../agents/agent-builder.js';
 import type { ModelProvenance, AGENT_PROFILES_TYPE } from '../agents/agent-builder.js';
 import {
-  generateConfigTemplate,
-  DEFAULT_PROFILE_MODELS,
 } from '../agents/config-loader.js';
 import type { SFlowConfig, ModelProfileConfig } from '../agents/config-loader.js';
 
@@ -129,17 +127,17 @@ describe('ModelProvenance type', () => {
     expect(provenance).toBe('profile');
   });
 
-  it('should still support existing provenance values', () => {
-    const override: ModelProvenance = 'override';
-    const configOverride: ModelProvenance = 'config-override';
-    const providerFallback: ModelProvenance = 'provider-fallback';
-    const systemDefault: ModelProvenance = 'system-default';
-    
-    expect(override).toBe('override');
-    expect(configOverride).toBe('config-override');
-    expect(providerFallback).toBe('provider-fallback');
-    expect(systemDefault).toBe('system-default');
-  });
+    it('should still support existing provenance values', () => {
+      const override: ModelProvenance = 'override';
+      const configOverride: ModelProvenance = 'config-override';
+      const providerFallback: ModelProvenance = 'provider-fallback';
+      const unconfigured: ModelProvenance = 'unconfigured';
+
+      expect(override).toBe('override');
+      expect(configOverride).toBe('config-override');
+      expect(providerFallback).toBe('provider-fallback');
+      expect(unconfigured).toBe('unconfigured');
+    });
 });
 
 // ─── Task 4.4: Profile resolution in resolveModelWithFallback ────────────────
@@ -257,6 +255,54 @@ describe('resolveModelWithFallback — profile resolution', () => {
   });
 });
 
+describe('resolveModelWithFallback — unconfigured (Wave 2 gate)', () => {
+  it('should return { model: undefined, provenance: "unconfigured" } when no user config', () => {
+    const result = resolveModelWithFallback(
+      'spec-writer',
+      undefined,
+      {},
+      undefined,
+      { activeWorkflow: 'sflow' },
+    );
+    expect(result.model).toBeUndefined();
+    expect(result.provenance).toBe('unconfigured');
+  });
+});
+
+describe('resolveModelWithFallback — T2.3 user-config only (Wave 2)', () => {
+  it('should return the user-configured deep tier model when configured', () => {
+    const result = resolveModelWithFallback(
+      'spec-writer',
+      undefined,
+      {},
+      undefined,
+      {
+        modelProfiles: { deep: { model: 'anthropic/claude-opus-4-7', fallback_models: [] } },
+        activeWorkflow: 'sflow',
+      },
+    );
+    expect(result.model).toBe('anthropic/claude-opus-4-7');
+    expect(result.provenance).toBe('profile');
+  });
+
+  it('should return unconfigured when the agent tier is not in user config', () => {
+    const result = resolveModelWithFallback(
+      'spec-writer',
+      undefined,
+      {},
+      undefined,
+      {
+        modelProfiles: { standard: { model: 'openai/gpt-5', fallback_models: [] } },
+        activeWorkflow: 'sflow',
+      },
+    );
+    // spec-writer → 'deep' tier, but only 'standard' is configured → no model resolved
+    expect(result.model).toBeUndefined();
+    expect(result.provenance).toBe('unconfigured');
+  });
+});
+
+
 describe('resolveModelWithFallback — workflow gating', () => {
   beforeEach(() => {
     clearUnavailableModels();
@@ -277,7 +323,7 @@ describe('resolveModelWithFallback — workflow gating', () => {
     expect(result.provenance).toBe('profile');
   });
 
-  it('should skip profile step when activeWorkflow is none', () => {
+  it('should resolve to unconfigured when activeWorkflow is none (no built-in default)', () => {
     const result = resolveModelWithFallback(
       'spec-writer',
       undefined,
@@ -288,17 +334,19 @@ describe('resolveModelWithFallback — workflow gating', () => {
         activeWorkflow: 'none',
       },
     );
-    expect(result.provenance).toBe('provider-fallback');
+    expect(result.provenance).toBe('unconfigured');
+    expect(result.model).toBeUndefined();
   });
 
-  it('should skip profile step when no profileOptions provided (backward compat)', () => {
+  it('should resolve to unconfigured when no profileOptions provided (no built-in default)', () => {
     const result = resolveModelWithFallback(
       'spec-writer',
       undefined,
       {},
       undefined,
     );
-    expect(result.provenance).toBe('provider-fallback');
+    expect(result.provenance).toBe('unconfigured');
+    expect(result.model).toBeUndefined();
   });
 
   it('should use profile when activeWorkflow is sflow', () => {
@@ -316,7 +364,7 @@ describe('resolveModelWithFallback — workflow gating', () => {
     expect(result.provenance).toBe('profile');
   });
 
-  it('should skip profile when activeWorkflow is undefined but modelProfiles present', () => {
+  it('should resolve to unconfigured when activeWorkflow is undefined but modelProfiles present (no built-in default)', () => {
     const result = resolveModelWithFallback(
       'spec-writer',
       undefined,
@@ -324,45 +372,26 @@ describe('resolveModelWithFallback — workflow gating', () => {
       undefined,
       { modelProfiles: { deep: { model: 'deep-model', fallback_models: [] } } },
     );
+    expect(result.provenance).toBe('unconfigured');
+    expect(result.model).toBeUndefined();
+  });
+
+  it('should return tier fallback model with provenance "provider-fallback" when activeWorkflow is none and only fallback_models configured (P2-2 pinned)', () => {
+    // 有意保留的行为（G1 评审 P2-2）：activeWorkflow 门控只作用于「档位解析」（P5 读取
+    // modelProfiles[tier].model），不作用于「fallback 链」（P6 收集 modelProfiles[tier].fallback_models）。
+    // 用户显式配置的 fallback_models 属于 fallback 链，不是内置档位兜底，故工作流未激活时依然生效。
+    const result = resolveModelWithFallback(
+      'spec-writer',
+      undefined,
+      {},
+      undefined,
+      {
+        modelProfiles: { deep: { fallback_models: ['tier-only-fallback'] } },
+        activeWorkflow: 'none',
+      },
+    );
+    expect(result.model).toBe('tier-only-fallback');
     expect(result.provenance).toBe('provider-fallback');
-  });
-});
-
-// ─── Task 4.6: generateConfigTemplate with modelProfiles ────────────────────
-
-describe('generateConfigTemplate — modelProfiles', () => {
-  it('should include modelProfiles section in template', () => {
-    const template = generateConfigTemplate();
-    expect(template.modelProfiles).toBeDefined();
-  });
-
-  it('should have all 6 profile keys in modelProfiles', () => {
-    const template = generateConfigTemplate();
-    expect(template.modelProfiles?.lite).toBeDefined();
-    expect(template.modelProfiles?.quick).toBeDefined();
-    expect(template.modelProfiles?.standard).toBeDefined();
-    expect(template.modelProfiles?.deep).toBeDefined();
-    expect(template.modelProfiles?.ultra).toBeDefined();
-    expect(template.modelProfiles?.review).toBeDefined();
-  });
-
-  it('should have { model, fallback_models } structure for each profile', () => {
-    const template = generateConfigTemplate();
-    const tiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
-    for (const tier of tiers) {
-      const tierConfig = template.modelProfiles?.[tier];
-      expect(tierConfig).toBeDefined();
-      expect(tierConfig?.model).toBeDefined();
-      expect(typeof tierConfig?.model).toBe('string');
-      expect(tierConfig?.fallback_models).toBeDefined();
-      expect(Array.isArray(tierConfig?.fallback_models)).toBe(true);
-    }
-  });
-
-  it('should not have legacy tier names (mechanical, strong)', () => {
-    const template = generateConfigTemplate();
-    expect(template.modelProfiles).not.toHaveProperty('mechanical');
-    expect(template.modelProfiles).not.toHaveProperty('strong');
   });
 });
 
@@ -437,7 +466,9 @@ describe('resolveModelWithFallback — modelType parameter', () => {
     expect(result.provenance).toBe('profile');
   });
 
-  it('should fallback to DEFAULT_PROFILE_MODELS when modelType tier not in user config', () => {
+  it('should fall through to agent profile when modelType tier not in user config', () => {
+    // Model tiers come only from user config. A modelType tier that is not
+    // configured falls through to the agent's AGENT_PROFILES binding.
     const result = resolveModelWithFallback(
       'spec-writer',
       undefined,
@@ -447,9 +478,9 @@ describe('resolveModelWithFallback — modelType parameter', () => {
         modelProfiles: { deep: { model: 'deep-model', fallback_models: [] } },
         activeWorkflow: 'sflow',
       },
-      'ultra', // ultra not in user config, should use DEFAULT_PROFILE_MODELS.ultra
+      'ultra', // ultra not in user config → fall through to AGENT_PROFILES('spec-writer')='deep'
     );
-    expect(result.model).toBe('provider/glm-5');
+    expect(result.model).toBe('deep-model');
     expect(result.provenance).toBe('profile');
   });
 
@@ -560,7 +591,7 @@ describe('resolveModelWithFallback — modelType parameter', () => {
     expect(result.provenance).toBe('profile');
   });
 
-  it('should use complete fallback chain: per-agent → tier → DEFAULT_PROFILE_MODELS tier → DEFAULT_FALLBACKS', () => {
+  it('should use complete fallback chain: per-agent → tier (user-config only, Wave 2)', () => {
     markModelUnavailable('deep-model');
     const result = resolveModelWithFallback(
       'spec-writer',
@@ -588,7 +619,7 @@ describe('resolveModelWithFallback — modelType parameter', () => {
     expect(result.fallbackAttempted).toContain('per-agent-fallback1');
   });
 
-  it('should skip empty fallback_models arrays in chain', () => {
+  it('should degrade to unconfigured when tier model unavailable and fallback chain empty (Wave 2)', () => {
     markModelUnavailable('deep-model');
     const result = resolveModelWithFallback(
       'spec-writer',
@@ -605,95 +636,13 @@ describe('resolveModelWithFallback — modelType parameter', () => {
         activeWorkflow: 'sflow',
       },
     );
-    // Should skip empty tier fallback_models and go to DEFAULT_FALLBACKS
-    expect(result.provenance).toBe('provider-fallback');
-    expect(result.fallbackAttempted).toBeDefined();
+    // Empty tier fallback_models + no per-agent fallback → no model configured → unconfigured
+    expect(result.model).toBeUndefined();
+    expect(result.provenance).toBe('unconfigured');
     expect(result.fallbackAttempted).toContain('deep-model');
   });
 
-  // P1-2: Fallback chain should concatenate all non-empty lists (not short-circuit on empty array)
-  it('should include DEFAULT_PROFILE_MODELS tier fallbacks even when user tier fallback_models is empty', () => {
-    // Modify DEFAULT_PROFILE_MODELS.deep to have fallback_models for this test
-    const originalDefault = DEFAULT_PROFILE_MODELS.deep;
-    (DEFAULT_PROFILE_MODELS as any).deep = {
-      model: 'provider/glm-5.1',
-      fallback_models: ['default-deep-fallback1', 'default-deep-fallback2'],
-    };
 
-    try {
-      markModelUnavailable('deep-model');
-      const result = resolveModelWithFallback(
-        'spec-writer',
-        undefined,
-        {},
-        undefined,
-        {
-          modelProfiles: {
-            deep: {
-              model: 'deep-model',
-              fallback_models: [], // empty array - should NOT skip DEFAULT_PROFILE_MODELS.deep.fallback_models
-            },
-          },
-          activeWorkflow: 'sflow',
-        },
-      );
-      // Should try: deep-model (unavailable) → default-deep-fallback1
-      expect(result.model).toBe('default-deep-fallback1');
-      expect(result.provenance).toBe('provider-fallback');
-      expect(result.fallbackAttempted).toBeDefined();
-      expect(result.fallbackAttempted).toContain('deep-model');
-      expect(result.fallbackAttempted).toContain('default-deep-fallback1');
-    } finally {
-      // Restore original DEFAULT_PROFILE_MODELS.deep
-      (DEFAULT_PROFILE_MODELS as any).deep = originalDefault;
-    }
-  });
-
-  it('should build complete fallback chain: per-agent → user tier → default tier → DEFAULT_FALLBACKS', () => {
-    // Modify DEFAULT_PROFILE_MODELS.deep to have fallback_models for this test
-    const originalDefault = DEFAULT_PROFILE_MODELS.deep;
-    (DEFAULT_PROFILE_MODELS as any).deep = {
-      model: 'provider/glm-5.1',
-      fallback_models: ['default-deep-fallback'],
-    };
-
-    try {
-      markModelUnavailable('deep-model');
-      markModelUnavailable('per-agent-fallback');
-      markModelUnavailable('user-tier-fallback');
-      const result = resolveModelWithFallback(
-        'spec-writer',
-        undefined,
-        {
-          'spec-writer': {
-            fallback_models: ['per-agent-fallback'],
-          },
-        },
-        undefined,
-        {
-          modelProfiles: {
-            deep: {
-              model: 'deep-model',
-              fallback_models: ['user-tier-fallback'],
-            },
-          },
-          activeWorkflow: 'sflow',
-        },
-      );
-      // Should try in order: deep-model → per-agent-fallback → user-tier-fallback → default-deep-fallback
-      expect(result.model).toBe('default-deep-fallback');
-      expect(result.provenance).toBe('provider-fallback');
-      expect(result.fallbackAttempted).toEqual([
-        'deep-model',
-        'per-agent-fallback',
-        'user-tier-fallback',
-        'default-deep-fallback',
-      ]);
-    } finally {
-      // Restore original DEFAULT_PROFILE_MODELS.deep
-      (DEFAULT_PROFILE_MODELS as any).deep = originalDefault;
-    }
-  });
 
   it('should support all 6 tiers: lite/quick/standard/deep/ultra/review', () => {
     const tiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
@@ -857,48 +806,6 @@ describe('resolveModelWithFallback — modelType parameter', () => {
     expect(result.fallbackAttempted).toEqual(['config-model', 'per-agent-fallback1']);
   });
 
-  // P1-2: Complete fallback chain order verification
-  it('should verify complete fallback chain order: per-agent → user tier → default tier → DEFAULT_FALLBACKS', () => {
-    markModelUnavailable('deep-model');
-    markModelUnavailable('per-agent-fallback');
-    markModelUnavailable('user-tier-fallback');
-    const originalDefault = DEFAULT_PROFILE_MODELS.deep;
-    try {
-      (DEFAULT_PROFILE_MODELS as any).deep = {
-        model: 'default-deep-model',
-        fallback_models: ['default-deep-fallback'],
-      };
-      markModelUnavailable('default-deep-model');
-      markModelUnavailable('default-deep-fallback');
-      const result = resolveModelWithFallback(
-        'spec-writer',
-        undefined,
-        {
-          'spec-writer': {
-            fallback_models: ['per-agent-fallback'],
-          },
-        },
-        undefined,
-        {
-          modelProfiles: {
-            deep: {
-              model: 'deep-model',
-              fallback_models: ['user-tier-fallback'],
-            },
-          },
-          activeWorkflow: 'sflow',
-        },
-      );
-      // Should try in order: deep-model → per-agent-fallback → user-tier-fallback → default-deep-fallback → DEFAULT_FALLBACKS['spec-writer']
-      expect(result.provenance).toBe('provider-fallback');
-      expect(result.fallbackAttempted).toContain('deep-model');
-      expect(result.fallbackAttempted).toContain('per-agent-fallback');
-      expect(result.fallbackAttempted).toContain('user-tier-fallback');
-      expect(result.fallbackAttempted).toContain('default-deep-fallback');
-    } finally {
-      (DEFAULT_PROFILE_MODELS as any).deep = originalDefault;
-    }
-  });
 
   // P1-2: model_type × activeWorkflow combination tests
   it('should use model_type profile when activeWorkflow is iflow', () => {
@@ -1023,7 +930,7 @@ describe('resolveModelWithFallback — IFlow profile support', () => {
     expect(result.provenance).toBe('profile');
   });
 
-  it('should bypass profile for iFlow main agent (no mapping)', () => {
+  it('should degrade to unconfigured for iFlow main agent with no profile mapping (Wave 2)', () => {
     const result = resolveModelWithFallback(
       'iFlow',
       undefined,
@@ -1034,7 +941,8 @@ describe('resolveModelWithFallback — IFlow profile support', () => {
         activeWorkflow: 'iflow',
       },
     );
-    // iFlow is not in AGENT_PROFILES → bypass profile → provider-fallback
-    expect(result.provenance).toBe('provider-fallback');
+    // iFlow is not in AGENT_PROFILES → profile branch bypassed; no model configured → unconfigured (Wave 2, no built-in default)
+    expect(result.model).toBeUndefined();
+    expect(result.provenance).toBe('unconfigured');
   });
 });

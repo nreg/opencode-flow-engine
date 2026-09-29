@@ -8,8 +8,6 @@ import {
   getPrimaryAgents,
   getSubagentAgents,
   agentExists,
-  getDefaultModel,
-  getAllDefaultModels,
   getAlternativeModel,
   markModelUnavailable,
   clearUnavailableModels,
@@ -133,11 +131,17 @@ describe('Agent Builder', () => {
       expect(agent.name).toBe('Review Engineer');
     });
 
-    it('should use default model when not specified', async () => {
+    it('should not inject a model when unconfigured (Wave 2: no built-in default)', async () => {
       const agent = await createAgent('sFlow');
-      // 已隔离用户配置：sFlow 无 AGENT_PROFILES 绑定，未指定 model 时
-      // 走 fallback 链，第一个可用 fallback 为 DEFAULT_FALLBACKS.sFlow[0]
-      expect(agent.model).toBe('provider/glm-5.1');
+      // sFlow 无 AGENT_PROFILES 绑定，且无用户配置 → 解析为 unconfigured → 不写 model 字段
+      expect(agent.model).toBeUndefined();
+    });
+
+    it('T2.5: createAgent without config produces no model field', async () => {
+      const agent = await createAgent('spec-writer');
+      expect(agent.model).toBeUndefined();
+      // 钉死"字段缺失"语义：不仅是 undefined，而是 model 键根本不存在
+      expect('model' in agent).toBe(false);
     });
   });
 
@@ -318,148 +322,111 @@ describe('Agent Builder', () => {
     });
   });
 
-  describe('getDefaultModel', () => {
-    it('should return default model for sFlow', () => {
-      const model = getDefaultModel('sFlow');
-      expect(model).toBe('provider/deepseek-v4-flash');
-    });
-
-    it('should return default model for other agents', () => {
-      const model = getDefaultModel('need-explorer');
-      expect(model).toBe('provider/kimi-k2.6');
-    });
-  });
-
-  describe('getAllDefaultModels', () => {
-    it('should return models for all agents', () => {
-      const models = getAllDefaultModels();
-      expect(Object.keys(models)).toHaveLength(24);
-      expect(models.sFlow).toBe('provider/deepseek-v4-flash');
-      expect(models['need-explorer']).toBe('provider/kimi-k2.6');
-      expect(models['spec-writer']).toBe('provider/glm-5.1');
-      // IFlow models
-      expect(models.iFlow).toBe('provider/deepseek-v4-flash');
-      expect(models['iflow-discuss-planner']).toBe('provider/kimi-k2.6');
-      expect(models['iflow-plan-executor']).toBe('provider/step-3.7-flash');
-      expect(models['iflow-verifier']).toBe('provider/minimax-m2.7');
-      expect(models['iflow-researcher']).toBe('provider/glm-5.1');
-      expect(models['iflow-shipper']).toBe('provider/mimo-v2.5-pro');
-    });
-  });
-
   describe('getAlternativeModel', () => {
+    // Wave 2: getAlternativeModel reads ONLY the explicitly-provided user-config fallback
+    // chain (extraFallbacks). There is no built-in default list anymore — each test
+    // injects its own fallback list (neutral model strings, not built-in defaults).
+    const REVIEW_FB = ['provider/alt-a', 'provider/alt-b'];
+    const SFLOW_FB = ['provider/alt-a', 'provider/alt-b'];
+    const NEED_FB = ['provider/alt-a', 'provider/alt-b'];
+    const CURRENT = 'provider/alt-current';
+
     it('should return first fallback model different from current model', () => {
-      // review-engineer default is provider/deepseek-v4-flash
-      // fallbacks are ['provider/glm-5.1', 'provider/kimi-k2.6']
-      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'review-engineer');
-      expect(alt).toBe('provider/glm-5.1');
+      const alt = getAlternativeModel(CURRENT, 'review-engineer', REVIEW_FB);
+      expect(alt).toBe('provider/alt-a');
     });
 
     it('should skip fallback that matches current model', () => {
-      // sFlow fallbacks are ['provider/glm-5.1', 'provider/kimi-k2.6']
-      // If current is glm-5.1, should return kimi-k2.6
-      const alt = getAlternativeModel('provider/glm-5.1', 'sFlow');
-      expect(alt).toBe('provider/kimi-k2.6');
+      const alt = getAlternativeModel('provider/alt-a', 'sFlow', SFLOW_FB);
+      expect(alt).toBe('provider/alt-b');
     });
 
     it('should return null when all fallbacks match current model', () => {
-      // Create a scenario where the only fallback is the same as current
-      // This is unlikely in practice but we test the null path
-      // For build-executor, fallbacks are ['provider/glm-5', 'provider/kimi-k2.6']
-      // If we pass a model that happens to match all fallbacks, return null
-      // Since fallbacks are different from each other, we test with a non-existent agent
-      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'non-existent-agent' as any);
+      const alt = getAlternativeModel('provider/alt-a', 'x', ['provider/alt-a']);
       expect(alt).toBeNull();
     });
 
-    it('should return null for unknown agent name', () => {
-      const alt = getAlternativeModel('some-model', 'unknown-agent' as any);
+    it('should return null for empty fallback list', () => {
+      const alt = getAlternativeModel(CURRENT, 'x', []);
       expect(alt).toBeNull();
     });
 
-    it('should return null when current model matches all fallbacks', () => {
-      // need-explorer fallbacks: ['provider/glm-5.1', 'provider/deepseek-v4-flash']
-      // If current is neither, it should return the first fallback
-      const alt = getAlternativeModel('provider/kimi-k2.6', 'need-explorer');
-      expect(alt).toBe('provider/glm-5.1');
-    });
-
-    it('should return null when fallback list is empty', () => {
-      // All agents have fallbacks defined, but test the empty path
-      // by mocking an agent with no fallbacks - not possible directly,
-      // so test that a valid agent always has at least one different model
-      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'review-engineer');
-      expect(alt).not.toBeNull();
-      expect(alt).not.toBe('provider/deepseek-v4-flash');
+    it('should return first fallback when current differs', () => {
+      const alt = getAlternativeModel('provider/alt-b', 'need-explorer', NEED_FB);
+      expect(alt).toBe('provider/alt-a');
     });
 
     it('should work for cross-model spot-check scenario', () => {
-      // review-engineer uses deepseek-v4-flash by default
-      // For spot-check, we want a different model
-      const defaultModel = getDefaultModel('review-engineer');
-      const alt = getAlternativeModel(defaultModel, 'review-engineer');
+      const defaultModel = CURRENT;
+      const alt = getAlternativeModel(defaultModel, 'review-engineer', REVIEW_FB);
       expect(alt).not.toBeNull();
       expect(alt).not.toBe(defaultModel);
     });
   });
 
+  describe('getAlternativeModel — Wave 2 (no built-in defaults)', () => {
+    it('returns null when no user fallback chain is provided', () => {
+      const alt = getAlternativeModel('provider/x', 'build-executor', []);
+      expect(alt).toBeNull();
+    });
+
+    it('returns the provided fallback when available', () => {
+      const alt = getAlternativeModel('provider/x', 'build-executor', ['openai/gpt-5']);
+      expect(alt).toBe('openai/gpt-5');
+    });
+  });
+
   describe('getAlternativeModel — F5 可用性检查', () => {
+    // Wave 2: fallbacks are injected explicitly via extraFallbacks (user-config chain).
+    const REVIEW_FB = ['provider/alt-a', 'provider/alt-b'];
+    const SFLOW_FB = ['provider/alt-a', 'provider/alt-b'];
+    const NEED_FB = ['provider/alt-a', 'provider/alt-b'];
+    const CURRENT = 'provider/alt-current';
+
     it('应跳过不可用的 fallback 模型，返回下一个可用模型', () => {
       clearUnavailableModels();
-      // review-engineer fallbacks: ['provider/glm-5.1', 'provider/kimi-k2.6']
-      // 标记 glm-5.1 为不可用，应返回 kimi-k2.6
-      markModelUnavailable('provider/glm-5.1');
-      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'review-engineer');
-      expect(alt).toBe('provider/kimi-k2.6');
+      markModelUnavailable('provider/alt-a');
+      const alt = getAlternativeModel(CURRENT, 'review-engineer', REVIEW_FB);
+      expect(alt).toBe('provider/alt-b');
       clearUnavailableModels();
     });
 
     it('应在所有 fallback 都不可用时返回 null', () => {
       clearUnavailableModels();
-      // review-engineer fallbacks: ['provider/glm-5.1', 'provider/kimi-k2.6']
-      // 标记两个都不可用
-      markModelUnavailable('provider/glm-5.1');
-      markModelUnavailable('provider/kimi-k2.6');
-      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'review-engineer');
+      markModelUnavailable('provider/alt-a');
+      markModelUnavailable('provider/alt-b');
+      const alt = getAlternativeModel(CURRENT, 'review-engineer', REVIEW_FB);
       expect(alt).toBeNull();
       clearUnavailableModels();
     });
 
     it('应在可用模型与当前模型不同时返回该模型', () => {
       clearUnavailableModels();
-      // sFlow fallbacks: ['provider/glm-5.1', 'provider/kimi-k2.6']
-      // 当前模型是 deepseek-v4-flash，两个 fallback 都可用
-      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'sFlow');
-      expect(alt).toBe('provider/glm-5.1');
+      const alt = getAlternativeModel(CURRENT, 'sFlow', SFLOW_FB);
+      expect(alt).toBe('provider/alt-a');
       clearUnavailableModels();
     });
 
     it('应在可用模型与当前模型相同时跳过继续查找', () => {
       clearUnavailableModels();
-      // need-explorer fallbacks: ['provider/glm-5.1', 'provider/deepseek-v4-flash']
-      // 当前模型是 glm-5.1，应跳过它返回 deepseek-v4-flash
-      const alt = getAlternativeModel('provider/glm-5.1', 'need-explorer');
-      expect(alt).toBe('provider/deepseek-v4-flash');
+      const alt = getAlternativeModel('provider/alt-a', 'need-explorer', NEED_FB);
+      expect(alt).toBe('provider/alt-b');
       clearUnavailableModels();
     });
 
     it('应在当前模型匹配且后续 fallback 不可用时返回 null', () => {
       clearUnavailableModels();
-      // need-explorer fallbacks: ['provider/glm-5.1', 'provider/deepseek-v4-flash']
-      // 当前模型是 glm-5.1（跳过），deepseek-v4-flash 不可用
-      markModelUnavailable('provider/deepseek-v4-flash');
-      const alt = getAlternativeModel('provider/glm-5.1', 'need-explorer');
+      markModelUnavailable('provider/alt-b');
+      const alt = getAlternativeModel('provider/alt-a', 'need-explorer', NEED_FB);
       expect(alt).toBeNull();
       clearUnavailableModels();
     });
 
     it('应在当前模型不可用但与 fallback 不同时仍返回可用 fallback', () => {
       clearUnavailableModels();
-      // 当前模型本身不可用不影响 fallback 选择
-      // review-engineer fallbacks: ['provider/glm-5.1', 'provider/kimi-k2.6']
-      markModelUnavailable('provider/deepseek-v4-flash');
-      const alt = getAlternativeModel('provider/deepseek-v4-flash', 'review-engineer');
-      expect(alt).toBe('provider/glm-5.1');
+      markModelUnavailable(CURRENT);
+      const alt = getAlternativeModel(CURRENT, 'review-engineer', REVIEW_FB);
+      expect(alt).toBe('provider/alt-a');
       clearUnavailableModels();
     });
   });
@@ -611,7 +578,7 @@ describe('createAgent — iFlow activeWorkflow tier resolution', () => {
       },
     );
 
-    // Verify provenance is 'profile' (tier resolution), not 'system-default'
+    // Verify provenance is 'profile' (user-configured tier resolution), not any built-in default
     expect(result.provenance).toBe('profile');
     expect(result.model).toBe('provider/test-deep-model');
   });

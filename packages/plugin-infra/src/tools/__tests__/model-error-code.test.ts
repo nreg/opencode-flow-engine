@@ -172,6 +172,7 @@ describe('错误码驱动: send 阶段接线（runWithModelFallback）', () => {
     initialModel: 'provider/first-model',
     maxWaitMs: 100,
     directory: '',
+    extraFallbacks: ['provider/alt-model'],
     poll,
   });
 
@@ -388,7 +389,10 @@ describe('错误码驱动: pollAndComplete 第三路径接线', () => {
       sessionLabelPrefix: 'sFlow',
       validateAgent: async () => null,
       workflowName: 'sFlow',
-    };
+    } as any;
+    // Fallback chain comes ONLY from user config
+    options.modelProfiles = {};
+    options.configOverrides = { 'build-executor': { fallback_models: ['provider/alt-model'] } };
     const tools = createCallFlowAgentTools(options);
     return { tools, backgroundTaskRegistry };
   }

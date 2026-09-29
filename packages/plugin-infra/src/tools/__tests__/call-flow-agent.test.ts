@@ -12,9 +12,9 @@
 import { beforeEach, describe, expect, it, mock, afterEach } from 'bun:test';
 import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
 import { createCallFlowAgentTools, resetRunningSubagentCounts } from '../call-flow-agent.js';
-import { DEFAULT_PROFILE_MODELS } from '../../agents/config-loader.js';
 import { resetGlobalEventBus, getGlobalEventBus } from '../../features/event-bus.js';
 import { clearUnavailableModels, markModelUnavailable, getAlternativeModel, isModelAvailable } from '../../agents/agent-builder.js';
+import { Logger } from '../../utils/logger.js';
 
 // ─── Test helpers ──────────────────────────────────────────────────────────
 
@@ -1776,6 +1776,15 @@ describe('Wave 4: model_type parameter', () => {
       });
 
       const options = createTestOptions(client);
+      (options as any).modelProfiles = {
+        lite: { model: 'provider/lite-resolved-model', fallback_models: [] },
+        quick: { model: 'provider/quick-resolved-model', fallback_models: [] },
+        standard: { model: 'provider/standard-resolved-model', fallback_models: [] },
+        deep: { model: 'provider/deep-resolved-model', fallback_models: [] },
+        ultra: { model: 'provider/ultra-resolved-model', fallback_models: [] },
+        review: { model: 'provider/review-resolved-model', fallback_models: [] },
+      };
+      (options as any).configOverrides = {};
       const tools = createTestTools(options);
       currentTools = tools;
 
@@ -1809,6 +1818,8 @@ describe('Wave 4: model_type parameter', () => {
       });
 
       const options = createTestOptions(client);
+      (options as any).modelProfiles = { ultra: { model: 'provider/ultra-resolved-model', fallback_models: [] } };
+      (options as any).configOverrides = {};
       const tools = createTestTools(options);
       currentTools = tools;
 
@@ -1825,15 +1836,10 @@ describe('Wave 4: model_type parameter', () => {
 
       // Verify prompt was called
       expect(promptCalls.length).toBeGreaterThan(0);
-      
-      // Verify body.model was injected with ultra tier model
+
+      // Verify body.model was injected with the user-configured ultra tier model (Wave 2: no built-in default)
       const promptCall = promptCalls[0];
-      expect(promptCall.body.model).toBeDefined();
-      
-      // The model should be from ultra tier: 'provider/glm-5'
-      const expectedModel = DEFAULT_PROFILE_MODELS.ultra.model;
-      const [providerID, modelID] = expectedModel.split('/');
-      expect(promptCall.body.model).toEqual({ providerID, modelID });
+      expect(promptCall.body.model).toEqual({ providerID: 'provider', modelID: 'ultra-resolved-model' });
     });
 
     it('async mode: should route to deep tier when model_type=deep', async () => {
@@ -1843,6 +1849,8 @@ describe('Wave 4: model_type parameter', () => {
       });
 
       const options = createTestOptions(client);
+      (options as any).modelProfiles = { deep: { model: 'provider/deep-resolved-model', fallback_models: [] } };
+      (options as any).configOverrides = {};
       const tools = createTestTools(options);
       currentTools = tools;
 
@@ -1865,14 +1873,9 @@ describe('Wave 4: model_type parameter', () => {
       // Verify prompt was called
       expect(promptCalls.length).toBeGreaterThan(0);
       
-      // Verify body.model was injected with deep tier model
+      // Verify body.model was injected with the user-configured deep tier model (Wave 2: no built-in default)
       const promptCall = promptCalls[0];
-      expect(promptCall.body.model).toBeDefined();
-      
-      // The model should be from deep tier: 'provider/glm-5.1'
-      const expectedModel = DEFAULT_PROFILE_MODELS.deep.model;
-      const [providerID, modelID] = expectedModel.split('/');
-      expect(promptCall.body.model).toEqual({ providerID, modelID });
+      expect(promptCall.body.model).toEqual({ providerID: 'provider', modelID: 'deep-resolved-model' });
     });
 
     it('should fallback to AGENT_PROFILES when model_type is not provided', async () => {
@@ -1917,6 +1920,8 @@ describe('Wave 4: model_type parameter', () => {
       });
 
       const options = createTestOptions(client);
+      (options as any).modelProfiles = { standard: { model: 'provider/standard-resolved-model', fallback_models: [] } };
+      (options as any).configOverrides = {};
       const tools = createTestTools(options);
       currentTools = tools;
 
@@ -1950,6 +1955,8 @@ describe('Wave 4: model_type parameter', () => {
       });
 
       const options = createTestOptions(client);
+      (options as any).modelProfiles = { ultra: { model: 'provider/ultra-resolved-model', fallback_models: [] } };
+      (options as any).configOverrides = {};
       const tools = createTestTools(options);
       currentTools = tools;
 
@@ -1965,14 +1972,10 @@ describe('Wave 4: model_type parameter', () => {
         { sessionID: 'parent-session', directory: '/test' },
       );
 
-      // Verify the injected model matches resolveModelWithFallback result
+      // Verify the injected model matches the user-configured ultra tier model (Wave 2)
       const promptCall = promptCalls[0];
       const injectedModel = promptCall.body.model as { providerID: string; modelID: string };
-      
-      // The model should be from ultra tier
-      const expectedModel = DEFAULT_PROFILE_MODELS.ultra.model;
-      const [providerID, modelID] = expectedModel.split('/');
-      expect(injectedModel).toEqual({ providerID, modelID });
+      expect(injectedModel).toEqual({ providerID: 'provider', modelID: 'ultra-resolved-model' });
     });
   });
 
@@ -2056,8 +2059,8 @@ describe('P0: model_type routing priority chain', () => {
   });
 
   it('P0-1: should use user-configured modelProfiles when model_type is specified', async () => {
-    // 测试：当 model_type='deep' 时，应该优先使用 modelProfiles.deep.model
-    // 而不是直接使用 DEFAULT_PROFILE_MODELS.deep.model
+    // 测试：当 model_type='deep' 时，应该优先使用用户配置的 modelProfiles.deep.model
+    // 未配置该档位时不应回落到任何内置常量
     const client = createMockClient({
       pollOutputs: ['Task completed [TASK_COMPLETE]'],
       promptCalls,
@@ -2142,15 +2145,15 @@ describe('P0: model_type routing priority chain', () => {
   });
 
   it('P0-3: should use resolveModelWithFallback for model resolution', async () => {
-    // 测试：call_flow_agent 应该调用 resolveModelWithFallback
-    // 而不是直接读取 DEFAULT_PROFILE_MODELS
+    // 测试：call_flow_agent 应该调用 resolveModelWithFallback，统一走用户配置解析
+    // 而不是直接读取任何内置的档位常量
     const client = createMockClient({
       pollOutputs: ['Task completed [TASK_COMPLETE]'],
       promptCalls,
     });
 
     const options = createTestOptions(client);
-    (options as any).modelProfiles = {};
+    (options as any).modelProfiles = { deep: { model: 'provider/deep-configured-model', fallback_models: [] } };
     (options as any).configOverrides = {};
 
     const tools = createTestTools(options);
@@ -2168,14 +2171,13 @@ describe('P0: model_type routing priority chain', () => {
       { sessionID: 'parent-session', directory: '/test' },
     );
 
-    // 验证使用了 DEFAULT_PROFILE_MODELS.deep.model（因为没有用户配置）
+    // Wave 2: model_type='deep' 经 resolveModelWithFallback 读取用户配置（modelProfiles），
+    // 不再注入旧内置默认 provider/deep-model；body.model 来自用户配置。
     expect(promptCalls.length).toBeGreaterThan(0);
     const lastCall = promptCalls[promptCalls.length - 1];
-    const expectedModel = DEFAULT_PROFILE_MODELS.deep.model;
-    expect(lastCall.body.model).toEqual({
-      providerID: expectedModel.split('/')[0],
-      modelID: expectedModel.split('/')[1],
-    });
+    expect(lastCall.body.model).toEqual({ providerID: 'provider', modelID: 'deep-configured-model' });
+    // 确保不再回退到已删除的内置默认
+    expect((lastCall.body.model as { modelID: string }).modelID).not.toBe('deep-model');
   });
 
   it('P0: should respect model_type over per-agent override', async () => {
@@ -2215,6 +2217,57 @@ describe('P0: model_type routing priority chain', () => {
       providerID: 'provider',
       modelID: 'tier-deep-model',
     });
+  });
+
+  it('P2-4: should log degradation diagnosis and keep explicit error when tier is unconfigured', async () => {
+    // 测试：model_type 指定了 tier（ultra）但用户未配置该 tier 时，
+    // 解析链尾降级为 unconfigured —— 必须补降级诊断日志，同时保留显式报错，
+    // 且绝不注入假模型（不得发起任何 prompt）。
+    const client = createMockClient({
+      pollOutputs: ['Task completed [TASK_COMPLETE]'],
+      promptCalls,
+    });
+
+    const options = createTestOptions(client);
+    // 不提供该 tier 的用户配置
+    (options as any).modelProfiles = {};
+    (options as any).configOverrides = {};
+
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    // 拦截 Logger.log 断言降级日志（Logger 目前无 debug 级别，LOG 为最低级别）
+    const originalLog = Logger.log;
+    const logSpy = mock(() => Promise.resolve());
+    (Logger as unknown as { log: unknown }).log = logSpy;
+
+    try {
+      const result = await tools.call_flow_agent.execute(
+        {
+          description: 'test unconfigured tier',
+          prompt: 'Test prompt',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+          model_type: 'ultra',
+        },
+        { sessionID: 'parent-session', directory: '/test' },
+      );
+
+      // 保留既有语义：显式报错，而不是静默回退或注入假模型
+      const output = (result as { output: string }).output;
+      expect(output).toContain('No model configured');
+      expect(output).toContain('ultra');
+      // 未注入任何模型 ⇒ 不应发起 prompt
+      expect(promptCalls.length).toBe(0);
+
+      // 降级诊断日志：说明未配置该 tier，agent 将使用 OpenCode 默认模型
+      const messages = logSpy.mock.calls.map((call) => String(call[0]));
+      expect(
+        messages.some((msg) => msg.includes('ultra') && msg.includes('OpenCode')),
+      ).toBe(true);
+    } finally {
+      (Logger as unknown as { log: unknown }).log = originalLog;
+    }
   });
 });
 
@@ -3084,6 +3137,11 @@ describe('模型级故障转移 (model fallback)', () => {
     });
 
     const options = createTestOptions(client);
+    // Fallback chain comes ONLY from user config
+    (options as any).modelProfiles = {};
+    (options as any).configOverrides = {
+      'build-executor': { fallback_models: ['provider/alt-1', 'provider/alt-2'] },
+    };
     const tools = createTestTools(options);
 
     const result = await tools.call_flow_agent.execute(
@@ -3101,9 +3159,9 @@ describe('模型级故障转移 (model fallback)', () => {
     // 断言 1：prompt 调用 2 次（首次 + 换模型重试）
     expect(promptCalls.length).toBe(2);
 
-    // 断言 2：第 2 次 prompt 使用 fallback 模型（build-executor 的第一个 fallback = provider/glm-5）
+    // 断言 2：第 2 次 prompt 使用用户配置的 fallback 模型（第一个 fallback = provider/alt-1）
     const secondModel = promptCalls[1].body.model as { providerID: string; modelID: string };
-    expect(secondModel.modelID).toBe('glm-5.1');
+    expect(secondModel.modelID).toBe('alt-1');
 
     // 断言 3：第 2 次 prompt 原样重发 basePrompt（D-5：不含接管声明，上下文由 session 承载）
     const secondParts = promptCalls[1].body.parts as Array<{ type: string; text: string }>;
@@ -3112,7 +3170,7 @@ describe('模型级故障转移 (model fallback)', () => {
 
     // 断言 4：最终成功
     expect(data.success).toBe(true);
-    expect(data.model).toContain('glm-5.1');
+    expect(data.model).toContain('alt-1');
   });
 
   it('F-2: 拉黑生效（故障模型不再被选中）', async () => {
@@ -3125,6 +3183,11 @@ describe('模型级故障转移 (model fallback)', () => {
     });
 
     const options = createTestOptions(client);
+    // Fallback chain comes ONLY from user config
+    (options as any).modelProfiles = {};
+    (options as any).configOverrides = {
+      'build-executor': { fallback_models: ['provider/alt-1', 'provider/alt-2'] },
+    };
     const tools = createTestTools(options);
 
     await tools.call_flow_agent.execute(
@@ -3138,20 +3201,21 @@ describe('模型级故障转移 (model fallback)', () => {
     );
 
     // 断言：首次模型 provider/test-model 已被拉黑
-    // getAlternativeModel 跳过 currentModel 且跳过黑名单模型
+    // getAlternativeModel 跳过 currentModel 且跳过黑名单模型（Wave 2：显式传入用户 fallback 链）
     // 验证方式：把所有 fallback 也拉黑后，getAlternativeModel 应返回 null
-    // 先验证 glm-5 仍可用（F-1 只拉黑了 test-model）
-    const alt1 = getAlternativeModel('provider/test-model', 'build-executor');
-    expect(alt1).toBe('provider/glm-5.1'); // 第一个可用 fallback
+    const fb = ['provider/alt-1', 'provider/alt-2'];
+    // 先验证 alt-1 仍可用（F-1 只拉黑了 test-model）
+    const alt1 = getAlternativeModel('provider/test-model', 'build-executor', fb);
+    expect(alt1).toBe('provider/alt-1'); // 第一个可用 fallback
 
-    // 再拉黑 glm-5，验证 kimi-k2.6 被选中
-    markModelUnavailable('provider/glm-5.1');
-    const alt2 = getAlternativeModel('provider/test-model', 'build-executor');
-    expect(alt2).toBe('provider/kimi-k2.6');
+    // 再拉黑 alt-1，验证 alt-2 被选中
+    markModelUnavailable('provider/alt-1');
+    const alt2 = getAlternativeModel('provider/test-model', 'build-executor', fb);
+    expect(alt2).toBe('provider/alt-2');
 
-    // 再拉黑 kimi-k2.6，验证无可用模型
-    markModelUnavailable('provider/kimi-k2.6');
-    const alt3 = getAlternativeModel('provider/test-model', 'build-executor');
+    // 再拉黑 alt-2，验证无可用模型
+    markModelUnavailable('provider/alt-2');
+    const alt3 = getAlternativeModel('provider/test-model', 'build-executor', fb);
     expect(alt3).toBeNull();
 
     // 测试结束清理（afterEach 也会清理，但显式清理更安全）
@@ -3167,6 +3231,11 @@ describe('模型级故障转移 (model fallback)', () => {
     });
 
     const options = createTestOptions(client);
+    // Fallback chain comes ONLY from user config
+    (options as any).modelProfiles = {};
+    (options as any).configOverrides = {
+      'build-executor': { fallback_models: ['provider/alt-1', 'provider/alt-2'] },
+    };
     const tools = createTestTools(options);
 
     const result = await tools.call_flow_agent.execute(
@@ -3194,17 +3263,17 @@ describe('模型级故障转移 (model fallback)', () => {
     expect(data.attempted_models).toBeDefined();
     expect(data.attempted_models.length).toBe(3);
 
-    // 断言 5：3 次 prompt 使用的模型依次为 test-model → glm-5 → kimi-k2.6
+    // 断言 5：3 次 prompt 使用的模型依次为 test-model → alt-1 → alt-2（用户配置 fallback 链）
     const models = promptCalls.map(c => (c.body.model as { providerID: string; modelID: string }).modelID);
     expect(models[0]).toBe('test-model');
-    expect(models[1]).toBe('glm-5.1');
-    expect(models[2]).toBe('kimi-k2.6');
+    expect(models[1]).toBe('alt-1');
+    expect(models[2]).toBe('alt-2');
   });
 
   it('F-4: 无可用替代模型（getAlternativeModel 返回 null，立即终止）', async () => {
-    // 预先拉黑 build-executor 的全部 fallback
-    markModelUnavailable('provider/glm-5.1');
-    markModelUnavailable('provider/kimi-k2.6');
+    // 预先拉黑 build-executor 的全部用户配置 fallback（无内置兜底链）
+    markModelUnavailable('provider/alt-1');
+    markModelUnavailable('provider/alt-2');
 
     const client = createMockClient({
       pollOutputs: ['irrelevant'],
@@ -3213,6 +3282,11 @@ describe('模型级故障转移 (model fallback)', () => {
     });
 
     const options = createTestOptions(client);
+    // Fallback chain comes ONLY from user config
+    (options as any).modelProfiles = {};
+    (options as any).configOverrides = {
+      'build-executor': { fallback_models: ['provider/alt-1', 'provider/alt-2'] },
+    };
     const tools = createTestTools(options);
 
     const result = await tools.call_flow_agent.execute(
@@ -3246,6 +3320,11 @@ describe('模型级故障转移 (model fallback)', () => {
     });
 
     const options = createTestOptions(client);
+    // Fallback chain comes ONLY from user config
+    (options as any).modelProfiles = {};
+    (options as any).configOverrides = {
+      'build-executor': { fallback_models: ['provider/alt-1', 'provider/alt-2'] },
+    };
     const tools = createTestTools(options);
 
     const result = await tools.call_flow_agent.execute(
@@ -3269,9 +3348,9 @@ describe('模型级故障转移 (model fallback)', () => {
     // 断言 3：error 含 ContextOverflow 且明确未换模型
     expect(data.error).toContain('ContextOverflow');
 
-    // 断言 4：模型未被拉黑（getAlternativeModel 仍能返回 fallback）
-    const alt = getAlternativeModel('provider/test-model', 'build-executor');
-    expect(alt).toBe('provider/glm-5.1'); // 若未被拉黑，第一个 fallback 仍可用
+    // 断言 4：模型未被拉黑（getAlternativeModel 仍能返回用户 fallback 链第一个）
+    const alt = getAlternativeModel('provider/test-model', 'build-executor', ['provider/alt-1', 'provider/alt-2']);
+    expect(alt).toBe('provider/alt-1'); // 若未被拉黑，第一个 fallback 仍可用
   });
 
   it('F-6a: 前置校验失败 HTTP 400 不换模型', async () => {
@@ -3314,6 +3393,7 @@ describe('模型级故障转移 (model fallback)', () => {
     });
 
     const options = createTestOptions(client);
+    (options as any).configOverrides = { 'build-executor': { fallback_models: ['provider/alt-model'] } };
     const tools = createTestTools(options);
 
     const result = await tools.call_flow_agent.execute(
@@ -3344,6 +3424,11 @@ describe('模型级故障转移 (model fallback)', () => {
     });
 
     const options = createTestOptions(client);
+    // Fallback chain comes ONLY from user config
+    (options as any).modelProfiles = {};
+    (options as any).configOverrides = {
+      'build-executor': { fallback_models: ['provider/alt-1', 'provider/alt-2'] },
+    };
     const tools = createTestTools(options);
 
     // 启动 async 任务
@@ -3375,13 +3460,13 @@ describe('模型级故障转移 (model fallback)', () => {
     // 断言 2：prompt 调用 2 次（初始 + 换模型重 prompt）
     expect(promptCalls.length).toBe(2);
 
-    // 断言 3：第 2 次 prompt 使用 fallback 模型
+    // 断言 3：第 2 次 prompt 使用用户配置的 fallback 模型
     const secondModel = promptCalls[1].body.model as { providerID: string; modelID: string };
-    expect(secondModel.modelID).toBe('glm-5.1');
+    expect(secondModel.modelID).toBe('alt-1');
 
     // 断言 4：registry 中 resolvedModel 已变为 fallback 模型
     const task = options.backgroundTaskRegistry.get(taskId);
     expect(task).toBeDefined();
-    expect(task?.resolvedModel).toContain('glm-5.1');
+    expect(task?.resolvedModel).toContain('alt-1');
   });
 });

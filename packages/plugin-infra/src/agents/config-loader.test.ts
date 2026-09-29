@@ -12,9 +12,7 @@ import {
   loadCascadedSFlowConfig,
   agentOverridesFromConfig,
   mergeOverrides,
-  generateConfigTemplate,
   USER_CONFIG_FILE,
-  DEFAULT_PROFILE_MODELS,
 } from './config-loader.js';
 import { createAgent, createAllAgents, clearConfigCache } from './agent-builder.js';
 
@@ -158,15 +156,15 @@ describe('Config Loader', () => {
       try {
         writeTestConfig({
           modelProfiles: {
-            free: { model: 'provider/free-legacy', fallback_models: ['provider/glm-5.1'] },
-            standard: { model: 'provider/kimi-k2.6', fallback_models: [] },
+            free: { model: 'provider/free-legacy', fallback_models: ['provider/alt-a'] },
+            standard: { model: 'provider/alt-b', fallback_models: [] },
           },
         });
         const config = await loadCascadedSFlowConfig(TEST_DIR);
         // free should be renamed to lite, content preserved
         expect(config.modelProfiles?.lite).toEqual({
           model: 'provider/free-legacy',
-          fallback_models: ['provider/glm-5.1'],
+          fallback_models: ['provider/alt-a'],
         });
         // legacy "free" key must be removed
         expect('free' in (config.modelProfiles as Record<string, unknown>)).toBe(false);
@@ -205,8 +203,8 @@ describe('Config Loader', () => {
       try {
         writeTestConfig({
           modelProfiles: {
-            lite: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
-            standard: 'provider/kimi-k2.6' as unknown as { model: string; fallback_models: string[] },
+            lite: { model: 'provider/alt-c', fallback_models: [] },
+            standard: 'provider/alt-b' as unknown as { model: string; fallback_models: string[] },
           },
         });
         const config = await loadCascadedSFlowConfig(TEST_DIR);
@@ -228,7 +226,7 @@ describe('Config Loader', () => {
           modelProfiles: {
             mechanical: { model: 'provider/x', fallback_models: [] },
             strong: { model: 'provider/y', fallback_models: [] },
-            lite: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
+            lite: { model: 'provider/alt-c', fallback_models: [] },
           },
         });
         const config = await loadCascadedSFlowConfig(TEST_DIR);
@@ -286,28 +284,7 @@ describe('Config Loader', () => {
     });
   });
 
-  describe('generateConfigTemplate', () => {
-    it('should include all 17 agents', () => {
-      const tmpl = generateConfigTemplate();
-      expect(tmpl.agents).toBeDefined();
-      expect(Object.keys(tmpl.agents!)).toHaveLength(17);
-    });
 
-    it('should include fallback_models for all agents', () => {
-      const tmpl = generateConfigTemplate();
-      for (const [name, cfg] of Object.entries(tmpl.agents!)) {
-        expect(cfg.fallback_models).toBeDefined();
-        expect(cfg.fallback_models!.length).toBeGreaterThan(0);
-      }
-    });
-
-    it('should include features, hooks, and tools sections', () => {
-      const tmpl = generateConfigTemplate();
-      expect(tmpl.features).toBeDefined();
-      expect(tmpl.hooks).toBeDefined();
-      expect(tmpl.tools).toBeDefined();
-    });
-  });
 
   describe('features.reviewGate configuration', () => {
     it('should load features.reviewGate from config', async () => {
@@ -446,7 +423,9 @@ describe('Config File Integration with Agent Builder', () => {
     const agents = await createAllAgents();
     expect(agents.sFlow.model).toBe('gpt-5');
     expect(agents['build-executor'].model).toBe('claude-4-opus');
-    expect(agents['code-reviewer'].model).toBe('provider/deepseek-v4-flash');
+    expect(agents['code-reviewer'].model).toBeUndefined();
+    // 钉死"字段缺失"语义：未配置时不写入 model 键
+    expect('model' in agents['code-reviewer']).toBe(false);
   });
 });
 
@@ -495,71 +474,6 @@ describe('Wave 1: ModelProfileConfig 6-tier structure', () => {
   });
 });
 
-describe('Wave 1: DEFAULT_PROFILE_MODELS constant', () => {
-  it('should export DEFAULT_PROFILE_MODELS with all 6 tiers', () => {
-    expect(DEFAULT_PROFILE_MODELS).toBeDefined();
-    expect(DEFAULT_PROFILE_MODELS.lite).toBeDefined();
-    expect(DEFAULT_PROFILE_MODELS.quick).toBeDefined();
-    expect(DEFAULT_PROFILE_MODELS.standard).toBeDefined();
-    expect(DEFAULT_PROFILE_MODELS.deep).toBeDefined();
-    expect(DEFAULT_PROFILE_MODELS.ultra).toBeDefined();
-    expect(DEFAULT_PROFILE_MODELS.review).toBeDefined();
-  });
 
-  it('should have { model, fallback_models } structure for each tier', () => {
-    const tiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
-    for (const tier of tiers) {
-      expect(DEFAULT_PROFILE_MODELS[tier]).toBeDefined();
-      expect(DEFAULT_PROFILE_MODELS[tier].model).toBeDefined();
-      expect(typeof DEFAULT_PROFILE_MODELS[tier].model).toBe('string');
-      expect(DEFAULT_PROFILE_MODELS[tier].fallback_models).toBeDefined();
-      expect(Array.isArray(DEFAULT_PROFILE_MODELS[tier].fallback_models)).toBe(true);
-    }
-  });
 
-  it('should use provider/ prefix format for model identifiers', () => {
-    const tiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
-    for (const tier of tiers) {
-      expect(DEFAULT_PROFILE_MODELS[tier].model).toMatch(/^provider\//);
-    }
-  });
 
-  it('should have empty fallback_models arrays initially', () => {
-    const tiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
-    for (const tier of tiers) {
-      expect(DEFAULT_PROFILE_MODELS[tier].fallback_models).toEqual([]);
-    }
-  });
-});
-
-describe('Wave 1: generateConfigTemplate with 6-tier modelProfiles', () => {
-  it('should emit 6-tier object format in modelProfiles', () => {
-    const template = generateConfigTemplate();
-    expect(template.modelProfiles).toBeDefined();
-    expect(template.modelProfiles?.lite).toBeDefined();
-    expect(template.modelProfiles?.quick).toBeDefined();
-    expect(template.modelProfiles?.standard).toBeDefined();
-    expect(template.modelProfiles?.deep).toBeDefined();
-    expect(template.modelProfiles?.ultra).toBeDefined();
-    expect(template.modelProfiles?.review).toBeDefined();
-  });
-
-  it('should have { model, fallback_models } structure for each tier in template', () => {
-    const template = generateConfigTemplate();
-    const tiers = ['lite', 'quick', 'standard', 'deep', 'ultra', 'review'] as const;
-    for (const tier of tiers) {
-      const tierConfig = template.modelProfiles?.[tier];
-      expect(tierConfig).toBeDefined();
-      expect(tierConfig?.model).toBeDefined();
-      expect(typeof tierConfig?.model).toBe('string');
-      expect(tierConfig?.fallback_models).toBeDefined();
-      expect(Array.isArray(tierConfig?.fallback_models)).toBe(true);
-    }
-  });
-
-  it('should not have legacy tier names (mechanical, strong) in template', () => {
-    const template = generateConfigTemplate();
-    expect(template.modelProfiles).not.toHaveProperty('mechanical');
-    expect(template.modelProfiles).not.toHaveProperty('strong');
-  });
-});

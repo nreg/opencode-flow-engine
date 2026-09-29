@@ -50,7 +50,6 @@ import {
   loadCascadedSFlowConfig,
   agentOverridesFromConfig,
   mergeOverrides,
-  DEFAULT_PROFILE_MODELS,
 } from './config-loader.js';
 
 /**
@@ -86,76 +85,6 @@ const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
   'flow-evolve': 'subagent',
   'flow-health': 'subagent',
   'flow-restyle': 'subagent',
-};
-
-/**
- * Default model for each agent
- * 国产模型默认配置
- */
-const DEFAULT_MODELS: Record<BuiltinAgentName, string> = {
-  // SFlow — all built-in models use provider/ prefix (actual user config overrides)
-  sFlow: 'provider/deepseek-v4-flash',
-  'need-explorer': 'provider/kimi-k2.6',
-  'spec-writer': 'provider/glm-5.1',
-  'contract-builder': 'provider/glm-5.1',
-  'build-executor': 'provider/glm-5.1',
-  'bug-investigator': 'provider/minimax-m2.7',
-  'code-reviewer': 'provider/deepseek-v4-flash',
-  'release-archivist': 'provider/mimo-v2.5-pro',
-  'spec-merger': 'provider/mimo-v2.5',
-  'ui-director': 'provider/glm-5.1',
-  'ui-implementer': 'provider/glm-5.1',
-  // IFlow
-  iFlow: 'provider/deepseek-v4-flash',
-  'iflow-discuss-planner': 'provider/kimi-k2.6',
-  'iflow-plan-executor': 'provider/step-3.7-flash',
-  'iflow-verifier': 'provider/minimax-m2.7',
-  'iflow-researcher': 'provider/glm-5.1',
-  'iflow-shipper': 'provider/mimo-v2.5-pro',
-  // Shared
-  'test-engineer': 'provider/deepseek-v4-flash',
-  'review-engineer': 'provider/deepseek-v4-flash',
-  // Horizontal commands
-  'flow-intel': 'provider/glm-5.1',
-  'flow-architect': 'provider/glm-5.1',
-  'flow-evolve': 'provider/glm-5.1',
-  'flow-health': 'provider/glm-5.1',
-  'flow-restyle': 'provider/glm-5.1',
-};
-
-/**
- * Default fallback models for each agent
- * When the primary model is unavailable, try these in order
- */
-const DEFAULT_FALLBACKS: Record<BuiltinAgentName, string[]> = {
-  // SFlow — all built-in fallbacks use provider/ prefix
-  sFlow: ['provider/glm-5.1', 'provider/kimi-k2.6'],
-  'need-explorer': ['provider/glm-5.1', 'provider/deepseek-v4-flash'],
-  'spec-writer': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
-  'contract-builder': ['provider/glm-5.1', 'provider/deepseek-v4-flash'],
-  'build-executor': ['provider/glm-5.1', 'provider/kimi-k2.6'],
-  'bug-investigator': ['provider/deepseek-v4-flash', 'provider/glm-5.1'],
-  'code-reviewer': ['provider/glm-5.1', 'provider/kimi-k2.6'],
-  'release-archivist': ['provider/mimo-v2.5', 'provider/glm-5.1'],
-  'spec-merger': ['provider/mimo-v2.5-pro', 'provider/glm-5.1'],
-  'ui-director': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
-  'ui-implementer': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
-  // IFlow
-  iFlow: ['provider/glm-5.1', 'provider/kimi-k2.6'],
-  'iflow-discuss-planner': ['provider/glm-5.1', 'provider/deepseek-v4-flash'],
-  'iflow-plan-executor': ['provider/deepseek-v4-flash', 'provider/glm-5.1'],
-  'iflow-verifier': ['provider/deepseek-v4-flash', 'provider/glm-5.1'],
-  'iflow-researcher': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
-  'iflow-shipper': ['provider/mimo-v2.5', 'provider/glm-5.1'],
-  // Shared
-  'test-engineer': ['provider/glm-5.1', 'provider/kimi-k2.6'],
-  'review-engineer': ['provider/glm-5.1', 'provider/kimi-k2.6'],
-  // Horizontal commands
-  'flow-intel': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
-  'flow-architect': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
-  'flow-evolve': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
-  'flow-health': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
-  'flow-restyle': ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
 };
 
 /**
@@ -362,13 +291,13 @@ export type ModelProvenance =
   | 'config-override'
   | 'profile'
   | 'provider-fallback'
-  | 'system-default';
+  | 'unconfigured';
 
 /**
  * Model resolution result with provenance tracking
  */
 export interface ModelResolutionResult {
-  model: string;
+  model: string | undefined;
   provenance: ModelProvenance;
   fallbackAttempted?: string[];
 }
@@ -383,15 +312,14 @@ export interface ProfileResolutionOptions {
 }
 
 /**
- * Build fallback chain in R9 order: per-agent → user tier → default tier → DEFAULT_FALLBACKS
+ * Build fallback chain: per-agent config fallbacks → user tier fallbacks.
+ * No built-in/default fallbacks are appended (Wave 2: only user-configured models).
  */
 function buildFallbackChain(
   configFallbackList: string[],
   userTierFallbacks: string[],
-  defaultTierFallbacks: string[],
-  defaultFallbackList: string[],
 ): string[] {
-  return [...configFallbackList, ...userTierFallbacks, ...defaultTierFallbacks, ...defaultFallbackList];
+  return [...configFallbackList, ...userTierFallbacks];
 }
 
 /**
@@ -417,11 +345,15 @@ function tryFallbackChain(
  * Priority chain (from highest to lowest):
  * 1. Programmatic override (overrides?.[name]?.model) → 'override'
  * 2. model parameter → 'override'
- * 3. modelType explicit parameter → use tier model resolution
+ * 3. modelType explicit parameter → use tier model resolution (user-configured only)
  * 4. configModel (configOverrides?.[name]?.model) → 'config-override' (skip tier resolution)
- * 5. AGENT_PROFILES[name] static binding → tier model → 'profile'
- * 6. Fallback chain (per-agent → tier → DEFAULT_PROFILE_MODELS → DEFAULT_FALLBACKS)
- * 7. DEFAULT_MODELS[name] → 'system-default'
+ * 5. AGENT_PROFILES[name] static binding → user tier model → 'profile'
+ * 6. Fallback chain (per-agent config → user tier fallbacks)
+ * 7. Chain tail → { model: undefined, provenance: 'unconfigured' }
+ *
+ * NOTE (Wave 2): resolution reads ONLY user configuration (modelProfiles / per-agent
+ * overrides). There is no built-in default model or default fallback list — when no
+ * user model is configured, resolution degrades gracefully to 'unconfigured'.
  *
  * Provenance is tracked to help diagnose model selection issues.
  */
@@ -436,7 +368,7 @@ export function resolveModelWithFallback(
   const programmaticModel = overrides?.[name]?.model;
   const configModel = configOverrides?.[name]?.model;
 
-  // P1-3: override/param/system-default branches must respect the blacklist —
+  // P1-3: override/param branches must respect the blacklist —
   // unavailable models fall through to the next priorities instead of being
   // returned blindly (otherwise every dispatch keeps using the failed model).
 
@@ -451,33 +383,26 @@ export function resolveModelWithFallback(
   }
 
   // Priority 3: modelType parameter (highest priority tier signal)
-  // When modelType is specified, it overrides per-agent config and AGENT_PROFILES
+  // When modelType is specified, it overrides per-agent config and AGENT_PROFILES.
+  // Resolution reads ONLY user-configured modelProfiles[tier] (no built-in default).
   if (modelType && VALID_MODEL_TIERS.has(modelType as ModelTier)) {
     const tier = modelType as ModelTier;
-    const tierConfig = profileOptions?.modelProfiles?.[tier] ?? DEFAULT_PROFILE_MODELS[tier];
+    const tierConfig = profileOptions?.modelProfiles?.[tier];
     if (tierConfig?.model) {
       if (isModelAvailable(tierConfig.model)) {
         return { model: tierConfig.model, provenance: 'profile' };
       }
-      // Build complete fallback chain for modelType tier
+      // Build fallback chain from the user-configured tier fallback list + per-agent config
       const userTierFallbacks = tierConfig.fallback_models || [];
-      const defaultTierFallbacks = DEFAULT_PROFILE_MODELS[tier]?.fallback_models || [];
       const configFallbackList = normalizeFallbackList(configOverrides?.[name]?.fallback_models);
-      const defaultFallbackList = DEFAULT_FALLBACKS[name] || [];
 
-      const fallbacks = buildFallbackChain(configFallbackList, userTierFallbacks, defaultTierFallbacks, defaultFallbackList);
+      const fallbacks = buildFallbackChain(configFallbackList, userTierFallbacks);
       const result = tryFallbackChain(tierConfig.model, fallbacks);
-      
+
       if (result) {
         return { model: result.model, provenance: 'provider-fallback', fallbackAttempted: result.attempted };
       }
-      // All fallbacks exhausted, return system default
-      const systemDefault = DEFAULT_MODELS[name];
-      return {
-        model: systemDefault,
-        provenance: 'system-default',
-        fallbackAttempted: [tierConfig.model, ...fallbacks],
-      };
+      // Tier model + its fallbacks exhausted → fall through to lower priorities
     }
   }
 
@@ -498,12 +423,18 @@ export function resolveModelWithFallback(
     // per-agent fallbacks exhausted, continue to tier resolution
   }
 
-  // Priority 5: AGENT_PROFILES static binding → tier resolution
+  // Priority 5: AGENT_PROFILES static binding → user tier model resolution
   let primaryModel: string | undefined;
   const agentProfile = AGENT_PROFILES[name];
   // sflow/iflow enable tier resolution; none/absent skip (backward compatible)
+  //
+  // [P2-2 作用域声明] 该门控的作用域是「档位解析」——即是否读取 modelProfiles[tier].model 作为
+  // 档位主模型。它**不**门控下方 P6 对 modelProfiles[tier].fallback_models 的收集：tier 级
+  // fallback_models 是用户显式配置的 fallback 链，不是内置档位兜底，因此即使 activeWorkflow 为
+  // 'none'/缺省（档位解析被跳过），P6 仍会返回该 fallback 模型，provenance 为 'provider-fallback'。
+  // 该行为为有意保留，由 model-profiles.test.ts 的 gating 组用例钉死，修改前请先确认该用例意图。
   if ((profileOptions?.activeWorkflow === 'sflow' || profileOptions?.activeWorkflow === 'iflow') && agentProfile) {
-    const tierConfig = profileOptions?.modelProfiles?.[agentProfile] ?? DEFAULT_PROFILE_MODELS[agentProfile];
+    const tierConfig = profileOptions?.modelProfiles?.[agentProfile];
     if (tierConfig?.model) {
       if (isModelAvailable(tierConfig.model)) {
         return { model: tierConfig.model, provenance: 'profile' };
@@ -512,21 +443,24 @@ export function resolveModelWithFallback(
     }
   }
 
-  // Priority 6: Fallback chain
-  // Build fallback chain in order: per-agent → user tier → default tier → DEFAULT_FALLBACKS
+  // Priority 6: Fallback chain (per-agent config → user tier fallbacks; no built-in defaults)
   const configFallback = configOverrides?.[name]?.fallback_models;
   const configFallbackList = normalizeFallbackList(configFallback);
 
-  // Add tier-level fallbacks (if agent has a profile)
+  // Add tier-level fallbacks (if agent has a profile) from user-configured modelProfiles only
+  //
+  // [P2-2 作用域声明] 此处**不受** activeWorkflow 门控影响：P5 的 gate 只决定档位主模型是否被读取，
+  // fallback 链一旦由用户显式配置即无条件生效。故「用户仅配 modelProfiles[tier].fallback_models
+  // 而未配 model」+ activeWorkflow='none'/缺省 的组合，会在此走到下面的 fallback 直接尝试分支，
+  // 返回该 fallback 模型且 provenance='provider-fallback'（而非 'unconfigured'）。
+  // 这是有意保留的行为，非内置兜底：模型来源始终是用户配置。
   let tierFallbackList: string[] = [];
   if (agentProfile) {
     const userTierFallbacks = profileOptions?.modelProfiles?.[agentProfile]?.fallback_models || [];
-    const defaultTierFallbacks = DEFAULT_PROFILE_MODELS[agentProfile]?.fallback_models || [];
-    tierFallbackList = [...userTierFallbacks, ...defaultTierFallbacks];
+    tierFallbackList = [...userTierFallbacks];
   }
 
-  const defaultFallbackList = DEFAULT_FALLBACKS[name] || [];
-  const fallbacks = buildFallbackChain(configFallbackList, tierFallbackList, [], defaultFallbackList);
+  const fallbacks = buildFallbackChain(configFallbackList, tierFallbackList);
 
   let attempted: string[] = [];
   if (primaryModel) {
@@ -545,24 +479,10 @@ export function resolveModelWithFallback(
     }
   }
 
-  // Priority 7: System default (P1-3: blacklist-aware "last resort" branch)
-  const systemDefault = DEFAULT_MODELS[name];
-  if (isModelAvailable(systemDefault)) {
-    return {
-      model: systemDefault,
-      provenance: 'system-default',
-      fallbackAttempted: attempted.length > 0 ? attempted : undefined,
-    };
-  }
-  // System default itself blacklisted — try the full fallback chain one last time
-  const lastChain = buildAgentFallbackChain(name, configOverrides, profileOptions?.modelProfiles);
-  const lastResult = tryFallbackChain(systemDefault, lastChain);
-  if (lastResult) {
-    return { model: lastResult.model, provenance: 'provider-fallback', fallbackAttempted: lastResult.attempted };
-  }
+  // Priority 7: Chain tail — no user model configured → graceful degradation
   return {
-    model: systemDefault,
-    provenance: 'system-default',
+    model: undefined,
+    provenance: 'unconfigured',
     fallbackAttempted: attempted.length > 0 ? attempted : undefined,
   };
 }
@@ -605,21 +525,31 @@ export async function createAgent(
 
   // Resolve temperature: override > config > factory default
   const resolvedTemperature = agentOverride?.temperature ?? configOverrides?.[name]?.temperature ?? undefined;
-  let agentConfig = factory(resolved.model, { temperature: resolvedTemperature, skillContent, config });
+  // Wave 2: resolved.model may be undefined (unconfigured). Pass it through to the factory
+  // and ensure we do NOT write a `model` field when no model was resolved.
+  const agentConfig = factory(resolved.model as string, { temperature: resolvedTemperature, skillContent, config });
 
   if (agentOverride) {
-    return {
+    const result: AgentConfig = {
       ...agentConfig,
       ...agentOverride,
-      model: resolved.model,
       id: agentConfig.id,
       name: agentConfig.name,
     };
+    if (resolved.model !== undefined) {
+      result.model = resolved.model;
+    } else if ('model' in result) {
+      delete (result as Partial<AgentConfig>).model;
+    }
+    return result;
   }
 
-  agentConfig = applySkillContent(agentConfig, skillContent);
+  const finalConfig = applySkillContent(agentConfig, skillContent);
+  if (resolved.model === undefined && 'model' in finalConfig) {
+    delete (finalConfig as Partial<AgentConfig>).model;
+  }
 
-  return agentConfig;
+  return finalConfig;
 }
 
 /**
@@ -639,31 +569,39 @@ export async function createAllAgents(
   for (const name of Object.keys(AGENT_REGISTRY) as BuiltinAgentName[]) {
     const factory = AGENT_REGISTRY[name];
 
-const resolved = resolveModelWithFallback(name, model, configOverrides, overrides, {
-    modelProfiles: config.modelProfiles,
-    activeWorkflow: activeWorkflow ?? 'sflow',
-  });
+    const resolved = resolveModelWithFallback(name, model, configOverrides, overrides, {
+      modelProfiles: config.modelProfiles,
+      activeWorkflow: activeWorkflow ?? 'sflow',
+    });
 
     const content = skillContents?.[name];
 
     const merged = mergeOverrides(configOverrides, overrides || {});
     const agentOverride = merged[name];
     const resolvedTemperature = agentOverride?.temperature ?? configOverrides?.[name]?.temperature ?? undefined;
-    const agentConfig = factory(resolved.model, { temperature: resolvedTemperature, skillContent: content, config });
+    const agentConfig = factory(resolved.model as string, { temperature: resolvedTemperature, skillContent: content, config });
 
+    let finalAgent: AgentConfig;
     if (agentOverride) {
-      agents[name] = {
+      finalAgent = {
         ...agentConfig,
         ...agentOverride,
-        model: resolved.model,
         id: agentConfig.id,
         name: agentConfig.name,
       };
+      if (resolved.model !== undefined) {
+        finalAgent.model = resolved.model;
+      } else if ('model' in finalAgent) {
+        delete (finalAgent as Partial<AgentConfig>).model;
+      }
     } else {
-      agents[name] = agentConfig;
+      finalAgent = agentConfig;
+      if (resolved.model === undefined && 'model' in finalAgent) {
+        delete (finalAgent as Partial<AgentConfig>).model;
+      }
     }
 
-    agents[name] = applySkillContent(agents[name], content);
+    agents[name] = applySkillContent(finalAgent, content);
   }
 
   return agents as Record<BuiltinAgentName, AgentConfig>;
@@ -712,51 +650,23 @@ export function agentExists(name: string): name is BuiltinAgentName {
 }
 
 /**
- * Get default model for agent
- */
-export function getDefaultModel(name: BuiltinAgentName): string {
-  return DEFAULT_MODELS[name];
-}
-
-/**
- * Get all default models
- */
-export function getAllDefaultModels(): Record<BuiltinAgentName, string> {
-  return { ...DEFAULT_MODELS };
-}
-
-/**
- * Get default fallbacks for agent
- */
-export function getDefaultFallbacks(name: BuiltinAgentName): string[] {
-  return DEFAULT_FALLBACKS[name] ? [...DEFAULT_FALLBACKS[name]] : [];
-}
-
-/**
- * Get all default fallbacks
- */
-export function getAllDefaultFallbacks(): Record<BuiltinAgentName, string[]> {
-  return { ...DEFAULT_FALLBACKS };
-}
-
-/**
  * Get an alternative model for cross-model spot-check / fallback.
  *
- * P1-1: reads BOTH the user-configured fallback chain (extraFallbacks, built from
- * configOverrides/modelProfiles via buildAgentFallbackChain) AND DEFAULT_FALLBACKS.
- * Returns the first model that differs from `currentModel` and passes
- * isModelAvailable (blacklist check). Returns null when no alternative exists.
+ * Wave 2: reads ONLY the explicitly-provided user-configured fallback chain
+ * (`extraFallbacks`, normally built from configOverrides/modelProfiles via
+ * buildAgentFallbackChain). There is no built-in default list. Returns the first
+ * model that differs from `currentModel` and passes isModelAvailable (blacklist
+ * check). Returns null when no alternative exists.
  *
  * Primary use-cases: review-engineer spot-check and runWithModelFallback
  * model switching (P0-4).
  */
 export function getAlternativeModel(
   currentModel: string,
-  agentName: string,
+  _agentName: string,
   extraFallbacks?: string[],
 ): string | null {
-  // User-configured chain first (per docs/模型路由体系.md §四), then DEFAULT_FALLBACKS
-  const chain = dedupeModels([...(extraFallbacks ?? []), ...(DEFAULT_FALLBACKS[agentName as BuiltinAgentName] ?? [])]);
+  const chain = dedupeModels([...(extraFallbacks ?? [])]);
   for (const fb of chain) {
     if (fb !== currentModel && isModelAvailable(fb)) {
       return fb;
@@ -775,8 +685,9 @@ function dedupeModels(models: string[]): string[] {
 /**
  * Build the complete user-configurable fallback chain for an agent
  * (per docs/模型路由体系.md §四 order):
- * per-agent config fallbacks → user tier fallbacks → default tier fallbacks → DEFAULT_FALLBACKS.
+ * per-agent config fallbacks → user tier fallbacks.
  *
+ * Wave 2: no built-in default tier fallbacks or default fallback list are appended.
  * Used by getAlternativeModel callers (call-flow-agent) so model switching
  * respects the same fallback sources as resolveModelWithFallback.
  */
@@ -790,11 +701,5 @@ export function buildAgentFallbackChain(
   const userTierFallbacks = profile
     ? normalizeFallbackList(modelProfiles?.[profile]?.fallback_models)
     : [];
-  const defaultTierFallbacks = profile
-    ? DEFAULT_PROFILE_MODELS[profile]?.fallback_models || []
-    : [];
-  const defaultFallbackList = DEFAULT_FALLBACKS[name] || [];
-  return dedupeModels(
-    buildFallbackChain(configFallbackList, userTierFallbacks, defaultTierFallbacks, defaultFallbackList),
-  );
+  return dedupeModels(buildFallbackChain(configFallbackList, userTierFallbacks));
 }

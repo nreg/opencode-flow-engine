@@ -79,13 +79,26 @@ describe('P1-1: getAlternativeModel 读用户配置 fallback 链', () => {
     expect(next).toBe('provider/user-config-fallback');
   });
 
-  it('skips unavailable models in user-config chain', () => {
+  it('returns null when all models in the user-config chain are unavailable', () => {
     markModelUnavailable('provider/u1');
     markModelUnavailable('provider/u2');
     const next = getAlternativeModel('provider/current', 'build-executor', ['provider/u1', 'provider/u2']);
-    // Falls back to DEFAULT_FALLBACKS entries that are still available
-    expect(next).not.toBeNull();
-    expect(next).not.toBe('provider/current');
+    // Only the explicitly-provided user-config chain is consulted
+    expect(next).toBeNull();
+  });
+});
+
+describe('T2.4: getAlternativeModel — user-config only (Wave 2)', () => {
+  beforeEach(() => clearUnavailableModels());
+
+  it('returns null when no user fallback chain is provided', () => {
+    const next = getAlternativeModel('provider/x', 'build-executor', []);
+    expect(next).toBeNull();
+  });
+
+  it('returns the provided fallback when available', () => {
+    const next = getAlternativeModel('provider/x', 'build-executor', ['openai/gpt-5']);
+    expect(next).toBe('openai/gpt-5');
   });
 });
 
@@ -123,8 +136,8 @@ describe('P1-3: resolveModelWithFallback P1/P2/P7 黑名单检查', () => {
     expect(result.provenance).toBe('override');
   });
 
-  it('P7: unavailable system default tries fallback chain instead', () => {
-    const sysDefault = 'provider/deepseek-v4-flash'; // DEFAULT_MODELS['spec-writer']
+  it('P7: unavailable primary tier model tries fallback chain instead', () => {
+    const sysDefault = 'provider/legacy-sys-default'; // Wave 2: no built-in default; marked unavailable is harmless
     markModelUnavailable(sysDefault);
     markModelUnavailable('provider/tier-model3');
     const result = resolveModelWithFallback(
@@ -193,6 +206,7 @@ describe('P0-1/P0-2/P0-4: runWithModelFallback 成功判定与换模', () => {
     initialModel: 'provider/first-model',
     maxWaitMs: 100,
     directory: '',
+    extraFallbacks: ['provider/alt-model'],
     poll,
   });
 
@@ -420,6 +434,7 @@ describe('P0-3: 无 model_type 默认路径查黑名单', () => {
       backgroundTaskRegistry,
       backgroundTaskCounter: { value: 0 },
       agentModelMap: { 'build-executor': 'provider/test-model' } as AgentModelMap,
+      configOverrides: { 'build-executor': { fallback_models: ['provider/alt-model'] } },
       sessionLabelPrefix: 'sFlow',
       validateAgent: async () => null,
       workflowName: 'sFlow',
@@ -561,6 +576,7 @@ describe('R3-P2-3: pollAndComplete 第三路径错误/配额识别', () => {
       backgroundTaskRegistry,
       backgroundTaskCounter: { value: 0 },
       agentModelMap: { 'build-executor': 'provider/test-model' } as AgentModelMap,
+      configOverrides: { 'build-executor': { fallback_models: ['provider/alt-model'] } },
       sessionLabelPrefix: 'sFlow',
       validateAgent: async () => null,
       workflowName: 'sFlow',
@@ -738,6 +754,7 @@ describe('NEW-P1-D: attempt>0 回显比对对正确对象（实际发送文本�
       initialModel: 'provider/first-model',
       maxWaitMs: 100,
       directory: '',
+      extraFallbacks: ['provider/alt-model', 'provider/alt-model-2'],
       poll,
     });
     expect(result.success).toBe(true);

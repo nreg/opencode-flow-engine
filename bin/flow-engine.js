@@ -108,114 +108,216 @@ async function initCommand(args) {
 }
 
 /**
- * Generate default config template
+ * 配置模板中的占位模型（唯一维护点）
  *
- * 注意：本函数内的默认模型名（含 modelProfiles 各档）必须与
- * packages/plugin-infra/src/agents/config-loader.ts 的 generateConfigTemplate()
- * 保持同步。两处为重复的 configTemplate 知识来源，修改其中一处时需同步另一处，
- * 以避免 CLI 初始化配置与运行时 config-loader 生成的配置出现默认模型名不一致。
+ * 这些值只是"配置该怎么写"的示例占位符，既不是真实模型，也不是运行时默认值。
+ * packages/ 运行时不内置任何默认模型，模型解析只遵循用户配置
+ * （项目级 .flow-engine/sflow/config.json 或用户级 ~/.flow-engine/sflow/config.json）。
+ * 本文件是独立的配置模板生成文件，保留占位写法是为了提示用户该填什么；
+ * 未来要调整占位写法，只需修改本常量一处。
+ */
+const TEMPLATE_PLACEHOLDER_MODELS = {
+  agents: {
+    // sFlow 工作流 agents
+    sFlow: {
+      model: 'your-provider/deepseek-v4-flash',
+      fallbackModels: ['your-provider/glm-5.1', 'your-provider/kimi-k2.6'],
+    },
+    'need-explorer': {
+      model: 'your-provider/kimi-k2.6',
+      fallbackModels: ['your-provider/glm-5.1', 'your-provider/deepseek-v4-flash'],
+    },
+    'ui-director': {
+      model: 'your-provider/glm-5.1',
+      fallbackModels: ['your-provider/kimi-k2.6', 'your-provider/minimax-m2.7'],
+    },
+    'spec-writer': {
+      model: 'your-provider/glm-5.1',
+      fallbackModels: ['your-provider/kimi-k2.6', 'your-provider/deepseek-v4-flash'],
+    },
+    'contract-builder': {
+      model: 'your-provider/glm-5',
+      fallbackModels: ['your-provider/glm-5.1', 'your-provider/deepseek-v4-flash'],
+    },
+    'build-executor': {
+      model: 'your-provider/step-3.7-flash',
+      fallbackModels: ['your-provider/deepseek-v4-flash', 'your-provider/glm-5.1'],
+    },
+    'bug-investigator': {
+      model: 'your-provider/minimax-m2.7',
+      fallbackModels: ['your-provider/deepseek-v4-flash', 'your-provider/glm-5.1'],
+    },
+    'code-reviewer': {
+      model: 'your-provider/deepseek-v4-flash',
+      fallbackModels: ['your-provider/glm-5.1', 'your-provider/kimi-k2.6'],
+    },
+    'release-archivist': {
+      model: 'your-provider/mimo-v2.5-pro',
+      fallbackModels: ['your-provider/mimo-v2.5', 'your-provider/glm-5.1'],
+    },
+    'spec-merger': {
+      model: 'your-provider/mimo-v2.5',
+      fallbackModels: ['your-provider/mimo-v2.5-pro', 'your-provider/glm-5.1'],
+    },
+    // IFlow agents
+    iFlow: {
+      model: 'your-provider/deepseek-v4-flash',
+      fallbackModels: ['your-provider/glm-5.1', 'your-provider/kimi-k2.6'],
+    },
+    'iflow-discuss-planner': {
+      model: 'your-provider/kimi-k2.6',
+      fallbackModels: ['your-provider/glm-5.1', 'your-provider/deepseek-v4-flash'],
+    },
+    'iflow-plan-executor': {
+      model: 'your-provider/step-3.7-flash',
+      fallbackModels: ['your-provider/deepseek-v4-flash', 'your-provider/glm-5.1'],
+    },
+    'iflow-verifier': {
+      model: 'your-provider/minimax-m2.7',
+      fallbackModels: ['your-provider/deepseek-v4-flash', 'your-provider/glm-5.1'],
+    },
+    'iflow-researcher': {
+      model: 'your-provider/glm-5.1',
+      fallbackModels: ['your-provider/kimi-k2.6', 'your-provider/deepseek-v4-flash'],
+    },
+    'iflow-shipper': {
+      model: 'your-provider/mimo-v2.5-pro',
+      fallbackModels: ['your-provider/mimo-v2.5', 'your-provider/glm-5.1'],
+    },
+    'ui-implementer': {
+      model: 'your-provider/glm-5.1',
+      fallbackModels: ['your-provider/deepseek-v4-flash', 'your-provider/kimi-k2.6'],
+    },
+    // Shared agents (cross-workflow, standalone)
+    'test-engineer': {
+      model: 'your-provider/glm-5.2',
+      fallbackModels: ['your-provider/glm-5.1', 'your-provider/deepseek-v4-flash'],
+    },
+    'review-engineer': {
+      model: 'your-provider/glm-5.2',
+      fallbackModels: ['your-provider/glm-5.1', 'your-provider/deepseek-v4-flash'],
+    },
+  },
+  // modelProfiles 各档位占位模型，键名与配置中的档位一致
+  profiles: {
+    lite: 'provider/fast-model',
+    quick: 'provider/quick-model',
+    standard: 'provider/standard-model',
+    deep: 'provider/deep-model',
+    ultra: 'provider/ultra-model',
+    review: 'provider/review-model',
+  },
+};
+
+/**
+ * 生成默认配置模板
+ *
+ * 模板由本文件独立生成；packages/ 运行时不内置任何默认模型，
+ * 解析只遵循用户配置。模板中的占位模型统一取自 TEMPLATE_PLACEHOLDER_MODELS。
  */
 function configTemplate() {
+  const M = TEMPLATE_PLACEHOLDER_MODELS;
+
   return {
     version: '0.1.0',
     mode: 'full',
     agents: {
       sFlow: {
-        model: 'your-provider/deepseek-v4-flash',
+        model: M.agents.sFlow.model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/glm-5.1', 'your-provider/kimi-k2.6'],
+        fallbackModels: [...M.agents.sFlow.fallbackModels],
       },
       'need-explorer': {
-        model: 'your-provider/kimi-k2.6',
+        model: M.agents['need-explorer'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/glm-5.1', 'your-provider/deepseek-v4-flash'],
+        fallbackModels: [...M.agents['need-explorer'].fallbackModels],
       },
       'ui-director': {
-        model: 'your-provider/glm-5.1',
+        model: M.agents['ui-director'].model,
         temperature: 0.7,
-        fallbackModels: ['your-provider/kimi-k2.6', 'your-provider/minimax-m2.7'],
+        fallbackModels: [...M.agents['ui-director'].fallbackModels],
       },
       'spec-writer': {
-        model: 'your-provider/glm-5.1',
+        model: M.agents['spec-writer'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/kimi-k2.6', 'your-provider/deepseek-v4-flash'],
+        fallbackModels: [...M.agents['spec-writer'].fallbackModels],
       },
       'contract-builder': {
-        model: 'your-provider/glm-5',
+        model: M.agents['contract-builder'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/glm-5.1', 'your-provider/deepseek-v4-flash'],
+        fallbackModels: [...M.agents['contract-builder'].fallbackModels],
       },
       'build-executor': {
-        model: 'your-provider/step-3.7-flash',
+        model: M.agents['build-executor'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/deepseek-v4-flash', 'your-provider/glm-5.1'],
+        fallbackModels: [...M.agents['build-executor'].fallbackModels],
       },
       'bug-investigator': {
-        model: 'your-provider/minimax-m2.7',
+        model: M.agents['bug-investigator'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/deepseek-v4-flash', 'your-provider/glm-5.1'],
+        fallbackModels: [...M.agents['bug-investigator'].fallbackModels],
       },
       'code-reviewer': {
-        model: 'your-provider/deepseek-v4-flash',
+        model: M.agents['code-reviewer'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/glm-5.1', 'your-provider/kimi-k2.6'],
+        fallbackModels: [...M.agents['code-reviewer'].fallbackModels],
       },
       'release-archivist': {
-        model: 'your-provider/mimo-v2.5-pro',
+        model: M.agents['release-archivist'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/mimo-v2.5', 'your-provider/glm-5.1'],
+        fallbackModels: [...M.agents['release-archivist'].fallbackModels],
       },
       'spec-merger': {
-        model: 'your-provider/mimo-v2.5',
+        model: M.agents['spec-merger'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/mimo-v2.5-pro', 'your-provider/glm-5.1'],
+        fallbackModels: [...M.agents['spec-merger'].fallbackModels],
       },
       // IFlow agents
       iFlow: {
-        model: 'your-provider/deepseek-v4-flash',
+        model: M.agents.iFlow.model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/glm-5.1', 'your-provider/kimi-k2.6'],
+        fallbackModels: [...M.agents.iFlow.fallbackModels],
       },
       'iflow-discuss-planner': {
-        model: 'your-provider/kimi-k2.6',
+        model: M.agents['iflow-discuss-planner'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/glm-5.1', 'your-provider/deepseek-v4-flash'],
+        fallbackModels: [...M.agents['iflow-discuss-planner'].fallbackModels],
       },
       'iflow-plan-executor': {
-        model: 'your-provider/step-3.7-flash',
+        model: M.agents['iflow-plan-executor'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/deepseek-v4-flash', 'your-provider/glm-5.1'],
+        fallbackModels: [...M.agents['iflow-plan-executor'].fallbackModels],
       },
       'iflow-verifier': {
-        model: 'your-provider/minimax-m2.7',
+        model: M.agents['iflow-verifier'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/deepseek-v4-flash', 'your-provider/glm-5.1'],
+        fallbackModels: [...M.agents['iflow-verifier'].fallbackModels],
       },
       'iflow-researcher': {
-        model: 'your-provider/glm-5.1',
+        model: M.agents['iflow-researcher'].model,
         temperature: 0.7,
-        fallbackModels: ['your-provider/kimi-k2.6', 'your-provider/deepseek-v4-flash'],
+        fallbackModels: [...M.agents['iflow-researcher'].fallbackModels],
       },
       'iflow-shipper': {
-        model: 'your-provider/mimo-v2.5-pro',
+        model: M.agents['iflow-shipper'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/mimo-v2.5', 'your-provider/glm-5.1'],
+        fallbackModels: [...M.agents['iflow-shipper'].fallbackModels],
       },
       'ui-implementer': {
-        model: 'your-provider/glm-5.1',
+        model: M.agents['ui-implementer'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/deepseek-v4-flash', 'your-provider/kimi-k2.6'],
+        fallbackModels: [...M.agents['ui-implementer'].fallbackModels],
       },
       // Shared agents (cross-workflow, standalone)
       'test-engineer': {
-        model: 'your-provider/glm-5.2',
+        model: M.agents['test-engineer'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/glm-5.1', 'your-provider/deepseek-v4-flash'],
+        fallbackModels: [...M.agents['test-engineer'].fallbackModels],
       },
       'review-engineer': {
-        model: 'your-provider/glm-5.2',
+        model: M.agents['review-engineer'].model,
         temperature: 0.6,
-        fallbackModels: ['your-provider/glm-5.1', 'your-provider/deepseek-v4-flash'],
+        fallbackModels: [...M.agents['review-engineer'].fallbackModels],
       },
     },
     features: {
@@ -233,12 +335,12 @@ function configTemplate() {
       artifact_inspector: true,
     },
     modelProfiles: {
-      lite: { model: 'provider/fast-model', fallback_models: [] },
-      quick: { model: 'provider/quick-model', fallback_models: [] },
-      standard: { model: 'provider/standard-model', fallback_models: [] },
-      deep: { model: 'provider/deep-model', fallback_models: [] },
-      ultra: { model: 'provider/ultra-model', fallback_models: [] },
-      review: { model: 'provider/review-model', fallback_models: [] },
+      lite: { model: M.profiles.lite, fallback_models: [] },
+      quick: { model: M.profiles.quick, fallback_models: [] },
+      standard: { model: M.profiles.standard, fallback_models: [] },
+      deep: { model: M.profiles.deep, fallback_models: [] },
+      ultra: { model: M.profiles.ultra, fallback_models: [] },
+      review: { model: M.profiles.review, fallback_models: [] },
     },
   };
 }

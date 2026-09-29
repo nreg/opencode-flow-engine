@@ -24,14 +24,10 @@ export interface ModelProfileConfig {
   review?: { model: string; fallback_models: string[] };
 }
 
-export const DEFAULT_PROFILE_MODELS: Required<ModelProfileConfig> = {
-  lite: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
-  quick: { model: 'provider/mimo-v2.5', fallback_models: [] },
-  standard: { model: 'provider/kimi-k2.6', fallback_models: [] },
-  deep: { model: 'provider/glm-5.1', fallback_models: [] },
-  ultra: { model: 'provider/glm-5', fallback_models: [] },
-  review: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
-};
+// NOTE: the built-in profile model table was removed (model resolution now follows
+// user configuration only). Resolution reads ONLY user configuration (modelProfiles /
+// per-agent overrides); there is no built-in default model set.
+// See agent-builder.ts resolveModelWithFallback / buildAgentFallbackChain.
 
 export interface SFlowConfig {
   version?: string;
@@ -140,7 +136,7 @@ export async function loadCascadedSFlowConfig(projectDir?: string): Promise<SFlo
           `[sflow] Legacy tier "${tier}" detected in modelProfiles. ` +
           `The 4-tier system (mechanical/standard/strong/review) has been replaced by ` +
           `6-tier (lite/quick/standard/deep/ultra/review). ` +
-          `Please update your config. Falling back to DEFAULT_PROFILE_MODELS for this tier.`,
+          `Please update your config. No built-in default for this tier; agent will use OpenCode default model.`,
         );
         // Remove legacy key to prevent usage
         delete profiles[tier];
@@ -155,7 +151,7 @@ export async function loadCascadedSFlowConfig(projectDir?: string): Promise<SFlo
           `[sflow] Legacy string format detected for tier "${tier}" in modelProfiles. ` +
           `Tier configs must be upgraded to the 6-tier object format ` +
           `{ model: string; fallback_models: string[] }. ` +
-          `Falling back to DEFAULT_PROFILE_MODELS for this tier.`,
+          `No built-in default for this tier; agent will use OpenCode default model.`,
         );
         // Remove string-valued key to prevent usage
         delete profiles[tier];
@@ -239,124 +235,4 @@ export function mergeOverrides(
       : { ...cfg };
   }
   return merged;
-}
-
-/**
- * Generate a config file template with all agents
- */
-export function generateConfigTemplate(): SFlowConfig {
-  return {
-    version: '0.1.0',
-    mode: 'full',
-    agents: {
-      sFlow: {
-        model: 'provider/deepseek-v4-flash',
-        temperature: 0.6,
-        fallback_models: ['provider/glm-5.1', 'provider/kimi-k2.6'],
-      },
-      'need-explorer': {
-        model: 'provider/kimi-k2.6',
-        temperature: 0.6,
-        fallback_models: ['provider/glm-5.1', 'provider/deepseek-v4-flash'],
-      },
-      'spec-writer': {
-        model: 'provider/glm-5.1',
-        temperature: 0.6,
-        fallback_models: ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
-      },
-      'contract-builder': {
-        model: 'provider/glm-5',
-        temperature: 0.6,
-        fallback_models: ['provider/glm-5.1', 'provider/deepseek-v4-flash'],
-      },
-      'build-executor': {
-        model: 'provider/step-3.7-flash',
-        temperature: 0.7,
-        fallback_models: ['provider/deepseek-v4-flash', 'provider/glm-5.1'],
-      },
-      'bug-investigator': {
-        model: 'provider/minimax-m2.7',
-        temperature: 0.6,
-        fallback_models: ['provider/deepseek-v4-flash', 'provider/glm-5.1'],
-      },
-      'code-reviewer': {
-        model: 'provider/deepseek-v4-flash',
-        temperature: 0.6,
-        fallback_models: ['provider/glm-5.1', 'provider/kimi-k2.6'],
-      },
-      'release-archivist': {
-        model: 'provider/mimo-v2.5-pro',
-        temperature: 0.7,
-        fallback_models: ['provider/mimo-v2.5', 'provider/glm-5.1'],
-      },
-      'spec-merger': {
-        model: 'provider/mimo-v2.5',
-        temperature: 0.7,
-        fallback_models: ['provider/mimo-v2.5-pro', 'provider/glm-5.1'],
-      },
-      'ui-director': {
-        model: 'provider/glm-5.1',
-        temperature: 0.7,
-        fallback_models: ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
-      },
-      'ui-implementer': {
-        model: 'provider/glm-5.1',
-        temperature: 0.6,
-        fallback_models: ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
-      },
-      // iFlow agents
-      iFlow: {
-        model: 'provider/deepseek-v4-flash',
-        temperature: 0.6,
-        fallback_models: ['provider/glm-5.1', 'provider/kimi-k2.6'],
-      },
-      'iflow-discuss-planner': {
-        model: 'provider/kimi-k2.6',
-        temperature: 0.4,
-        fallback_models: ['provider/glm-5.1', 'provider/deepseek-v4-flash'],
-      },
-      'iflow-plan-executor': {
-        model: 'provider/step-3.7-flash',
-        temperature: 0.5,
-        fallback_models: ['provider/deepseek-v4-flash', 'provider/glm-5.1'],
-      },
-      'iflow-verifier': {
-        model: 'provider/minimax-m2.7',
-        temperature: 0.6,
-        fallback_models: ['provider/deepseek-v4-flash', 'provider/glm-5.1'],
-      },
-      'iflow-researcher': {
-        model: 'provider/glm-5.1',
-        temperature: 0.4,
-        fallback_models: ['provider/kimi-k2.6', 'provider/deepseek-v4-flash'],
-      },
-      'iflow-shipper': {
-        model: 'provider/mimo-v2.5-pro',
-        temperature: 0.4,
-        fallback_models: ['provider/mimo-v2.5', 'provider/glm-5.1'],
-      },
-    },
-    features: {
-      workflow_manager: true,
-      state_manager: true,
-    },
-    hooks: {
-      state_transition: true,
-      artifact_validation: true,
-      guard: true,
-    },
-    tools: {
-      workflow_router: true,
-      contract_validator: true,
-      artifact_inspector: true,
-    },
-    modelProfiles: {
-      lite: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
-      quick: { model: 'provider/mimo-v2.5', fallback_models: [] },
-      standard: { model: 'provider/kimi-k2.6', fallback_models: [] },
-      deep: { model: 'provider/glm-5.1', fallback_models: [] },
-      ultra: { model: 'provider/glm-5', fallback_models: [] },
-      review: { model: 'provider/deepseek-v4-flash', fallback_models: [] },
-    },
-  };
 }
