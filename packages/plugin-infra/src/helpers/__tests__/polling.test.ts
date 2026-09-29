@@ -12,6 +12,7 @@ import {
   extractLatestMessage,
 } from '../polling';
 import { getGlobalEventBus, resetGlobalEventBus } from '../../features/event-bus.js';
+import { PROBE_PENDING } from '../../types.js';
 import type { Event } from '../../types.js';
 
 // ─── Event bus mock helpers (Batch 3) ───────────────────────────────────────────
@@ -1055,5 +1056,115 @@ describe('pollSessionCompletion - P0-FIX: Already complete session', () => {
     expect(result).toBe('new output');
     // 应该至少等待 200ms（证明没有提前返回）
     expect(elapsed).toBeGreaterThanOrEqual(200);
+  });
+});
+
+// ─── R3-fix P1-1: 超时回显消歧（echoBaseline）──────────────────────────────────
+// sync poll 窗口耗尽时，readSessionLastMessage 返回的最后一条消息往往就是编排器
+// 自己发出的 prompt（回显）。若会话仍在 busy/retry，说明模型只是慢而非故障，
+// 返回 PROBE_PENDING 而非回显，避免调用方把「慢而健康」的模型拉黑换模。
+describe('P1-1: timeout 回显消歧（echoBaseline）', () => {
+  let mockClient: { session: SFlowClientSession };
+  let mockSession: {
+    status: ReturnType<typeof vi.fn>;
+    messages: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    mockSession = {
+      status: vi.fn(),
+      messages: vi.fn(),
+    };
+    mockClient = { session: mockSession as unknown as SFlowClientSession };
+  });
+
+  it('超时且最后一条消息=所发 prompt 且会话仍 busy → 返回 PROBE_PENDING', async () => {
+    const promptText = 'do the slow work';
+    mockSession.status.mockResolvedValue({
+      data: [{ id: 'test-session', type: 'busy' }],
+    });
+    mockSession.messages.mockResolvedValue({
+      data: [{ parts: [{ type: 'text', text: promptText }] }],
+    });
+
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      maxWaitMs: 100,
+      pollIntervalMs: 50,
+      echoBaseline: promptText,
+    });
+
+    expect(result).toBe(PROBE_PENDING);
+  });
+
+  it('超时且最后一条消息=所发 prompt 且会话为 retry → 返回 PROBE_PENDING', async () => {
+    const promptText = 'do the slow work';
+    mockSession.status.mockResolvedValue({
+      data: [{ id: 'test-session', type: 'retry', attempt: 2, next: Date.now() + 5000 }],
+    });
+    mockSession.messages.mockResolvedValue({
+      data: [{ parts: [{ type: 'text', text: promptText }] }],
+    });
+
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      maxWaitMs: 100,
+      pollIntervalMs: 50,
+      echoBaseline: promptText,
+    });
+
+    expect(result).toBe(PROBE_PENDING);
+  });
+
+  it('超时回显但会话已 idle（模型把 prompt 当作最终产出）→ 仍返回回显原文', async () => {
+    const promptText = 'echo as final answer';
+    mockSession.status.mockResolvedValue({
+      data: [{ id: 'test-session', type: 'idle' }],
+    });
+    mockSession.messages.mockResolvedValue({
+      data: [{ parts: [{ type: 'text', text: promptText }] }],
+    });
+
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      maxWaitMs: 100,
+      pollIntervalMs: 50,
+      echoBaseline: promptText,
+    });
+
+    // 保持既有 echo 语义：idle 状态下的回显属异常产出，交给上层判定，不在此转 pending
+    expect(result).toBe(promptText);
+  });
+
+  it('未提供 echoBaseline 时超时仍返回最后一条消息（行为不变）', async () => {
+    const promptText = 'plain last message';
+    mockSession.status.mockResolvedValue({
+      data: [{ id: 'test-session', type: 'busy' }],
+    });
+    mockSession.messages.mockResolvedValue({
+      data: [{ parts: [{ type: 'text', text: promptText }] }],
+    });
+
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      maxWaitMs: 100,
+      pollIntervalMs: 50,
+    });
+
+    expect(result).toBe(promptText);
+  });
+
+  it('超时回显 + busy，但最后一条消息与 echoBaseline 不同 → 不转 PROBE_PENDING', async () => {
+    const otherText = 'some other last message';
+    mockSession.status.mockResolvedValue({
+      data: [{ id: 'test-session', type: 'busy' }],
+    });
+    mockSession.messages.mockResolvedValue({
+      data: [{ parts: [{ type: 'text', text: otherText }] }],
+    });
+
+    const result = await pollSessionCompletion(mockClient, 'test-session', {
+      maxWaitMs: 100,
+      pollIntervalMs: 50,
+      echoBaseline: 'the actual prompt text',
+    });
+
+    expect(result).toBe(otherText);
   });
 });

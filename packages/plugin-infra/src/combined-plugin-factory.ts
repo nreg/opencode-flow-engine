@@ -18,6 +18,7 @@ import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentMod
 import { SFLOW_TOOLS, IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolError, detectAgnesProvider } from './types.js';
 
 import { getAgentNames, getAgentMode, createAgent } from './agents/index.js';
+import { validateConfiguredModels } from './agents/model-availability.js';
 import { createWorkflowRouterTool } from './tools/index.js';
 import { createIFlowRouterTool } from './tools/iflow-router.js';
 import { createCallFlowAgentTools } from './tools/call-flow-agent.js';
@@ -208,6 +209,14 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
   // 初始化 Logger 日志路径（确保日志写入正确的项目目录）
   Logger.initialize(workDir);
   const sflowClient = input.client;
+
+  // R3-fix P2（1357a31 接线缺口）：combined 工厂补齐启动期模型可用性对账
+  //（与 sflow / iflow 工厂一致：失败不阻断插件启动，仅 warn）
+  try {
+    await validateConfiguredModels(sflowClient as never, cascadedConfig);
+  } catch (err) {
+    void Logger.warn(`[model-availability] 启动期模型校验失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   const hookComposer = createHookComposer();
   const skillLoader = await createSkillLoader();

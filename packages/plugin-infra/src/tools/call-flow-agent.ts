@@ -29,7 +29,7 @@ import type {
   BackgroundTaskRegistry,
   SFlowClient,
 } from '../types.js';
-import { formatToolError, generateTaskId, PROBE_PENDING } from '../types.js';
+import { formatToolError, generateTaskId, PROBE_PENDING, type ProbePending } from '../types.js';
 import type { LocalToolDefinition } from '../types/local-tool-definition.js';
 import {
   resolveModelWithFallback,
@@ -253,7 +253,8 @@ interface RunFallbackResult {
     | 'fatal'
     | 'invalid-model'
     | 'no-valid-output'
-    | 'aborted';
+    | 'aborted'
+    | 'timeout-pending';
   detail?: string;
 }
 
@@ -280,7 +281,12 @@ export async function runWithModelFallback(params: {
   directory: string;
   /** P1-1: 用户配置 fallback 链（configOverrides/modelProfiles 构建结果） */
   extraFallbacks?: string[];
-  poll: (sessionID: string, model: string) => Promise<string | null>;
+  /**
+   * poll 产出。返回 PROBE_PENDING（polling 层判定「窗口超时但会话仍在 busy/retry」）
+   * 时，编排器 MUST 不拉黑、不换模、不重发——慢而健康的模型不因固定窗口超时定罪
+   *（R3-fix P1-1，对齐 pollAndComplete re-poll 的 probeMode 语义）。
+   */
+  poll: (sessionID: string, model: string) => Promise<string | null | ProbePending>;
   onFallback?: (info: { from: string; to: string; attempt: number; reason: string }) => Promise<void> | void;
 }): Promise<RunFallbackResult> {
   const { client, sessionID, agentName, basePrompt, initialModel, poll, onFallback, extraFallbacks } = params;
@@ -364,11 +370,28 @@ export async function runWithModelFallback(params: {
     }
 
     const output = await poll(sessionID, currentModel);
+    if (output === PROBE_PENDING) {
+      // R3-fix P1-1: poll 窗口超时但会话仍在 busy/retry——模型慢而健康，不拉黑、
+      // 不换模、不重发。以 timeout-pending 失败终结，交还编排器
+      //（session 仍在运行，编排器可稍后通过 flowagent_output 取结果）。
+      return {
+        success: false,
+        failureReason: 'timeout-pending',
+        detail:
+          'sync poll window exceeded while session still running; model not blacklisted (session may still be producing)',
+        output: null,
+        model: currentModel,
+        attemptedModels,
+        fallbacks,
+      };
+    }
     if (output !== null) {
       // P0-1: 实质性产出校验——错误码驱动分类（唯一判据）。错误码报错 / 用户 prompt 回显
       // 不算成功，转入 model-failure 分支。无错误码的报错无法分类是可接受的已知限制。
-      const codeOnPoll = classifyModelErrorByCode(output);
-      const echoFailure = output.trim() === sentText.trim();
+      // PROBE_PENDING 已在上方提前返回；TS 无法经 === 窄除对象字面量类型，此处显式标注为 string
+      const pollOutput = output as string;
+      const codeOnPoll = classifyModelErrorByCode(pollOutput);
+      const echoFailure = pollOutput.trim() === sentText.trim();
       if (codeOnPoll || echoFailure) {
         if (codeOnPoll?.kind === 'non-transient') {
           // 非瞬态：长冷却（重置时间 TTL；无重置时间给默认长 TTL 30min）+ 立即换模
@@ -381,20 +404,20 @@ export async function runWithModelFallback(params: {
           markModelUnavailable(currentModel, { ttlMs: TRANSIENT_COOLDOWN_TTL_MS });
         }
         // P0-4: 错误识别接入换模——落入下方 model-failure 分支（markModelUnavailable + getAlternativeModel）
-      } else if (!hasRealOutput(output)) {
+      } else if (!hasRealOutput(pollOutput)) {
         // P0-1：无机器可读错误码 + 无完成信号 → 不判成功，按失败返回（原文保留供编排器参考）。
         // 不拉黑、不换模、不重发：产出本身无信号并非模型故障证据。
         return {
           success: false,
           failureReason: 'no-valid-output',
           detail: NO_VALID_OUTPUT_DETAIL,
-          output,
+          output: pollOutput,
           model: currentModel,
           attemptedModels,
           fallbacks,
         };
       } else {
-        return { success: true, output, model: currentModel, attemptedModels, fallbacks };
+        return { success: true, output: pollOutput, model: currentModel, attemptedModels, fallbacks };
       }
     }
 
@@ -1476,6 +1499,15 @@ export function createCallFlowAgentTools(
 
         // ── Background 模式：发送首次 prompt 后立即返回 task_id（故障转移由 watcher/pollAndComplete 异步处理）──
         if (isBackground) {
+          // R3-fix P1-3: reserve-then-dispatch——先占并发槽位再发送 prompt。
+          // 槽位已满时直接返回错误：此时 prompt 尚未发送、session 尚未开始运行（零成本），
+          // 不再产生「发了 prompt 却未进入 registry」的无人监控孤儿 session。
+          if (!acquireSubagentSlot(subagent_type as string)) {
+            return await formatToolError(
+              `Concurrency limit reached for subagent "${subagent_type}". Maximum ${MAX_CONCURRENT_SUBAGENTS} parallel instances allowed. Wait for a running task to complete before starting another.`,
+            );
+          }
+
           // Wave 1 Task 1：以 sendPromptOnce 发送首次 prompt（{ throwOnError: true } + try/catch）
           const firstSend = await sendPromptOnce(client, {
             sessionID,
@@ -1486,16 +1518,11 @@ export function createCallFlowAgentTools(
 
           // Wave 1 Task 2 / D-7：前置校验失败不拉黑不换模型，直接返回工具错误
           if (!firstSend.ok) {
+            // R3-fix P1-3: 占位成功但首发送失败——必须释放槽位，否则并发上限被永久侵蚀
+            releaseSubagentSlot(subagent_type as string);
             return await formatToolError(
               `Failed to send prompt (HTTP ${firstSend.status ?? 'unknown'}): ${firstSend.message ?? 'no detail'}. ` +
                 `前置校验失败（SessionBusy / model not found / agent 不存在）不属于模型故障，未触发模型故障转移。`,
-            );
-          }
-
-          // Check concurrency limit: max 3 parallel subagents of the same type
-          if (!acquireSubagentSlot(subagent_type as string)) {
-            return await formatToolError(
-              `Concurrency limit reached for subagent "${subagent_type}". Maximum ${MAX_CONCURRENT_SUBAGENTS} parallel instances allowed. Wait for a running task to complete before starting another.`,
             );
           }
 
@@ -1556,12 +1583,21 @@ export function createCallFlowAgentTools(
           initialModel: subagentModel,
           maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS,
           directory: changeDir,
-          poll: async () =>
-            (await pollSessionCompletion(
+          poll: async () => {
+            // R3-fix P1-1: 传入 echoBaseline（所发 prompt 文本）——polling 层在窗口超时
+            // 且会话仍在 busy/retry 时返回 PROBE_PENDING 而非回显，避免「慢而健康」的
+            // 模型被拉黑换模。
+            const pollResult = await pollSessionCompletion(
               client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
               sessionID,
-              { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS, directory: changeDir },
-            )) as string | null,
+              {
+                maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS,
+                directory: changeDir,
+                echoBaseline: finalPrompt,
+              },
+            );
+            return pollResult;
+          },
           onFallback: async (info) => {
             if (resolvedAgentId) {
               try {
@@ -1582,6 +1618,24 @@ export function createCallFlowAgentTools(
         // 故障转移失败分支分派（D-4/D-6/D-7）
         if (!fallbackResult.success) {
           const syncTaskId = generateTaskId(backgroundTaskCounter);
+          // R3-fix P1-1: sync 窗口超时但会话仍在运行——模型健康，仅超时。
+          // 不拉黑、不换模、不写 registry：明确告知编排器会话仍在产出，可稍后查询。
+          if (fallbackResult.failureReason === 'timeout-pending') {
+            return {
+              title: sessionLabel,
+              output: JSON.stringify(
+                {
+                  success: false,
+                  subagent: subagent_type,
+                  sessionID,
+                  error: `同步等待超时（${DEFAULT_SYNC_MAX_WAIT_MS / 1000}s 窗口耗尽）但会话仍在运行：模型未被拉黑、未触发故障转移。可稍后使用 flowagent_output 携带 session_id 查询该会话的后续产出。`,
+                  attempted_models: fallbackResult.attemptedModels,
+                },
+                null,
+                2,
+              ),
+            };
+          }
           if (fallbackResult.failureReason === 'fatal' || fallbackResult.failureReason === 'invalid-model') {
             return await formatToolError(
               `模型调用失败 (${fallbackResult.detail ?? 'unknown'})：前置校验失败或模型格式非法，未触发模型故障转移。`,
@@ -1888,6 +1942,22 @@ export function createCallFlowAgentTools(
           // P0-1: 换模后 re-poll 无完成信号时的产出原文（no-valid-output 失败终结，不拉黑/不换模/不重发）
           let noValidOutput: string | null = null;
           if (typeof output === 'string') {
+            // R3-fix P1-2: 初次 poll（非 probeMode）超时/结束时返回的最后一条消息可能就是
+            // 所发 prompt 本身（回显）——此时模型尚未产出任何 assistant 内容。回显不是产出：
+            // - 绝不判 completed（违反「无完成信号不判成功」不变量；prompt 含 Markdown
+            //   标题时回显会被 hasRealOutput 误判为结构化报告）
+            // - 不换模、不拉黑（对齐 re-poll 回显守卫与 watcher probeMode 守卫）
+            // 保持 running 交还 watcher，下一轮 tick 继续探测。
+            const initialEchoBaseline = task.prompt ?? '';
+            if (initialEchoBaseline && output.trim() === initialEchoBaseline.trim()) {
+              const stillRunningEntry: BackgroundTaskEntry = {
+                ...(backgroundTaskRegistry.get(task_id) ?? task),
+                status: 'running',
+                _errorCount: 0,
+              };
+              backgroundTaskRegistry.set(task_id, stillRunningEntry);
+              return stillRunningEntry;
+            }
             // 错误码驱动分类（唯一判据）：错误码报错不算成功 → 换模型重 prompt 或结构化错误。
             // 无码报错无法分类是可接受的已知限制（文本模式兜底已删除）。
             const identifiedCode = classifyModelErrorByCode(output);

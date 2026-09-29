@@ -12,6 +12,7 @@
  */
 
 import { beforeEach, describe, expect, it, mock, afterEach, afterAll, spyOn } from 'bun:test';
+import { PROBE_PENDING, type ProbePending } from '../../types.js';
 import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
 import { createCallFlowAgentTools, resetRunningSubagentCounts, runWithModelFallback, createBackgroundTaskWatcher } from '../call-flow-agent.js';
 import { clearUnavailableModels, markModelUnavailable, isModelAvailable, getAlternativeModel, resolveModelWithFallback, TRANSIENT_COOLDOWN_TTL_MS, MIN_QUOTA_COOLDOWN_TTL_MS } from '../../agents/agent-builder.js';
@@ -25,6 +26,7 @@ import {
   validateConfiguredModels,
 } from '../../agents/model-availability.js';
 import type { ProviderListClient, SFlowConfig } from '../../agents/model-availability.js';
+import { createCombinedPluginModule } from '../../combined-plugin-factory.js';
 
 /** 临时把 Date.now 前进 offsetMs，返回恢复函数 */
 function advanceClock(offsetMs: number): () => void {
@@ -207,7 +209,7 @@ describe('P0-1/P0-2/P0-4: runWithModelFallback 成功判定与换模', () => {
     };
   }
 
-  const baseParams = (c: ReturnType<typeof makeClient>, poll: (sid: string, m: string) => Promise<string | null>) => ({
+  const baseParams = (c: ReturnType<typeof makeClient>, poll: (sid: string, m: string) => Promise<string | null | ProbePending>) => ({
     client: c.client as never,
     sessionID: 's1',
     agentName: 'build-executor',
@@ -319,7 +321,29 @@ describe('P0-1/P0-2/P0-4: runWithModelFallback 成功判定与换模', () => {
       restore();
     }
   });
+
+  // R3-fix P1-1: poll 返回 PROBE_PENDING（polling 层判定「窗口超时但会话仍在 busy/retry」）
+  // 时，sync 编排器 MUST 不拉黑、不换模、不重发，以 timeout-pending 失败终结。
+  it('poll 返回 PROBE_PENDING → timeout-pending 失败，模型未拉黑、无换模、prompt 仅 1 次', async () => {
+    const c = makeClient({ outputs: [] });
+    let pollCount = 0;
+    const poll = async () => {
+      pollCount++;
+      return PROBE_PENDING;
+    };
+    const result = await runWithModelFallback({ ...baseParams(c, poll) });
+    expect(result.success).toBe(false);
+    expect(result.failureReason).toBe('timeout-pending');
+    expect(result.model).toBe('provider/first-model');
+    expect(result.fallbacks.length).toBe(0);
+    // 慢而健康的模型不拉黑
+    expect(isModelAvailable('provider/first-model')).toBe(true);
+    // 未换模重发（首次发送计入 1 次）
+    expect(pollCount).toBe(1);
+    expect(c.promptCalls.length).toBe(1);
+  });
 });
+
 
 // ─── P1-2: async pollAndComplete success guard ──────────────────────────────
 
@@ -2042,5 +2066,62 @@ describe('FIX-P1-4: 配置模型存在性校验', () => {
     expect(getAvailabilityState()).toBe('failed');
     expect(result?.unknown).toEqual([]);
     expect(result?.unconnected).toEqual([]);
+  });
+});
+
+// ─── R3-fix P2: combined 工厂补接启动期模型可用性校验 ──────────────────────────
+// 1357a31 只接了 sflow / iflow 两个工厂；combined（同时安装两个工作流）漏接
+// validateConfiguredModels → 配置模型拼错 / provider 未连接完全无 warn。
+// 可观测效果：server() 执行后 availability 快照离开 'cold'（refresh 被调用）。
+
+describe('R3-fix P2: combined 工厂启动期模型校验接线', () => {
+  let warnSpy: ReturnType<typeof spyOn> | undefined;
+
+  beforeEach(() => {
+    resetModelAvailability();
+    warnSpy = spyOn(Logger, 'warn').mockImplementation(async () => {});
+  });
+
+  afterEach(() => {
+    warnSpy?.mockRestore();
+  });
+
+  it('provider.list 抛错 → failed 状态（不阻断插件启动，返回 hooks）', async () => {
+    const input = {
+      client: {
+        provider: { list: mock(async () => { throw new Error('network down'); }) },
+      },
+      directory: 'C:/Users/admin/AppData/Local/Temp/opencode/combined-factory-test',
+    };
+
+    const hooks = await createCombinedPluginModule().server(input as never);
+
+    expect(hooks).toBeDefined();
+    expect(typeof hooks.dispose).toBe('function');
+    // 校验被调用：状态从 cold 推进到 failed（且不抛出）
+    expect(getAvailabilityState()).toBe('failed');
+    expect(warnSpy).toHaveBeenCalled();
+
+    await hooks.dispose?.();
+  });
+
+  it('provider.list 正常返回 → ready 状态', async () => {
+    const input = {
+      client: {
+        provider: {
+          list: mock(async () => ({
+            data: { all: [{ id: 'p', models: { real: {} } }], connected: ['p'] },
+          })),
+        },
+      },
+      directory: 'C:/Users/admin/AppData/Local/Temp/opencode/combined-factory-test',
+    };
+
+    const hooks = await createCombinedPluginModule().server(input as never);
+
+    expect(hooks).toBeDefined();
+    expect(getAvailabilityState()).toBe('ready');
+
+    await hooks.dispose?.();
   });
 });

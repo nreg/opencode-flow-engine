@@ -56,7 +56,17 @@ export async function pollSessionCompletion(
     session: SFlowClientSession;
   },
   sessionID: string,
-  options: { maxWaitMs?: number; pollIntervalMs?: number; isNew?: boolean; probeMode?: boolean; logger?: DiagnosticLogger } & PollingOptions = {},
+  options: {
+    maxWaitMs?: number;
+    pollIntervalMs?: number;
+    isNew?: boolean;
+    probeMode?: boolean;
+    logger?: DiagnosticLogger;
+    /** R3-fix P1-1: 所发 prompt 文本（回显基线）。窗口超时且最后一条消息恰为该文本、
+     * 且会话仍在 busy/retry 时，返回 PROBE_PENDING 而非回显——
+     * 「慢而健康」的模型不应被固定窗口超时判为模型故障。 */
+    echoBaseline?: string;
+  } & PollingOptions = {},
 ): Promise<string | null | ProbePending> {
   const MAX_WAIT = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const POLL_INTERVAL = options.pollIntervalMs ?? 200; // 200ms default (was 500ms, reduced for faster detection)
@@ -65,6 +75,7 @@ export async function pollSessionCompletion(
   let consecutiveFailures = 0;
   const isNew = options.isNew ?? false;
   const probeMode = options.probeMode ?? false;
+  const echoBaseline = options.echoBaseline; // R3-fix P1-1: 超时回显消歧基线
   const MAX_POLLS_FOR_NEW = 120; // 120 * 200ms = 24s max for new sessions
   const eventDriven = options.eventDriven ?? true; // Batch 2: event-driven by default
   const fallbackThreshold = options.fallbackThreshold ?? 5_000; // P1-FIX: fallback to pure polling after 5s (event loss → fast fallback)
@@ -395,8 +406,46 @@ export async function pollSessionCompletion(
     }
   }
 
-  const result = await readSessionLastMessage(client, sessionID);
-  return await logExit('timeout', result);
+  // R3-fix P1-1: 超时回显消歧——窗口耗尽时 readSessionLastMessage 返回的最后一条消息
+  // 往往就是编排器自己发出的 prompt（回显）。若会话仍在 busy/retry，说明模型只是慢
+  // 而非故障：返回 PROBE_PENDING，让调用方不把「慢而健康」的模型拉黑换模
+  //（对齐 pollAndComplete re-poll 的 probeMode 语义）。会话已 idle 时回显属异常产出，
+  // 仍返回原文交由上层判定（保持既有 echo 语义不变）。
+  const timeoutResult = await readSessionLastMessage(client, sessionID);
+  if (
+    echoBaseline &&
+    timeoutResult !== null &&
+    timeoutResult.trim() === echoBaseline.trim() &&
+    (await isSessionStillRunning(client, sessionID))
+  ) {
+    return await logExit('timeout_pending', PROBE_PENDING);
+  }
+  return await logExit('timeout', timeoutResult);
+}
+
+/**
+ * R3-fix P1-1: 判断会话是否仍在运行（status 为 busy / retry）。
+ * 结构不确定或 status() 失败时返回 false（保守：不把异常状态当作「仍在运行」）。
+ */
+async function isSessionStillRunning(
+  client: { session: SFlowClientSession },
+  sessionID: string,
+): Promise<boolean> {
+  try {
+    const statusResult = await client.session.status();
+    const rawData = statusResult.data;
+    let statusType: string | undefined;
+    if (Array.isArray(rawData)) {
+      const entry = (rawData as Array<{ id: string; type: string }>).find((s) => s.id === sessionID);
+      statusType = entry?.type;
+    } else if (rawData && typeof rawData === 'object') {
+      const obj = rawData as Record<string, { type: string }>;
+      statusType = obj[sessionID]?.type;
+    }
+    return statusType === 'busy' || statusType === 'retry';
+  } catch {
+    return false;
+  }
 }
 
 export async function readSessionLastMessage(

@@ -3525,3 +3525,209 @@ describe('模型级故障转移 (model fallback)', () => {
     expect(task?.resolvedModel).toContain('alt-1');
   });
 });
+
+// ─── R3-fix：第 3 轮审查修复（P1-1 / P1-2 / P1-3）──────────────────────────
+
+describe('R3-fix P1-1: sync 超时回显不拉黑换模', () => {
+  let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
+
+  beforeEach(() => {
+    promptCalls = [];
+  });
+
+  it('sync 窗口超时但会话仍 busy → 不判模型故障：未拉黑、未换模、prompt 仅 1 次', async () => {
+    // 会话一直 busy、消息列表只有编排器发出的 prompt（超时回显）
+    let sentText = '';
+    const client = {
+      session: {
+        create: mock(async () => ({ data: { id: 'test-session-001' } })),
+        prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+          promptCalls.push({ id: args.path.id, body: args.body });
+          const parts = args.body.parts as Array<{ type: string; text?: string }>;
+          sentText = parts[0]?.text ?? '';
+        }),
+        messages: mock(async () => ({ data: [{ parts: [{ type: 'text', text: sentText }] }] })),
+        status: mock(async () => ({ data: { 'test-session-001': { type: 'busy' } } })),
+        abort: mock(async () => {}),
+      },
+    };
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+
+    // 快进时钟：让 sync poll 的 30s 窗口在首次循环条件检查即超时
+    const realNow = Date.now;
+    let fake = realNow();
+    Date.now = () => (fake += 60_000);
+    try {
+      const result = await tools.call_flow_agent.execute(
+        {
+          description: 'slow task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+        },
+        { sessionID: 'parent-session', directory: '' },
+      );
+      const data = JSON.parse(result.output);
+      expect(data.success).toBe(false);
+      expect(data.error).toContain('仍在运行');
+    } finally {
+      Date.now = realNow;
+    }
+
+    // 慢而健康的模型不被拉黑
+    expect(isModelAvailable('provider/test-model')).toBe(true);
+    // 未换模重发
+    expect(promptCalls.length).toBe(1);
+  });
+});
+
+describe('R3-fix P1-2: pollAndComplete 初次 poll 回显不判 completed', () => {
+  it('prompt 含 Markdown 标题 + 初次 poll 返回回显 → 不判 completed、不换模', async () => {
+    const promptCalls: Array<{ id: string; body: Record<string, unknown> }> = [];
+    let sentText = '';
+    const client = {
+      session: {
+        create: mock(async () => ({ data: { id: 'test-session-001' } })),
+        prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+          promptCalls.push({ id: args.path.id, body: args.body });
+          const parts = args.body.parts as Array<{ type: string; text?: string }>;
+          sentText = parts[0]?.text ?? '';
+        }),
+        // 会话 idle 但消息列表只有 prompt（无 assistant 消息）→ poll 返回回显
+        messages: mock(async () => ({ data: [{ parts: [{ type: 'text', text: sentText }] }] })),
+        status: mock(async () => ({ data: { 'test-session-001': { type: 'idle' } } })),
+        abort: mock(async () => {}),
+      },
+    };
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+    // 隔离 watcher：本用例只验证 pollAndComplete 自身判定
+    (tools as { _stopWatcher?: () => void })._stopWatcher?.();
+
+    // 启动 background 任务（prompt 含 Markdown 标题——回显若被 hasRealOutput 判过即误判）
+    const startResult = await tools.call_flow_agent.execute(
+      {
+        description: 'markdown prompt task',
+        prompt: '## 执行计划\n\n请构建功能并输出报告',
+        subagent_type: 'build-executor',
+        run_in_background: true,
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+    const startData = JSON.parse(startResult.output);
+    const taskId = startData.task_id;
+
+    // 触发 pollAndComplete（block=true）
+    const outputResult = await tools.flowagent_output.execute(
+      { task_id: taskId, block: true },
+      { sessionID: 'parent-session', directory: '' },
+    );
+    const outputData = JSON.parse(outputResult.output);
+
+    // 回显不得被判为成功产出：保持 running
+    expect(outputData.status).toBe('running');
+    expect(outputData.result).toBeFalsy();
+    // 初次 poll 回显不触发换模（prompt 仅 1 次）
+    expect(promptCalls.length).toBe(1);
+
+    const task = options.backgroundTaskRegistry.get(taskId);
+    expect(task?.status).toBe('running');
+  });
+});
+
+describe('R3-fix P1-3: background reserve-then-dispatch', () => {
+  it('并发槽位已满时不发送 prompt（不产生孤儿 session）', async () => {
+    const promptCalls: Array<{ id: string; body: Record<string, unknown> }> = [];
+    const client = {
+      session: {
+        create: mock(async () => ({ data: { id: 'test-session-001' } })),
+        prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+          promptCalls.push({ id: args.path.id, body: args.body });
+        }),
+        // 会话持续 busy → 3 个已启动任务保持 running、持续占位
+        messages: mock(async () => ({ data: [] })),
+        status: mock(async () => ({ data: { 'test-session-001': { type: 'busy' } } })),
+        abort: mock(async () => {}),
+      },
+    };
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+    // 停掉 watcher：已占位的 3 个任务由 mock 保持 running，确定性不受 tick 干扰
+    (tools as { _stopWatcher?: () => void })._stopWatcher?.();
+
+    const base = {
+      description: 't',
+      prompt: 'work',
+      subagent_type: 'build-executor',
+      run_in_background: true,
+    };
+
+    // 占满 3 个并发槽位（MAX_CONCURRENT_SUBAGENTS = 3）
+    for (let i = 0; i < 3; i++) {
+      const r = await tools.call_flow_agent.execute(
+        { ...base, description: `task ${i}` },
+        { sessionID: 'parent-session', directory: '' },
+      );
+      expect(JSON.parse(r.output).success).toBe(true);
+    }
+    expect(promptCalls.length).toBe(3);
+
+    // 第 4 次调用：槽位满 → 必须返回并发错误且【未发送 prompt】
+    const r4 = await tools.call_flow_agent.execute(
+      { ...base, description: 'task 4' },
+      { sessionID: 'parent-session', directory: '' },
+    );
+    const d4 = JSON.parse(r4.output);
+    expect(d4.success).toBe(false);
+    expect(String(d4.error)).toContain('Concurrency limit');
+    // 关键断言：旧实现先发 prompt 后占位 → 第 4 次 prompt 已发出（孤儿 session）
+    expect(promptCalls.length).toBe(3);
+  });
+
+  it('占位成功但首发送失败时释放槽位（不泄漏）', async () => {
+    const promptCalls: Array<{ id: string; body: Record<string, unknown> }> = [];
+    // 首次 prompt 失败（HTTP 400 前置校验失败，D-7 不换模），其后成功
+    const client = createMockClient({
+      pollOutputs: ['Task done [TASK_COMPLETE]'],
+      promptCalls,
+      promptFailures: [400],
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+
+    // 第 1 次 background 调用：占位成功 → send 失败 → 必须释放槽位
+    const r1 = await tools.call_flow_agent.execute(
+      {
+        description: 'failing send',
+        prompt: 'work',
+        subagent_type: 'build-executor',
+        run_in_background: true,
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+    const d1 = JSON.parse(r1.output);
+    expect(d1.success).toBe(false);
+
+    // 槽位已释放：第 2 次调用可以正常占位并启动（否则会命中 Concurrency limit）
+    const r2 = await tools.call_flow_agent.execute(
+      {
+        description: 'retry after release',
+        prompt: 'work',
+        subagent_type: 'build-executor',
+        run_in_background: true,
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+    const d2 = JSON.parse(r2.output);
+    expect(d2.success).toBe(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const task = options.backgroundTaskRegistry.get(d2.task_id);
+    expect(task?.status).toBe('completed');
+  });
+});
