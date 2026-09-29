@@ -429,7 +429,10 @@ AFK (Away From Keyboard) 模式允许工作流自动推进，无需用户手动�
 
 ### 模型 Profile
 
-6 层模型解析：`override → model → model_type → config → profile → fallback → default`
+7 级模型解析链（**仅用户配置，无内置默认模型**）：
+`override → model → model_type → config → profile → fallback → unconfigured`
+
+模型**只从用户配置**（`modelProfiles.<tier>` 与 per-agent `agents.<name>`）解析；已移除全部内置默认模型与内置 fallback 列表。未配置任何模型时解析结果为 `unconfigured`，不注入 `model` 字段，由 OpenCode 使用其默认模型。
 
 | 档位 | 用途 | 典型智能体 |
 |------|------|-----------|

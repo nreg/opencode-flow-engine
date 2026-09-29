@@ -1,5 +1,7 @@
 # 全景对比：sFlow（opencode-flow-engine）vs spec-superflow
 
+> **注**：本文为历史对比/复盘记录，正文未作改写。文中提到的 `generateConfigTemplate()` **已于 2026-09（v1.1.1）从运行时移除**；配置模板现由 `bin/flow-engine.js` 的 `TEMPLATE_PLACEHOLDER_MODELS` 提供 `your-provider/*` 占位符。内置默认模型链（`DEFAULT_MODELS` / `DEFAULT_FALLBACKS` / `DEFAULT_PROFILE_MODELS`）同样已移除。详见 `docs/智能体配置模型体系-v1.1.0.md` §8 v1.1.1 变更记录。
+
 ---
 
 ## 一、架构层差异（不是"缺失"，是设计选择）
@@ -279,7 +281,7 @@ code-reviewer agent 已经包含完整的 "Minimality Discipline (MANDATORY GATE
 | AGENT_PROFILES 映射（per-agent 到 profile）                  | ✅    | `agent-builder.ts` — `AGENT_PROFILES` 常量                   |
 | Profile 在模型解析链中的优先级                               | ✅    | `resolveModelWithFallback` — profile provenance 在 config-override 之后、provider-fallback 之前 |
 | 级联配置支持                                                 | ✅    | `loadCascadedSFlowConfig` — 用户级 + 项目级 `deepMerge`      |
-| 配置模板                                                     | ✅    | `generateConfigTemplate()` 包含 modelProfiles 段             |
+| 配置模板                                                     | ⚠️    | `generateConfigTemplate()` 包含 modelProfiles 段（**v1.1.1 已移除**；模板现由 `bin/flow-engine.js` 的 `TEMPLATE_PLACEHOLDER_MODELS` 提供占位符） |
 
 **领先说明**：spec-superflow 只有 4 个预定义 profile 名称和 CLI 解析命令。sFlow 在此基础上增加了 per-agent 到 profile 的映射（`AGENT_PROFILES`）+ 级联配置覆盖（用户级 vs 项目级）+ fallback 链集成。
 

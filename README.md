@@ -442,7 +442,10 @@ Subagent completion detection uses a hybrid event-driven + polling fallback mech
 
 ### Model Profiles
 
-6-tier model resolution: `override → model → model_type → config → profile → fallback → default`
+7-step model resolution chain (user configuration only — no built-in default models):
+`override → model → model_type → config → profile → fallback → unconfigured`
+
+Models are resolved **only from user configuration** (`modelProfiles.<tier>` and per-agent `agents.<name>`). There is no built-in default model or default fallback list: when nothing is configured, resolution returns `unconfigured` and no `model` field is injected, so OpenCode uses its own default model.
 
 | Tier | Purpose | Typical Agents |
 |------|---------|----------------|

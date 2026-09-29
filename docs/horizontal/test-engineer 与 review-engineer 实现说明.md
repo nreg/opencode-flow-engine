@@ -502,7 +502,7 @@ const allowedAgents = [...SFLOW_AGENT_NAMES, ...SHARED_AGENT_NAMES];
 
 | 任务 | 改动 | 状态 |
 |------|------|------|
-| T03: agent-builder.ts 注册 | 新增 `AGENT_MODES` + `DEFAULT_MODELS` + `DEFAULT_FALLBACKS` + `AGENT_REGISTRY` | ✅ |
+| T03: agent-builder.ts 注册 | 新增 `AGENT_MODES` + `AGENT_PROFILES` + `AGENT_REGISTRY` | ✅ |
 | T03: types.ts 类型 | 新增 `BuiltinAgentName` 分支 | ✅ |
 | T03: agents/index.ts 导出 | 新增 `SHARED_AGENT_NAMES` 导出 | ✅ |
 | T04: workflow_router Phase 0 | 新增 `HORIZONTAL_COMMANDS` 表 + Phase 0 检测逻辑 | ✅ |
@@ -553,7 +553,7 @@ const allowedAgents = [...SFLOW_AGENT_NAMES, ...SHARED_AGENT_NAMES];
 
 | 文件 | 改动 |
 |------|------|
-| `packages/plugin-infra/src/agents/agent-builder.ts` | 注册 test-engineer/review-engineer 到 `AGENT_MODES`、`DEFAULT_MODELS`、`DEFAULT_FALLBACKS`、`AGENT_REGISTRY` |
+| `packages/plugin-infra/src/agents/agent-builder.ts` | 注册 test-engineer/review-engineer 到 `AGENT_MODES`、`AGENT_PROFILES`（均绑定 `review` 档）、`AGENT_REGISTRY` |
 | `packages/plugin-infra/src/agents/types.ts` | `BuiltinAgentName` 增加两个新类型 |
 | `packages/plugin-infra/src/agents/index.ts` | 导出 `SHARED_AGENT_NAMES` |
 | `packages/plugin-infra/src/tools/workflow-router.ts` | 新增 Phase 0 横向命令检测（`HORIZONTAL_COMMANDS`） |
