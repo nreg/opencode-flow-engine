@@ -217,13 +217,39 @@ async function readLastAssistantErrorName(client: SFlowClient, sessionID: string
 const NO_VALID_OUTPUT_DETAIL =
   'output has no completion signal; treated as failure (raw output preserved)';
 
+/**
+ * P1-3：用户/系统取消（Abort）对应的 assistant 错误名白名单。
+ *
+ * 错误名核实结论（ADR-4，已在依赖中核实）：OpenCode SDK v1 中
+ * `AssistantMessage.info.error.name` 的合法枚举只有五个字面量：
+ * `ProviderAuthError` / `UnknownError` / `MessageOutputLengthError` /
+ * `MessageAbortedError` / `APIError`。与"取消/中止"对应的是 `MessageAbortedError`；
+ * 审查报告提及的 `OutputAbortedError` 在本 SDK 中不存在，故不纳入。
+ * `AbortError` 作为兼容项保留（OpenCode 包装层/未来版本可能注入标准 AbortError）。
+ *
+ * 比对方式必须是**精确相等**（禁止 `/abort/i` 之类的包含式匹配与错误文案正则，C-6），
+ * 以保证正常模型错误名不会被误判为取消。
+ */
+export const ABORT_ERROR_NAMES: string[] = ['MessageAbortedError', 'AbortError'];
+
+/** P1-3：取消语义的判定（精确相等，零误伤） */
+function isAbortErrorName(errName: string | undefined): boolean {
+  return errName !== undefined && ABORT_ERROR_NAMES.includes(errName);
+}
+
 interface RunFallbackResult {
   success: boolean;
   output: string | null;
   model: string;
   attemptedModels: string[];
   fallbacks: Array<{ from: string; to: string; reason: string }>;
-  failureReason?: 'exhausted' | 'context-overflow' | 'fatal' | 'invalid-model' | 'no-valid-output';
+  failureReason?:
+    | 'exhausted'
+    | 'context-overflow'
+    | 'fatal'
+    | 'invalid-model'
+    | 'no-valid-output'
+    | 'aborted';
   detail?: string;
 }
 
@@ -374,6 +400,21 @@ export async function runWithModelFallback(params: {
       return {
         success: false,
         failureReason: 'context-overflow',
+        output: null,
+        model: currentModel,
+        attemptedModels,
+        fallbacks,
+      };
+    }
+
+    // P1-3：用户/系统取消（Abort）与模型故障严格区分 —— 零降级：
+    // 不拉黑（不调用 markModelUnavailable）、不换模（不调用 getAlternativeModel）、
+    // 不重发 prompt。用户主动中止的任务若被自动换模重发，既违反用户意图又产生额外成本。
+    if (isAbortErrorName(errName)) {
+      return {
+        success: false,
+        failureReason: 'aborted',
+        detail: `assistant error: ${errName}; task aborted, no model fallback triggered`,
         output: null,
         model: currentModel,
         attemptedModels,
@@ -533,6 +574,58 @@ async function tryAsyncModelFallback(params: {
   return { retried: true, nextModel: next };
 }
 
+/**
+ * P1-3：async 两路径（watcher / pollAndComplete）统一的 abort 终结逻辑。
+ *
+ * 与模型故障路径的差别是**零降级**：不拉黑模型、不换模型、不重发 prompt。
+ * registry 复用既有 `status: 'error'`（ADR-4：不新增 'cancelled' 枚举，避免跨消费者契约变更），
+ * 取消语义通过 error 文案显式声明。
+ */
+async function finalizeAbortedTask(params: {
+  registry: BackgroundTaskRegistry;
+  taskId: string;
+  task: BackgroundTaskEntry;
+  errName: string;
+}): Promise<BackgroundTaskEntry> {
+  const { registry, taskId, task, errName } = params;
+  // 与故障转移路径一致：以 live registry 为基线，避免覆盖刚写入的 resolvedModel / attemptedModels
+  const base = registry.get(taskId) ?? task;
+  const message = `Task aborted (${errName}): no model fallback triggered`;
+  const entry: BackgroundTaskEntry = {
+    ...base,
+    status: 'error',
+    error: message,
+    completedAt: Date.now(),
+    slotReleased: base.slotReleased ?? false,
+    _processing: false,
+  };
+  registry.set(taskId, entry);
+
+  if (!entry.slotReleased) {
+    releaseSubagentSlot(task.subagentType);
+    entry.slotReleased = true;
+    registry.set(taskId, entry);
+  }
+
+  try {
+    const nm = createNotificationManager({ changeDir: task.changeDir || '' });
+    await nm.writeNotification({
+      type: 'async_error',
+      subagent: task.subagentType,
+      task_id: taskId,
+      session_id: task.sessionID,
+      summary: message,
+    });
+  } catch (err) {
+    Logger.warn(
+      `[CallFlowAgent] abort 任务通知写入失败: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  taskModelAttempts.delete(taskId);
+  return entry;
+}
+
 // ─── BackgroundTaskWatcher ─────────────────────────────────────────────────────
 
 /**
@@ -626,6 +719,19 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
         }
 
         if (probeResult === null) {
+          // P1-3：先判定用户/系统取消（Abort）——命中则零降级终结（不拉黑、不换模、不重发）。
+          // 放在故障转移之前，避免把用户主动中止当作模型故障处理。
+          const abortErrName = await readLastAssistantErrorName(client, task.sessionID);
+          if (isAbortErrorName(abortErrName)) {
+            await finalizeAbortedTask({
+              registry,
+              taskId,
+              task,
+              errName: abortErrName as string,
+            });
+            continue;
+          }
+
           // Wave 2 Task 5：尝试模型故障转移（换模型重 prompt），直至成功/耗尽。
           // 设计：保持 running、不释放并发槽位；耗尽后才走原错误路径（D-4 未命中前不宣告失败）。
           let fb = { retried: (await attemptWatcherFallback(taskId, task, { kind: 'error', resetAt: null })) } as { retried: boolean };
@@ -1451,6 +1557,24 @@ export function createCallFlowAgentTools(
               ),
             };
           }
+          if (fallbackResult.failureReason === 'aborted') {
+            // P1-3：用户/系统取消 —— 文案必须明确"取消"，且不得出现"未触发模型故障转移"的
+            // 误导组合（取消不是模型故障，排障方向不同）。
+            return {
+              title: sessionLabel,
+              output: JSON.stringify(
+                {
+                  success: false,
+                  subagent: subagent_type,
+                  sessionID,
+                  error: `任务被用户/系统取消（${fallbackResult.detail ?? 'aborted'}）：未拉黑模型、未触发模型故障转移`,
+                  attempted_models: fallbackResult.attemptedModels,
+                },
+                null,
+                2,
+              ),
+            };
+          }
           // exhausted：复用原 null 输出结构（status:'error' + success:false），补充可观测字段（D-8）
           backgroundTaskRegistry.set(syncTaskId, {
             sessionID,
@@ -1739,6 +1863,20 @@ export function createCallFlowAgentTools(
               return noSignalEntry;
             }
           }
+          // P1-3：abort 判定必须先于故障转移（与 watcher 路径 `:600` 对齐）——
+          // 用户取消不是模型故障：命中则零降级终结（不拉黑、不换模、不重发）。
+          if (output === null) {
+            const abortErrName = await readLastAssistantErrorName(client, task.sessionID);
+            if (isAbortErrorName(abortErrName)) {
+              await finalizeAbortedTask({
+                registry: backgroundTaskRegistry,
+                taskId: task_id,
+                task,
+                errName: abortErrName as string,
+              });
+              return backgroundTaskRegistry.get(task_id) ?? task;
+            }
+          }
           if (output === null && identifiedErrorKind === null) {
             fb = await tryAsyncModelFallback({
               client,
@@ -1751,14 +1889,26 @@ export function createCallFlowAgentTools(
           let fbSafety = 0;
           while (fb.retried && fbSafety <= MAX_MODEL_RETRIES + 2) {
             fbSafety++;
+            // P1-2（ADR-3）：re-poll 与 watcher 的 reProbe 语义对齐 —— probeMode + 无事件总线。
+            // 不再以 DEFAULT_SYNC_MAX_WAIT_MS 固定窗口给慢而健康的模型定罪：
+            // PROBE_PENDING 表示"仍在进行中" → break 保持 running 交还 tick。
             const rePoll = await pollSessionCompletion(
               client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
               task.sessionID,
-              { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS, directory: changeDir },
+              {
+                maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS,
+                directory: changeDir,
+                probeMode: true,
+                eventDriven: false,
+                pollIntervalMs: 50,
+              },
             );
+            if (rePoll === PROBE_PENDING) {
+              // 换上的模型仍在运行：保持 running 交还 tick，绝不以固定短窗口超时定罪（P1-2）
+              break;
+            }
             if (rePoll !== null) {
               // R3-P2-3: 换模后的 re-poll 输出同样做错误码识别（唯一判据）——错误码报错不算成功，继续换模
-              // Type guard: in pollAndComplete (no probeMode), rePoll is string
               const reOutput = rePoll as string;
               const reCode = classifyModelErrorByCode(reOutput);
               if (reCode) {
@@ -1787,8 +1937,10 @@ export function createCallFlowAgentTools(
 
           if (fb.retried) {
             // 故障转移进行中仍 running：保持任务运行、不释放槽位，返回 running（交给 watcher 后续探测）
+            // P1-2（ADR-3）：展开基线改用 live registry 快照——入参 task 是调用前的旧快照，
+            // 直接展开会抹掉故障转移刚写入的 resolvedModel / attemptedModels。
             const runningEntry: BackgroundTaskEntry = {
-              ...task,
+              ...(backgroundTaskRegistry.get(task_id) ?? task),
               status: 'running',
               _errorCount: 0,
             };

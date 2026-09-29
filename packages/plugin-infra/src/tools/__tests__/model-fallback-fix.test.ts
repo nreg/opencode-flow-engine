@@ -1399,3 +1399,362 @@ describe('FIX-P1-1: send 失败语义分离', () => {
     }
   });
 });
+
+// ─── FIX-P1-3: abort 与模型故障分离 ────────────────────────────────────────────
+describe('FIX-P1-3: abort 与模型故障分离', () => {
+  beforeEach(() => clearUnavailableModels());
+  afterEach(() => {
+    resetRunningSubagentCounts();
+    clearUnavailableModels();
+  });
+
+  /** sync harness：poll 恒返回 null，messages 注入指定 assistant 错误名（undefined = 无错误名） */
+  function makeAbortClient(errName: string | undefined) {
+    const promptCalls: Array<{ model?: { providerID: string; modelID: string } }> = [];
+    return {
+      promptCalls,
+      client: {
+        session: {
+          prompt: mock(async (args: { path: { id: string }; body: { model?: { providerID: string; modelID: string } } }) => {
+            promptCalls.push({ model: args.body.model });
+          }),
+          messages: mock(async () => ({
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              { info: { role: 'assistant', error: errName ? { name: errName } : undefined }, parts: [] },
+            ],
+          })),
+          status: mock(async () => ({ data: { s1: { type: 'retry', attempt: 5 } } })),
+          create: mock(async () => ({ data: { id: 's1' } })),
+          abort: mock(async () => {}),
+        },
+      },
+    };
+  }
+
+  const syncParams = (c: ReturnType<typeof makeAbortClient>) => ({
+    client: c.client as never,
+    sessionID: 's1',
+    agentName: 'build-executor',
+    basePrompt: 'do the work',
+    initialModel: 'provider/first-model',
+    maxWaitMs: 100,
+    directory: '',
+    extraFallbacks: ['provider/alt-model'],
+    poll: async () => null,
+  });
+
+  /** pollAndComplete harness：status 序列可控（retry/attempt=5 → poll 返回 null），messages 注入错误名 */
+  function createAbortAsyncTools(errName: string | undefined) {
+    const promptCalls: Array<{ id: string; body: Record<string, unknown> }> = [];
+    const client = {
+      session: {
+        create: mock(async () => ({ data: { id: 'test-session-001' } })),
+        prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+          promptCalls.push({ id: args.path.id, body: args.body });
+        }),
+        messages: mock(async () => ({
+          data: [
+            { parts: [{ type: 'text', text: 'user prompt' }] },
+            { info: { role: 'assistant', error: errName ? { name: errName } : undefined }, parts: [] },
+          ],
+        })),
+        status: mock(async () => ({ data: { 'test-session-001': { type: 'retry', attempt: 5 } } })),
+        abort: mock(async () => {}),
+      },
+    };
+    const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
+    const tools = createCallFlowAgentTools({
+      client: client as unknown as import('../../types.js').SFlowClient,
+      backgroundTaskRegistry,
+      backgroundTaskCounter: { value: 0 },
+      agentModelMap: { 'build-executor': 'provider/test-model' } as AgentModelMap,
+      configOverrides: { 'build-executor': { fallback_models: ['provider/alt-model'] } },
+      sessionLabelPrefix: 'sFlow',
+      validateAgent: async () => null,
+      workflowName: 'sFlow',
+    });
+    return { tools, backgroundTaskRegistry, promptCalls };
+  }
+
+  it('1: sync poll null + MessageAbortedError → aborted，不拉黑不换模不重发', async () => {
+    const c = makeAbortClient('MessageAbortedError');
+    const result = await runWithModelFallback(syncParams(c));
+    expect(result.success).toBe(false);
+    expect(result.failureReason).toBe('aborted');
+    expect(isModelAvailable('provider/first-model')).toBe(true);
+    expect(c.promptCalls.length).toBe(1);
+    expect(result.fallbacks.length).toBe(0);
+  });
+
+  it('2: sync ContextOverflowError → 仍为 context-overflow（既有语义不变）', async () => {
+    const c = makeAbortClient('ContextOverflowError');
+    const result = await runWithModelFallback(syncParams(c));
+    expect(result.success).toBe(false);
+    expect(result.failureReason).toBe('context-overflow');
+    expect(isModelAvailable('provider/first-model')).toBe(true);
+    expect(c.promptCalls.length).toBe(1);
+  });
+
+  it('3: APIError / ProviderAuthError / ContextOverflowError 均不判为 aborted', async () => {
+    for (const name of ['APIError', 'ProviderAuthError']) {
+      clearUnavailableModels();
+      const c = makeAbortClient(name);
+      const result = await runWithModelFallback(syncParams(c));
+      expect(result.failureReason).not.toBe('aborted');
+      // 既有语义：走模型故障路径（拉黑 + 换模尝试）
+      expect(isModelAvailable('provider/first-model')).toBe(false);
+      expect(c.promptCalls.length).toBe(2);
+    }
+    clearUnavailableModels();
+    const c = makeAbortClient('ContextOverflowError');
+    const result = await runWithModelFallback(syncParams(c));
+    expect(result.failureReason).toBe('context-overflow');
+  });
+
+  it('4: watcher probe null + MessageAbortedError → error 条目且未换模未拉黑', async () => {
+    const promptCalls: Array<{ id: string; body: Record<string, unknown> }> = [];
+    const client = {
+      session: {
+        create: mock(async () => ({ data: { id: 'abort-session' } })),
+        prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+          promptCalls.push({ id: args.path.id, body: args.body });
+        }),
+        messages: mock(async () => ({
+          data: [
+            { parts: [{ type: 'text', text: 'user prompt' }] },
+            { info: { role: 'assistant', error: { name: 'MessageAbortedError' } }, parts: [] },
+          ],
+        })),
+        status: mock(async () => ({ data: { 'abort-session': { type: 'retry', attempt: 5 } } })),
+        abort: mock(async () => {}),
+      },
+    };
+    const registry: BackgroundTaskRegistry = new Map();
+    registry.set('abort-task', {
+      sessionID: 'abort-session',
+      subagentType: 'build-executor',
+      status: 'running',
+      createdAt: Date.now(),
+      changeDir: '',
+      resolvedModel: 'provider/abort-primary',
+    });
+    const watcher = createBackgroundTaskWatcher({
+      client: client as never,
+      registry,
+      pollIntervalMs: 20,
+      extraFallbacks: ['provider/abort-fallback'],
+    });
+    watcher.start();
+    await waitFor(() => registry.get('abort-task')?.status === 'error');
+    watcher.stop();
+
+    const task = registry.get('abort-task');
+    if (!task) throw new Error('abort-task entry missing from registry');
+    expect(task.status).toBe('error');
+    expect(task.error).toContain('aborted');
+    expect(isModelAvailable('provider/abort-primary')).toBe(true);
+    expect(promptCalls.length).toBe(0);
+  });
+
+  it('5: pollAndComplete poll null + MessageAbortedError → error 条目，未拉黑未换模', async () => {
+    const { tools, backgroundTaskRegistry, promptCalls } = createAbortAsyncTools('MessageAbortedError');
+
+    const startResult = await tools.call_flow_agent.execute(
+      { description: 't', prompt: 'work', subagent_type: 'build-executor', run_in_background: true },
+      { sessionID: 'parent', directory: '' },
+    );
+    const startData = JSON.parse(startResult.output);
+    expect(startData.success).toBe(true);
+
+    await tools.flowagent_output.execute(
+      { task_id: startData.task_id, block: true },
+      { sessionID: 'parent', directory: '' },
+    );
+
+    const entry = backgroundTaskRegistry.get(startData.task_id);
+    if (!entry) throw new Error('task entry missing from registry');
+    expect(entry.status).toBe('error');
+    expect(entry.error).toContain('aborted');
+    expect(isModelAvailable('provider/test-model')).toBe(true);
+    expect(promptCalls.length).toBe(1);
+  });
+
+  it('6: 非 abort 的 poll null（无错误名）→ 仍走既有故障转移（换模重发）', async () => {
+    const { tools, backgroundTaskRegistry, promptCalls } = createAbortAsyncTools(undefined);
+
+    const startResult = await tools.call_flow_agent.execute(
+      { description: 't', prompt: 'work', subagent_type: 'build-executor', run_in_background: true },
+      { sessionID: 'parent', directory: '' },
+    );
+    const startData = JSON.parse(startResult.output);
+
+    await tools.flowagent_output.execute(
+      { task_id: startData.task_id, block: true },
+      { sessionID: 'parent', directory: '' },
+    );
+
+    // 既有语义不变：poll null 触发故障转移（首发 + 一次换模）
+    expect(promptCalls.length).toBe(2);
+    expect(backgroundTaskRegistry.get(startData.task_id)?.resolvedModel).toBe('provider/alt-model');
+  });
+
+  it('7: 上层 aborted 文案 → success false、含"取消"，且不是既有 fatal/exhausted 误导组合', async () => {
+    const c = makeAbortClient('MessageAbortedError');
+    const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
+    const tools = createCallFlowAgentTools({
+      client: c.client as unknown as import('../../types.js').SFlowClient,
+      backgroundTaskRegistry,
+      backgroundTaskCounter: { value: 0 },
+      agentModelMap: { 'build-executor': 'provider/test-model' } as AgentModelMap,
+      configOverrides: { 'build-executor': { fallback_models: ['provider/alt-model'] } },
+      sessionLabelPrefix: 'sFlow',
+      validateAgent: async () => null,
+      workflowName: 'sFlow',
+    });
+
+    const result = await tools.call_flow_agent.execute(
+      { description: 't', prompt: 'work', subagent_type: 'build-executor', run_in_background: false },
+      { sessionID: 'parent', directory: '' },
+    );
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(false);
+    // 文案必须明确"取消"（spec: 任务被用户/系统取消，未拉黑模型、未触发模型故障转移）
+    expect(data.error).toContain('取消');
+    expect(data.error).toContain('未拉黑模型');
+    // 不得复用 fatal / exhausted 的误导表述（把取消说成模型故障或前置校验失败）
+    expect(data.error).not.toContain('前置校验失败');
+    expect(data.error).not.toContain('model fallback exhausted');
+    expect(data.attempted_models).toContain('provider/test-model');
+  });
+});
+
+// ─── FIX-P1-2: 换模后 re-poll 语义 ────────────────────────────────────────────
+describe('FIX-P1-2: 换模后 re-poll 语义', () => {
+  beforeEach(() => clearUnavailableModels());
+  afterEach(() => {
+    resetRunningSubagentCounts();
+    clearUnavailableModels();
+  });
+
+  /**
+   * pollAndComplete harness：
+   * - pollOutputs[0] 为首次 poll 文本（触发换模），pollOutputs[1] 为 re-poll 文本
+   * - statusTypes 为 status() 的返回序列（'busy' → probeMode 下返回 PROBE_PENDING）
+   */
+  function createRepollTools(opts: {
+    pollOutputs: string[];
+    statusTypes: Array<'idle' | 'busy'>;
+    fallbackModels?: string[];
+  }) {
+    let msgCallCount = 0;
+    let statusIdx = 0;
+    const promptCalls: Array<{ id: string; body: Record<string, unknown> }> = [];
+    const client = {
+      session: {
+        create: mock(async () => ({ data: { id: 'test-session-001' } })),
+        prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+          promptCalls.push({ id: args.path.id, body: args.body });
+        }),
+        messages: mock(async () => {
+          const callIdx = msgCallCount++;
+          const idx = callIdx === 0 ? 0 : Math.min(callIdx - 1, opts.pollOutputs.length - 1);
+          return {
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              { info: { role: 'assistant' }, parts: [{ type: 'text', text: opts.pollOutputs[idx] }] },
+            ],
+          };
+        }),
+        status: mock(async () => {
+          const type = opts.statusTypes[Math.min(statusIdx++, opts.statusTypes.length - 1)];
+          return { data: { 'test-session-001': { type } } };
+        }),
+        abort: mock(async () => {}),
+      },
+    };
+    const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
+    const tools = createCallFlowAgentTools({
+      client: client as unknown as import('../../types.js').SFlowClient,
+      backgroundTaskRegistry,
+      backgroundTaskCounter: { value: 0 },
+      agentModelMap: { 'build-executor': 'provider/test-model' } as AgentModelMap,
+      configOverrides: {
+        'build-executor': { fallback_models: opts.fallbackModels ?? ['provider/alt-model'] },
+      },
+      sessionLabelPrefix: 'sFlow',
+      validateAgent: async () => null,
+      workflowName: 'sFlow',
+    });
+    return { tools, backgroundTaskRegistry, promptCalls };
+  }
+
+  /** 启动 async 任务并 block 拉取一次结果 */
+  async function runOnce(t: ReturnType<typeof createRepollTools>) {
+    const startResult = await t.tools.call_flow_agent.execute(
+      { description: 't', prompt: 'work', subagent_type: 'build-executor', run_in_background: true },
+      { sessionID: 'parent', directory: '' },
+    );
+    const startData = JSON.parse(startResult.output);
+    const outResult = await t.tools.flowagent_output.execute(
+      { task_id: startData.task_id, block: true },
+      { sessionID: 'parent', directory: '' },
+    );
+    return { taskId: startData.task_id as string, outData: JSON.parse(outResult.output) };
+  }
+
+  it('1: 换模后 re-poll 会话 busy → 保持 running，新模型未被拉黑且不二次换模', async () => {
+    const t = createRepollTools({
+      pollOutputs: ['Error: internal provider failure (code: 500)'],
+      statusTypes: ['idle', 'busy'],
+    });
+    const { taskId } = await runOnce(t);
+
+    const entry = t.backgroundTaskRegistry.get(taskId);
+    if (!entry) throw new Error('task entry missing from registry');
+    expect(entry.status).toBe('running');
+    expect(isModelAvailable('provider/alt-model')).toBe(true);
+    // 首发 + 一次换模，无第二次换模
+    expect(t.promptCalls.length).toBe(2);
+  });
+
+  it('2: 换模后 re-poll 正常产出 → completed', async () => {
+    const t = createRepollTools({
+      pollOutputs: ['Error: internal provider failure (code: 500)', '[TASK_COMPLETE]\nDone'],
+      statusTypes: ['idle', 'idle'],
+    });
+    const { taskId } = await runOnce(t);
+
+    const entry = t.backgroundTaskRegistry.get(taskId);
+    if (!entry) throw new Error('task entry missing from registry');
+    expect(entry.status).toBe('completed');
+    expect(entry.result).toBe('[TASK_COMPLETE]\nDone');
+    expect(t.promptCalls.length).toBe(2);
+  });
+
+  it('3: 换模后 re-poll 仍返回错误码文本 → 继续换模（第三次 prompt）', async () => {
+    const t = createRepollTools({
+      pollOutputs: ['Error: internal provider failure (code: 500)', 'HTTP 500: internal error'],
+      statusTypes: ['idle', 'idle'],
+      // 链上仍有第二个未尝试模型：re-poll 仍为错误码文本时继续换模
+      fallbackModels: ['provider/alt-model', 'provider/alt-model-2'],
+    });
+    await runOnce(t);
+
+    expect(t.promptCalls.length).toBe(3);
+  });
+
+  it('4: running 条目保留换模后的 resolvedModel 与 attemptedModels（live registry 基线）', async () => {
+    const t = createRepollTools({
+      pollOutputs: ['Error: internal provider failure (code: 500)'],
+      statusTypes: ['idle', 'busy'],
+    });
+    const { taskId } = await runOnce(t);
+
+    const entry = t.backgroundTaskRegistry.get(taskId);
+    if (!entry) throw new Error('task entry missing from registry');
+    expect(entry.status).toBe('running');
+    expect(entry.resolvedModel).toBe('provider/alt-model');
+    expect(entry.attemptedModels).toContain('provider/alt-model');
+  });
+});
