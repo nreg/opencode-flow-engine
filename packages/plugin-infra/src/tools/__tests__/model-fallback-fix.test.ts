@@ -11,11 +11,20 @@
  * - P1-3: resolveModelWithFallback P1/P2/P7 分支接入黑名单检查
  */
 
-import { beforeEach, describe, expect, it, mock, afterEach, afterAll } from 'bun:test';
+import { beforeEach, describe, expect, it, mock, afterEach, afterAll, spyOn } from 'bun:test';
 import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
 import { createCallFlowAgentTools, resetRunningSubagentCounts, runWithModelFallback, createBackgroundTaskWatcher } from '../call-flow-agent.js';
 import { clearUnavailableModels, markModelUnavailable, isModelAvailable, getAlternativeModel, resolveModelWithFallback, TRANSIENT_COOLDOWN_TTL_MS, MIN_QUOTA_COOLDOWN_TTL_MS } from '../../agents/agent-builder.js';
 import { parseQuotaResetTime, classifyModelErrorByCode, hasRealOutput, hasStructuredReportEvidence } from '../../helpers/completion-detector.js';
+import { Logger } from '../../utils/logger.js';
+import {
+  resetModelAvailability,
+  refreshAvailableModels,
+  getAvailabilityState,
+  isModelKnown,
+  validateConfiguredModels,
+} from '../../agents/model-availability.js';
+import type { ProviderListClient, SFlowConfig } from '../../agents/model-availability.js';
 
 /** 临时把 Date.now 前进 offsetMs，返回恢复函数 */
 function advanceClock(offsetMs: number): () => void {
@@ -1756,5 +1765,135 @@ describe('FIX-P1-2: 换模后 re-poll 语义', () => {
     expect(entry.status).toBe('running');
     expect(entry.resolvedModel).toBe('provider/alt-model');
     expect(entry.attemptedModels).toContain('provider/alt-model');
+  });
+});
+
+// ─── FIX-P1-4: 启动期配置模型存在性校验（P1-4） ──────────────────────────────
+
+/** 构造一个 duck-typed provider.list client */
+function makeListClient(data: unknown): ProviderListClient {
+  return { provider: { list: mock(async () => ({ data })) } };
+}
+
+describe('FIX-P1-4: 配置模型存在性校验', () => {
+  let warnSpy: ReturnType<typeof spyOn> | undefined;
+
+  beforeEach(() => {
+    resetModelAvailability();
+    warnSpy = spyOn(Logger, 'warn').mockImplementation(async () => {});
+  });
+
+  afterEach(() => {
+    warnSpy?.mockRestore();
+  });
+
+  it('1: 未刷新时状态为 cold', () => {
+    expect(getAvailabilityState()).toBe('cold');
+  });
+
+  it('2: refresh 后 ready 且 isModelKnown 正确', async () => {
+    const client = makeListClient({ all: [{ id: 'p', models: { real: {} } }], connected: ['p'] });
+    const snap = await refreshAvailableModels(client);
+    expect(snap.state).toBe('ready');
+    expect(isModelKnown('p/real')).toBe(true);
+    expect(isModelKnown('p/nonexistent')).toBe(false);
+  });
+
+  it('3: provider.list 抛错 → failed 且不抛出', async () => {
+    const client: ProviderListClient = {
+      provider: { list: mock(async () => { throw new Error('boom'); }) },
+    };
+    let threw = false;
+    try {
+      await refreshAvailableModels(client);
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
+    expect(getAvailabilityState()).toBe('failed');
+    // 状态说明 warn 一条
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('4: all 为空 → cold', async () => {
+    const client = makeListClient({ all: [], connected: [] });
+    await refreshAvailableModels(client);
+    expect(getAvailabilityState()).toBe('cold');
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('5: 未知模型 / 未连接 provider 被 warn 并收集', async () => {
+    const client = makeListClient({
+      all: [
+        { id: 'p', models: { real: {} } },
+        { id: 'p2', models: { m: {} } },
+      ],
+      connected: ['p'],
+    });
+    const config: SFlowConfig = {
+      agents: { 'build-executor': { model: 'p/nonexistent', fallback_models: ['p2/m'] } },
+      modelProfiles: { deep: { model: 'p/real', fallback_models: ['p2/m'] } },
+    };
+    const result = await validateConfiguredModels(client, config);
+    expect(result.unknown).toContain('p/nonexistent');
+    expect(result.unconnected).toContain('p2/m');
+    // 按模型串去重：p2/m 在 agent 与 tier 两处出现，仅 warn 一次
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('p/nonexistent'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('p2/m'));
+    const unconnectedCalls = warnSpy.mock.calls.filter((c: unknown[]) =>
+      String(c[0]).includes('p2/m'),
+    );
+    expect(unconnectedCalls.length).toBe(1);
+  });
+
+  it('5b: 全部合法时两数组为空且无 warn', async () => {
+    const client = makeListClient({ all: [{ id: 'p', models: { real: {} } }], connected: ['p'] });
+    const config: SFlowConfig = {
+      agents: { 'build-executor': { model: 'p/real' } },
+    };
+    const result = await validateConfiguredModels(client, config);
+    expect(result.unknown).toEqual([]);
+    expect(result.unconnected).toEqual([]);
+    // 全部合法：无模型级 warn（refresh 为 ready，也不 warn 状态）
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('6: ready 状态下未知模型被标注 unverifiedModels（解析结果不变）', async () => {
+    const client = makeListClient({ all: [{ id: 'p', models: { real: {} } }], connected: ['p'] });
+    await refreshAvailableModels(client);
+    const result = resolveModelWithFallback('spec-writer', undefined, {}, undefined, {
+      modelProfiles: { deep: { model: 'p/typo', fallback_models: [] } },
+      activeWorkflow: 'sflow',
+    });
+    expect(result.model).toBe('p/typo');
+    expect(result.unverifiedModels).toContain('p/typo');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('p/typo'));
+  });
+
+  it('6b: cold 状态下不标注 unverifiedModels', async () => {
+    resetModelAvailability();
+    const result = resolveModelWithFallback('spec-writer', undefined, {}, undefined, {
+      modelProfiles: { deep: { model: 'p/typo', fallback_models: [] } },
+      activeWorkflow: 'sflow',
+    });
+    expect(result.unverifiedModels).toBeUndefined();
+  });
+
+  it('7: 启动期校验失败（provider.list 抛错）不抛出且状态 failed', async () => {
+    const client: ProviderListClient = {
+      provider: { list: mock(async () => { throw new Error('network down'); }) },
+    };
+    const config: SFlowConfig = { agents: { 'build-executor': { model: 'p/whatever' } } };
+    let threw = false;
+    let result: { unknown: string[]; unconnected: string[] } | undefined;
+    try {
+      result = await validateConfiguredModels(client, config);
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
+    expect(getAvailabilityState()).toBe('failed');
+    expect(result?.unknown).toEqual([]);
+    expect(result?.unconnected).toEqual([]);
   });
 });

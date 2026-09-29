@@ -51,6 +51,8 @@ import {
   agentOverridesFromConfig,
   mergeOverrides,
 } from './config-loader.js';
+import { Logger } from '../utils/logger.js';
+import { getAvailabilityState, isModelKnown } from './model-availability.js';
 
 /**
  * Agent mode registry — explicit mapping instead of static property on function
@@ -300,6 +302,13 @@ export interface ModelResolutionResult {
   model: string | undefined;
   provenance: ModelProvenance;
   fallbackAttempted?: string[];
+  /**
+   * P1-4：启动期与 provider 可用列表对账后，若最终 model 不在已知列表中且状态为 ready，
+   * 标注该模型。独立字段，不复用 fallbackAttempted（后者语义为"已尝试的降级链"，
+   * model-profiles.test.ts 对其有 toEqual 断言）。
+   * 本轮只 warn + 标注，不改变解析结果。
+   */
+  unverifiedModels?: string[];
 }
 
 /**
@@ -357,7 +366,7 @@ function tryFallbackChain(
  *
  * Provenance is tracked to help diagnose model selection issues.
  */
-export function resolveModelWithFallback(
+function resolveModelWithFallbackCore(
   name: BuiltinAgentName,
   model?: string,
   configOverrides?: AgentOverrides,
@@ -485,6 +494,46 @@ export function resolveModelWithFallback(
     provenance: 'unconfigured',
     fallbackAttempted: attempted.length > 0 ? attempted : undefined,
   };
+}
+
+/**
+ * 启动期模型配置存在性标注（P1-4）。
+ * 仅当 availability 状态为 'ready' 且最终 model 不在已知列表中时，标注 unverifiedModels 并 warn。
+ * 不改变解析结果（model / provenance / fallbackAttempted 语义完全不变）。
+ * 冷缓存 / 失败状态下静默跳过（不误报）。
+ */
+function annotateModelAvailability(result: ModelResolutionResult): ModelResolutionResult {
+  if (getAvailabilityState() !== 'ready') return result;
+  const model = result.model;
+  if (model === undefined) return result;
+  if (isModelKnown(model) !== false) return result;
+  void Logger.warn(`[model-availability] 配置的模型不在 provider 可用列表中: ${model}`);
+  return { ...result, unverifiedModels: [model] };
+}
+
+/**
+ * Resolve model with fallback chain and provenance tracking (P1-4: 薄包装 + 标注).
+ *
+ * 对外导出签名保持不变——原函数体整体下沉为 resolveModelWithFallbackCore（内部 7 处 return 零改动），
+ * 此层仅做 unverifiedModels 标注。详见 annotateModelAvailability。
+ */
+export function resolveModelWithFallback(
+  name: BuiltinAgentName,
+  model?: string,
+  configOverrides?: AgentOverrides,
+  overrides?: AgentOverrides,
+  profileOptions?: ProfileResolutionOptions,
+  modelType?: string,
+): ModelResolutionResult {
+  const result = resolveModelWithFallbackCore(
+    name,
+    model,
+    configOverrides,
+    overrides,
+    profileOptions,
+    modelType,
+  );
+  return annotateModelAvailability(result);
 }
 
 /**

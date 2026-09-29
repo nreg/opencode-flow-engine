@@ -24,6 +24,7 @@ import { createIFlowRouterTool } from './tools/iflow-router.js';
 import { createCallFlowAgentTools } from './tools/call-flow-agent.js';
 
 import { loadCascadedSFlowConfig, agentOverridesFromConfig } from './agents/config-loader.js';
+import { validateConfiguredModels } from './agents/model-availability.js';
 import { createHookComposer } from './hooks/hook-composer.js';
 import { createSkillLoader } from './features/skill-loader.js';
 import type { HookContext } from './hooks/types.js';
@@ -466,6 +467,13 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
       // 初始化 Logger 日志路径（确保日志写入正确的项目目录）
       Logger.initialize(workDir);
       const sflowClient = input.client;
+
+      // P1-4：启动期与 provider 实际可用列表对账（失败不阻断插件启动）
+      try {
+        await validateConfiguredModels(sflowClient as never, cascadedConfig);
+      } catch (err) {
+        void Logger.warn(`[model-availability] 启动期模型校验失败: ${err instanceof Error ? err.message : String(err)}`);
+      }
 
       const hookComposer = createHookComposer();
       const skillLoader = await createSkillLoader();
