@@ -30,6 +30,8 @@ export interface BackgroundTaskEntry {
   changeDir?: string;
   /** P1-5: resolved model used for this task (for tracing and retry consistency) */
   resolvedModel?: string;
+  /** P1-2: original prompt sent to the subagent (carried for async fallback re-send, mirroring sync path) */
+  prompt?: string;
   /** P1-5: original model_type parameter (for tracing) */
   modelType?: string;
   /** Wave 2: models attempted across the fallback chain (for tracing) */

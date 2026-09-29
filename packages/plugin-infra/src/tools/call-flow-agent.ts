@@ -220,11 +220,15 @@ const NO_VALID_OUTPUT_DETAIL =
 /**
  * P1-3：用户/系统取消（Abort）对应的 assistant 错误名白名单。
  *
- * 错误名核实结论（ADR-4，已在依赖中核实）：OpenCode SDK v1 中
- * `AssistantMessage.info.error.name` 的合法枚举只有五个字面量：
+ * 错误名核实结论（ADR-4，已在依赖中核实）：OpenCode SDK v2
+ *（`node_modules/@opencode-ai/sdk/dist/v2/gen/types.gen.d.ts:221`）中
+ * `AssistantMessage.info.error.name` 的合法联合枚举为 8 个字面量：
  * `ProviderAuthError` / `UnknownError` / `MessageOutputLengthError` /
- * `MessageAbortedError` / `APIError`。与"取消/中止"对应的是 `MessageAbortedError`；
- * 审查报告提及的 `OutputAbortedError` 在本 SDK 中不存在，故不纳入。
+ * `MessageAbortedError` / `StructuredOutputError` / `ContextOverflowError` /
+ * `ContentFilterError` / `ApiError`。
+ * 与"取消/中止"对应的是 `MessageAbortedError`（注意：此前提及的 `APIError` 实际拼写应为
+ * `ApiError`；审查报告提到的 `OutputAbortedError` 在本 SDK 中并不存在，故不纳入）。
+ * 下方 D-6 检查所用的 `ContextOverflowError` 即出自此枚举，属合法错误名（非死代码，不可删除）。
  * `AbortError` 作为兼容项保留（OpenCode 包装层/未来版本可能注入标准 AbortError）。
  *
  * 比对方式必须是**精确相等**（禁止 `/abort/i` 之类的包含式匹配与错误文案正则，C-6），
@@ -530,12 +534,13 @@ async function tryAsyncModelFallback(params: {
   const nextParsed = parseModelString(next);
   if (!nextParsed) return { retried: false };
 
-  // D-5：同 session 换模型重 prompt，声明"接管并继续"
+  // D-5/P1-2：与 sync 路径统一——换模型重 prompt 原样重发 basePrompt（b10922e：重试原样重发，
+  // 上下文由 session 承载，不含"接管轮次"声明）。basePrompt 取自 registry 条目上保存的原始 prompt。
   const send = await sendPromptOnce(client, {
     sessionID: task.sessionID,
     agent: task.subagentType,
     text: buildAttemptPrompt(
-      '前次模型调用失败，请接管并继续任务。前次模型未产生有效输出，请从当前 session 上下文接管并继续，不要重复已完成的工作。',
+      registry.get(taskId)?.prompt ?? '',
       attempted.length,
       task.resolvedModel,
     ),
@@ -698,6 +703,8 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
       if (!currentTask || currentTask.status !== 'running' || currentTask._processing) {
         continue;
       }
+      // P1-3: 跟踪故障转移过程中的错误分类，供耗尽路径写出结构化错误（与 pollAndComplete 对齐）
+      let identifiedErrorKind: 'quota' | 'model' | null = null;
 
       // Set processing flag
       currentTask._processing = true;
@@ -734,10 +741,12 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
 
           // Wave 2 Task 5：尝试模型故障转移（换模型重 prompt），直至成功/耗尽。
           // 设计：保持 running、不释放并发槽位；耗尽后才走原错误路径（D-4 未命中前不宣告失败）。
+          identifiedErrorKind = 'model';
           let fb = { retried: (await attemptWatcherFallback(taskId, task, { kind: 'error', resetAt: null })) } as { retried: boolean };
           // 使用 live registry 条目而非 L483 的过期 task 快照，避免覆盖故障转移已写入的 resolvedModel/attemptedModels
           const baseEntry = registry.get(taskId) ?? task;
           let fallbackCompletedOutput: string | null = null;
+          let fallbackNoValidOutput: string | null = null;
           let safety = 0;
           while (fb.retried && safety <= MAX_MODEL_RETRIES + 2) {
             safety++;
@@ -757,9 +766,10 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
               break;
             }
             if (reProbe !== null) {
-              // NEW-P0-B: 换模型后的回显校验——错误文本/配额报错不算成功，继续故障转移
+              // NEW-P0-B: 换模型后的错误码校验——错误文本/配额报错不算成功，继续故障转移
               const reFailure = classifyAsyncFailure(reProbe as string);
               if (reFailure) {
+                identifiedErrorKind = reFailure.kind === 'quota' ? 'quota' : 'model';
                 const retried = await attemptWatcherFallback(taskId, task, reFailure);
                 if (!retried) {
                   fb = { retried: false } as { retried: false };
@@ -767,12 +777,31 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
                 }
                 continue;
               }
+              // P0-1: 换模后 re-poll 产出正向判定（对齐 sync 路径）
+              // 回显：新模型原样回显所发 basePrompt → 视为未完成，继续故障转移（既有 model-failure 语义）
+              const echoBaseline = task.prompt ?? '';
+              if (echoBaseline && (reProbe as string).trim() === echoBaseline.trim()) {
+                identifiedErrorKind = 'model';
+                const retried = await attemptWatcherFallback(taskId, task, { kind: 'error', resetAt: null });
+                if (!retried) {
+                  fb = { retried: false } as { retried: false };
+                  break;
+                }
+                continue;
+              }
+              // 无机器可读错误码 且 无完成信号 → no-valid-output 失败终结（不拉黑/不换模/不重发，原文保留）
+              if (!hasRealOutput(reProbe as string)) {
+                fallbackNoValidOutput = reProbe as string;
+                fb = { retried: false } as { retried: false };
+                break;
+              }
               // 换模型后已完成
               fallbackCompletedOutput = reProbe as string;
               fb = { retried: false } as { retried: false };
               break;
             }
             fb = { retried: (await attemptWatcherFallback(taskId, task, { kind: 'error', resetAt: null })) } as { retried: boolean };
+            identifiedErrorKind = 'model';
           }
 
           if (fallbackCompletedOutput !== null) {
@@ -825,6 +854,36 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
             continue;
           }
 
+          if (fallbackNoValidOutput !== null) {
+            // P0-1：换模后 re-poll 无完成信号 → no-valid-output 失败终结（不拉黑/不换模/不重发，原文保留）。
+            // F-2 防御：处理期间状态可能已被其他路径改写（如并发完成），此时不覆盖、直接跳过。
+            const liveBeforeNoSignal = registry.get(taskId);
+            if (liveBeforeNoSignal && liveBeforeNoSignal.status !== 'running') {
+              liveBeforeNoSignal._processing = false;
+              registry.set(taskId, liveBeforeNoSignal);
+              continue;
+            }
+            const now = Date.now();
+            const baseEntryNoSignal = liveBeforeNoSignal ?? baseEntry;
+            const noSignalEntry: BackgroundTaskEntry = {
+              ...baseEntryNoSignal,
+              status: 'error',
+              result: fallbackNoValidOutput,
+              error: NO_VALID_OUTPUT_DETAIL,
+              completedAt: now,
+              slotReleased: baseEntryNoSignal.slotReleased ?? false,
+              _errorCount: 0,
+            };
+            registry.set(taskId, noSignalEntry);
+            if (!noSignalEntry.slotReleased) {
+              releaseSubagentSlot(task.subagentType);
+              noSignalEntry.slotReleased = true;
+              registry.set(taskId, noSignalEntry);
+            }
+            taskModelAttempts.delete(taskId);
+            continue;
+          }
+
           if (fb.retried && safety <= MAX_MODEL_RETRIES + 2) {
             // 安全上限内仍 running：保持任务运行，交给后续 tick（仅清除 _processing，不覆盖故障转移已更新的 registry）
             const live = registry.get(taskId);
@@ -838,10 +897,14 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
           // 故障转移耗尽（safety 触顶 或 fb.retried === false，且未转 completed）→ 原错误路径
           const now = Date.now();
           const baseEntryForError = registry.get(taskId) ?? task;
+          const attemptedModelsForErr = baseEntryForError.attemptedModels ?? [];
+          const identifiedNote = identifiedErrorKind
+            ? `async output identified as ${identifiedErrorKind === 'quota' ? 'quota/rate-limit' : 'model'} error; model fallback exhausted`
+            : 'Task failed after max retries';
           const updated: BackgroundTaskEntry = {
             ...baseEntryForError,
             status: 'error',
-            error: 'Task failed after max retries',
+            error: `${identifiedNote} (attempted: ${attemptedModelsForErr.join(', ') || 'none'})`,
             completedAt: now,
             slotReleased: baseEntryForError.slotReleased ?? false,
           };
@@ -1446,6 +1509,7 @@ export function createCallFlowAgentTools(
             changeDir,
             resolvedModel: subagentModel,
             modelType: model_type as string | undefined,
+            prompt: finalPrompt,
           });
           // Wave 2 Task 5：记录已尝试模型，供故障转移终止判定使用
           taskModelAttempts.set(taskId, [subagentModel]);
@@ -1813,7 +1877,7 @@ export function createCallFlowAgentTools(
           // Wave 2 Task 5：尝试模型故障转移（换模型重 prompt），循环直至成功/耗尽。
           // 设计：保持 running、不释放并发槽位；耗尽后才走原错误路径（D-4 未命中前不宣告失败）。
           // P1-2：output !== null（poll 已成功）时不触发 fallback——避免误拉黑健康模型
-          // 并向同一 session 重复注入接管 prompt（对照 watcher 路径的 probeResult === null 守卫）。
+          // 并向同一 session 重复注入原始 prompt（对照 watcher 路径的 probeResult === null 守卫）。
           let fb: { retried: true; nextModel: string } | { retried: false } = { retried: false };
           // R3-P2-3: 第三路径（pollAndComplete 非 null 输出）接入错误/配额识别——
           // 与 sync 路径（runWithModelFallback）及 async watcher 路径对齐：
@@ -1821,6 +1885,8 @@ export function createCallFlowAgentTools(
           // P1-2 守卫保留：正常产出（含 completion signal）仍不触发 fallback。
           let identifiedErrorKind: 'quota' | 'model' | null = null;
           let activeQuota: { resetAt: number | null } | null = null;
+          // P0-1: 换模后 re-poll 无完成信号时的产出原文（no-valid-output 失败终结，不拉黑/不换模/不重发）
+          let noValidOutput: string | null = null;
           if (typeof output === 'string') {
             // 错误码驱动分类（唯一判据）：错误码报错不算成功 → 换模型重 prompt 或结构化错误。
             // 无码报错无法分类是可接受的已知限制（文本模式兜底已删除）。
@@ -1908,7 +1974,7 @@ export function createCallFlowAgentTools(
               break;
             }
             if (rePoll !== null) {
-              // R3-P2-3: 换模后的 re-poll 输出同样做错误码识别（唯一判据）——错误码报错不算成功，继续换模
+              // R3-P2-3/P0-1: 换模后的 re-poll 输出做错误码识别（唯一判据），并补齐产出正向判定（对齐 sync 路径）
               const reOutput = rePoll as string;
               const reCode = classifyModelErrorByCode(reOutput);
               if (reCode) {
@@ -1918,9 +1984,23 @@ export function createCallFlowAgentTools(
                   : null;
                 output = null;
               } else {
-                output = reOutput;
-                fb = { retried: false } as { retried: false };
-                break;
+                // 回显：新模型原样回显所发 basePrompt → 视为未完成，继续故障转移（既有 model-failure 语义）
+                const echoBaseline = task.prompt ?? '';
+                if (echoBaseline && reOutput.trim() === echoBaseline.trim()) {
+                  identifiedErrorKind = 'model';
+                  output = null;
+                  // 不 break：继续 while 循环触发下一次 tryAsyncModelFallback
+                } else if (!hasRealOutput(reOutput)) {
+                  // 无机器可读错误码 且 无完成信号 → no-valid-output 失败终结（不拉黑/不换模/不重发，原文保留）
+                  noValidOutput = reOutput;
+                  output = reOutput;
+                  fb = { retried: false } as { retried: false };
+                  break;
+                } else {
+                  output = reOutput;
+                  fb = { retried: false } as { retried: false };
+                  break;
+                }
               }
             } else {
               output = null;
@@ -1951,6 +2031,59 @@ export function createCallFlowAgentTools(
           // 故障转移后使用最新 registry 快照（含新 resolvedModel），再走成功/错误路径
           const latestEntry = backgroundTaskRegistry.get(task_id);
           if (latestEntry) task = latestEntry;
+
+          if (noValidOutput) {
+            // P0-1：换模后 re-poll 无完成信号 → no-valid-output 失败终结（不拉黑/不换模/不重发，原文保留）
+            const live = backgroundTaskRegistry.get(task_id) ?? task;
+            const noSignalEntry: BackgroundTaskEntry = {
+              ...live,
+              status: 'error',
+              result: noValidOutput,
+              error: NO_VALID_OUTPUT_DETAIL,
+              completedAt: now,
+              slotReleased: live.slotReleased ?? false,
+              _errorCount: 0,
+            };
+            backgroundTaskRegistry.set(task_id, noSignalEntry);
+
+            if (!noSignalEntry.slotReleased) {
+              releaseSubagentSlot(task.subagentType);
+              noSignalEntry.slotReleased = true;
+              backgroundTaskRegistry.set(task_id, noSignalEntry);
+            }
+
+            try {
+              const nm = createNotificationManager({ changeDir });
+              await nm.writeNotification({
+                type: 'async_error',
+                subagent: task.subagentType,
+                task_id,
+                session_id: task.sessionID,
+                summary: `Task output has no completion signal; treated as failure (raw output preserved)`,
+              });
+            } catch (err) {
+              Logger.warn(`[CallFlowAgent] 异步模式写入错误通知失败: ${err instanceof Error ? err.message : String(err)}`);
+            }
+
+            try {
+              const asyncStore = createSubagentStore({ changeDir });
+              const agents = await asyncStore.listAgents();
+              const matchedAgent = agents.find((a) => a.session_id === task.sessionID);
+              if (matchedAgent) {
+                await asyncStore.updateOutput(matchedAgent.agent_id, noValidOutput);
+                await asyncStore.appendEvent(matchedAgent.agent_id, {
+                  timestamp: new Date().toISOString(),
+                  event_type: 'error',
+                  detail: `Async task ${task_id} failed: ${NO_VALID_OUTPUT_DETAIL}`,
+                });
+              }
+            } catch (err) {
+              Logger.warn(`[CallFlowAgent] 异步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
+            }
+
+            taskModelAttempts.delete(task_id);
+            return noSignalEntry;
+          }
 
           let updated: BackgroundTaskEntry;
           if (output === null) {

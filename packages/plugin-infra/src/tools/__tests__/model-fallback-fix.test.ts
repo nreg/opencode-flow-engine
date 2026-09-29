@@ -824,6 +824,7 @@ describe('NEW-P0-B: async watcher 路径配额错误识别与换模', () => {
       createdAt: Date.now(),
       changeDir: '',
       resolvedModel: 'provider/quota-primary',
+      prompt: 'original-task-prompt',
     });
     const watcher = createBackgroundTaskWatcher({
       client: client as never,
@@ -841,9 +842,9 @@ describe('NEW-P0-B: async watcher 路径配额错误识别与换模', () => {
     expect(task.status).not.toBe('completed');
     // 换模：resolvedModel 变为 fallback 链中的模型
     expect(task.resolvedModel).toBe('provider/watch-fallback');
-    // 发送了接管 prompt（故障转移重派调用）
+    // 发送了原样重发 prompt（P1-2：与 sync 统一，不再发送"接管"声明）
     expect(promptCalls.length).toBeGreaterThanOrEqual(1);
-    expect(JSON.stringify(promptCalls[0]?.body ?? {})).toContain('接管');
+    expect(JSON.stringify(promptCalls[0]?.body ?? {})).toContain('original-task-prompt');
     // 原模型被拉黑且 TTL 为长冷却（5min+1s 后仍 blocked）
     expect(isModelAvailable('provider/quota-primary')).toBe(false);
     const restore = advanceClock(TRANSIENT_COOLDOWN_TTL_MS + 1000);
@@ -879,6 +880,120 @@ describe('NEW-P0-B: async watcher 路径配额错误识别与换模', () => {
     const task = registry.get('watch-task-2')!;
     expect(task.status).not.toBe('completed');
     expect(task.resolvedModel).toBe('provider/user-chain-fallback');
+  });
+
+  /**
+   * 构造可驱动 watcher「换模后 re-probe」分支的 client：
+   * - 首次 poll：status=retry(attempt>=5) → pollSessionCompletion 返回 null → 触发初始故障转移
+   * - 换模后 re-probe：status=idle → pollSessionCompletion 返回 messages 末条 assistant 文本
+   * 用于复现 P0 异步 re-poll 绕过产出正向判定的 bug。
+   */
+  function createWatcherClientForReProbe(opts: {
+    probeOutputs: string[];
+    statusTypes: Array<'idle' | 'retry'>;
+    attempts?: number[];
+  }) {
+    let msgIdx = 0;
+    let statusIdx = 0;
+    const promptCalls: Array<{ id: string; body: Record<string, unknown> }> = [];
+    return {
+      promptCalls,
+      client: {
+        session: {
+          create: mock(async () => ({ data: { id: 'watch-session' } })),
+          prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+            promptCalls.push({ id: args.path.id, body: args.body });
+          }),
+          messages: mock(async () => {
+            const output = opts.probeOutputs[Math.min(msgIdx, opts.probeOutputs.length - 1)];
+            msgIdx++;
+            return {
+              data: [
+                { parts: [{ type: 'text', text: 'user prompt' }] },
+                { info: { role: 'assistant' }, parts: [{ type: 'text', text: output }] },
+              ],
+            };
+          }),
+          status: mock(async () => {
+            const type = opts.statusTypes[Math.min(statusIdx, opts.statusTypes.length - 1)];
+            const attempt = opts.attempts?.[Math.min(statusIdx, opts.attempts.length - 1)] ?? 5;
+            statusIdx++;
+            return { data: { 'watch-session': { type, attempt } } };
+          }),
+          abort: mock(async () => {}),
+        },
+      },
+    };
+  }
+
+  it('P0: 换模后 re-probe 返回无码错误文本 → no-valid-output 失败终结且不再换模', async () => {
+    const { client, promptCalls } = createWatcherClientForReProbe({
+      probeOutputs: ['Service overloaded, please try again later'],
+      statusTypes: ['retry', 'idle'],
+      attempts: [5, 0],
+    });
+    const registry: BackgroundTaskRegistry = new Map();
+    registry.set('watch-task-ns', {
+      sessionID: 'watch-session',
+      subagentType: 'build-executor',
+      status: 'running',
+      createdAt: Date.now(),
+      changeDir: '',
+      resolvedModel: 'provider/watch-primary',
+      prompt: 'original-task-prompt',
+    });
+    const watcher = createBackgroundTaskWatcher({
+      client: client as never,
+      registry,
+      pollIntervalMs: 20,
+      extraFallbacks: ['provider/watch-fallback'],
+    });
+    watcher.start();
+    await waitFor(() => registry.get('watch-task-ns')?.status === 'error');
+    watcher.stop();
+
+    const task = registry.get('watch-task-ns');
+    if (!task) throw new Error('task entry missing from registry');
+    expect(task.status).toBe('error');
+    expect(task.result).toBe('Service overloaded, please try again later');
+    expect(task.error).toContain('no completion signal');
+    // 仅一次换模（初始 fallback 的 prompt 调用），no-valid-output 不再换模
+    expect(promptCalls.length).toBe(1);
+    // 换模目标模型未被拉黑
+    expect(isModelAvailable('provider/watch-fallback')).toBe(true);
+  });
+
+  it('P0: 换模后 re-probe 返回正常产出 → completed（不误杀真实产出）', async () => {
+    const { client, promptCalls } = createWatcherClientForReProbe({
+      probeOutputs: ['## Wave 1 Batch 1.1 完成报告\n\n### 改动文件清单'],
+      statusTypes: ['retry', 'idle'],
+      attempts: [5, 0],
+    });
+    const registry: BackgroundTaskRegistry = new Map();
+    registry.set('watch-task-ok', {
+      sessionID: 'watch-session',
+      subagentType: 'build-executor',
+      status: 'running',
+      createdAt: Date.now(),
+      changeDir: '',
+      resolvedModel: 'provider/watch-primary',
+      prompt: 'original-task-prompt',
+    });
+    const watcher = createBackgroundTaskWatcher({
+      client: client as never,
+      registry,
+      pollIntervalMs: 20,
+      extraFallbacks: ['provider/watch-fallback'],
+    });
+    watcher.start();
+    await waitFor(() => registry.get('watch-task-ok')?.status === 'completed');
+    watcher.stop();
+
+    const task = registry.get('watch-task-ok');
+    if (!task) throw new Error('task entry missing from registry');
+    expect(task.status).toBe('completed');
+    expect(task.result).toBe('## Wave 1 Batch 1.1 完成报告\n\n### 改动文件清单');
+    expect(promptCalls.length).toBe(1);
   });
 });
 
@@ -1765,6 +1880,38 @@ describe('FIX-P1-2: 换模后 re-poll 语义', () => {
     expect(entry.status).toBe('running');
     expect(entry.resolvedModel).toBe('provider/alt-model');
     expect(entry.attemptedModels).toContain('provider/alt-model');
+  });
+
+  it('5: 换模后 re-poll 返回无码错误文本 → no-valid-output 失败终结且不再换模（P0 补齐异步 re-poll 正向判定）', async () => {
+    const t = createRepollTools({
+      pollOutputs: ['Error: internal provider failure (code: 500)', 'Service overloaded, please try again later'],
+      statusTypes: ['idle', 'idle'],
+    });
+    const { taskId } = await runOnce(t);
+
+    const entry = t.backgroundTaskRegistry.get(taskId);
+    if (!entry) throw new Error('task entry missing from registry');
+    expect(entry.status).toBe('error');
+    expect(entry.result).toBe('Service overloaded, please try again later');
+    expect(entry.error).toContain('no completion signal');
+    // 仅首发 + 一次换模（no-valid-output 不再触发第二次换模）
+    expect(t.promptCalls.length).toBe(2);
+    // 未拉黑换模目标模型
+    expect(isModelAvailable('provider/alt-model')).toBe(true);
+  });
+
+  it('6: 换模后 re-poll 返回正常产出 → completed（P0 正向判定不误杀真实产出）', async () => {
+    const t = createRepollTools({
+      pollOutputs: ['Error: internal provider failure (code: 500)', '## Wave 1 Batch 1.1 完成报告\n\n### 改动文件清单'],
+      statusTypes: ['idle', 'idle'],
+    });
+    const { taskId } = await runOnce(t);
+
+    const entry = t.backgroundTaskRegistry.get(taskId);
+    if (!entry) throw new Error('task entry missing from registry');
+    expect(entry.status).toBe('completed');
+    expect(entry.result).toBe('## Wave 1 Batch 1.1 完成报告\n\n### 改动文件清单');
+    expect(t.promptCalls.length).toBe(2);
   });
 });
 
