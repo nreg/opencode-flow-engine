@@ -2067,6 +2067,105 @@ describe('FIX-P1-4: 配置模型存在性校验', () => {
     expect(result?.unknown).toEqual([]);
     expect(result?.unconnected).toEqual([]);
   });
+
+  // ─── P0: provider.list 挂起超时保护（OpenCode 启动卡死根因） ───────────────
+  // provider.list() 是 HTTP 调用：宿主未就绪时永不 settle，无超时会阻塞插件
+  // server() 返回导致 OpenCode 黑屏卡死；try/catch 无法解救永不 settle 的 promise。
+
+  /** 挂起 client：provider.list() 永不 settle */
+  function makeHangingClient(): ProviderListClient {
+    return { provider: { list: mock(() => new Promise<never>(() => {})) } };
+  }
+
+  /** 可控 fake timer：注册的定时器不自动触发，需手动 fire；可观测是否被清理 */
+  function installFakeTimers(): {
+    pending: () => Array<{ ms: number; cleared: boolean }>;
+    fireFirstPending: () => void;
+    restore: () => void;
+  } {
+    type Entry = { cb: () => void; ms: number; cleared: boolean };
+    const entries: Entry[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    const realClearTimeout = globalThis.clearTimeout;
+    globalThis.setTimeout = ((cb: () => void, ms: number) => {
+      const entry: Entry = { cb, ms, cleared: false };
+      entries.push(entry);
+      return entry as unknown as ReturnType<typeof setTimeout>;
+    }) as unknown as typeof setTimeout;
+    globalThis.clearTimeout = ((handle: unknown) => {
+      const entry = entries.find((e) => e === handle);
+      if (entry) entry.cleared = true;
+    }) as unknown as typeof clearTimeout;
+    return {
+      pending: () => entries,
+      fireFirstPending: () => {
+        const entry = entries.find((e) => !e.cleared);
+        if (entry) entry.cb();
+      },
+      restore: () => {
+        globalThis.setTimeout = realSetTimeout;
+        globalThis.clearTimeout = realClearTimeout;
+      },
+    };
+  }
+
+  it('8: provider.list 永不 settle → 超时后 failed、不抛出、warn 一次', async () => {
+    const timers = installFakeTimers();
+    try {
+      const client = makeHangingClient();
+      const config: SFlowConfig = { agents: { 'build-executor': { model: 'p/whatever' } } };
+      const pending = validateConfiguredModels(client, config);
+      // 未触发超时前：3s 定时器已注册，promise 仍挂起
+      await Promise.resolve();
+      expect(timers.pending()).toHaveLength(1);
+      expect(timers.pending()[0].ms).toBe(3000);
+      // 手动推进到超时点
+      timers.fireFirstPending();
+      let threw = false;
+      try {
+        await pending;
+      } catch {
+        threw = true;
+      }
+      expect(threw).toBe(false);
+      expect(getAvailabilityState()).toBe('failed');
+      // failed 状态说明只 warn 一次（warnStatusOnce）
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      timers.restore();
+    }
+  });
+
+  it('9: provider.list 正常返回 → 状态 ready 且行为不变（超时定时器被清理）', async () => {
+    const timers = installFakeTimers();
+    try {
+      const client = makeListClient({ all: [{ id: 'p', models: { real: {} } }], connected: ['p'] });
+      const config: SFlowConfig = { agents: { 'build-executor': { model: 'p/real' } } };
+      const result = await validateConfiguredModels(client, config);
+      expect(getAvailabilityState()).toBe('ready');
+      expect(result.unknown).toEqual([]);
+      expect(result.unconnected).toEqual([]);
+      // promise 先 settle：定时器必须被清理，无泄漏
+      expect(timers.pending().filter((e) => !e.cleared)).toHaveLength(0);
+    } finally {
+      timers.restore();
+    }
+  });
+
+  it('10: 超时路径同样清理定时器（无泄漏）', async () => {
+    const timers = installFakeTimers();
+    try {
+      const client = makeHangingClient();
+      const pending = refreshAvailableModels(client);
+      await Promise.resolve();
+      timers.fireFirstPending();
+      const snap = await pending;
+      expect(snap.state).toBe('failed');
+      expect(timers.pending().every((e) => e.cleared)).toBe(true);
+    } finally {
+      timers.restore();
+    }
+  });
 });
 
 // ─── R3-fix P2: combined 工厂补接启动期模型可用性校验 ──────────────────────────

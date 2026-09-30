@@ -34,6 +34,22 @@ let connectedProviders: Set<string> = new Set();
 // 状态说明（cold/failed）只 warn 一次，避免重复刷屏；进入 ready 后重置以便后续失败可再次提示
 let statusWarnEmitted = false;
 
+// ─── provider.list 超时保护 ──────────────────────────────────────────────────
+// provider.list() 是 HTTP API 调用：OpenCode 服务器尚未就绪时可能长时间挂起，
+// 不设超时会阻塞插件 server 函数返回，导致宿主启动卡死。超时按 'failed' 处理。
+const PROVIDER_LIST_TIMEOUT_MS = 3_000;
+
+/** 给 promise 附加超时；无论先 settle 的是哪一方，都清理定时器避免泄漏 */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 function snapshot(): ModelAvailabilitySnapshot {
   return {
     state: availabilityState,
@@ -58,13 +74,17 @@ function warnStatusOnce(): void {
 
 /**
  * 拉取 provider 可用模型集合并刷新状态机。
- * MUST NOT 抛出：任何异常（网络/解析）都被捕获、置 'failed' 并 warn。
+ * MUST NOT 抛出：任何异常（网络/解析/超时）都被捕获、置 'failed' 并 warn。
  */
 export async function refreshAvailableModels(
   client: ProviderListClient,
 ): Promise<ModelAvailabilitySnapshot> {
   try {
-    const raw = await client.provider.list();
+    const raw = await withTimeout(
+      client.provider.list(),
+      PROVIDER_LIST_TIMEOUT_MS,
+      'provider.list',
+    );
     const data =
       raw && typeof raw === 'object' && 'data' in raw
         ? (raw as { data?: unknown }).data
