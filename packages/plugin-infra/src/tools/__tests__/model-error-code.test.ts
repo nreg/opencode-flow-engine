@@ -16,10 +16,24 @@ import { createCallFlowAgentTools, resetRunningSubagentCounts, runWithModelFallb
 import { clearUnavailableModels, isModelAvailable, TRANSIENT_COOLDOWN_TTL_MS } from '../../agents/agent-builder.js';
 import { classifyModelErrorByCode } from '../../helpers/completion-detector.js';
 
-/** 真实事故样例：iFlow 子代理英文配额报文（原文，无错误码） */
+/**
+ * NP-2（对齐 56aa628 修复范式）：配额重置时间必须相对 Date.now() 生成，绝不硬编码
+ * 绝对日期——markModelUnavailable 对「resetAt 已过期」有蓄意语义（R3-P2-2：重置
+ * 时刻已过 → 模型可用，不拉黑），硬编码的未来日期一旦过期，全部长冷却断言
+ * 必失败（时间炸弹）。此处固定为「当前 + 2 天」，安全低于 7 天上限；
+ * 规整到整秒，与解析器（仅精确到秒）严格可逆。
+ */
+const QUOTA_RESET_AT = new Date(Math.ceil((Date.now() + 2 * 24 * 3600_000) / 1000) * 1000);
+const formatResetTime = (d: Date): string => {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+    `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
+
+/** 真实事故样例：iFlow 子代理英文配额报文（原文，无错误码；重置时间为相对未来） */
 const REAL_QUOTA_SAMPLE =
   'You have used up your free quota for the current cycle (used 10083874 tokens). ' +
-  'Your quota will automatically reset at 2026-09-30 00:00:00. ' +
+  `Your quota will automatically reset at ${formatResetTime(QUOTA_RESET_AT)}. ` +
   'For a higher quota, please complete real-name verification.';
 
 /** 行首前缀码形态（402:）的同一样例：错误码驱动分类的唯一可靠形态 */
@@ -53,8 +67,8 @@ describe('classifyModelErrorByCode: 错误码驱动分类', () => {
     const info = classifyModelErrorByCode(CODED_QUOTA_SAMPLE);
     expect(info).not.toBeNull();
     expect(info!.kind).toBe('non-transient');
-    // "2026-09-30 00:00:00" 无时区标记 → 按本地时间解释
-    expect(info!.resetAt).toBe(new Date(2026, 8, 30, 0, 0, 0).getTime());
+    // 无时区标记的 "YYYY-MM-DD HH:MM:SS" → 按本地时间解释，与生成时刻严格相等
+    expect(info!.resetAt).toBe(QUOTA_RESET_AT.getTime());
   });
 
   it('行首前缀码：401：Token refresh failed → non-transient（用户真实样例）', () => {
