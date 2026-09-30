@@ -7,12 +7,24 @@ import {
   resolveModelWithFallback,
   clearUnavailableModels,
   markModelUnavailable,
+  isModelAvailable,
   AGENT_PROFILES,
 } from '../agents/agent-builder.js';
 import type { ModelProvenance, AGENT_PROFILES_TYPE } from '../agents/agent-builder.js';
 import {
 } from '../agents/config-loader.js';
 import type { SFlowConfig, ModelProfileConfig } from '../agents/config-loader.js';
+import {
+  getAvailabilityState,
+  refreshAvailableModels,
+  resetModelAvailability,
+} from '../agents/model-availability.js';
+import type { ProviderListClient } from '../agents/model-availability.js';
+import {
+  createFallbackState,
+  getNextCandidate,
+  resetAvailabilitySkipWarnFlag,
+} from '../helpers/fallback-state.js';
 
 // ─── Task 4.1: ModelProfileConfig interface ──────────────────────────────────
 
@@ -944,5 +956,65 @@ describe('resolveModelWithFallback — IFlow profile support', () => {
     // iFlow is not in AGENT_PROFILES → profile branch bypassed; no model configured → unconfigured (Wave 2, no built-in default)
     expect(result.model).toBeUndefined();
     expect(result.provenance).toBe('unconfigured');
+  });
+});
+
+// ─── FIX-P2-2 (Wave 3): 可用性状态机接入换模判定（冷缓存 protection） ─────────
+// omo 参考：model-resolution-pipeline.ts:121-130 的 {skipped:true} 信号——
+// 缓存未就绪（cold）或查询失败（failed）时可用性快照不可信，getNextCandidate
+// 跳过黑名单检查直接沿用户配置链取候选，并置位 availabilitySkipped 标注；
+// state=ready 时走正常黑名单过滤、不置标记。
+
+describe('FIX-P2-2: 冷缓存保护接入 getNextCandidate', () => {
+  beforeEach(() => {
+    clearUnavailableModels();
+    resetModelAvailability();
+    resetAvailabilitySkipWarnFlag();
+  });
+
+  const isAvailable = (m: string): boolean | undefined =>
+    m === 'p1/m1' ? false : isModelAvailable(m);
+
+  it('① state=cold 时跳过黑名单直接取链候选', () => {
+    expect(getAvailabilityState()).toBe('cold');
+    markModelUnavailable('p2/m2');
+    const state = createFallbackState('p1/m1', ['p2/m2', 'p3/m3']);
+    const next = getNextCandidate(state, isAvailable);
+    expect(next).toBe('p2/m2');
+    expect(state.availabilitySkipped).toBe(true);
+  });
+
+  it('② state=failed 时同样跳过黑名单 + availabilitySkipped 置位', async () => {
+    const client: ProviderListClient = {
+      provider: {
+        list: async () => {
+          throw new Error('provider.list failed');
+        },
+      },
+    };
+    await refreshAvailableModels(client);
+    expect(getAvailabilityState()).toBe('failed');
+    markModelUnavailable('p2/m2');
+    const state = createFallbackState('p1/m1', ['p2/m2', 'p3/m3']);
+    const next = getNextCandidate(state, isAvailable);
+    expect(next).toBe('p2/m2');
+    expect(state.availabilitySkipped).toBe(true);
+  });
+
+  it('③ state=ready 时走正常黑名单过滤、不置 availabilitySkipped', async () => {
+    const client: ProviderListClient = {
+      provider: {
+        list: async () => ({
+          data: { all: [{ id: 'p1', models: { m1: {}, m2: {}, m3: {} } }], connected: ['p1'] },
+        }),
+      },
+    };
+    await refreshAvailableModels(client);
+    expect(getAvailabilityState()).toBe('ready');
+    markModelUnavailable('p2/m2');
+    const state = createFallbackState('p1/m1', ['p2/m2', 'p3/m3']);
+    const next = getNextCandidate(state, isAvailable);
+    expect(next).toBe('p3/m3');
+    expect(state.availabilitySkipped).toBeUndefined();
   });
 });

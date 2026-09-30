@@ -6,8 +6,13 @@
  * attemptedModels 单源，消除 taskModelAttempts 与 registry.attemptedModels 双写。
  */
 
+import { getAvailabilityState } from '../agents/model-availability.js';
 import type { BackgroundTaskEntry } from '../types.js';
 import { PROBE_PENDING } from '../types.js';
+import { Logger } from '../utils/logger.js';
+
+/** availabilitySkipped 状态说明只 warn 一次，避免重复刷屏 */
+let availabilitySkipWarnEmitted = false;
 
 /**
  * 模型回退状态机。
@@ -21,6 +26,13 @@ export interface FallbackState {
   attemptCount: number;
   attemptedModels: string[];
   pending: boolean;
+  /**
+   * W3：换模候选判定时可用性状态机（model-availability）不在 'ready' 状态
+   * （冷缓存 'cold' / 查询失败 'failed'，可用性快照不可信），本次降级决策
+   * 跳过了黑名单检查（availabilitySkipped）。仅供观测标注，不影响候选来源
+   * （候选仍全部来自用户配置链）。
+   */
+  availabilitySkipped?: boolean;
 }
 
 /** 六值枚举：probe 结果的高阶判定 */
@@ -61,18 +73,40 @@ export function recordAttempt(state: FallbackState, model: string): void {
  * 沿 fallbackChain 查找第一个不在 attemptedModels 中
  * 且 isModelAvailable(model) !== false 的候选；若无则返回 null。
  *
- * W3 扩展：cold/failed 状态下跳过 isModelAvailable 过滤并 warn。
+ * W3（P2-2，omo 冷缓存 skipped 信号）：model-availability 状态机接入换模判定。
+ * 当 state === 'cold'（未刷新/空）或 'failed'（provider.list 查询失败）时，
+ * 可用性快照不可信，跳过 isModelAvailable 黑名单过滤直接沿用户配置链取候选——
+ * 冷缓存跳过只为加速降级决策，不代表拉黑失效；候选仍全部来自用户配置链，
+ * abort 零降级 / timeout-pending 语义不受影响。同时置位 availabilitySkipped 标注。
  */
 export function getNextCandidate(
   state: FallbackState,
   isModelAvailable: (model: string) => boolean | undefined,
 ): string | null {
+  const availabilityState = getAvailabilityState();
+  const availabilityTrusted = availabilityState === 'ready';
+  if (!availabilityTrusted) {
+    state.availabilitySkipped = true;
+    warnAvailabilitySkippedOnce();
+  }
   for (const model of state.fallbackChain) {
     if (state.attemptedModels.includes(model)) continue;
-    if (isModelAvailable(model) === false) continue;
+    if (availabilityTrusted && isModelAvailable(model) === false) continue;
     return model;
   }
   return null;
+}
+
+/** W3：cold/failed 状态下跳过黑名单检查只提示一次（对齐 model-availability warnStatusOnce 语义） */
+function warnAvailabilitySkippedOnce(): void {
+  if (availabilitySkipWarnEmitted) return;
+  availabilitySkipWarnEmitted = true;
+  void Logger.warn('[model-availability] 可用性快照不可用（cold/failed），换模候选跳过黑名单检查');
+}
+
+/** W3：重置 availabilitySkipped 一次性 warn 标记（仅供测试隔离使用） */
+export function resetAvailabilitySkipWarnFlag(): void {
+  availabilitySkipWarnEmitted = false;
 }
 
 /**

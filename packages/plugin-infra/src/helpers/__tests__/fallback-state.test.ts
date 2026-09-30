@@ -1,7 +1,9 @@
 /**
  * Tests for shared FallbackState state machine (P3-3 / P3-4)
  */
-import { describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
+import type { ProviderListClient } from '../../agents/model-availability.js';
+import { refreshAvailableModels, resetModelAvailability } from '../../agents/model-availability.js';
 import type { BackgroundTaskEntry } from '../../types.js';
 import { PROBE_PENDING } from '../../types.js';
 import {
@@ -10,6 +12,7 @@ import {
   getNextCandidate,
   isExhausted,
   recordAttempt,
+  resetAvailabilitySkipWarnFlag,
   resolveProbeVerdict,
 } from '../fallback-state.js';
 
@@ -68,6 +71,25 @@ describe('FIX-P3-3: FallbackState 核心状态机', () => {
 // ─── Task 1.2: getNextCandidate ────────────────────────────────────────────────
 
 describe('FIX-P3-3: getNextCandidate', () => {
+  // W3: getNextCandidate 内部已接入 model-availability 状态机（cold/failed 跳过
+  // 黑名单）。此组用例验证注入的 isModelAvailable 语义，前置推进到 ready，
+  // 避免单文件运行时的全局 cold 默认导致黑名单被跳过。
+  beforeEach(async () => {
+    resetModelAvailability();
+    resetAvailabilitySkipWarnFlag();
+    const client: ProviderListClient = {
+      provider: {
+        list: async () => ({
+          data: {
+            all: [{ id: 'p1', models: { m1: {}, m2: {}, m3: {}, m4: {} } }],
+            connected: ['p1'],
+          },
+        }),
+      },
+    };
+    await refreshAvailableModels(client);
+  });
+
   it('沿 fallbackChain 返回第一个未尝试且可用的模型', () => {
     const state = createFallbackState('p1/m1', ['p2/m2', 'p3/m3']);
     const isAvailable = (m: string) => m !== 'p2/m2'; // p2/m2 unavailable
