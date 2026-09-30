@@ -18,10 +18,12 @@ import {
   shouldClassifyOutput,
 } from '../helpers/completion-detector.js';
 import {
+  canRecoverFromPollError,
   createFallbackState,
-  recordAttempt,
+  extractLastAssistantText,
   getNextCandidate,
   isExhausted,
+  recordAttempt,
   resolveProbeVerdict,
 } from '../helpers/fallback-state.js';
 import { extractJsonBlock, getSchemaHint } from '../helpers/output-extractor.js';
@@ -225,6 +227,30 @@ async function readLastAssistantErrorName(
     return undefined;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * P2-3 恢复层（omo fetchSyncResult 借鉴）：从 session.messages 提取"最后一条
+ * assistant 消息的最终文本"作为可恢复产出候选。
+ *
+ * 返回 null 表示无可恢复产出（最新 assistant 回合带 error / 无可读 text part /
+ * session.messages 读取失败）。提取结果须再由调用方过 hasRealOutput 正向判定，
+ * 假产出不采纳、仍走换模路径。
+ */
+async function readRecoverableOutput(
+  client: SFlowClient,
+  sessionID: string,
+): Promise<string | null> {
+  try {
+    const res = await (
+      client as unknown as {
+        session: { messages(args: { path: { id: string } }): Promise<{ data?: unknown }> };
+      }
+    ).session.messages({ path: { id: sessionID } });
+    return extractLastAssistantText(res.data);
+  } catch {
+    return null;
   }
 }
 
@@ -483,6 +509,8 @@ export async function runWithModelFallback(params: {
     // P1-3：用户/系统取消（Abort）与模型故障严格区分 —— 零降级：
     // 不拉黑（不调用 markModelUnavailable）、不换模（不调用 getAlternativeModel）、
     // 不重发 prompt。用户主动中止的任务若被自动换模重发，既违反用户意图又产生额外成本。
+    // W4（P2-3）：abort 路径先于恢复层判定——恢复逻辑必须让位于 abort 零降级语义
+    //（canRecoverFromPollError 对 abort 类错误名返回 false，此处已提前 return）。
     if (isAbortErrorName(errName)) {
       return {
         success: false,
@@ -493,6 +521,30 @@ export async function runWithModelFallback(params: {
         attemptedModels: state.attemptedModels,
         fallbacks,
       };
+    }
+
+    // W4（P2-3，omo sync-poll-error-recovery 借鉴）：poll 失败结果恢复层。
+    // 背景：poll 返回 null（OpenCode 已重试耗尽）时，session 里可能已有完整的
+    // assistant 产出——只是未带完成信号或会话状态未翻转。直接进入换模重发会浪费
+    // 一次尝试，且换模复用同一 session 存在假设风险。参考实现先尝试从已完成
+    // session 恢复结果（sync-result-fetcher.ts fetchSyncResult），恢复不了才新建
+    // session 换模。
+    // 触发条件：非 abort 类 poll 失败（canRecoverFromPollError 正向）。
+    // 从 session.messages 提取最后一条 assistant 文本，过 hasRealOutput 正向判定
+    //（完成信号正向判定约束：恢复产出与正常产出同门控）；通过则直接采用——
+    // 不换模、不拉黑。恢复失败（无文本 / 最新回合为 error / 假产出）才走既有换模路径。
+    if (canRecoverFromPollError(errName ?? '')) {
+      const recovered = await readRecoverableOutput(client, sessionID);
+      if (recovered !== null && hasRealOutput(recovered)) {
+        return {
+          success: true,
+          output: recovered,
+          model: currentModel,
+          attemptedModels: state.attemptedModels,
+          fallbacks,
+        };
+      }
+      // 恢复失败：fall through 到下方案模型故障路径（不在此 return）
     }
 
     // D-2/D-8：模型故障 → 拉黑
@@ -1025,11 +1077,26 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
           { maxWaitMs: 1000, probeMode: true, directory: task.changeDir },
         );
 
+        // W4（P2-3）：recoverable 判定分支落地——probe null 且非 abort 类错误名时，
+        // 先尝试从已完成 session 恢复产出。恢复门控：session.messages 最后一条
+        // assistant 消息含文本且过 hasRealOutput 正向判定（假产出不采纳，走换模）。
+        // abort 优先：canRecoverFromPollError 对 abort 类返回 false，此处短路跳过恢复。
         const errName =
           probeResult === null
             ? ((await readLastAssistantErrorName(client, task.sessionID)) ?? null)
             : null;
-        const verdict = resolveProbeVerdict(probeResult, null, currentTask, () => errName);
+        let recoveredCandidate: string | null = null;
+        if (probeResult === null && canRecoverFromPollError(errName ?? '')) {
+          const recovered = await readRecoverableOutput(client, task.sessionID);
+          recoveredCandidate = recovered !== null && hasRealOutput(recovered) ? recovered : null;
+        }
+        const verdict = resolveProbeVerdict(
+          probeResult,
+          null,
+          currentTask,
+          () => errName,
+          () => recoveredCandidate !== null,
+        );
 
         switch (verdict) {
           case 'pending': {
@@ -1044,6 +1111,23 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
               task,
               errName: errName as string,
             });
+            continue;
+          }
+          case 'recoverable': {
+            // W4（P2-3）：从 session.messages 恢复已完成产出（hasRealOutput 已通过
+            // 门控，recoveredCandidate 已缓存）。恢复成功直接标记 completed
+            //（不换模、不拉黑）；恢复失败回退 noSignal 换模路径（窄竞态：判定后
+            // 到读取间产出被新回合覆盖）。
+            if (recoveredCandidate !== null) {
+              await finalizeAsyncCompleted(
+                taskId,
+                currentTask,
+                recoveredCandidate,
+                `Async task ${taskId} completed (recovered from session after poll error)`,
+              );
+              continue;
+            }
+            await handleNoSignalFallback(taskId, task);
             continue;
           }
           case 'noSignal': {

@@ -141,6 +141,8 @@ export function resolveProbeVerdict(
   _reProbe: typeof PROBE_PENDING | null,
   registryEntry: BackgroundTaskEntry,
   readErrorName: () => string | null,
+  /** W4：恢复能力回调（session messages 含可采用的 assistant 产出）。缺省不恢复。 */
+  readRecoverable?: () => boolean,
 ): ProbeVerdict {
   // pending
   if (probeResult === PROBE_PENDING) return 'pending';
@@ -163,7 +165,57 @@ export function resolveProbeVerdict(
     return 'error';
   }
 
-  // W1：recoverable 留枚举位，暂归 noSignal
-  // W4：在此处插入 recoverable 判定（session messages 含有效产出时）
+  // W4（P2-3）：recoverable 落地——调用方注入 readRecoverable 且判定会话内已有
+  // 可恢复产出时返回 recoverable（不再走 noSignal 换模）；否则维持 noSignal 原语义。
+  if (readRecoverable?.() === true) {
+    return 'recoverable';
+  }
   return 'noSignal';
+}
+
+/**
+ * W4（P2-3）：从 session.messages 原始数据提取「最后一条 assistant 消息」的最终文本，
+ * 作为 poll 失败时可恢复产出候选。
+ *
+ * 严格最新消息守卫（对齐 omo fetchSyncResult 的 strictAbortRecovery，
+ * sync-result-fetcher.ts:100-129）：
+ * - 仅考察最新一条 assistant 消息，绝不回溯更早消息——最新产出正是 poll 关心的回合；
+ *   若最新回合被错误/中止污染，回溯旧内容会以陈旧产出掩盖失败、报告假成功。
+ * - 最新 assistant 消息带 error（info.error）→ 拒绝恢复（返回 null）。
+ * - 最新 assistant 消息无可读文本（text part 为空）→ 拒绝恢复（返回 null）。
+ * - 仅拼接 `type === 'text'` part（不含 reasoning，避免链式思考中的关键词
+ *   「假产出」通过 hasRealOutput 正向判定——比 omo 的 messageText 更保守）。
+ *
+ * 纯函数，无副作用（不发起 IO，不读写 registry）。提取结果须再由调用方
+ *（恢复层）过 hasRealOutput 正向判定（completion-detector），假产出不采纳。
+ */
+export function extractLastAssistantText(messagesData: unknown): string | null {
+  if (!Array.isArray(messagesData)) return null;
+  let lastAssistant:
+    | {
+        info?: { error?: { name?: string } };
+        parts?: Array<{ type?: string; text?: string }>;
+      }
+    | null = null;
+  for (let i = messagesData.length - 1; i >= 0; i--) {
+    const msg = messagesData[i] as
+      | {
+          info?: { role?: string; error?: { name?: string } };
+          parts?: Array<{ type?: string; text?: string }>;
+        }
+      | undefined;
+    if (msg?.info?.role === 'assistant') {
+      lastAssistant = msg;
+      break;
+    }
+  }
+  if (!lastAssistant) return null;
+  // 最新回合本身是 error → 拒绝恢复（严禁用陈旧内容掩盖失败）
+  if (lastAssistant.info?.error) return null;
+  const text = (lastAssistant.parts ?? [])
+    .filter((p) => p.type === 'text')
+    .map((p) => p.text ?? '')
+    .filter((t) => t.length > 0)
+    .join('\n');
+  return text ? text : null;
 }

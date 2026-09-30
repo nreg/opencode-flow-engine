@@ -1017,7 +1017,9 @@ describe('NEW-P0-B: async watcher 路径配额错误识别与换模', () => {
     if (!task) throw new Error('task entry missing from registry');
     expect(task.status).toBe('completed');
     expect(task.result).toBe('## Wave 1 Batch 1.1 完成报告\n\n### 改动文件清单');
-    expect(promptCalls.length).toBe(1);
+    // W4（P2-3）：probe null 时先从 session.messages 恢复已完成产出——本次会话最后一条
+    // assistant 文本过 hasRealOutput 正向判定，直接采用，不再浪费一次换模重发。
+    expect(promptCalls.length).toBe(0);
   });
 });
 
@@ -1774,6 +1776,116 @@ describe('FIX-P1-3: abort 与模型故障分离', () => {
     expect(data.error).not.toContain('前置校验失败');
     expect(data.error).not.toContain('model fallback exhausted');
     expect(data.attempted_models).toContain('provider/test-model');
+  });
+});
+
+// ─── FIX-P2-3: poll 失败结果恢复层（session messages 抢救已完成产出）─────────────
+describe('FIX-P2-3: poll 失败结果恢复层', () => {
+  beforeEach(() => clearUnavailableModels());
+  afterEach(() => {
+    resetRunningSubagentCounts();
+    clearUnavailableModels();
+  });
+
+  /**
+   * sync harness：poll 恒返回 null（OpenCode 重试耗尽），通过 messages 注入
+   * 「最后一条 assistant 消息」的文本 / 错误名，驱动 W4 恢复层判定。
+   */
+  function makeRecoveryClient(opts: {
+    assistantText?: string | null;
+    assistantErrorName?: string;
+  }) {
+    const promptCalls: Array<{ model?: { providerID: string; modelID: string } }> = [];
+    return {
+      promptCalls,
+      client: {
+        session: {
+          prompt: mock(async (args: { path: { id: string }; body: { model?: { providerID: string; modelID: string } } }) => {
+            promptCalls.push({ model: args.body.model });
+          }),
+          messages: mock(async () => ({
+            data: [
+              { parts: [{ type: 'text', text: 'user prompt' }] },
+              {
+                info: {
+                  role: 'assistant',
+                  error: opts.assistantErrorName ? { name: opts.assistantErrorName } : undefined,
+                },
+                parts:
+                  opts.assistantText != null
+                    ? [{ type: 'text', text: opts.assistantText }]
+                    : [],
+              },
+            ],
+          })),
+          status: mock(async () => ({ data: { s1: { type: 'retry', attempt: 5 } } })),
+          create: mock(async () => ({ data: { id: 's1' } })),
+          abort: mock(async () => {}),
+        },
+      },
+    };
+  }
+
+  const recoveryParams = (c: ReturnType<typeof makeRecoveryClient>) => ({
+    client: c.client as never,
+    sessionID: 's1',
+    agentName: 'build-executor',
+    basePrompt: 'do the work',
+    initialModel: 'provider/first-model',
+    maxWaitMs: 100,
+    directory: '',
+    extraFallbacks: ['provider/alt-model'],
+    poll: async () => null,
+  });
+
+  it('1: poll null + session 恢复产出过 hasRealOutput → 直接采用，不换模不拉黑', async () => {
+    const c = makeRecoveryClient({ assistantText: '## Wave 1 完成报告\n\n### 改动文件清单' });
+    const result = await runWithModelFallback(recoveryParams(c));
+    expect(result.success).toBe(true);
+    expect(result.output).toBe('## Wave 1 完成报告\n\n### 改动文件清单');
+    // 不换模：模型与 fallbacks 保持原样
+    expect(result.model).toBe('provider/first-model');
+    expect(result.fallbacks.length).toBe(0);
+    expect(c.promptCalls.length).toBe(1);
+    // 不拉黑
+    expect(isModelAvailable('provider/first-model')).toBe(true);
+  });
+
+  it('2: poll null + session 无有效产出 → 走既有换模路径', async () => {
+    const c = makeRecoveryClient({ assistantText: null });
+    const result = await runWithModelFallback(recoveryParams(c));
+    expect(result.success).toBe(false);
+    expect(result.failureReason).toBe('exhausted');
+    // 换模：首发 + 一次换模
+    expect(c.promptCalls.length).toBe(2);
+    // 拉黑失败模型
+    expect(isModelAvailable('provider/first-model')).toBe(false);
+  });
+
+  it('3: abort 错误名 → 不恢复、走 abort 零降级', async () => {
+    const c = makeRecoveryClient({ assistantErrorName: 'MessageAbortedError' });
+    const result = await runWithModelFallback(recoveryParams(c));
+    expect(result.success).toBe(false);
+    expect(result.failureReason).toBe('aborted');
+    // abort 优先于恢复层：即使 session 有文本也不采用
+    expect(result.output).toBeNull();
+    // 零降级：不拉黑、不换模、不重发
+    expect(isModelAvailable('provider/first-model')).toBe(true);
+    expect(c.promptCalls.length).toBe(1);
+    expect(result.fallbacks.length).toBe(0);
+  });
+
+  it('4: 恢复产出未过 hasRealOutput → 不采纳（假产出），仍走换模', async () => {
+    // "Service overloaded, please try again later" 被 hasRealOutput 判为假产出（model-fallback-fix.test.ts:1113）
+    const c = makeRecoveryClient({ assistantText: 'Service overloaded, please try again later' });
+    const result = await runWithModelFallback(recoveryParams(c));
+    // 假产出不采纳：未作为 success output 返回
+    expect(result.success).toBe(false);
+    expect(result.failureReason).toBe('exhausted');
+    expect(result.output).toBeNull();
+    // 仍走换模路径
+    expect(c.promptCalls.length).toBe(2);
+    expect(isModelAvailable('provider/first-model')).toBe(false);
   });
 });
 

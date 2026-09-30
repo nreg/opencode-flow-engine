@@ -9,6 +9,7 @@ import { PROBE_PENDING } from '../../types.js';
 import {
   canRecoverFromPollError,
   createFallbackState,
+  extractLastAssistantText,
   getNextCandidate,
   isExhausted,
   recordAttempt,
@@ -178,5 +179,65 @@ describe('FIX-P3-4: resolveProbeVerdict', () => {
       return null;
     });
     expect(called).toBe(false);
+  });
+
+  it('probeResult 为 null 且 readRecoverable 返回 true → recoverable（W4 落地枚举分支）', () => {
+    const verdict = resolveProbeVerdict(null, null, baseEntry(['a']), () => 'ApiError', () => true);
+    expect(verdict).toBe('recoverable');
+  });
+
+  it('probeResult 为 null 且 readRecoverable 缺省/返回 false → 维持 noSignal', () => {
+    const defaultVerdict = resolveProbeVerdict(null, null, baseEntry(['a']), () => 'ApiError');
+    expect(defaultVerdict).toBe('noSignal');
+    const falseVerdict = resolveProbeVerdict(
+      null,
+      null,
+      baseEntry(['a']),
+      () => 'ApiError',
+      () => false,
+    );
+    expect(falseVerdict).toBe('noSignal');
+  });
+
+  it('probeResult 为 null 且 abort 错误名 → abort 优先于 recoverable（readRecoverable 被短路）', () => {
+    const verdict = resolveProbeVerdict(null, null, baseEntry(['a']), () => 'MessageAbortedError', () => true);
+    expect(verdict).toBe('abort');
+  });
+});
+
+// ─── W4: extractLastAssistantText ────────────────────────────────────────────
+
+describe('FIX-P2-3: extractLastAssistantText', () => {
+  it('取最后一条 assistant 消息的 text part 拼接文本', () => {
+    const data = [
+      { info: { role: 'user' }, parts: [{ type: 'text', text: 'user prompt' }] },
+      { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'first draft' }] },
+      {
+        info: { role: 'assistant' },
+        parts: [{ type: 'text', text: '## 完成报告\n\n### 改动清单' }],
+      },
+    ];
+    expect(extractLastAssistantText(data)).toBe('## 完成报告\n\n### 改动清单');
+  });
+
+  it('最新 assistant 消息带 error → 返回 null（拒绝用陈旧内容掩盖失败）', () => {
+    const data = [
+      { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'old complete report' }] },
+      { info: { role: 'assistant', error: { name: 'ApiError' } }, parts: [{ type: 'text', text: 'partial' }] },
+    ];
+    expect(extractLastAssistantText(data)).toBeNull();
+  });
+
+  it('最新 assistant 消息无可读 text → 返回 null', () => {
+    const data = [
+      { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'old report' }] },
+      { info: { role: 'assistant' }, parts: [{ type: 'reasoning', text: 'chain of thought' }] },
+    ];
+    expect(extractLastAssistantText(data)).toBeNull();
+  });
+
+  it('无 assistant 消息 / 非数组数据 → 返回 null', () => {
+    expect(extractLastAssistantText(null)).toBeNull();
+    expect(extractLastAssistantText([{ info: { role: 'user' }, parts: [] }])).toBeNull();
   });
 });
