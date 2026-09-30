@@ -209,6 +209,46 @@ const ERROR_TYPE_PATTERN = /"type"\s*:\s*"[^"]*(RateLimit|Quota|PaymentRequired)
 const LINE_PREFIX_CODE_PATTERN = /^(?:\[?error\]?\s*[：:]?\s*)?(401|402|403|404|408|409|429|5\d\d)\s*[：:\-–—]\s*/;
 
 /**
+ * P2-1：poll 产出错误码分类的长度上限（用户批准阈值）。
+ *
+ * provider 真实错误报文都是短文本；而「讨论错误码的正常产出」（code-reviewer
+ * 报告引用 "HTTP 429" / `"status": 503`、researcher 引用文档）通常篇幅较长、
+ * 错误码只出现在正文中部。以 500 字符为界收窄判定面。
+ */
+export const ERROR_CLASSIFY_MAX_LENGTH = 500;
+
+/**
+ * P2-1 前置守卫：判定 poll 产出是否进入错误码分类。
+ *
+ * 错误码正则会误伤「讨论错误码的正常产出」——子代理正常产出中引用 "HTTP 429"
+ * 或 `"status": 503`（如 code-reviewer 审查报告），会被全文匹配的码正则判为
+ * 模型错误 → 假性拉黑换模。这类引用都出现在长篇正文中部。据此收窄判定面
+ * （spec：仅短文本或以错误行开头的输出做错误码分类）：
+ * 1. 短文本（<= ERROR_CLASSIFY_MAX_LENGTH）→ 进入分类；
+ * 2. 超长产出默认视为正常产出（走正向判定 hasRealOutput），但以错误行开头
+ *    （行首码形态）的仍进入分类——provider 错误报文也可能很长，长度上限不应
+ *    把真实的长错误报文挡在分类之外。
+ *
+ * - 判据为长度 + 既有行首码形态，不含任何错误文案匹配（兼容 C-6）；码驱动
+ *   分类仍由 classifyModelErrorByCode 承担，本守卫只决定是否调用它（兼容
+ *   C-1：不改动分类器函数体，仅复用既有 LINE_PREFIX_CODE_PATTERN）。
+ * - 仅收窄 poll 产出分类面：send 阶段错误消息（sendPromptOnce 的 throwOnError
+ *   + cause.status 提取）与 polling 层 retry 状态消息不经过此守卫，错误通道
+ *   判定不受影响。
+ *
+ * @param output - poll 得到的完整产出正文
+ * @returns true → 进入错误码分类；false → 视为正常产出，交由正向判定处理
+ */
+export function shouldClassifyOutput(output: string): boolean {
+  const text = output ?? '';
+  // 短文本 → 进入错误码分类
+  if (text.length <= ERROR_CLASSIFY_MAX_LENGTH) return true;
+  // 错误形态前置（spec「或以错误行开头的输出」）：复用既有行首码模式，
+  // 仅匹配位于行首的状态码（非文案匹配），不引入新正则（兼容 C-6）
+  return LINE_PREFIX_CODE_PATTERN.test(text.trimStart());
+}
+
+/**
  * 错误码驱动的模型错误分类（主判据）。
  *
  * 依据 provider-scaffold 提供商错误码规范：

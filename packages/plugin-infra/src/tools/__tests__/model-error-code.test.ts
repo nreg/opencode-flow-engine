@@ -14,7 +14,11 @@ import { beforeEach, describe, expect, it, mock, afterEach } from 'bun:test';
 import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
 import { createCallFlowAgentTools, resetRunningSubagentCounts, runWithModelFallback, createBackgroundTaskWatcher } from '../call-flow-agent.js';
 import { clearUnavailableModels, isModelAvailable, TRANSIENT_COOLDOWN_TTL_MS } from '../../agents/agent-builder.js';
-import { classifyModelErrorByCode } from '../../helpers/completion-detector.js';
+import {
+  classifyModelErrorByCode,
+  ERROR_CLASSIFY_MAX_LENGTH,
+  shouldClassifyOutput,
+} from '../../helpers/completion-detector.js';
 
 /**
  * NP-2（对齐 56aa628 修复范式）：配额重置时间必须相对 Date.now() 生成，绝不硬编码
@@ -38,6 +42,19 @@ const REAL_QUOTA_SAMPLE =
 
 /** 行首前缀码形态（402:）的同一样例：错误码驱动分类的唯一可靠形态 */
 const CODED_QUOTA_SAMPLE = `402: ${REAL_QUOTA_SAMPLE}`;
+
+/**
+ * P2-1 误伤场景：code-reviewer 正常报告在正文中引用错误码（"HTTP 429" /
+ * `"status": 503`）。错误码位于长度上限之后（前 ERROR_CLASSIFY_MAX_LENGTH
+ * 字符窗口内无任何错误形态），整篇是正常产出（末尾带完成信号）。
+ * 无守卫时 STATUS_FIELD_PATTERN / HTTP_CODE_PATTERN 全文匹配会判为模型错误
+ * → 假性拉黑换模；守卫应直接拦截分类，走正向判定。
+ */
+const LONG_REPORT_WITH_CITED_CODE =
+  '代码审查报告\n\n## 概述\n本次审查覆盖认证模块与限流组件，全部通过。\n\n## 详情\n' +
+  '审查项通过：模块结构清晰，无阻断问题。\n'.repeat(32) +
+  '接口在高负载下返回 HTTP 429，建议加熔断；另一服务健康检查输出 "status": 503，需关注。\n' +
+  '\n[TASK_COMPLETE]\n审查完成，无阻断问题。';
 
 function advanceClock(offsetMs: number): () => void {
   const realNow = Date.now;
@@ -135,6 +152,45 @@ describe('classifyModelErrorByCode: 错误码驱动分类', () => {
     expect(classifyModelErrorByCode(text)).toBeNull();
     // 带 code 的同语义报文 → non-transient
     expect(classifyModelErrorByCode(`402: ${text}`)?.kind).toBe('non-transient');
+  });
+});
+
+// ─── P2-1: poll 产出错误码分类判定面收窄（shouldClassifyOutput）────────────
+
+describe('P2-1: shouldClassifyOutput 前置守卫（判定面收窄）', () => {
+  it('超长正常报告（文中部引用 HTTP 429 / "status": 503）→ 不进入错误码分类', () => {
+    // 超长输出视为正常产出（走正向判定），避免误伤讨论错误码的正常产出
+    expect(LONG_REPORT_WITH_CITED_CODE.length).toBeGreaterThan(ERROR_CLASSIFY_MAX_LENGTH);
+    expect(shouldClassifyOutput(LONG_REPORT_WITH_CITED_CODE)).toBe(false);
+  });
+
+  it('短文本含 HTTP 码 → 仍进入错误码分类', () => {
+    // 短文本不收窄：码驱动分类照常作用（命中 HTTP 429 → transient）
+    const text = 'See HTTP 429 docs for retry semantics.';
+    expect(text.length).toBeLessThanOrEqual(ERROR_CLASSIFY_MAX_LENGTH);
+    expect(shouldClassifyOutput(text)).toBe(true);
+    expect(classifyModelErrorByCode(text)?.kind).toBe('transient');
+  });
+
+  it('错误形态前置短文本（行首码）→ 进入错误码分类', () => {
+    // provider 真实报文形态：短文本且错误码前置，守卫放行
+    const text = '429: Too Many Requests';
+    expect(shouldClassifyOutput(text)).toBe(true);
+    expect(classifyModelErrorByCode(text)?.kind).toBe('transient');
+  });
+
+  it('边界：恰好 500 字符放行，501 字符拦截', () => {
+    expect(shouldClassifyOutput('a'.repeat(ERROR_CLASSIFY_MAX_LENGTH))).toBe(true);
+    expect(shouldClassifyOutput('a'.repeat(ERROR_CLASSIFY_MAX_LENGTH + 1))).toBe(false);
+  });
+
+  it('超长但以错误行开头（行首码）→ 仍进入错误码分类（spec 错误形态前置支）', () => {
+    // spec P2-1 修复方向：「仅对短文本（< 500）或以错误行开头的输出做错误码分类」。
+    // 超长报文若以行首错误码开头，仍是 provider 错误产出，长度上限不应将其挡在分类之外
+    const text = `429: Too Many Requests\n${'详情行内容'.repeat(200)}\n请稍后重试。`;
+    expect(text.length).toBeGreaterThan(ERROR_CLASSIFY_MAX_LENGTH);
+    expect(shouldClassifyOutput(text)).toBe(true);
+    expect(classifyModelErrorByCode(text)?.kind).toBe('transient');
   });
 });
 
@@ -261,6 +317,17 @@ describe('错误码驱动: send 阶段接线（runWithModelFallback）', () => {
     } finally {
       restore();
     }
+  });
+
+  it('P2-1 E2E：超长正常报告引用错误码 → 不换模、不拉黑、判成功', async () => {
+    // 守卫拦截 poll 产出的错误码分类 → 不判模型错误；报告带完成信号 → 正向判定成功
+    const c = makeClient({ outputs: [] });
+    const poll = async () => LONG_REPORT_WITH_CITED_CODE;
+    const result = await runWithModelFallback({ ...baseParams(c, poll) });
+    expect(result.success).toBe(true);
+    expect(result.model).toBe('provider/first-model');
+    expect(result.fallbacks.length).toBe(0);
+    expect(isModelAvailable('provider/first-model')).toBe(true);
   });
 });
 

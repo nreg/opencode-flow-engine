@@ -15,6 +15,7 @@ import {
   performCompletionRetry,
   REMINDER_MESSAGE,
   classifyModelErrorByCode,
+  shouldClassifyOutput,
 } from '../helpers/completion-detector.js';
 import {
   createFallbackState,
@@ -424,7 +425,12 @@ export async function runWithModelFallback(params: {
       // 不算成功，转入 model-failure 分支。无错误码的报错无法分类是可接受的已知限制。
       // PROBE_PENDING 已在上方提前返回；TS 无法经 === 窄除对象字面量类型，此处显式标注为 string
       const pollOutput = output as string;
-      const codeOnPoll = classifyModelErrorByCode(pollOutput);
+      // P2-1：收窄 poll 产出分类面——超长产出（如 code-reviewer 报告引用 "HTTP 429" /
+      // `"status": 503`）视为正常产出，不做错误码分类，避免假性拉黑换模。
+      // send 阶段错误消息不经过此守卫（错误通道判定不受影响）
+      const codeOnPoll = shouldClassifyOutput(pollOutput)
+        ? classifyModelErrorByCode(pollOutput)
+        : null;
       const echoFailure = pollOutput.trim() === sentText.trim();
       if (codeOnPoll || echoFailure) {
         if (codeOnPoll?.kind === 'non-transient') {
@@ -720,7 +726,8 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
   const classifyAsyncFailure = (
     text: string,
   ): { kind: 'quota'; resetAt: number | null } | { kind: 'error'; resetAt: null } | null => {
-    const code = classifyModelErrorByCode(text);
+    // P2-1：收窄判定面——超长 poll 产出不分类，视为正常产出走正向判定（与 sync 路径一致）
+    const code = shouldClassifyOutput(text) ? classifyModelErrorByCode(text) : null;
     if (code?.kind === 'non-transient') return { kind: 'quota', resetAt: code.resetAt };
     if (code?.kind === 'transient') return { kind: 'error', resetAt: null };
     return null;
@@ -1990,7 +1997,10 @@ export function createCallFlowAgentTools(
             }
             // 错误码驱动分类（唯一判据）：错误码报错不算成功 → 换模型重 prompt 或结构化错误。
             // 无码报错无法分类是可接受的已知限制（文本模式兜底已删除）。
-            const identifiedCode = classifyModelErrorByCode(output);
+            // P2-1：收窄判定面——超长 poll 产出不分类（错误码只在正文中部引用时不应误判为模型错误）
+            const identifiedCode = shouldClassifyOutput(output)
+              ? classifyModelErrorByCode(output)
+              : null;
             if (identifiedCode) {
               identifiedErrorKind = identifiedCode.kind === 'non-transient' ? 'quota' : 'model';
               activeQuota =
@@ -2083,8 +2093,11 @@ export function createCallFlowAgentTools(
             }
             if (rePoll !== null) {
               // R3-P2-3/P0-1: 换模后的 re-poll 输出做错误码识别（唯一判据），并补齐产出正向判定（对齐 sync 路径）
+              // P2-1：同样收窄判定面——超长 re-poll 产出不分类
               const reOutput = rePoll as string;
-              const reCode = classifyModelErrorByCode(reOutput);
+              const reCode = shouldClassifyOutput(reOutput)
+                ? classifyModelErrorByCode(reOutput)
+                : null;
               if (reCode) {
                 identifiedErrorKind = reCode.kind === 'non-transient' ? 'quota' : 'model';
                 activeQuota = reCode.kind === 'non-transient' ? { resetAt: reCode.resetAt } : null;
