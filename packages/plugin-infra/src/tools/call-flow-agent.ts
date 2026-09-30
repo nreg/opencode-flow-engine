@@ -16,6 +16,13 @@ import {
   REMINDER_MESSAGE,
   classifyModelErrorByCode,
 } from '../helpers/completion-detector.js';
+import {
+  createFallbackState,
+  recordAttempt,
+  getNextCandidate,
+  isExhausted,
+  resolveProbeVerdict,
+} from '../helpers/fallback-state.js';
 import { extractJsonBlock, getSchemaHint } from '../helpers/output-extractor.js';
 import {
   pollSessionCompletion,
@@ -172,7 +179,11 @@ async function sendPromptOnce(
  * 重试是同 session 换 model 重新 prompt，session 本身已携带全部上下文，
  * 因此无需"接管轮次"声明。此函数保留为直通函数，便于集中维护重试发送策略。
  */
-function buildAttemptPrompt(basePrompt: string, _attemptIndex: number, _previousModel?: string): string {
+function buildAttemptPrompt(
+  basePrompt: string,
+  _attemptIndex: number,
+  _previousModel?: string,
+): string {
   return basePrompt;
 }
 
@@ -192,7 +203,10 @@ interface AttemptResult {
  * 真正的 halt 错误落在 `info.error`（`MessageV2.fromError` 产出）。因此这里只用 `info.error`，
  * 绝不用 `parts[].error` 替代。结构不确定时用宽松读取 + 失败静默返回 undefined，不得抛异常。
  */
-async function readLastAssistantErrorName(client: SFlowClient, sessionID: string): Promise<string | undefined> {
+async function readLastAssistantErrorName(
+  client: SFlowClient,
+  sessionID: string,
+): Promise<string | undefined> {
   try {
     const res = await (
       client as unknown as {
@@ -287,15 +301,30 @@ export async function runWithModelFallback(params: {
    *（R3-fix P1-1，对齐 pollAndComplete re-poll 的 probeMode 语义）。
    */
   poll: (sessionID: string, model: string) => Promise<string | null | ProbePending>;
-  onFallback?: (info: { from: string; to: string; attempt: number; reason: string }) => Promise<void> | void;
+  onFallback?: (info: {
+    from: string;
+    to: string;
+    attempt: number;
+    reason: string;
+  }) => Promise<void> | void;
 }): Promise<RunFallbackResult> {
-  const { client, sessionID, agentName, basePrompt, initialModel, poll, onFallback, extraFallbacks } = params;
+  const {
+    client,
+    sessionID,
+    agentName,
+    basePrompt,
+    initialModel,
+    poll,
+    onFallback,
+    extraFallbacks,
+  } = params;
   let currentModel = initialModel;
-  const attemptedModels: string[] = [];
   const fallbacks: Array<{ from: string; to: string; reason: string }> = [];
-  // P0-4/P1-1: 换模时读取用户配置 fallback 链（getAlternativeModel 只在用户配置的候选内挑选；
+  // P0-4/P1-1: 换模时读取用户配置 fallback 链（getNextCandidate 只在用户配置的候选内挑选；
   // 已无内置 fallback 列表，用户未配置时无候选可换）
   const userFallbackChain: string[] = extraFallbacks ?? [];
+  // P3-3: 使用共享 FallbackState 状态机追踪 attemptedModels
+  const state = createFallbackState(initialModel, userFallbackChain);
 
   // MAX_MODEL_RETRIES = 2 ⇒ 最多 3 次 prompt：首次 + 2 次换模型。
   for (let attempt = 0; ; attempt++) {
@@ -304,19 +333,19 @@ export async function runWithModelFallback(params: {
       return {
         success: false,
         failureReason: 'invalid-model',
-        attemptedModels,
+        attemptedModels: state.attemptedModels,
         fallbacks,
         output: null,
         model: currentModel,
       };
     }
-    attemptedModels.push(currentModel);
+    // P3-3: state.attemptedModels 已由 createFallbackState 初始化含首模型
 
     // NEW-P1-D: 记录实际发送文本，回显比对以实际发送的 prompt 为基准（重试原样重发）
     const sentText = buildAttemptPrompt(
       basePrompt,
       attempt,
-      attempt > 0 ? attemptedModels[attempt - 1] : undefined,
+      attempt > 0 ? state.attemptedModels[attempt - 1] : undefined,
     );
     const send = await sendPromptOnce(client, {
       sessionID,
@@ -334,10 +363,15 @@ export async function runWithModelFallback(params: {
         const transient = codeOnSend.kind === 'transient';
         markModelUnavailable(currentModel, {
           resetAt: transient ? null : codeOnSend.resetAt,
-          ttlMs: transient ? TRANSIENT_COOLDOWN_TTL_MS : codeOnSend.resetAt ? undefined : MIN_QUOTA_COOLDOWN_TTL_MS,
+          ttlMs: transient
+            ? TRANSIENT_COOLDOWN_TTL_MS
+            : codeOnSend.resetAt
+              ? undefined
+              : MIN_QUOTA_COOLDOWN_TTL_MS,
         });
-        const nextOnSend = getAlternativeModel(currentModel, agentName, userFallbackChain);
-        if (nextOnSend && !attemptedModels.includes(nextOnSend) && attemptedModels.length <= MAX_MODEL_RETRIES) {
+        const nextOnSend = getNextCandidate(state, isModelAvailable);
+        if (nextOnSend && !isExhausted(state, MAX_MODEL_RETRIES)) {
+          recordAttempt(state, nextOnSend);
           const reason = `${codeOnSend.kind} model error (HTTP ${codeOnSend.status ?? send.status ?? 'unknown'})`;
           fallbacks.push({ from: currentModel, to: nextOnSend, reason });
           await onFallback?.({ from: currentModel, to: nextOnSend, attempt: attempt + 1, reason });
@@ -350,7 +384,7 @@ export async function runWithModelFallback(params: {
           success: false,
           failureReason: 'exhausted',
           detail: `model error (HTTP ${codeOnSend.status ?? send.status ?? 'unknown'}); fallback chain exhausted or model already attempted`,
-          attemptedModels,
+          attemptedModels: state.attemptedModels,
           fallbacks,
           model: currentModel,
           output: null,
@@ -362,7 +396,7 @@ export async function runWithModelFallback(params: {
         success: false,
         failureReason: 'fatal',
         detail: `HTTP ${send.status ?? 'unknown'}`,
-        attemptedModels,
+        attemptedModels: state.attemptedModels,
         fallbacks,
         model: currentModel,
         output: null,
@@ -381,7 +415,7 @@ export async function runWithModelFallback(params: {
           'sync poll window exceeded while session still running; model not blacklisted (session may still be producing)',
         output: null,
         model: currentModel,
-        attemptedModels,
+        attemptedModels: state.attemptedModels,
         fallbacks,
       };
     }
@@ -413,11 +447,17 @@ export async function runWithModelFallback(params: {
           detail: NO_VALID_OUTPUT_DETAIL,
           output: pollOutput,
           model: currentModel,
-          attemptedModels,
+          attemptedModels: state.attemptedModels,
           fallbacks,
         };
       } else {
-        return { success: true, output: pollOutput, model: currentModel, attemptedModels, fallbacks };
+        return {
+          success: true,
+          output: pollOutput,
+          model: currentModel,
+          attemptedModels: state.attemptedModels,
+          fallbacks,
+        };
       }
     }
 
@@ -429,7 +469,7 @@ export async function runWithModelFallback(params: {
         failureReason: 'context-overflow',
         output: null,
         model: currentModel,
-        attemptedModels,
+        attemptedModels: state.attemptedModels,
         fallbacks,
       };
     }
@@ -444,7 +484,7 @@ export async function runWithModelFallback(params: {
         detail: `assistant error: ${errName}; task aborted, no model fallback triggered`,
         output: null,
         model: currentModel,
-        attemptedModels,
+        attemptedModels: state.attemptedModels,
         fallbacks,
       };
     }
@@ -453,21 +493,21 @@ export async function runWithModelFallback(params: {
     markModelUnavailable(currentModel);
 
     // 终止条件 ③：换模型次数上限（attemptedModels 已含本次失败，> MAX_MODEL_RETRIES 即停）
-    if (attemptedModels.length > MAX_MODEL_RETRIES) {
+    if (isExhausted(state, MAX_MODEL_RETRIES)) {
       return {
         success: false,
         failureReason: 'exhausted',
         detail: 'MAX_MODEL_RETRIES reached',
         output: null,
         model: currentModel,
-        attemptedModels,
+        attemptedModels: state.attemptedModels,
         fallbacks,
       };
     }
 
-    // 终止条件 ①：无可用替代模型（D-3：必须用 getAlternativeModel，不得用 resolveModelWithFallback；
+    // 终止条件 ①：无可用替代模型（D-3：必须用 getNextCandidate，不得用 resolveModelWithFallback；
     // P1-1：同时传入用户配置 fallback 链）
-    const next = getAlternativeModel(currentModel, agentName, userFallbackChain);
+    const next = getNextCandidate(state, isModelAvailable);
     if (!next) {
       return {
         success: false,
@@ -475,25 +515,15 @@ export async function runWithModelFallback(params: {
         detail: 'no alternative model',
         output: null,
         model: currentModel,
-        attemptedModels,
+        attemptedModels: state.attemptedModels,
         fallbacks,
       };
     }
 
-    // 终止条件 ②：重复模型检测（防 P7 退化到 unconfigured 后反复重试导致的无限循环）
-    if (attemptedModels.includes(next)) {
-      return {
-        success: false,
-        failureReason: 'exhausted',
-        detail: `model ${next} already attempted`,
-        output: null,
-        model: currentModel,
-        attemptedModels,
-        fallbacks,
-      };
-    }
+    // 终止条件 ②：重复模型检测已由 getNextCandidate 内置（attemptedModels 过滤）
 
     const reason = errName ? `assistant error: ${errName}` : 'poll returned null (retry exhausted)';
+    recordAttempt(state, next);
     fallbacks.push({ from: currentModel, to: next, reason });
     await onFallback?.({ from: currentModel, to: next, attempt: attempt + 1, reason });
     currentModel = next;
@@ -501,12 +531,6 @@ export async function runWithModelFallback(params: {
 }
 
 // ─── Wave 2 (Task 5): async 模式故障转移 ──────────────────────────────────────
-
-/**
- * 模块级状态容器：记录每个 async task 已尝试的模型（避免重复换模型与跨调用泄漏）。
- * 不新增文件、不改 types.ts 主结构（attemptedModels 字段在 Task 4/5 中按需写入 registry）。
- */
-const taskModelAttempts = new Map<string, string[]>();
 
 /**
  * async 模式单次故障转移尝试（D-3/D-4/D-5/D-6/D-7/D-8）。
@@ -535,8 +559,14 @@ async function tryAsyncModelFallback(params: {
   const parsed = parseModelString(task.resolvedModel);
   if (!parsed) return { retried: false };
 
-  const attempted = taskModelAttempts.get(taskId) ?? [task.resolvedModel];
-  if (!attempted.includes(task.resolvedModel)) attempted.push(task.resolvedModel);
+  // P3-3: 使用 registry.attemptedModels 作为单源真值，废弃 taskModelAttempts Map
+  const chain = extraFallbacks ?? [];
+  const state = createFallbackState(task.resolvedModel, chain);
+  state.attemptedModels = [...(task.attemptedModels ?? [])];
+  if (!state.attemptedModels.includes(task.resolvedModel)) {
+    state.attemptedModels.push(task.resolvedModel);
+  }
+  state.attemptCount = state.attemptedModels.length;
 
   // D-8：拉黑当前失败模型。
   // NEW-P0-B: 配额错误（有重置时间）→ 长冷却到重置时间；无重置时间 → 默认长 TTL（30min）；
@@ -547,12 +577,12 @@ async function tryAsyncModelFallback(params: {
   });
 
   // D-3：换模型（禁止 resolveModelWithFallback）
-  const next = getAlternativeModel(task.resolvedModel, task.subagentType, extraFallbacks);
+  const next = getNextCandidate(state, isModelAvailable);
   if (!next) return { retried: false }; // 终止条件 ①
 
   // D-4：重复模型 / 超限检测
-  if (attempted.includes(next)) return { retried: false }; // 终止条件 ②
-  if (attempted.length > MAX_MODEL_RETRIES) return { retried: false }; // 终止条件 ③
+  if (state.attemptedModels.includes(next)) return { retried: false }; // 终止条件 ②
+  if (state.attemptCount > MAX_MODEL_RETRIES) return { retried: false }; // 终止条件 ③
 
   const nextParsed = parseModelString(next);
   if (!nextParsed) return { retried: false };
@@ -564,7 +594,7 @@ async function tryAsyncModelFallback(params: {
     agent: task.subagentType,
     text: buildAttemptPrompt(
       registry.get(taskId)?.prompt ?? '',
-      attempted.length,
+      state.attemptCount,
       task.resolvedModel,
     ),
     model: nextParsed,
@@ -572,14 +602,14 @@ async function tryAsyncModelFallback(params: {
   if (!send.ok) return { retried: false }; // D-7：前置校验失败不重试
 
   // 保持 running、不释放并发槽位（D-4 未命中前绝不宣告失败）
+  recordAttempt(state, next);
   registry.set(taskId, {
     ...task,
     resolvedModel: next,
     status: 'running',
-    attemptedModels: [...attempted, next],
+    attemptedModels: state.attemptedModels,
     _errorCount: 0,
   });
-  taskModelAttempts.set(taskId, [...attempted, next]);
 
   // 写 model_fallback 事件（反查 agent_id，找不到则跳过，不阻塞）
   try {
@@ -650,7 +680,6 @@ async function finalizeAbortedTask(params: {
     );
   }
 
-  taskModelAttempts.delete(taskId);
   return entry;
 }
 
@@ -715,6 +744,254 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
     return fb.retried;
   };
 
+  /** P3-4 辅助：释放并发槽位并同步写 registry */
+  function releaseSlot(taskId: string, entry: BackgroundTaskEntry): void {
+    if (!entry.slotReleased && entry.status !== 'running') {
+      releaseSubagentSlot(entry.subagentType);
+      entry.slotReleased = true;
+      registry.set(taskId, entry);
+    }
+  }
+
+  /** P3-4 辅助：标记 completed 并写通知与 store */
+  async function finalizeAsyncCompleted(
+    taskId: string,
+    baseEntry: BackgroundTaskEntry,
+    output: string,
+    storeDetail: string,
+  ): Promise<void> {
+    const asyncHasSignal = hasCompletionSignal(output);
+    const now = Date.now();
+    const completedEntry: BackgroundTaskEntry = {
+      ...baseEntry,
+      status: 'completed',
+      result: output,
+      completedAt: now,
+      slotReleased: baseEntry.slotReleased ?? false,
+      _errorCount: 0,
+    };
+    registry.set(taskId, completedEntry);
+    releaseSlot(taskId, completedEntry);
+    try {
+      const nm = createNotificationManager({ changeDir: baseEntry.changeDir || '' });
+      await nm.writeNotification({
+        type: 'async_completed',
+        subagent: baseEntry.subagentType,
+        task_id: taskId,
+        session_id: baseEntry.sessionID,
+        summary: output.slice(0, 200),
+        has_completion_signal: asyncHasSignal,
+      });
+    } catch (err) {
+      Logger.warn(
+        `[BackgroundTaskWatcher] 写入完成通知失败: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    try {
+      const store = createSubagentStore({ changeDir: baseEntry.changeDir || '' });
+      const agents = await store.listAgents();
+      const matchedAgent = agents.find((a) => a.session_id === baseEntry.sessionID);
+      if (matchedAgent) {
+        await store.updateOutput(matchedAgent.agent_id, output);
+        await store.appendEvent(matchedAgent.agent_id, {
+          timestamp: new Date().toISOString(),
+          event_type: 'completed',
+          detail: storeDetail,
+        });
+      }
+    } catch (err) {
+      Logger.warn(
+        `[BackgroundTaskWatcher] 更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /** P3-4 辅助：标记 error 并写通知与 store */
+  async function finalizeAsyncError(
+    taskId: string,
+    baseEntry: BackgroundTaskEntry,
+    errorMessage: string,
+    summary: string,
+    storeDetail?: string,
+  ): Promise<void> {
+    const now = Date.now();
+    const updated: BackgroundTaskEntry = {
+      ...baseEntry,
+      status: 'error',
+      error: errorMessage,
+      completedAt: now,
+      slotReleased: baseEntry.slotReleased ?? false,
+    };
+    registry.set(taskId, updated);
+    releaseSlot(taskId, updated);
+    try {
+      const nm = createNotificationManager({ changeDir: baseEntry.changeDir || '' });
+      await nm.writeNotification({
+        type: 'async_error',
+        subagent: baseEntry.subagentType,
+        task_id: taskId,
+        session_id: baseEntry.sessionID,
+        summary,
+      });
+    } catch (err) {
+      Logger.warn(
+        `[BackgroundTaskWatcher] 写入错误通知失败: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (!storeDetail) return;
+    try {
+      const store = createSubagentStore({ changeDir: baseEntry.changeDir || '' });
+      const agents = await store.listAgents();
+      const matchedAgent = agents.find((a) => a.session_id === baseEntry.sessionID);
+      if (matchedAgent) {
+        await store.updateOutput(matchedAgent.agent_id, '', { status: 'error' });
+        await store.appendEvent(matchedAgent.agent_id, {
+          timestamp: new Date().toISOString(),
+          event_type: 'error',
+          detail: storeDetail,
+        });
+      }
+    } catch (err) {
+      Logger.warn(
+        `[BackgroundTaskWatcher] 更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /** P3-4 辅助：标记 no-valid-output（不拉黑/不换模/不重发） */
+  async function finalizeAsyncNoSignal(
+    taskId: string,
+    baseEntry: BackgroundTaskEntry,
+    output: string,
+  ): Promise<void> {
+    const now = Date.now();
+    const noSignalEntry: BackgroundTaskEntry = {
+      ...baseEntry,
+      status: 'error',
+      result: output,
+      error: NO_VALID_OUTPUT_DETAIL,
+      completedAt: now,
+      slotReleased: baseEntry.slotReleased ?? false,
+    };
+    registry.set(taskId, noSignalEntry);
+    releaseSlot(taskId, noSignalEntry);
+  }
+
+  /** P3-4 辅助：noSignal verdict 的故障转移循环与终结（从 checkTasks 提取） */
+  async function handleNoSignalFallback(taskId: string, task: BackgroundTaskEntry): Promise<void> {
+    let identifiedErrorKind: 'quota' | 'model' | null = 'model';
+    let fb = {
+      retried: await attemptWatcherFallback(taskId, task, { kind: 'error', resetAt: null }),
+    } as { retried: boolean };
+    const baseEntry = registry.get(taskId) ?? task;
+    let fallbackCompletedOutput: string | null = null;
+    let fallbackNoValidOutput: string | null = null;
+    let safety = 0;
+    while (fb.retried && safety <= MAX_MODEL_RETRIES + 2) {
+      safety++;
+      const reProbe = await pollSessionCompletion(
+        client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
+        task.sessionID,
+        {
+          maxWaitMs: 300,
+          probeMode: true,
+          directory: task.changeDir,
+          eventDriven: false,
+          pollIntervalMs: 50,
+        },
+      );
+      if (reProbe === PROBE_PENDING) {
+        const live = registry.get(taskId);
+        if (live) {
+          live._processing = false;
+          registry.set(taskId, live);
+        }
+        fb = { retried: false } as { retried: false };
+        break;
+      }
+      if (reProbe !== null) {
+        const reFailure = classifyAsyncFailure(reProbe as string);
+        if (reFailure) {
+          identifiedErrorKind = reFailure.kind === 'quota' ? 'quota' : 'model';
+          const retried = await attemptWatcherFallback(taskId, task, reFailure);
+          if (!retried) {
+            fb = { retried: false } as { retried: false };
+            break;
+          }
+          continue;
+        }
+        const echoBaseline = task.prompt ?? '';
+        if (echoBaseline && (reProbe as string).trim() === echoBaseline.trim()) {
+          identifiedErrorKind = 'model';
+          const retried = await attemptWatcherFallback(taskId, task, {
+            kind: 'error',
+            resetAt: null,
+          });
+          if (!retried) {
+            fb = { retried: false } as { retried: false };
+            break;
+          }
+          continue;
+        }
+        if (!hasRealOutput(reProbe as string)) {
+          fallbackNoValidOutput = reProbe as string;
+          fb = { retried: false } as { retried: false };
+          break;
+        }
+        fallbackCompletedOutput = reProbe as string;
+        fb = { retried: false } as { retried: false };
+        break;
+      }
+      fb = {
+        retried: await attemptWatcherFallback(taskId, task, { kind: 'error', resetAt: null }),
+      } as { retried: boolean };
+      identifiedErrorKind = 'model';
+    }
+
+    if (fallbackCompletedOutput !== null) {
+      await finalizeAsyncCompleted(
+        taskId,
+        baseEntry,
+        fallbackCompletedOutput,
+        `Async task ${taskId} completed (after model fallback)`,
+      );
+      return;
+    }
+
+    if (fallbackNoValidOutput !== null) {
+      const liveBeforeNoSignal = registry.get(taskId);
+      if (liveBeforeNoSignal && liveBeforeNoSignal.status !== 'running') {
+        liveBeforeNoSignal._processing = false;
+        registry.set(taskId, liveBeforeNoSignal);
+        return;
+      }
+      await finalizeAsyncNoSignal(taskId, liveBeforeNoSignal ?? baseEntry, fallbackNoValidOutput);
+      return;
+    }
+
+    if (fb.retried && safety <= MAX_MODEL_RETRIES + 2) {
+      const live = registry.get(taskId);
+      if (live) {
+        live._processing = false;
+        registry.set(taskId, live);
+      }
+      return;
+    }
+
+    const baseEntryForError = registry.get(taskId) ?? task;
+    const attemptedModelsForErr = baseEntryForError.attemptedModels ?? [];
+    const identifiedNote = identifiedErrorKind
+      ? `async output identified as ${identifiedErrorKind === 'quota' ? 'quota/rate-limit' : 'model'} error; model fallback exhausted`
+      : 'Task failed after max retries';
+    await finalizeAsyncError(
+      taskId,
+      baseEntryForError,
+      `${identifiedNote} (attempted: ${attemptedModelsForErr.join(', ') || 'none'})`,
+      'Task failed after max retries',
+      `Async task ${taskId} failed: max retries exceeded`,
+    );
+  }
+
   async function checkTasks(): Promise<void> {
     const runningTasks = Array.from(registry.entries()).filter(
       ([, task]) => task.status === 'running',
@@ -741,353 +1018,93 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
           { maxWaitMs: 1000, probeMode: true, directory: task.changeDir },
         );
 
-        // F2: If still pending, keep running and skip this cycle
-        if (probeResult === PROBE_PENDING) {
-          currentTask._processing = false;
-          registry.set(taskId, currentTask);
-          continue;
-        }
+        const errName =
+          probeResult === null
+            ? ((await readLastAssistantErrorName(client, task.sessionID)) ?? null)
+            : null;
+        const verdict = resolveProbeVerdict(probeResult, null, currentTask, () => errName);
 
-        if (probeResult === null) {
-          // P1-3：先判定用户/系统取消（Abort）——命中则零降级终结（不拉黑、不换模、不重发）。
-          // 放在故障转移之前，避免把用户主动中止当作模型故障处理。
-          const abortErrName = await readLastAssistantErrorName(client, task.sessionID);
-          if (isAbortErrorName(abortErrName)) {
+        switch (verdict) {
+          case 'pending': {
+            currentTask._processing = false;
+            registry.set(taskId, currentTask);
+            continue;
+          }
+          case 'abort': {
             await finalizeAbortedTask({
               registry,
               taskId,
               task,
-              errName: abortErrName as string,
+              errName: errName as string,
             });
             continue;
           }
-
-          // Wave 2 Task 5：尝试模型故障转移（换模型重 prompt），直至成功/耗尽。
-          // 设计：保持 running、不释放并发槽位；耗尽后才走原错误路径（D-4 未命中前不宣告失败）。
-          identifiedErrorKind = 'model';
-          let fb = { retried: (await attemptWatcherFallback(taskId, task, { kind: 'error', resetAt: null })) } as { retried: boolean };
-          // 使用 live registry 条目而非 L483 的过期 task 快照，避免覆盖故障转移已写入的 resolvedModel/attemptedModels
-          const baseEntry = registry.get(taskId) ?? task;
-          let fallbackCompletedOutput: string | null = null;
-          let fallbackNoValidOutput: string | null = null;
-          let safety = 0;
-          while (fb.retried && safety <= MAX_MODEL_RETRIES + 2) {
-            safety++;
-            const reProbe = await pollSessionCompletion(
-              client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
-              task.sessionID,
-              { maxWaitMs: 300, probeMode: true, directory: task.changeDir, eventDriven: false, pollIntervalMs: 50 },
-            );
-            if (reProbe === PROBE_PENDING) {
-              // 仍在进行中，交由下一轮 tick 处理（仅清除 _processing，不覆盖故障转移已更新的 registry）
-              const live = registry.get(taskId);
-              if (live) {
-                live._processing = false;
-                registry.set(taskId, live);
-              }
-              fb = { retried: false } as { retried: false };
-              break;
-            }
-            if (reProbe !== null) {
-              // NEW-P0-B: 换模型后的错误码校验——错误文本/配额报错不算成功，继续故障转移
-              const reFailure = classifyAsyncFailure(reProbe as string);
-              if (reFailure) {
-                identifiedErrorKind = reFailure.kind === 'quota' ? 'quota' : 'model';
-                const retried = await attemptWatcherFallback(taskId, task, reFailure);
-                if (!retried) {
-                  fb = { retried: false } as { retried: false };
-                  break;
-                }
-                continue;
-              }
-              // P0-1: 换模后 re-poll 产出正向判定（对齐 sync 路径）
-              // 回显：新模型原样回显所发 basePrompt → 视为未完成，继续故障转移（既有 model-failure 语义）
-              const echoBaseline = task.prompt ?? '';
-              if (echoBaseline && (reProbe as string).trim() === echoBaseline.trim()) {
-                identifiedErrorKind = 'model';
-                const retried = await attemptWatcherFallback(taskId, task, { kind: 'error', resetAt: null });
-                if (!retried) {
-                  fb = { retried: false } as { retried: false };
-                  break;
-                }
-                continue;
-              }
-              // 无机器可读错误码 且 无完成信号 → no-valid-output 失败终结（不拉黑/不换模/不重发，原文保留）
-              if (!hasRealOutput(reProbe as string)) {
-                fallbackNoValidOutput = reProbe as string;
-                fb = { retried: false } as { retried: false };
-                break;
-              }
-              // 换模型后已完成
-              fallbackCompletedOutput = reProbe as string;
-              fb = { retried: false } as { retried: false };
-              break;
-            }
-            fb = { retried: (await attemptWatcherFallback(taskId, task, { kind: 'error', resetAt: null })) } as { retried: boolean };
+          case 'noSignal': {
+            // Wave 2 Task 5：尝试模型故障转移（换模型重 prompt），直至成功/耗尽。
+            // 设计：保持 running、不释放并发槽位；耗尽后才走原错误路径（D-4 未命中前不宣告失败）。
+            await handleNoSignalFallback(taskId, task);
+            continue;
+          }
+          case 'error': {
             identifiedErrorKind = 'model';
-          }
-
-          if (fallbackCompletedOutput !== null) {
-            // 故障转移后成功完成：复用到原 completed 路径
-            const asyncHasSignal = hasCompletionSignal(fallbackCompletedOutput);
-            const now = Date.now();
-            const completedEntry: BackgroundTaskEntry = {
-              ...baseEntry,
-              status: 'completed',
-              result: fallbackCompletedOutput,
-              completedAt: now,
-              slotReleased: baseEntry.slotReleased ?? false,
-              _errorCount: 0,
-            };
-            registry.set(taskId, completedEntry);
-            if (!completedEntry.slotReleased) {
-              releaseSubagentSlot(task.subagentType);
-              completedEntry.slotReleased = true;
-              registry.set(taskId, completedEntry);
-            }
-            try {
-              const nm = createNotificationManager({ changeDir: task.changeDir || '' });
-              await nm.writeNotification({
-                type: 'async_completed',
-                subagent: task.subagentType,
-                task_id: taskId,
-                session_id: task.sessionID,
-                summary: fallbackCompletedOutput.slice(0, 200),
-                has_completion_signal: asyncHasSignal,
-              });
-            } catch (err) {
-              Logger.warn(`[BackgroundTaskWatcher] 写入完成通知失败: ${err instanceof Error ? err.message : String(err)}`);
-            }
-            try {
-              const store = createSubagentStore({ changeDir: task.changeDir || '' });
-              const agents = await store.listAgents();
-              const matchedAgent = agents.find((a) => a.session_id === task.sessionID);
-              if (matchedAgent) {
-                await store.updateOutput(matchedAgent.agent_id, fallbackCompletedOutput);
-                await store.appendEvent(matchedAgent.agent_id, {
-                  timestamp: new Date().toISOString(),
-                  event_type: 'completed',
-                  detail: `Async task ${taskId} completed (after model fallback)`,
-                });
-              }
-            } catch (err) {
-              Logger.warn(`[BackgroundTaskWatcher] 更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
-            }
-            taskModelAttempts.delete(taskId);
-            continue;
-          }
-
-          if (fallbackNoValidOutput !== null) {
-            // P0-1：换模后 re-poll 无完成信号 → no-valid-output 失败终结（不拉黑/不换模/不重发，原文保留）。
-            // F-2 防御：处理期间状态可能已被其他路径改写（如并发完成），此时不覆盖、直接跳过。
-            const liveBeforeNoSignal = registry.get(taskId);
-            if (liveBeforeNoSignal && liveBeforeNoSignal.status !== 'running') {
-              liveBeforeNoSignal._processing = false;
-              registry.set(taskId, liveBeforeNoSignal);
-              continue;
-            }
-            const now = Date.now();
-            const baseEntryNoSignal = liveBeforeNoSignal ?? baseEntry;
-            const noSignalEntry: BackgroundTaskEntry = {
-              ...baseEntryNoSignal,
-              status: 'error',
-              result: fallbackNoValidOutput,
-              error: NO_VALID_OUTPUT_DETAIL,
-              completedAt: now,
-              slotReleased: baseEntryNoSignal.slotReleased ?? false,
-              _errorCount: 0,
-            };
-            registry.set(taskId, noSignalEntry);
-            if (!noSignalEntry.slotReleased) {
-              releaseSubagentSlot(task.subagentType);
-              noSignalEntry.slotReleased = true;
-              registry.set(taskId, noSignalEntry);
-            }
-            taskModelAttempts.delete(taskId);
-            continue;
-          }
-
-          if (fb.retried && safety <= MAX_MODEL_RETRIES + 2) {
-            // 安全上限内仍 running：保持任务运行，交给后续 tick（仅清除 _processing，不覆盖故障转移已更新的 registry）
-            const live = registry.get(taskId);
-            if (live) {
-              live._processing = false;
-              registry.set(taskId, live);
-            }
-            continue;
-          }
-
-          // 故障转移耗尽（safety 触顶 或 fb.retried === false，且未转 completed）→ 原错误路径
-          const now = Date.now();
-          const baseEntryForError = registry.get(taskId) ?? task;
-          const attemptedModelsForErr = baseEntryForError.attemptedModels ?? [];
-          const identifiedNote = identifiedErrorKind
-            ? `async output identified as ${identifiedErrorKind === 'quota' ? 'quota/rate-limit' : 'model'} error; model fallback exhausted`
-            : 'Task failed after max retries';
-          const updated: BackgroundTaskEntry = {
-            ...baseEntryForError,
-            status: 'error',
-            error: `${identifiedNote} (attempted: ${attemptedModelsForErr.join(', ') || 'none'})`,
-            completedAt: now,
-            slotReleased: baseEntryForError.slotReleased ?? false,
-          };
-          registry.set(taskId, updated);
-
-          if (!updated.slotReleased && updated.status !== 'running') {
-            releaseSubagentSlot(task.subagentType);
-            updated.slotReleased = true;
-            registry.set(taskId, updated);
-          }
-
-          try {
-            const nm = createNotificationManager({ changeDir: task.changeDir || '' });
-            await nm.writeNotification({
-              type: 'async_error',
-              subagent: task.subagentType,
-              task_id: taskId,
-              session_id: task.sessionID,
-              summary: 'Task failed after max retries',
-            });
-          } catch (err) {
-            Logger.warn(`[BackgroundTaskWatcher] 写入错误通知失败: ${err instanceof Error ? err.message : String(err)}`);
-          }
-
-          try {
-            const store = createSubagentStore({ changeDir: task.changeDir || '' });
-            const agents = await store.listAgents();
-            const matchedAgent = agents.find((a) => a.session_id === task.sessionID);
-            if (matchedAgent) {
-              await store.updateOutput(matchedAgent.agent_id, '', { status: 'error' });
-              await store.appendEvent(matchedAgent.agent_id, {
-                timestamp: new Date().toISOString(),
-                event_type: 'error',
-                detail: `Async task ${taskId} failed: max retries exceeded`,
-              });
-            }
-          } catch (err) {
-            Logger.warn(`[BackgroundTaskWatcher] 更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
-           }
-          taskModelAttempts.delete(taskId);
-        } else {
-          // probeResult is string (session idle, task completed)
-          // Type guard: at this point probeResult is guaranteed to be string
-          const output = probeResult as string;
-
-          // NEW-P0-B: 与 sync 路径相同的失败识别——错误文本 / 配额报错不算成功。
-          // 命中时：标记 unavailable（quota 长冷却）→ 换 fallback 模型重派；
-          // 耗尽才走下方 error 路径，绝不把错误文本判为 completed。
-          const failure = classifyAsyncFailure(output);
-          if (failure) {
-            const retried = await attemptWatcherFallback(taskId, task, failure);
-            if (retried) {
-              // 已换模型重派：保持 running，交给下一轮 tick 复查
-              const live = registry.get(taskId);
-              if (live) {
-                live._processing = false;
-                registry.set(taskId, live);
-              }
-              continue;
-            }
-            // 故障转移耗尽 → 走 error 路径
-            const now = Date.now();
             const baseEntryForError = registry.get(taskId) ?? task;
-            const updated: BackgroundTaskEntry = {
-              ...baseEntryForError,
-              status: 'error',
-              error: 'Task output was a model error/quota text; model fallback exhausted',
-              completedAt: now,
-              slotReleased: baseEntryForError.slotReleased ?? false,
-            };
-            registry.set(taskId, updated);
-            if (!updated.slotReleased && updated.status !== 'running') {
-              releaseSubagentSlot(task.subagentType);
-              updated.slotReleased = true;
-              registry.set(taskId, updated);
-            }
-            taskModelAttempts.delete(taskId);
+            const attemptedModelsForErr = baseEntryForError.attemptedModels ?? [];
+            await finalizeAsyncError(
+              taskId,
+              baseEntryForError,
+              `async output identified as model error; model fallback exhausted (attempted: ${attemptedModelsForErr.join(', ') || 'none'})`,
+              'Task failed after max retries',
+              `Async task ${taskId} failed: max retries exceeded`,
+            );
             continue;
           }
+          case 'idle': {
+            // probeResult is string
+            const output = probeResult as string;
 
-          // P0-1：无错误码 且 无完成信号 → 不判 completed（不拉黑、不换模、不重发）。
-          // 产出原文保留在 result 中供编排器参考。
-          if (!hasRealOutput(output)) {
-            // F-2 防御：处理期间状态可能已被其他路径改写（如并发完成），此时不覆盖、直接跳过
-            const liveBeforeNoSignal = registry.get(taskId);
-            if (liveBeforeNoSignal && liveBeforeNoSignal.status !== 'running') {
-              liveBeforeNoSignal._processing = false;
-              registry.set(taskId, liveBeforeNoSignal);
+            // NEW-P0-B: 与 sync 路径相同的失败识别——错误文本 / 配额报错不算成功。
+            const failure = classifyAsyncFailure(output);
+            if (failure) {
+              const retried = await attemptWatcherFallback(taskId, task, failure);
+              if (retried) {
+                const live = registry.get(taskId);
+                if (live) {
+                  live._processing = false;
+                  registry.set(taskId, live);
+                }
+                continue;
+              }
+              // 故障转移耗尽 → error 路径
+              const baseEntryForError = registry.get(taskId) ?? task;
+              await finalizeAsyncError(
+                taskId,
+                baseEntryForError,
+                'Task output was a model error/quota text; model fallback exhausted',
+                'Task output was a model error/quota text; model fallback exhausted',
+              );
               continue;
             }
-            const now = Date.now();
-            const baseEntryNoSignal = liveBeforeNoSignal ?? task;
-            const noSignalEntry: BackgroundTaskEntry = {
-              ...baseEntryNoSignal,
-              status: 'error',
-              result: output,
-              error: NO_VALID_OUTPUT_DETAIL,
-              completedAt: now,
-              slotReleased: baseEntryNoSignal.slotReleased ?? false,
-            };
-            registry.set(taskId, noSignalEntry);
-            if (!noSignalEntry.slotReleased) {
-              releaseSubagentSlot(task.subagentType);
-              noSignalEntry.slotReleased = true;
-              registry.set(taskId, noSignalEntry);
+
+            // P0-1：无错误码 且 无完成信号 → 不判 completed（不拉黑、不换模、不重发）。
+            if (!hasRealOutput(output)) {
+              const liveBeforeNoSignal = registry.get(taskId);
+              if (liveBeforeNoSignal && liveBeforeNoSignal.status !== 'running') {
+                liveBeforeNoSignal._processing = false;
+                registry.set(taskId, liveBeforeNoSignal);
+                continue;
+              }
+              await finalizeAsyncNoSignal(taskId, liveBeforeNoSignal ?? task, output);
+              continue;
             }
-            taskModelAttempts.delete(taskId);
+
+            await finalizeAsyncCompleted(taskId, task, output, `Async task ${taskId} completed`);
             continue;
-          }
-
-          const asyncHasSignal = hasCompletionSignal(output);
-          const now = Date.now();
-          const updated: BackgroundTaskEntry = {
-            ...task,
-            status: 'completed',
-            result: output,
-            completedAt: now,
-            slotReleased: task.slotReleased ?? false,
-            _errorCount: 0,
-          };
-          registry.set(taskId, updated);
-
-          if (!updated.slotReleased && updated.status !== 'running') {
-            releaseSubagentSlot(task.subagentType);
-            updated.slotReleased = true;
-            registry.set(taskId, updated);
-          }
-
-          try {
-            const nm = createNotificationManager({ changeDir: task.changeDir || '' });
-            await nm.writeNotification({
-              type: 'async_completed',
-              subagent: task.subagentType,
-              task_id: taskId,
-              session_id: task.sessionID,
-              summary: output.slice(0, 200),
-              has_completion_signal: asyncHasSignal,
-            });
-          } catch (err) {
-            Logger.warn(`[BackgroundTaskWatcher] 写入完成通知失败: ${err instanceof Error ? err.message : String(err)}`);
-          }
-
-          try {
-            const store = createSubagentStore({ changeDir: task.changeDir || '' });
-            const agents = await store.listAgents();
-            const matchedAgent = agents.find((a) => a.session_id === task.sessionID);
-            if (matchedAgent) {
-              await store.updateOutput(matchedAgent.agent_id, output);
-              await store.appendEvent(matchedAgent.agent_id, {
-                timestamp: new Date().toISOString(),
-                event_type: 'completed',
-                detail: `Async task ${taskId} completed`,
-              });
-            }
-          } catch (err) {
-            Logger.warn(`[BackgroundTaskWatcher] 更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
       } catch (err) {
-        Logger.warn(`[BackgroundTaskWatcher] 检查任务失败: ${err instanceof Error ? err.message : String(err)}`);
+        Logger.warn(
+          `[BackgroundTaskWatcher] 检查任务失败: ${err instanceof Error ? err.message : String(err)}`,
+        );
         const currentTaskForError = registry.get(taskId);
         if (currentTaskForError && currentTaskForError.status === 'running') {
           const now = Date.now();
@@ -1105,12 +1122,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
                 slotReleased: latestTaskBeforeUpdate.slotReleased ?? false,
               };
               registry.set(taskId, updated);
-
-              if (!updated.slotReleased && updated.status !== 'running') {
-                releaseSubagentSlot(updated.subagentType);
-                updated.slotReleased = true;
-                registry.set(taskId, updated);
-              }
+              releaseSlot(taskId, updated);
             }
           } else {
             // F-2: Re-fetch latest state before updating to avoid overwriting concurrent changes
@@ -1217,10 +1229,7 @@ export function createCallFlowAgentTools(
         .describe(
           'true=async (returns task_id for flowagent_output), false=sync (waits for completion)',
         ),
-      session_id: z
-        .string()
-        .nullish()
-        .describe('Existing session to continue (sync mode only)'),
+      session_id: z.string().nullish().describe('Existing session to continue (sync mode only)'),
       agent_id: z
         .string()
         .nullish()
@@ -1299,20 +1308,20 @@ export function createCallFlowAgentTools(
       if (subagent_type === 'build-executor' || subagent_type === 'iflow-plan-executor') {
         const waveExecutionPattern = /(?:Execute|Run|Perform|Dispatch)\s+Wave\s+\d+/gi;
         const waveMatches = (prompt as string).match(waveExecutionPattern);
-        const uniqueWaves = waveMatches ? new Set(waveMatches.map(w => w.toLowerCase())).size : 0;
-        
+        const uniqueWaves = waveMatches ? new Set(waveMatches.map((w) => w.toLowerCase())).size : 0;
+
         if (uniqueWaves > 1) {
           if (subagent_type === 'build-executor') {
             return await formatToolError(
               `Wave Orchestration Constraint Violation: Detected ${uniqueWaves} waves in single build-executor prompt. ` +
-              `Waves MUST be dispatched one at a time with Review Gate checks between them. ` +
-              `Please delegate waves sequentially: Wave 1 → Review Gate → Wave 2 → Review Gate → ...`
+                `Waves MUST be dispatched one at a time with Review Gate checks between them. ` +
+                `Please delegate waves sequentially: Wave 1 → Review Gate → Wave 2 → Review Gate → ...`,
             );
           } else {
             return await formatToolError(
               `Wave Orchestration Constraint Violation: Detected ${uniqueWaves} waves in single iflow-plan-executor prompt. ` +
-              `Waves MUST be dispatched one at a time. ` +
-              `Please delegate waves sequentially: Wave 1 → Wave 2 → ...`
+                `Waves MUST be dispatched one at a time. ` +
+                `Please delegate waves sequentially: Wave 1 → Wave 2 → ...`,
             );
           }
         }
@@ -1345,7 +1354,7 @@ export function createCallFlowAgentTools(
             : undefined;
 
         let resolvedAgentId = normalizedAgentId;
-        
+
         // Model resolution strategy:
         // - If model_type is specified: use resolveModelWithFallback to respect the full priority chain
         // - Otherwise: use agentModelMap (pre-resolved during config hook)
@@ -1407,7 +1416,11 @@ export function createCallFlowAgentTools(
             const fallbackNext = getAlternativeModel(
               modelFromMap,
               subagent_type as string,
-              buildAgentFallbackChain(subagent_type as BuiltinAgentName, configOverrides, modelProfiles),
+              buildAgentFallbackChain(
+                subagent_type as BuiltinAgentName,
+                configOverrides,
+                modelProfiles,
+              ),
             );
             if (!fallbackNext) {
               return await formatToolError(
@@ -1438,7 +1451,6 @@ export function createCallFlowAgentTools(
           }
           sessionID = normalizedSessionId;
         } else {
-
           const createResult = await (
             client.session.create as (args: {
               body: Record<string, unknown>;
@@ -1493,7 +1505,9 @@ export function createCallFlowAgentTools(
             });
           } catch (err) {
             // subagent-store 创建失败不阻塞 agent 执行
-            Logger.warn(`[CallFlowAgent] 创建 agent store 失败: ${err instanceof Error ? err.message : String(err)}`);
+            Logger.warn(
+              `[CallFlowAgent] 创建 agent store 失败: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
 
@@ -1537,9 +1551,8 @@ export function createCallFlowAgentTools(
             resolvedModel: subagentModel,
             modelType: model_type as string | undefined,
             prompt: finalPrompt,
+            attemptedModels: [subagentModel],
           });
-          // Wave 2 Task 5：记录已尝试模型，供故障转移终止判定使用
-          taskModelAttempts.set(taskId, [subagentModel]);
 
           // P1: 追加 started 事件
           if (resolvedAgentId) {
@@ -1551,7 +1564,9 @@ export function createCallFlowAgentTools(
               });
             } catch (err) {
               // 事件追加失败不阻塞
-              Logger.warn(`[CallFlowAgent] 追加事件失败: ${err instanceof Error ? err.message : String(err)}`);
+              Logger.warn(
+                `[CallFlowAgent] 追加事件失败: ${err instanceof Error ? err.message : String(err)}`,
+              );
             }
           }
 
@@ -1577,7 +1592,11 @@ export function createCallFlowAgentTools(
           client,
           sessionID,
           // P1-1: 传入用户配置 fallback 链（换模候选完全来自用户配置，无内置 fallback）
-          extraFallbacks: buildAgentFallbackChain(subagent_type as BuiltinAgentName, configOverrides, modelProfiles),
+          extraFallbacks: buildAgentFallbackChain(
+            subagent_type as BuiltinAgentName,
+            configOverrides,
+            modelProfiles,
+          ),
           agentName: subagent_type as string,
           basePrompt: finalPrompt,
           initialModel: subagentModel,
@@ -1636,7 +1655,10 @@ export function createCallFlowAgentTools(
               ),
             };
           }
-          if (fallbackResult.failureReason === 'fatal' || fallbackResult.failureReason === 'invalid-model') {
+          if (
+            fallbackResult.failureReason === 'fatal' ||
+            fallbackResult.failureReason === 'invalid-model'
+          ) {
             return await formatToolError(
               `模型调用失败 (${fallbackResult.detail ?? 'unknown'})：前置校验失败或模型格式非法，未触发模型故障转移。`,
             );
@@ -1794,7 +1816,9 @@ export function createCallFlowAgentTools(
           });
         } catch (err) {
           // 通知写入失败不阻塞 agent 结果返回
-          Logger.warn(`[CallFlowAgent] 同步模式写入通知失败: ${err instanceof Error ? err.message : String(err)}`);
+          Logger.warn(
+            `[CallFlowAgent] 同步模式写入通知失败: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
 
         // P1: 同步模式完成时更新 subagent-store
@@ -1811,7 +1835,9 @@ export function createCallFlowAgentTools(
             });
           } catch (err) {
             // subagent-store 更新失败不阻塞 agent 结果返回
-            Logger.warn(`[CallFlowAgent] 同步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
+            Logger.warn(
+              `[CallFlowAgent] 同步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
 
@@ -1843,7 +1869,9 @@ export function createCallFlowAgentTools(
               output: lastOutput,
               // Wave 2 Task 4 / D-8：暴露实际生效模型与故障转移链
               model: fallbackResult.model,
-              ...(fallbackResult.fallbacks.length > 0 && { model_fallbacks: fallbackResult.fallbacks }),
+              ...(fallbackResult.fallbacks.length > 0 && {
+                model_fallbacks: fallbackResult.fallbacks,
+              }),
               ...(structuredOutput !== undefined && { structured_output: structuredOutput }),
               ...(syncWarnings.length > 0 && { warnings: syncWarnings }),
             },
@@ -1883,7 +1911,10 @@ export function createCallFlowAgentTools(
         return {
           title: 'FlowAgent Output',
           output: JSON.stringify(
-            { success: false, error: `子 agent "${callerAgent}" 不允许调用 flowagent_output。只有主 orchestrator（sFlow/iFlow）可以委派子 agent。` },
+            {
+              success: false,
+              error: `子 agent "${callerAgent}" 不允许调用 flowagent_output。只有主 orchestrator（sFlow/iFlow）可以委派子 agent。`,
+            },
             null,
             2,
           ),
@@ -1925,7 +1956,6 @@ export function createCallFlowAgentTools(
             { maxWaitMs: DEFAULT_MAX_WAIT_MS, directory: changeDir },
           );
 
-
           const now = Date.now();
 
           // Wave 2 Task 5：尝试模型故障转移（换模型重 prompt），循环直至成功/耗尽。
@@ -1963,15 +1993,20 @@ export function createCallFlowAgentTools(
             const identifiedCode = classifyModelErrorByCode(output);
             if (identifiedCode) {
               identifiedErrorKind = identifiedCode.kind === 'non-transient' ? 'quota' : 'model';
-              activeQuota = identifiedCode.kind === 'non-transient'
-                ? { resetAt: identifiedCode.resetAt }
-                : null;
+              activeQuota =
+                identifiedCode.kind === 'non-transient'
+                  ? { resetAt: identifiedCode.resetAt }
+                  : null;
               fb = await tryAsyncModelFallback({
                 client,
                 registry: backgroundTaskRegistry,
                 taskId: task_id,
                 changeDir,
-                extraFallbacks: buildAgentFallbackChain(task.subagentType as BuiltinAgentName, configOverrides, modelProfiles),
+                extraFallbacks: buildAgentFallbackChain(
+                  task.subagentType as BuiltinAgentName,
+                  configOverrides,
+                  modelProfiles,
+                ),
                 quota: activeQuota,
               });
               // 无效产出：置空交由下方 while 循环 re-poll；耗尽时走结构化错误路径
@@ -1995,7 +2030,6 @@ export function createCallFlowAgentTools(
                 backgroundTaskRegistry.set(task_id, noSignalEntry);
               }
 
-              taskModelAttempts.delete(task_id);
               return noSignalEntry;
             }
           }
@@ -2019,7 +2053,11 @@ export function createCallFlowAgentTools(
               registry: backgroundTaskRegistry,
               taskId: task_id,
               changeDir,
-              extraFallbacks: buildAgentFallbackChain(task.subagentType as BuiltinAgentName, configOverrides, modelProfiles),
+              extraFallbacks: buildAgentFallbackChain(
+                task.subagentType as BuiltinAgentName,
+                configOverrides,
+                modelProfiles,
+              ),
             });
           }
           let fbSafety = 0;
@@ -2049,9 +2087,7 @@ export function createCallFlowAgentTools(
               const reCode = classifyModelErrorByCode(reOutput);
               if (reCode) {
                 identifiedErrorKind = reCode.kind === 'non-transient' ? 'quota' : 'model';
-                activeQuota = reCode.kind === 'non-transient'
-                  ? { resetAt: reCode.resetAt }
-                  : null;
+                activeQuota = reCode.kind === 'non-transient' ? { resetAt: reCode.resetAt } : null;
                 output = null;
               } else {
                 // 回显：新模型原样回显所发 basePrompt → 视为未完成，继续故障转移（既有 model-failure 语义）
@@ -2080,7 +2116,11 @@ export function createCallFlowAgentTools(
               registry: backgroundTaskRegistry,
               taskId: task_id,
               changeDir,
-              extraFallbacks: buildAgentFallbackChain(task.subagentType as BuiltinAgentName, configOverrides, modelProfiles),
+              extraFallbacks: buildAgentFallbackChain(
+                task.subagentType as BuiltinAgentName,
+                configOverrides,
+                modelProfiles,
+              ),
               quota: activeQuota,
             });
           }
@@ -2132,7 +2172,9 @@ export function createCallFlowAgentTools(
                 summary: `Task output has no completion signal; treated as failure (raw output preserved)`,
               });
             } catch (err) {
-              Logger.warn(`[CallFlowAgent] 异步模式写入错误通知失败: ${err instanceof Error ? err.message : String(err)}`);
+              Logger.warn(
+                `[CallFlowAgent] 异步模式写入错误通知失败: ${err instanceof Error ? err.message : String(err)}`,
+              );
             }
 
             try {
@@ -2148,10 +2190,11 @@ export function createCallFlowAgentTools(
                 });
               }
             } catch (err) {
-              Logger.warn(`[CallFlowAgent] 异步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
+              Logger.warn(
+                `[CallFlowAgent] 异步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`,
+              );
             }
 
-            taskModelAttempts.delete(task_id);
             return noSignalEntry;
           }
 
@@ -2186,7 +2229,9 @@ export function createCallFlowAgentTools(
                 summary: `Task failed: ${identifiedNote}`,
               });
             } catch (err) {
-              Logger.warn(`[CallFlowAgent] 异步模式写入错误通知失败: ${err instanceof Error ? err.message : String(err)}`);
+              Logger.warn(
+                `[CallFlowAgent] 异步模式写入错误通知失败: ${err instanceof Error ? err.message : String(err)}`,
+              );
             }
 
             try {
@@ -2202,10 +2247,11 @@ export function createCallFlowAgentTools(
                 });
               }
             } catch (err) {
-              Logger.warn(`[CallFlowAgent] 异步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
+              Logger.warn(
+                `[CallFlowAgent] 异步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`,
+              );
             }
 
-            taskModelAttempts.delete(task_id);
             return updated;
           }
 
@@ -2241,7 +2287,9 @@ export function createCallFlowAgentTools(
               has_completion_signal: asyncHasSignal,
             });
           } catch (err) {
-            Logger.warn(`[CallFlowAgent] 异步模式写入通知失败: ${err instanceof Error ? err.message : String(err)}`);
+            Logger.warn(
+              `[CallFlowAgent] 异步模式写入通知失败: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
 
           try {
@@ -2260,18 +2308,21 @@ export function createCallFlowAgentTools(
               });
             }
           } catch (err) {
-            Logger.warn(`[CallFlowAgent] 异步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`);
+            Logger.warn(
+              `[CallFlowAgent] 异步模式更新 subagent-store 失败: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
 
-          taskModelAttempts.delete(task_id);
           return updated;
         } catch (err) {
           // F-1: Handle pollSessionCompletion exceptions (network errors, etc.)
-          Logger.warn(`[CallFlowAgent] pollAndComplete failed: ${err instanceof Error ? err.message : String(err)}`);
-          
+          Logger.warn(
+            `[CallFlowAgent] pollAndComplete failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+
           const now = Date.now();
           const errorMessage = err instanceof Error ? err.message : String(err);
-          
+
           const updated: BackgroundTaskEntry = {
             ...task,
             status: 'error',
@@ -2297,7 +2348,9 @@ export function createCallFlowAgentTools(
               summary: `Task failed: polling error - ${errorMessage}`,
             });
           } catch (notificationErr) {
-            Logger.warn(`[CallFlowAgent] 异步模式写入错误通知失败: ${notificationErr instanceof Error ? notificationErr.message : String(notificationErr)}`);
+            Logger.warn(
+              `[CallFlowAgent] 异步模式写入错误通知失败: ${notificationErr instanceof Error ? notificationErr.message : String(notificationErr)}`,
+            );
           }
 
           try {
@@ -2313,10 +2366,11 @@ export function createCallFlowAgentTools(
               });
             }
           } catch (storeErr) {
-            Logger.warn(`[CallFlowAgent] 异步模式更新 subagent-store 失败: ${storeErr instanceof Error ? storeErr.message : String(storeErr)}`);
+            Logger.warn(
+              `[CallFlowAgent] 异步模式更新 subagent-store 失败: ${storeErr instanceof Error ? storeErr.message : String(storeErr)}`,
+            );
           }
 
-          taskModelAttempts.delete(task_id);
           return updated;
         } finally {
           const latest = backgroundTaskRegistry.get(task_id);
@@ -2408,7 +2462,10 @@ export function createCallFlowAgentTools(
         return {
           title: 'FlowAgent Cancel',
           output: JSON.stringify(
-            { success: false, error: `子 agent "${callerAgent}" 不允许调用 flowagent_cancel。只有主 orchestrator（sFlow/iFlow）可以委派子 agent。` },
+            {
+              success: false,
+              error: `子 agent "${callerAgent}" 不允许调用 flowagent_cancel。只有主 orchestrator（sFlow/iFlow）可以委派子 agent。`,
+            },
             null,
             2,
           ),
@@ -2438,7 +2495,9 @@ export function createCallFlowAgentTools(
           await client.session.abort({ path: { id: task.sessionID } });
         } catch (err) {
           // session.abort may not be available; mark cancelled anyway
-          Logger.warn(`[CallFlowAgent] 取消 session 失败: ${err instanceof Error ? err.message : String(err)}`);
+          Logger.warn(
+            `[CallFlowAgent] 取消 session 失败: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
 
         // P1-A: Check slotReleased to prevent double release
@@ -2446,7 +2505,6 @@ export function createCallFlowAgentTools(
           releaseSubagentSlot(task.subagentType);
         }
         backgroundTaskRegistry.delete(taskId);
-        taskModelAttempts.delete(taskId);
         return {
           title: 'FlowAgent Cancel',
           output: JSON.stringify(
@@ -2487,7 +2545,7 @@ export function createCallFlowAgentTools(
     flowagent_output: flowagentOutputTool,
     flowagent_cancel: flowagentCancelTool,
   };
-  
+
   // Attach _stopWatcher for test cleanup (not part of LocalToolDefinition, excluded from return type)
   tools._stopWatcher = () => watcher.stop();
 
