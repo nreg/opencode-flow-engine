@@ -10,8 +10,11 @@
  */
 
 import { beforeEach, describe, expect, it, mock, afterEach } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
-import { createCallFlowAgentTools, resetRunningSubagentCounts } from '../call-flow-agent.js';
+import { createCallFlowAgentTools, resetRunningSubagentCounts, createBackgroundTaskWatcher } from '../call-flow-agent.js';
 import { resetGlobalEventBus, getGlobalEventBus } from '../../features/event-bus.js';
 import { clearUnavailableModels, markModelUnavailable, getAlternativeModel, isModelAvailable } from '../../agents/agent-builder.js';
 import { Logger } from '../../utils/logger.js';
@@ -129,6 +132,18 @@ function createTestTools(options: ReturnType<typeof createTestOptions>) {
   const tools = createCallFlowAgentTools(options);
   currentTools = tools;
   return tools;
+}
+
+/** R3-P2-1: 轮询等待条件成立（去除固定 sleep 的时序耦合，消除 flaky） */
+async function waitFor(
+  pred: () => boolean | Promise<boolean>,
+  timeoutMs = 3000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await pred()) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
 }
 
 // P0-3: Store tools reference for cleanup
@@ -3729,5 +3744,278 @@ describe('R3-fix P1-3: background reserve-then-dispatch', () => {
     await new Promise((resolve) => setTimeout(resolve, 500));
     const task = options.backgroundTaskRegistry.get(d2.task_id);
     expect(task?.status).toBe('completed');
+  });
+});
+
+// ─── FIX-P3-2: no-valid-output 路径补写降级通知 ─────────────────────────────
+
+describe('FIX-P3-2: no-valid-output 路径补写降级通知', () => {
+  let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
+
+  beforeEach(() => {
+    promptCalls = [];
+    currentTools = null;
+  });
+
+  /** 读取 changeDir 下通知目录中的全部通知 JSON */
+  async function readNotifications(changeDir: string): Promise<Array<Record<string, unknown>>> {
+    const notifDir = join(changeDir, '.flow-engine/sflow/notifications');
+    try {
+      const { readdir, readFile } = await import('node:fs/promises');
+      const files = (await readdir(notifDir)).filter((f) => f.endsWith('.json'));
+      const entries: Array<Record<string, unknown>> = [];
+      for (const f of files) {
+        const raw = await readFile(join(notifDir, f), 'utf-8');
+        entries.push(JSON.parse(raw));
+      }
+      return entries;
+    } catch {
+      return [];
+    }
+  }
+
+  it('① 异步模式首个产出无完成信号（noSignal 终结）→ 写入通知且含 no-valid-output 原因', async () => {
+    const client = createMockClient({
+      pollOutputs: ['The agent is still thinking about the approach and has not produced a final answer yet.'],
+      promptCalls,
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    const tmp = await mkdtemp(join(tmpdir(), 'w5-notif-'));
+    try {
+      const startResult = await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: true,
+        },
+        { sessionID: 'parent-session', directory: tmp },
+      );
+      const taskId = JSON.parse(startResult.output).task_id;
+
+      await tools.flowagent_output.execute(
+        { task_id: taskId, block: true },
+        { sessionID: 'parent-session', directory: tmp },
+      );
+
+      const task = options.backgroundTaskRegistry.get(taskId);
+      expect(task?.status).toBe('error');
+
+      const notifs = await readNotifications(tmp);
+      const match = notifs.find((n) => n.task_id === taskId);
+      expect(match).toBeDefined();
+      expect(match?.type).toBe('async_error');
+      expect(match?.failure_reason).toBe('no-valid-output');
+      expect(match?.has_completion_signal).toBe(false);
+      expect(String(match?.summary)).toContain('no completion signal');
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('② watcher 换模耗尽后 re-probe 仍无有效产出（其它无有效产出终结分支）→ 写入通知', async () => {
+    const client = {
+      session: {
+        create: mock(async () => ({ data: { id: 'watch-session-002' } })),
+        prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+          promptCalls.push({ id: args.path.id, body: args.body });
+        }),
+        messages: mock(async () => ({
+          data: [
+            { parts: [{ type: 'text', text: 'user prompt' }] },
+            { info: { role: 'assistant' }, parts: [{ type: 'text', text: '未完成的占位输出' }] },
+          ],
+        })),
+        status: mock(async () => ({ data: { 'watch-session-002': { type: 'idle' } } })),
+        abort: mock(async () => {}),
+      },
+    };
+
+    const tmp = await mkdtemp(join(tmpdir(), 'w5-notif-'));
+    try {
+      const registry: BackgroundTaskRegistry = new Map();
+      registry.set('watch-task-002', {
+        sessionID: 'watch-session-002',
+        subagentType: 'build-executor',
+        status: 'running',
+        createdAt: Date.now(),
+        changeDir: tmp,
+        resolvedModel: 'provider/no-signal-primary',
+        attemptedModels: ['provider/no-signal-primary'],
+      });
+      const watcher = createBackgroundTaskWatcher({
+        client: client as never,
+        registry,
+        pollIntervalMs: 20,
+        extraFallbacks: [],
+      });
+      watcher.start();
+      await waitFor(() => registry.get('watch-task-002')?.status === 'error');
+      watcher.stop();
+
+      const task = registry.get('watch-task-002');
+      expect(task?.status).toBe('error');
+      expect(task?.error).toContain('no completion signal');
+
+      const notifs = await readNotifications(tmp);
+      const match = notifs.find((n) => n.task_id === 'watch-task-002');
+      expect(match).toBeDefined();
+      expect(match?.type).toBe('async_error');
+      expect(match?.failure_reason).toBe('no-valid-output');
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('③ 假产出放弃路径（换模 re-poll 仍无有效产出 → 终结 noSignal）→ 写入通知', async () => {
+    // 首轮 poll 返回错误码文本触发换模（一次 fallback），re-poll 返回非完成信号/
+    // 非结构化报告的"假产出" → 落入 no-valid-output 终结分支（pollAndComplete
+    // re-poll 路径），与 watcher 的 finalizeAsyncNoSignal 一致补写降级通知。
+    const client = createMockClient({
+      pollOutputs: [
+        'Error: internal provider failure (code: 500)',
+        'The agent is still thinking about the approach and has not produced a final answer yet.',
+      ],
+      promptCalls,
+    });
+
+    const tmp = await mkdtemp(join(tmpdir(), 'w5-notif-'));
+    try {
+      const options = createTestOptions(client);
+      // 注入用户 fallback 链，使首轮错误码触发一次换模并进入 re-poll
+      (options as Record<string, unknown>).configOverrides = {
+        'build-executor': { fallback_models: ['provider/alt-model'] },
+      };
+      const tools = createTestTools(options);
+      currentTools = tools;
+
+      const startResult = await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: true,
+        },
+        { sessionID: 'parent-session', directory: tmp },
+      );
+      const taskId = JSON.parse(startResult.output).task_id;
+
+      await tools.flowagent_output.execute(
+        { task_id: taskId, block: true },
+        { sessionID: 'parent-session', directory: tmp },
+      );
+
+      const task = options.backgroundTaskRegistry.get(taskId);
+      expect(task?.status).toBe('error');
+      expect(task?.error).toContain('no completion signal');
+
+      // 等待通知落盘（finalize 先置 status 再 await 写通知，存在竞态窗口）
+      await waitFor(async () => {
+        const ns = await readNotifications(tmp);
+        return ns.some((n) => n.task_id === taskId);
+      });
+
+      const notifs = await readNotifications(tmp);
+      const match = notifs.find((n) => n.task_id === taskId);
+      expect(match).toBeDefined();
+      expect(match?.type).toBe('async_error');
+      expect(match?.failure_reason).toBe('no-valid-output');
+      expect(match?.has_completion_signal).toBe(false);
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('④ completed/error 通知行为不回归（含类型与字段断言）', async () => {
+    // completed 分支
+    const completedClient = createMockClient({
+      pollOutputs: ['任务已完成 [TASK_COMPLETE]'],
+      promptCalls,
+    });
+    const tmpCompleted = await mkdtemp(join(tmpdir(), 'w5-notif-'));
+    try {
+      const options = createTestOptions(completedClient);
+      const tools = createTestTools(options);
+      currentTools = tools;
+      const startResult = await tools.call_flow_agent.execute(
+        {
+          description: 'completed task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: true,
+        },
+        { sessionID: 'parent-session', directory: tmpCompleted },
+      );
+      const taskId = JSON.parse(startResult.output).task_id;
+      await tools.flowagent_output.execute(
+        { task_id: taskId, block: true },
+        { sessionID: 'parent-session', directory: tmpCompleted },
+      );
+      expect(options.backgroundTaskRegistry.get(taskId)?.status).toBe('completed');
+
+      const notifs = await readNotifications(tmpCompleted);
+      const match = notifs.find((n) => n.task_id === taskId);
+      expect(match).toBeDefined();
+      expect(match?.type).toBe('async_completed');
+      expect(match?.failure_reason).toBeUndefined();
+    } finally {
+      await rm(tmpCompleted, { recursive: true, force: true });
+    }
+
+    // error 分支（retry 耗尽 → async_error）
+    const errorClient = {
+      session: {
+        create: mock(async () => ({ data: { id: 'err-session-004' } })),
+        prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+          promptCalls.push({ id: args.path.id, body: args.body });
+        }),
+        messages: mock(async () => ({ data: [] })),
+        status: mock(async () => ({
+          data: { 'err-session-004': { type: 'retry', attempt: 5, next: 0 } },
+        })),
+        abort: mock(async () => {}),
+      },
+    };
+    const tmpError = await mkdtemp(join(tmpdir(), 'w5-notif-'));
+    try {
+      const registry: BackgroundTaskRegistry = new Map();
+      registry.set('watch-task-004', {
+        sessionID: 'err-session-004',
+        subagentType: 'build-executor',
+        status: 'running',
+        createdAt: Date.now(),
+        changeDir: tmpError,
+        resolvedModel: 'provider/error-primary',
+        attemptedModels: ['provider/error-primary'],
+      });
+      const watcher = createBackgroundTaskWatcher({
+        client: errorClient as never,
+        registry,
+        pollIntervalMs: 20,
+        extraFallbacks: [],
+      });
+      watcher.start();
+      await waitFor(() => registry.get('watch-task-004')?.status === 'error');
+      watcher.stop();
+
+      expect(registry.get('watch-task-004')?.status).toBe('error');
+
+      // 等待通知落盘（finalize 先置 status 再 await 写通知，存在竞态窗口）
+      await waitFor(async () => {
+        const ns = await readNotifications(tmpError);
+        return ns.some((n) => n.task_id === 'watch-task-004');
+      });
+
+      const notifs = await readNotifications(tmpError);
+      const match = notifs.find((n) => n.task_id === 'watch-task-004');
+      expect(match).toBeDefined();
+      expect(match?.type).toBe('async_error');
+    } finally {
+      await rm(tmpError, { recursive: true, force: true });
+    }
   });
 });

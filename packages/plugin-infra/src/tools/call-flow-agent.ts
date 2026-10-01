@@ -934,6 +934,26 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
     };
     registry.set(taskId, noSignalEntry);
     releaseSlot(taskId, noSignalEntry);
+    // P3-2：no-valid-output 终结路径补写降级通知（与 completed/error 分支一致）。
+    // 仅通知补充，不改变 registry 写入行为；含失败原因与模型尝试信息供下游消费方区分。
+    const attemptedForNotif = noSignalEntry.attemptedModels ?? [];
+    const notifSummary = `${NO_VALID_OUTPUT_DETAIL} (attempted: ${attemptedForNotif.join(', ') || 'none'}); raw output preserved`;
+    try {
+      const nm = createNotificationManager({ changeDir: baseEntry.changeDir || '' });
+      await nm.writeNotification({
+        type: 'async_error',
+        subagent: baseEntry.subagentType,
+        task_id: taskId,
+        session_id: baseEntry.sessionID,
+        summary: notifSummary,
+        has_completion_signal: false,
+        failure_reason: 'no-valid-output',
+      });
+    } catch (err) {
+      Logger.warn(
+        `[BackgroundTaskWatcher] 写入 no-valid-output 通知失败: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /** P3-4 辅助：noSignal verdict 的故障转移循环与终结（从 checkTasks 提取） */
@@ -2124,6 +2144,27 @@ export function createCallFlowAgentTools(
                 backgroundTaskRegistry.set(task_id, noSignalEntry);
               }
 
+              // P3-2：poll 首个产出即无完成信号 → 降级通知（与 error 分支一致，含失败原因与
+              // 模型尝试信息）。仅通知补充，不改变 registry 写入行为。
+              const attemptedForNotif = noSignalEntry.attemptedModels ?? [];
+              const noSignalSummary = `${NO_VALID_OUTPUT_DETAIL} (attempted: ${attemptedForNotif.join(', ') || 'none'}); raw output preserved`;
+              try {
+                const nm = createNotificationManager({ changeDir });
+                await nm.writeNotification({
+                  type: 'async_error',
+                  subagent: task.subagentType,
+                  task_id,
+                  session_id: task.sessionID,
+                  summary: noSignalSummary,
+                  has_completion_signal: false,
+                  failure_reason: 'no-valid-output',
+                });
+              } catch (err) {
+                Logger.warn(
+                  `[CallFlowAgent] 异步模式写入 no-valid-output 通知失败: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              }
+
               return noSignalEntry;
             }
           }
@@ -2267,6 +2308,8 @@ export function createCallFlowAgentTools(
                 task_id,
                 session_id: task.sessionID,
                 summary: `Task output has no completion signal; treated as failure (raw output preserved)`,
+                has_completion_signal: false,
+                failure_reason: 'no-valid-output',
               });
             } catch (err) {
               Logger.warn(

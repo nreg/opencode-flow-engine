@@ -43,6 +43,11 @@ export interface WriteNotificationParams {
   summary: string;
   /** P3: 输出是否包含完成信号 */
   has_completion_signal?: boolean;
+  /**
+   * 失败原因枚举（如 no-valid-output / exhausted / aborted），供下游消费方区分失败类别。
+   * 非失败类型通知（sync_completed / async_completed）不传。
+   */
+  failure_reason?: string;
 }
 
 export interface NotificationEntry {
@@ -54,6 +59,8 @@ export interface NotificationEntry {
   summary: string;
   /** P3: 输出是否包含完成信号 */
   has_completion_signal?: boolean;
+  /** 失败原因枚举（同 WriteNotificationParams） */
+  failure_reason?: string;
 }
 
 export interface ConsumedNotification extends NotificationEntry {
@@ -132,6 +139,9 @@ export function createNotificationManager(config: { changeDir: string }): Notifi
         summary: params.summary,
         ...(params.has_completion_signal !== undefined && {
           has_completion_signal: params.has_completion_signal,
+        }),
+        ...(params.failure_reason !== undefined && {
+          failure_reason: params.failure_reason,
         }),
       };
 
