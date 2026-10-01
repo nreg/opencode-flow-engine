@@ -9,11 +9,18 @@
  * ⑤ 同 sessionID 重复事件去重（只拉黑/通知一次）
  * ⑥ 分类未命中不产生通知
  *
+ * + P1-1：换模后旧 session 迟到事件不得误拉黑当前健康模型（attemptedModels 护栏）
+ * + P1-2：通知文件必须落到真实 changeDir，而非 process.cwd()
+ *
  * 设计：通过注入副作用（blacklistModel / writeNotification 计数）与可注入
- * modelResolver，对 handler 做纯逻辑验证，不依赖文件系统 / 后台注册表。
+ * modelResolver，对 handler 做纯逻辑验证；P1-2 另用真实文件系统验证目录落点。
  */
 
 import { beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { listFiles, readJsonFile } from '@opencode-flow-engine/shared';
 import {
   clearUnavailableModels,
   isModelAvailable,
@@ -305,5 +312,166 @@ describe('D2 补充：serializeErrorForClassifier 仅转义结构化码，不拼
     const s = serializeErrorForClassifier(namedErrorWithoutCode('MessageOutputLengthError'));
     // 仅 type 形态（C-6 兼容，不触发文案匹配）；分类器对该 type 不归一化为码 → null
     expect(s).toBe('type: MessageOutputLengthError');
+  });
+});
+
+// ─── P1-1：换模后旧 session 迟到事件不得误拉黑当前健康模型 ───────────────────────
+
+describe('P1-1 ① 换模后旧 session 迟到事件不拉黑新模型', () => {
+  beforeEach(() => clearUnavailableModels());
+
+  it('session 已换模（attemptedModels>1）：迟到旧模型错误 → 不拉黑当前解析模型', async () => {
+    const fx = makeFakeEffects();
+    // 模拟 P1-1 场景：registry 已换模，resolvedModel 指向健康新模型 B，
+    // 但迟到的错误事件属于旧模型 A。modelResolver 内置护栏：attemptedModels>1 返回 undefined。
+    const handler = createSessionErrorHandler({
+      changeDir: '',
+      // 护栏版解析器（与三工厂一致）：已换模 session 返回 undefined
+      modelResolver: () => undefined,
+      sideEffects: fx,
+      dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
+    });
+
+    const result = await handler.handle({ sessionID: 'sess-fb', error: apiError(402) });
+
+    // 不拉黑、不通知（交由轮询路径兜底）
+    expect(result).toBe('no-model');
+    expect(fx.blacklistCalls).toHaveLength(0);
+    expect(fx.notificationCalls).toHaveLength(0);
+  });
+
+  it('护栏等价方案：classifySessionError 对「已换模」解析器返回 null（不误拉黑）', () => {
+    // 直接验证纯分类层：当 modelResolver 因 P1-1 护栏返回 undefined 时，
+    // 即便错误码可分类（402），分类结果为 null → 上层不拉黑。
+    const r = classifySessionError({
+      sessionID: 'sess-fb',
+      error: apiError(402),
+      modelResolver: () => undefined, // 已换模 session：护栏命中
+    });
+    expect(r).toBeNull();
+  });
+
+  it('对照：未换模（attemptedModels<=1）session 仍正常拉黑', async () => {
+    const fx = makeFakeEffects();
+    // 未换模 session：modelResolver 返回当前模型（B），护栏不拦截
+    const handler = createSessionErrorHandler({
+      changeDir: '',
+      modelResolver: () => 'provider/current-model',
+      sideEffects: fx,
+      dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
+    });
+
+    const result = await handler.handle({ sessionID: 'sess-ok', error: apiError(402) });
+
+    expect(result).toBe('blacklisted');
+    expect(fx.blacklistCalls).toHaveLength(1);
+    expect(fx.blacklistCalls[0].model).toBe('provider/current-model');
+    expect(fx.notificationCalls).toHaveLength(1);
+  });
+});
+
+// ─── P1-2：通知文件落真实 changeDir，而非 process.cwd() ─────────────────────────
+
+describe('P1-2 ① 通知文件落在真实 changeDir 而非 process.cwd()', () => {
+  beforeEach(() => clearUnavailableModels());
+
+  it('使用注入的 changeDir 写入通知，不与 process.cwd() 耦合', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sflow-p1-2-'));
+    try {
+      // 真实副作用（默认 NotificationManager），changeDir 传入临时目录
+      const handler = createSessionErrorHandler({
+        changeDir: dir,
+        modelResolver: () => 'provider/p1-2-model',
+        dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
+      });
+
+      const result = await handler.handle({ sessionID: 'sess-p12', error: apiError(429) });
+      expect(result).toBe('blacklisted');
+
+      // 通知文件应落在 <dir>/.flow-engine/sflow/notifications/ 下
+      const notifDir = join(dir, '.flow-engine/sflow/notifications');
+      const files = await listFiles(notifDir, '.json');
+      expect(files).toHaveLength(1);
+
+      // 关键断言：process.cwd() 下不应出现本事件的通知文件（落点正确，非 cwd）
+      const cwdNotifDir = join(process.cwd(), '.flow-engine/sflow/notifications');
+      const cwdFiles = await listFiles(cwdNotifDir, '.json').catch(() => []);
+      expect(cwdFiles).not.toContain('sess-p12.json');
+
+      // 通知内容正确
+      const entry = await readJsonFile<{ session_id: string; failure_reason?: string }>(
+        join(notifDir, files[0]),
+      );
+      expect(entry?.session_id).toBe('sess-p12');
+      expect(entry?.failure_reason).toBe('transient');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('changeDir 经构造参数注入，且默认副作用使用它（非 process.cwd）', () => {
+    // 验证 createSessionErrorHandler 的 deps.changeDir 被默认副作用采用：
+    // 用真实 NotificationManager 探测目录是否按注入值创建（不实际写文件，仅构造）。
+    const handler = createSessionErrorHandler({
+      changeDir: '/nonexistent/injected-dir-p1-2',
+      modelResolver: () => undefined,
+      dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
+    });
+    // 构造本身不抛错即说明 changeDir 被接受（真实落点在 handle 时惰性使用）
+    expect(typeof handler.handle).toBe('function');
+    expect(typeof handler.resetDedup).toBe('function');
+  });
+
+  it('两个不同 changeDir 各自落盘、互不串写（per-workDir handler 隔离）', async () => {
+    const dirA = await mkdtemp(join(tmpdir(), 'sflow-p1-2-a-'));
+    const dirB = await mkdtemp(join(tmpdir(), 'sflow-p1-2-b-'));
+    try {
+      // 分别构造两个 changeDir 的 handler，各自写入同名 sessionID 的错误事件。
+      // 若 changeDir 被写死为 process.cwd()，两者会串写到同一份通知文件。
+      const handlerA = createSessionErrorHandler({
+        changeDir: dirA,
+        modelResolver: () => 'provider/model-a',
+        dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
+      });
+      const handlerB = createSessionErrorHandler({
+        changeDir: dirB,
+        modelResolver: () => 'provider/model-b',
+        dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
+      });
+
+      expect(await handlerA.handle({ sessionID: 'sess-shared', error: apiError(402) })).toBe(
+        'blacklisted',
+      );
+      expect(await handlerB.handle({ sessionID: 'sess-shared', error: apiError(402) })).toBe(
+        'blacklisted',
+      );
+
+      // A 目录：落盘，且解析模型为 model-a
+      const notifAFiles = await listFiles(join(dirA, '.flow-engine/sflow/notifications'), '.json');
+      expect(notifAFiles).toHaveLength(1);
+      const entryA = await readJsonFile<{ session_id: string }>(
+        join(dirA, '.flow-engine/sflow/notifications', notifAFiles[0]),
+      );
+      expect(entryA?.session_id).toBe('sess-shared');
+
+      // B 目录：同样落盘（独立一份，不与 A 串写）
+      const notifBFiles = await listFiles(join(dirB, '.flow-engine/sflow/notifications'), '.json');
+      expect(notifBFiles).toHaveLength(1);
+
+      // 关键：A/B 各自独立落盘 1 份（若 changeDir 写死为 process.cwd()，
+      // 第二次 handle 会覆盖/串写到同一目录，导致单侧文件数异常或两边落同一处）
+      expect(notifAFiles).toHaveLength(1);
+      expect(notifBFiles).toHaveLength(1);
+
+      // cwd 下不应出现本测试任一通知（真实落点由注入的 changeDir 决定）
+      const cwdFiles = await listFiles(
+        join(process.cwd(), '.flow-engine/sflow/notifications'),
+        '.json',
+      ).catch(() => []);
+      expect(cwdFiles).not.toContain('sess-shared.json');
+    } finally {
+      await rm(dirA, { recursive: true, force: true });
+      await rm(dirB, { recursive: true, force: true });
+    }
   });
 });

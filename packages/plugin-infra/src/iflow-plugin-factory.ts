@@ -35,6 +35,7 @@ import { resolveChangeDir } from './helpers/resolve-change-dir.js';
 import { getGlobalEventBus } from './features/event-bus.js';
 import { handleSessionIdleEvent } from './features/event-hook-handler.js';
 import { createSessionErrorHandler, type SessionErrorHandler } from './features/session-error-handler.js';
+import { sessionErrorModelForBlacklist } from './features/session-error-fence.js';
 import { PollingLogger } from './features/polling-logger.js';
 import { Logger } from './utils/logger.js';
 
@@ -53,17 +54,29 @@ import { createCompactionContext, type CompactionState } from '../../../workflow
 const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
 let backgroundTaskCounter = { value: 0 };
 
-// D2 / W7：session.error 事件驱动预降级 handler
-const iflowSessionErrorHandler: SessionErrorHandler = createSessionErrorHandler({
-  changeDir: process.cwd(),
-  modelResolver: (sessionID) => {
-    if (!sessionID) return undefined;
-    for (const entry of backgroundTaskRegistry.values()) {
-      if (entry.sessionID === sessionID) return entry.resolvedModel;
-    }
-    return undefined;
-  },
-});
+// D2 / W7：session.error 事件驱动预降级 handler。
+// 不能在模块顶层创建（曾写死 process.cwd()，P1-2）；改为按 workDir 惰性创建并缓存。
+// modelResolver 内置 P1-1 护栏：已换模（attemptedModels>1）的 session 不再反查拉黑。
+const iflowSessionErrorHandlers = new Map<string, SessionErrorHandler>();
+function getIflowSessionErrorHandler(workDir: string): SessionErrorHandler {
+  let handler = iflowSessionErrorHandlers.get(workDir);
+  if (!handler) {
+    handler = createSessionErrorHandler({
+      changeDir: workDir,
+      modelResolver: (sessionID) => {
+        if (!sessionID) return undefined;
+        for (const entry of backgroundTaskRegistry.values()) {
+          if (entry.sessionID === sessionID) {
+            return sessionErrorModelForBlacklist(entry);
+          }
+        }
+        return undefined;
+      },
+    });
+    iflowSessionErrorHandlers.set(workDir, handler);
+  }
+  return handler;
+}
 
 // ─── Agent model map (populated during config hook) ───────────────────────────
 
@@ -197,7 +210,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
           } else if (event.type === 'session.error') {
             // D2 / W7：session.error 事件驱动预降级
             const props = event.properties as { sessionID?: string; error?: unknown } | undefined;
-            await iflowSessionErrorHandler.handle({
+            await getIflowSessionErrorHandler(workDir).handle({
               sessionID: props?.sessionID,
               error: props?.error as never,
             });

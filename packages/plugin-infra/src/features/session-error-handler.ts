@@ -94,6 +94,8 @@ export interface CreateSessionErrorHandlerDeps {
 export interface SessionErrorHandler {
   /**
    * 处理一条 session.error 事件。
+   * @param event.sessionID - 事件携带的 sessionID
+   * @param event.error - SDK error 对象
    * @returns 处理结果：'aborted' | 'blacklisted' | 'deduped' | 'unclassified' | 'no-model'
    */
   handle: (event: {
@@ -145,7 +147,9 @@ export function createSessionErrorHandler(
       return 'deduped';
     }
 
-    // 3. 预分类（纯函数，错误码驱动，不含文案匹配）
+    // 3. 预分类（纯函数，错误码驱动，不含文案匹配）。
+    // modelResolver 已内置 P1-1 护栏：换模后（attemptedModels>1）返回 undefined，
+    // 使分类失败 → 'no-model'，不拉黑当前健康模型（轮询路径仍会兜底）。
     const classification = classifySessionError({
       sessionID,
       error,
@@ -153,7 +157,7 @@ export function createSessionErrorHandler(
     });
 
     if (!classification) {
-      // 分类未命中（none）/ 无法定位模型 → 不拉黑、不通知（可记录日志）
+      // 分类未命中（none）/ 无法定位模型（含 P1-1 护栏命中） → 不拉黑、不通知
       await Logger.log(`[SessionErrorHandler] 分类未命中，跳过拉黑: sessionID=${sessionID}`);
       return sessionID && deps.modelResolver(sessionID) ? 'unclassified' : 'no-model';
     }

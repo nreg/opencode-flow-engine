@@ -110,8 +110,10 @@ export function serializeErrorForClassifier(error: SessionErrorData | undefined)
  * @param args.sessionID - 事件携带的 sessionID
  * @param args.error - SDK error 对象
  * @param args.modelResolver - sessionID → 模型字符串 解析器（如后台任务注册表查询）；
- *                             解析不到模型时返回 undefined（分类命中但无法定位模型 → 仍返回分类，由上层决定）
- * @returns 分类结果（含模型），abort / 分类未命中（none）返回 null
+ *                             解析不到模型时返回 undefined（分类命中但无法定位模型 → 仍返回分类，由上层决定）。
+ *                             该解析器已内置 P1-1 归属护栏：仅在 session 尚未换模时返回当前模型，
+ *                             换模后的迟到旧模型事件返回 undefined，交由轮询路径处理。
+ * @returns 分类结果（含模型），abort / 分类未命中（none）/ 无法定位模型 返回 null
  */
 export function classifySessionError(args: {
   sessionID?: string;
@@ -123,10 +125,11 @@ export function classifySessionError(args: {
     return null;
   }
 
-  // 2. 解析待拉黑模型（事件体只带 sessionID + error，不带模型）
+  // 2. 解析待拉黑模型（事件体只带 sessionID + error，不带模型）。
+  // modelResolver 已内置 P1-1 护栏：换模后返回 undefined。
   const model = args.modelResolver(args.sessionID);
   if (!model) {
-    // 无法定位模型：放弃预降级（避免误拉黑默认/无关模型）。
+    // 无法定位模型（含 P1-1 换模后护栏命中）：放弃预降级（避免误拉黑默认/无关/健康模型）。
     // 轮询路径仍会按产出正文独立判定，不在此兜底。
     return null;
   }

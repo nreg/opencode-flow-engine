@@ -45,6 +45,7 @@ import { pollSessionCompletion } from './helpers/polling.js';
 import { getGlobalEventBus } from './features/event-bus.js';
 import { handleSessionIdleEvent } from './features/event-hook-handler.js';
 import { createSessionErrorHandler, type SessionErrorHandler } from './features/session-error-handler.js';
+import { sessionErrorModelForBlacklist } from './features/session-error-fence.js';
 import { PollingLogger } from './features/polling-logger.js';
 import { Logger } from './utils/logger.js';
 
@@ -65,17 +66,35 @@ import { resolveChangeDir } from './helpers/resolve-change-dir.js';
 const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
 let backgroundTaskCounter = { value: 0 };
 
-// D2 / W7：session.error 事件驱动预降级 handler（生命周期随工厂单例，复用 backgroundTaskRegistry 解析 sessionID → 模型）
-const sflowSessionErrorHandler: SessionErrorHandler = createSessionErrorHandler({
-  changeDir: process.cwd(),
-  modelResolver: (sessionID) => {
-    if (!sessionID) return undefined;
-    for (const entry of backgroundTaskRegistry.values()) {
-      if (entry.sessionID === sessionID) return entry.resolvedModel;
-    }
-    return undefined;
-  },
-});
+// D2 / W7：session.error 事件驱动预降级 handler。
+// 注意：handler 不能在模块顶层创建（此前错误地写死 process.cwd()，P1-2）。
+// 改为按 workDir 惰性创建并缓存，复用 backgroundTaskRegistry 解析 sessionID → 模型，
+// 文件写入统一落到真实 workDir（与 watcher/completed/error 路径同源）。
+//
+// P1-1 护栏（modelResolver 内置）：轮询/watcher 故障转移换模后，registry entry 的
+// attemptedModels 长度会 > 1。若某 session 已换模（迟到的旧模型 429/402 事件），
+// 反查到的 resolvedModel 已是新模型；此时不再由事件路径拉黑，避免误伤健康模型。
+// 仅当该 session 尚未换模（attemptedModels.length <= 1）时，事件路径才反查并拉黑。
+const sflowSessionErrorHandlers = new Map<string, SessionErrorHandler>();
+function getSflowSessionErrorHandler(workDir: string): SessionErrorHandler {
+  let handler = sflowSessionErrorHandlers.get(workDir);
+  if (!handler) {
+    handler = createSessionErrorHandler({
+      changeDir: workDir,
+      modelResolver: (sessionID) => {
+        if (!sessionID) return undefined;
+        for (const entry of backgroundTaskRegistry.values()) {
+          if (entry.sessionID === sessionID) {
+            return sessionErrorModelForBlacklist(entry);
+          }
+        }
+        return undefined;
+      },
+    });
+    sflowSessionErrorHandlers.set(workDir, handler);
+  }
+  return handler;
+}
 
 // ─── Agent model map (populated during config hook) ───────────────────────────
 
@@ -561,7 +580,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           } else if (event.type === 'session.error') {
             // D2 / W7：session.error 事件驱动预降级（错误码驱动，零文案匹配）
             const props = event.properties as { sessionID?: string; error?: unknown } | undefined;
-            await sflowSessionErrorHandler.handle({
+            await getSflowSessionErrorHandler(workDir).handle({
               sessionID: props?.sessionID,
               error: props?.error as never,
             });
