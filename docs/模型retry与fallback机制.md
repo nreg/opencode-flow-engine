@@ -1,7 +1,7 @@
 # 模型重试与 Fallback 机制
 
 > 面向 opencode-flow-engine 维护者的机制参考文档。
-> 最后更新：2026-09-30（Fix-Loop R4 闭环）
+> 最后更新：2026-10-01（第 2 轮增强：状态机收敛 / 冷缓存保护 / poll 恢复层 / 事件预降级）
 
 ---
 
@@ -315,40 +315,175 @@ const PROVIDER_LIST_TIMEOUT_MS = 3_000;
 
 ---
 
-## 八、遗留项（P2/P3）
+## 八、第 2 轮增强（R4 遗留修复 + omo 借鉴实现）
 
-> 以下问题由 R4 审查报告（REVIEW-20260930-1413-r4.md）摘录，判定 PASS 后记录在案，**将由后续工作流处理**。
+> 第 2 轮 7 个 commit（见 §八·7 清单），在保持「正向判定 / 码驱动 / abort 零降级」三原则不变的前提下，
+> 收敛重复结构、收窄误判面、补齐冷缓存保护与 poll 恢复层，并引入事件驱动预降级。
+> 全部 7 项均通过独立验收测试；验证基线由 2042 演进至 **2103 pass / 0 fail**。
 
-### P2（记录，近期迭代可修）
+### 1. 共享 FallbackState 状态机（W1，9a7faec）
 
-**P2-1 错误码正则可误伤"讨论错误码的正常产出"**
-- 位置：`completion-detector.ts:199-209`（正则对全文匹配）+ `call-flow-agent.ts:393`（对完整 poll 产出分类）
-- 场景：子代理正常产出中引用 "HTTP 429" 等错误码文本，被判为模型错误 → 拉黑 + 假性故障转移
-- 修复方向：对 poll 产出分类加"错误形态前置约束"（短文本 / 错误行开头 / session 处于 error 终态）
+位置：`helpers/fallback-state.ts`（纯重构，无行为变更，仅结构收敛）
 
-**P2-2 无冷缓存保护：可用性状态机与换模判定脱钩**
-- 位置：`agent-builder.ts:713-725`（`getAlternativeModel` 不读 model-availability 快照）
-- 场景：provider.list 3s 超时 → state='failed'，换模仍照常进行，可能信息不全
-- 修复方向：`getAlternativeModel` 在 `state==='failed'` 时跳过黑名单检查或返回 null 并标注
+收敛 `runWithModelFallback` / `tryAsyncModelFallback` / `checkTasks` 三处重复的
+「拉黑 → 选候选 → 终止判定」结构；`attemptedModels` 成为单源真值，async 路径
+废弃 `taskModelAttempts` Map，统一由 `recordAttempt` 单点写入 `registry.attemptedModels`。
+（对应 P3-3 / P3-4 / omo-5）
 
-**P2-3 同步任务 poll 失败无"结果恢复"层**
-- 位置：`call-flow-agent.ts:372-499`
-- 场景：poll 返回 null 时 session 里可能已有完整产出，当前直接进入换模重发产生重复成本
-- 修复方向：poll 返回 null 后先从 session messages 提取最后 assistant 文本，若 `hasRealOutput` 则直接采用
+导出 API：
 
-### P3（仅记录）
+| 函数 | 职责 |
+|------|------|
+| `createFallbackState(initialModel, fallbackChain)` | 初始化（首模型自动加入 `attemptedModels`，`attemptCount=1`） |
+| `recordAttempt(state, model)` | 单点写入：记入 `attemptedModels`、递增 `attemptCount`、更新 provider/model |
+| `getNextCandidate(state, isModelAvailable)` | 沿链选第一个未尝试且非黑名单的候选（见 §2 冷缓存保护） |
+| `isExhausted(state, maxRetries)` | `attemptCount > maxRetries` 或全链已尝试 → 耗尽 |
+| `canRecoverFromPollError(errorName)` | abort 类错误不可恢复，其余可恢复（见 §4） |
+| `resolveProbeVerdict(probeResult, reProbe, registryEntry, readErrorName, readRecoverable?)` | 纯函数：返回 `'idle'\|'pending'\|'noSignal'\|'recoverable'\|'error'\|'abort'`，无副作用 |
 
-**P3-1 文件 I/O 无超时**：启动路径文件操作无超时，仅当 changeDir 在网络盘时有风险
+`ProbeVerdict` 六值枚举取代散落三处的布尔/字符串判定，W4 在此落地 `recoverable` 分支。
 
-**P3-2 no-valid-output 路径不写通知**：watcher 的 noSignalEntry 分支只写 registry，不像 completed/error 分支写 NotificationManager
+### 2. 错误码分类前置守卫 shouldClassifyOutput（W2，91cc1f8）
 
-**P3-3 知识重复**：async 路径 `taskModelAttempts` 与 `registry.attemptedModels` 双写同一状态，两处可能漂移；sync/async/watcher 三处重复"错误码→拉黑→换模→终止"结构
+位置：`helpers/completion-detector.ts`（`ERROR_CLASSIFY_MAX_LENGTH = 500` + `shouldClassifyOutput`）
 
-**P3-4 偶然复杂**：watcher `checkTasks` 单函数约 410 行，嵌套 4 层，认知过载高风险。建议拆出 `resolveProbeVerdict` 纯函数
+对应 P2-1：错误码正则全文匹配会误伤「讨论错误码的正常产出」（如 code-reviewer 审查报告
+引用 "HTTP 429" / `"status": 503`）。收窄判定面：
+
+- 短文本（`<= ERROR_CLASSIFY_MAX_LENGTH`）→ 进入 `classifyModelErrorByCode`；
+- 超长产出默认视为正常产出（交 `hasRealOutput` 正向判定），但**以错误行开头**（行首码形态，
+  复用既有 `LINE_PREFIX_CODE_PATTERN`）仍进入分类——真实长错误报文不应被长度上限挡在分类外。
+
+约束：判据仅长度 + 行首码形态，**不含任何错误文案匹配**（兼容 C-6）；分类器函数体不动
+（兼容 C-1），本守卫只决定「是否调用」。仅收窄 **poll 产出**分类面：`send` 阶段错误通道
+（`sendPromptOnce` 的 `throwOnError` + `cause.status` 提取）与 polling 层 retry 状态消息
+不经过此守卫，错误通道判定不受影响。
+
+### 3. 冷缓存保护（W3，cd61c29）
+
+位置：`helpers/fallback-state.ts` 的 `getNextCandidate` + `model-availability.ts` 的 `getAvailabilityState`
+
+对应 P2-2：可用性状态机与换模判定脱钩。`getNextCandidate` 接入 `getAvailabilityState()`：
+
+- 当 `state === 'cold'`（未刷新/空）或 `'failed'`（provider.list 查询失败）时，可用性快照不可信，
+  **跳过 `isModelAvailable` 黑名单过滤**直接沿用户配置链取候选 → 加速降级决策；
+- 跳过同时置位 `state.availabilitySkipped` 标注（仅观测用，经 `warnAvailabilitySkippedOnce`
+  一次性 warn，对齐 `model-availability` 的 `warnStatusOnce` 语义）；
+- 候选仍**全部来自用户配置链**（黑名单失效≠拉黑失效）；abort 零降级 / timeout-pending 语义不受影响。
+
+### 4. poll 失败结果恢复层（W4，8d57a80）
+
+位置：`helpers/fallback-state.ts` 的 `extractLastAssistantText` + `resolveProbeVerdict` 的 `recoverable` 分支；
+`call-flow-agent.ts` 在 poll 返回 null 路径调用 `extractLastAssistantText`（:251 处）。
+
+对应 P2-3：poll 返回 null 时 session 里可能已有完整产出，原逻辑直接换模重发产生重复成本。恢复层：
+
+- `extractLastAssistantText(messagesData)` 仅考察**最新一条** assistant 消息（严格最新消息守卫，
+  对齐 omo `strictAbortRecovery`，不回溯更早消息避免陈旧产出掩盖失败）；
+- 最新 assistant 带 `info.error` 或无可读 `text` part → 拒绝恢复（返回 null）；
+- 仅拼接 `type === 'text'` part（不含 reasoning，比 omo 更保守，杜绝链式思考「假产出」通过
+  `hasRealOutput`）；
+- 提取结果须再由调用方过 `hasRealOutput` 正向判定，假产出不采纳；
+- abort 优先：`canRecoverFromPollError` 判定 abort 类错误 `recoverable=false`，`resolveProbeVerdict`
+  在 `readRecoverable?.()` 为真时返回 `'recoverable'`（不再走 noSignal 换模），否则维持 noSignal。
+
+### 5. no-valid-output 通知补写（W5，875be0a）
+
+位置：`tools/call-flow-agent.ts` 的 `finalizeAsyncNoSignal`（:921）+ `pollAndComplete` re-poll 路径（:2160 处）。
+
+对应 P3-2：watcher 的 noSignal 终结分支原只写 registry，不像 completed/error 分支写通知。
+现两条路径均补写 `NotificationManager.writeNotification`（`async_error` 类型，`failure_reason: 'no-valid-output'`，
+`has_completion_signal: false`，附 `attemptedModels` 与 raw output 保留说明）：
+
+- `finalizeAsyncNoSignal(taskId, baseEntry, output)`：watcher 终结路径（:1039-1047 / :1207 调用）；
+- `pollAndComplete` re-poll 路径：换模后 re-poll 无完成信号 → 同构通知（:2152-2166）。
+
+仅补充通知，**不改变 registry 写入行为**（不拉黑/不换模/不重发，原文保留）。
+
+### 6. D1 工具描述降级提示（W6，5081ba5）
+
+位置：`agents/model-availability.ts` 的 `buildChainUnavailableNotice` + `agents/agent-builder.ts` 的
+`appendChainUnavailableNotice`；三工厂在 agent description 构造处接线（`sflow-` `iflow-` `combined-`）。
+
+方案 B（仅事实陈述，不推荐替代模型、不引入硬编码链/默认模型、不做正则匹配，兼容 C-5/C-6）：
+
+- `buildChainUnavailableNotice(chain, validation)`：仅在 `availabilityState === 'ready'`（cold/failed
+  不加提示）、用户配置了模型（`chain.length > 0`）、且**全链不可用**（`chain.every(m => unavailable.has(m))`）
+  时返回静态文案：`启动对账：配置的模型 X、Y 当前未在 provider 可用列表中确认。`；部分可用不加提示。
+- `appendChainUnavailableNotice(baseDescription, name, config, validation)`：复用 `buildAgentFallbackChain`
+  的候选来源（主模型 + 各级 fallback）构造 `chain`，命中则把提示追加到原 description（原样无提示时返回 base）。
+
+三工厂接线点：在各自的 agent 描述组装处调用 `appendChainUnavailableNotice`（sflow-plugin-factory
+约 :608、iflow-plugin-factory 约 :253/:292、combined-plugin-factory 约 :329），逐 agent 生效。
+
+### 7. D2 session.error 事件驱动预降级（W7，7354e8b）
+
+位置：`features/session-error-classifier.ts`（纯分类）+ `features/session-error-handler.ts`
+（有状态 handler）；三工厂 `createSessionErrorHandler` 单例 + `session.error` 事件 hook 订阅。
+
+事件驱动预降级：**在 SDK 推送 `session.error` 时即时预分类拉黑**，缩短故障转移延迟，
+与既有轮询路径（pollAndComplete / BackgroundTaskWatcher）**幂等互补**
+（`markModelUnavailable` 单调合并，不重复终结/重派任务，避免双路径竞态写 registry）。
+
+**classifier（纯函数，无副作用、单测友好）：**
+
+| 函数 | 职责 |
+|------|------|
+| `isAbortSessionError(error)` | abort 零降级优先：`error.name ∈ ABORT_ERROR_NAMES` → 返回 null（零动作） |
+| `extractErrorName(error)` | 从 SDK error 对象取 `name` 字段（兼容顶层 `{name,message}` 包装） |
+| `serializeErrorForClassifier(error)` | 仅转义结构化字段：`status: N`（命中 `STATUS_FIELD_PATTERN`）/ `type: name`，**绝不拼接 provider message 文案**（C-6） |
+| `classifySessionError({sessionID, error, modelResolver})` | ① abort 跳过 ② `modelResolver` 反查模型（查不到返回 null）③ `classifyModelErrorByCode` 分类（none 返回 null）→ `{kind, model, info}` |
+
+**handler（有状态，可注入副作用，便于单测）：**
+
+- `createSessionErrorHandler({changeDir, modelResolver, sideEffects?, dedupWindowMs?})`；
+- 处理链：`abort → 零动作` → `去重` → `预分类` → 拉黑（`non-transient` 长冷却 `MIN_QUOTA_COOLDOWN_TTL_MS` / `transient` 短冷却 `TRANSIENT_COOLDOWN_TTL_MS`）+ 通知（`async_error`，`subagent: 'session-error-hook'`，`failure_reason: 'quota-or-persistent'|'transient'`）+ subagent-store 事件流水；
+- **3s 去重窗口** `SESSION_ERROR_DEDUP_WINDOW_MS = 3000`（`lastSeen` Map，事件层 + 轮询层幂等）；
+- 返回枚举：`'aborted' | 'blacklisted' | 'deduped' | 'unclassified' | 'no-model'`。
+
+**三工厂接线（modelResolver 反查 sessionID → resolvedModel）：**
+`sflow-plugin-factory.ts`（:69 `sflowSessionErrorHandler`，`modelResolver` 遍历 `backgroundTaskRegistry`
+匹配 `entry.sessionID`）、`iflow-plugin-factory.ts`（:57）、`combined-plugin-factory.ts`（:60）。
+各工厂在 SDK 事件分发中 `event.type === 'session.error'` 分支调用 `handler.handle({sessionID, error})`
+（sflow 约 :561、iflow 约 :197、combined 约 :285），并 `globalLogger.log` 记录「session.error event handled (pre-degradation)」。
+
+### 8. 第 2 轮 commit 清单与测试基线
+
+| Wave | commit | 首行摘要 | 验收测试数（基线演进） |
+|------|--------|----------|------------------------|
+| W1 | `9a7faec` | refactor(fallback): 提取共享 FallbackState 状态机与 resolveProbeVerdict 纯函数 | 2042 → 2062 |
+| W2 | `91cc1f8` | fix(fallback): 缩小错误码分类判定面，避免误伤讨论错误码的正常产出 | 2062 → 2068 |
+| W3 | `cd61c29` | feat(fallback): 可用性状态机接入换模判定，冷缓存期跳过黑名单检查 | 2068 → 2071 |
+| W4 | `8d57a80` | feat(fallback): poll 失败时先从 session messages 抢救已完成产出 | 2071 → 2082 |
+| W5 | `875be0a` | fix(fallback): no-valid-output 路径补写降级通知 | 2082 → 2086 |
+| W6 | `5081ba5` | feat(agent): 全链不可用时工具描述追加降级提示 | 2086 → 2089+1 flaky |
+| W7 | `7354e8b` | feat(hooks): session.error 事件驱动预降级 | 2089 → **2103 pass / 0 fail** |
+
+> 已知 flaky：polling.test.ts（D4 满载偶发，单独重跑通过）；已知既有隔离性问题：call-flow-agent.test.ts（F-4
+> 单文件跑失败，非本轮引入）。两者均不计入验收失败。
 
 ---
 
-## 九、测试
+## 九、遗留项（已闭环记录）
+
+> 以下问题由 R4 审查报告（REVIEW-20260930-1413-r4.md）摘录，**已于第 2 轮（§八）全部修复闭环**。
+
+### P2（已修复）
+
+- **P2-1 错误码误伤正常产出** → 修复于 W2（§八·2 `shouldClassifyOutput` 前置守卫）
+- **P2-2 冷缓存无保护** → 修复于 W3（§八·3 `getNextCandidate` 接入 `getAvailabilityState`）
+- **P2-3 poll 失败无恢复层** → 修复于 W4（§八·4 `extractLastAssistantText` + `recoverable` 分支）
+
+### P3（已修复 / 仅记录）
+
+- **P3-1 文件 I/O 无超时** → 仍仅记录（启动路径文件操作无超时，仅当 changeDir 在网络盘时有风险）
+- **P3-2 no-valid-output 不写通知** → 修复于 W5（§八·5 双路径补写）
+- **P3-3 知识重复 / 双写** → 修复于 W1（§八·1 `FallbackState` 单源 + 废弃 `taskModelAttempts`）
+- **P3-4 watcher 偶然复杂** → 修复于 W1（§八·1 抽出 `resolveProbeVerdict` 纯函数）
+
+---
+
+## 十、测试
 
 ### 测试组织
 
@@ -377,8 +512,13 @@ const PROVIDER_LIST_TIMEOUT_MS = 3_000;
 
 ### 当前基线
 
-- **2042 pass / 0 fail**（`bun test packages/plugin-infra`，2026-09-30 实测）
-- 跨 80 个测试文件
+- **2103 pass / 0 fail**（`bun test packages/plugin-infra`，2026-10-01 第 2 轮收尾实测，跨 82 个测试文件）
+- 测试基线演进：2042（R4 闭环）→ 2062（W1）→ 2068（W2）→ 2071（W3）→ 2082（W4）→ 2086（W5）→ 2089+1 flaky（W6）→ 2103（W7）
+- 已知 flaky：polling.test.ts（满载偶发，单独重跑通过）；已知既有隔离性问题：call-flow-agent.test.ts（F-4 单文件跑失败，非本轮引入）
+- 第 2 轮新增测试：
+  - `helpers/__tests__/fallback-state.test.ts`：共享状态机 / `resolveProbeVerdict` / `extractLastAssistantText` / 冷缓存跳过
+  - `__tests__/session-error.test.ts`：D2 事件预降级（6 条验收：abort 零降级 / 分类未命中 / 无模型 / 拉黑 / 去重 / 通知）
+  - `model-fallback-fix.test.ts` 追加：P2-1 守卫（shouldClassifyOutput）、P3-2 双路径通知、D1 描述降级提示（appendChainUnavailableNotice）
 
 ### 测试范式约定
 
