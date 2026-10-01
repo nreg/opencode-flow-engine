@@ -145,6 +145,42 @@ export function isModelKnown(model: string): boolean | undefined {
   return knownModels.has(model);
 }
 
+/** validateConfiguredModels 的返回结构（命名导出，供 description 降级提示接线复用） */
+export interface ModelValidation {
+  unknown: string[];
+  unconnected: string[];
+}
+
+/**
+ * W6/D1（方案 B）：启动对账完成后，若某 agent 的用户配置链上所有模型都在对账中
+ * 被判为 unknown / unconnected（全链不可用），生成追加到 description 末尾的降级提示。
+ *
+ * 约束（对齐 design.md ADR-5 / 方案 B）：
+ * - 只在 state='ready' 时生效；cold/failed（对账不可信）返回 null，不加提示。
+ * - 提示文案为静态事实陈述（"启动对账：配置的模型 X、Y 当前未在 provider 可用列表中确认。"），
+ *   不推荐替代模型、不引入硬编码链/默认模型、不做任何正则匹配（C-5/C-6）。
+ * - 链为空（用户未配置任何模型）时返回 null——对账没有可陈述的事实。
+ *
+ * @param chain 调用方算好的用户配置链（主模型 + 各级 fallback，已去重）
+ * @param validation validateConfiguredModels 的返回值
+ * @returns 提示文案；无需提示时返回 null
+ */
+export function buildChainUnavailableNotice(
+  chain: string[],
+  validation: ModelValidation,
+): string | null {
+  // 对账不可信（cold/failed）时不加提示
+  if (availabilityState !== 'ready') return null;
+  // 用户未配置任何模型 → 无对账事实可陈述
+  if (chain.length === 0) return null;
+
+  const unavailable = new Set<string>([...validation.unknown, ...validation.unconnected]);
+  // 部分可用 → 不加提示（只有全链不可用才陈述事实）
+  if (!chain.every((m) => unavailable.has(m))) return null;
+
+  return `启动对账：配置的模型 ${chain.join('、')} 当前未在 provider 可用列表中确认。`;
+}
+
 /** 本地 fallback_models 规范化（与 agent-builder#normalizeFallbackList 等价，仅读 model 字段） */
 function normalizeFallbackList(fb: string | (string | { model: string })[] | undefined): string[] {
   if (!fb) return [];

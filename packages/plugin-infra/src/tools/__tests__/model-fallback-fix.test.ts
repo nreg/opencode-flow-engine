@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it, mock, afterEach, afterAll, spyOn } fr
 import { PROBE_PENDING, type ProbePending } from '../../types.js';
 import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
 import { createCallFlowAgentTools, resetRunningSubagentCounts, runWithModelFallback, createBackgroundTaskWatcher } from '../call-flow-agent.js';
-import { clearUnavailableModels, markModelUnavailable, isModelAvailable, getAlternativeModel, resolveModelWithFallback, TRANSIENT_COOLDOWN_TTL_MS, MIN_QUOTA_COOLDOWN_TTL_MS } from '../../agents/agent-builder.js';
+import { clearUnavailableModels, markModelUnavailable, isModelAvailable, getAlternativeModel, resolveModelWithFallback, appendChainUnavailableNotice, TRANSIENT_COOLDOWN_TTL_MS, MIN_QUOTA_COOLDOWN_TTL_MS } from '../../agents/agent-builder.js';
 import { parseQuotaResetTime, classifyModelErrorByCode, hasRealOutput, hasStructuredReportEvidence } from '../../helpers/completion-detector.js';
 import { Logger } from '../../utils/logger.js';
 import {
@@ -2277,6 +2277,111 @@ describe('FIX-P1-4: 配置模型存在性校验', () => {
     } finally {
       timers.restore();
     }
+  });
+});
+
+// ─── W6/D1: 全链不可用时工具描述追加降级提示（方案 B） ─────────────────────────
+// 启动对账完成后，若某 agent 的用户配置链全部命中 unknown/unconnected，在其
+// description 末尾追加纯事实提示（不推荐替代模型、不改写绑定、不阻断注册）。
+// state=cold/failed（对账不可信）时不加提示。
+
+describe('W6/D1: 全链不可用降级提示', () => {
+  let warnSpy: ReturnType<typeof spyOn> | undefined;
+
+  beforeEach(() => {
+    resetModelAvailability();
+    warnSpy = spyOn(Logger, 'warn').mockImplementation(async () => {});
+  });
+
+  afterEach(() => {
+    warnSpy?.mockRestore();
+  });
+
+  it('①链全不可用（ready+全 unknown/unconnected）→ description 含降级提示', async () => {
+    const client = makeListClient({ all: [{ id: 'p', models: { real: {} } }], connected: ['p'] });
+    const config: SFlowConfig = {
+      agents: { 'build-executor': { model: 'p/unknown1', fallback_models: ['p/unknown2'] } },
+    };
+    const validation = await validateConfiguredModels(client, config);
+    expect(validation.unknown).toEqual(['p/unknown1', 'p/unknown2']);
+
+    const description = appendChainUnavailableNotice(
+      'build-executor agent from sFlow plugin',
+      'build-executor',
+      config,
+      validation,
+    );
+    // 原描述保留
+    expect(description).toContain('build-executor agent from sFlow plugin');
+    // 追加对账事实提示
+    expect(description).toContain('启动对账');
+    expect(description).toContain('p/unknown1');
+    expect(description).toContain('p/unknown2');
+  });
+
+  it('②部分可用 → 不加提示', async () => {
+    const client = makeListClient({ all: [{ id: 'p', models: { real: {} } }], connected: ['p'] });
+    const config: SFlowConfig = {
+      agents: { 'build-executor': { model: 'p/real', fallback_models: ['p/unknown'] } },
+    };
+    const validation = await validateConfiguredModels(client, config);
+    expect(validation.unknown).toEqual(['p/unknown']);
+
+    const description = appendChainUnavailableNotice(
+      'build-executor agent from sFlow plugin',
+      'build-executor',
+      config,
+      validation,
+    );
+    // 链上 p/real 可用 → 原描述原样返回，不追加任何提示
+    expect(description).toBe('build-executor agent from sFlow plugin');
+  });
+
+  it('③cold/failed（对账不可信）→ 不加提示', async () => {
+    const config: SFlowConfig = { agents: { 'build-executor': { model: 'p/x' } } };
+
+    // failed：provider.list 抛错 → 对账不可信
+    const failClient: ProviderListClient = {
+      provider: { list: mock(async () => { throw new Error('boom'); }) },
+    };
+    const validationFailed = await validateConfiguredModels(failClient, config);
+    expect(getAvailabilityState()).toBe('failed');
+    expect(
+      appendChainUnavailableNotice('base desc', 'build-executor', config, validationFailed),
+    ).toBe('base desc');
+
+    // cold：未刷新 → 对账不可信（即便传入"全不可用"的校验结果也不应提示）
+    resetModelAvailability();
+    expect(getAvailabilityState()).toBe('cold');
+    expect(
+      appendChainUnavailableNotice('base desc', 'build-executor', config, { unknown: ['p/x'], unconnected: [] }),
+    ).toBe('base desc');
+  });
+
+  it('④提示为纯事实陈述（不包含替代模型建议）', async () => {
+    const client = makeListClient({
+      all: [
+        { id: 'p', models: { real: {} } },
+        { id: 'q', models: { m: {} } },
+      ],
+      connected: ['p', 'q'],
+    });
+    const config: SFlowConfig = {
+      agents: { 'build-executor': { model: 'q/typo', fallback_models: ['q/typo2'] } },
+    };
+    const validation = await validateConfiguredModels(client, config);
+    expect(validation.unknown).toEqual(['q/typo', 'q/typo2']);
+
+    // 基础描述为空时，提示独立成文（覆盖另一分支）
+    const description = appendChainUnavailableNotice(undefined, 'build-executor', config, validation);
+    expect(description).not.toBeUndefined();
+    const notice = description as string;
+    // 纯事实陈述：不含推荐 / 替代 / 建议类措辞
+    expect(notice).not.toMatch(/建议|推荐|替代|改用|可使用|请使用/);
+    // 只陈述不可用模型事实，不引入可用模型作为替代暗示
+    expect(notice).not.toContain('p/real');
+    expect(notice).toContain('q/typo');
+    expect(notice).toContain('q/typo2');
   });
 });
 

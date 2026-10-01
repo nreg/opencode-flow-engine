@@ -18,6 +18,8 @@ import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentMod
 import { SFLOW_TOOLS, IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolError, detectAgnesProvider } from './types.js';
 
 import { getAgentNames, getAgentMode, createAgent } from './agents/index.js';
+import { appendChainUnavailableNotice } from './agents/agent-builder.js';
+import type { ModelValidation } from './agents/model-availability.js';
 import { validateConfiguredModels } from './agents/model-availability.js';
 import { createWorkflowRouterTool } from './tools/index.js';
 import { createIFlowRouterTool } from './tools/iflow-router.js';
@@ -212,8 +214,10 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
 
   // R3-fix P2（1357a31 接线缺口）：combined 工厂补齐启动期模型可用性对账
   //（与 sflow / iflow 工厂一致：失败不阻断插件启动，仅 warn）
+  // W6/D1：对账结果保留，供 description 降级提示使用（方案 B）
+  let modelValidation: ModelValidation = { unknown: [], unconnected: [] };
   try {
-    await validateConfiguredModels(sflowClient as never, cascadedConfig);
+    modelValidation = await validateConfiguredModels(sflowClient as never, cascadedConfig);
   } catch (err) {
     void Logger.warn(`[model-availability] 启动期模型校验失败: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -301,9 +305,14 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
           tools: agentTools,
           color: AGENT_COLORS[name],
           temperature: override?.temperature ?? temperature,
-          description: (typeof agentCfg.id === 'string')
-            ? `${agentCfg.id} agent from sFlow plugin`
-            : undefined,
+          description: appendChainUnavailableNotice(
+            (typeof agentCfg.id === 'string')
+              ? `${agentCfg.id} agent from sFlow plugin`
+              : undefined,
+            name,
+            cascadedConfig,
+            modelValidation,
+          ),
         };
 
         if (modelName) {

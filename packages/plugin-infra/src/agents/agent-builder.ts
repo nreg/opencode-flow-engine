@@ -52,7 +52,7 @@ import {
   mergeOverrides,
 } from './config-loader.js';
 import { Logger } from '../utils/logger.js';
-import { getAvailabilityState, isModelKnown } from './model-availability.js';
+import { getAvailabilityState, isModelKnown, buildChainUnavailableNotice, type ModelValidation } from './model-availability.js';
 
 /**
  * Agent mode registry — explicit mapping instead of static property on function
@@ -751,4 +751,42 @@ export function buildAgentFallbackChain(
     ? normalizeFallbackList(modelProfiles?.[profile]?.fallback_models)
     : [];
   return dedupeModels(buildFallbackChain(configFallbackList, userTierFallbacks));
+}
+
+/**
+ * W6/D1（方案 B）：启动对账完成后，给"用户配置链全不可用"的 agent 在其 description
+ * 末尾追加对账事实提示。
+ *
+ * 用户配置链 = 主模型（per-agent config 或绑定 tier 的主模型）+ 各级 fallback，
+ * 与 resolveModelWithFallback 的候选来源完全一致（只读用户配置，不引入硬编码链）。
+ * 命中 buildChainUnavailableNotice 时追加提示；否则原样返回 baseDescription。
+ *
+ * 语义：只陈述事实、不推荐替代模型、不改写模型绑定、不阻断注册（C-5/C-6）。
+ *
+ * @param baseDescription 工厂侧原有 description（可能为 undefined）
+ * @param name agent 名
+ * @param config 级联配置（agents 段 + modelProfiles 段，均为用户配置）
+ * @param validation validateConfiguredModels 的返回值
+ * @returns 追加提示后的 description；无提示时原样返回 baseDescription
+ */
+export function appendChainUnavailableNotice(
+  baseDescription: string | undefined,
+  name: BuiltinAgentName,
+  config: SFlowConfig,
+  validation: ModelValidation,
+): string | undefined {
+  const configOverrides = agentOverridesFromConfig(config);
+  const modelProfiles = config.modelProfiles;
+
+  const chain: string[] = [];
+  const profile = AGENT_PROFILES[name];
+  // 主模型：per-agent config 优先，其次绑定 tier 的主模型
+  const primaryModel = configOverrides[name]?.model ?? (profile ? modelProfiles?.[profile]?.model : undefined);
+  if (primaryModel) chain.push(primaryModel);
+  // 各级 fallback：复用 buildAgentFallbackChain 的候选来源（去重保序）
+  chain.push(...buildAgentFallbackChain(name, configOverrides, modelProfiles));
+
+  const notice = buildChainUnavailableNotice(chain, validation);
+  if (!notice) return baseDescription;
+  return baseDescription ? `${baseDescription}\n${notice}` : notice;
 }

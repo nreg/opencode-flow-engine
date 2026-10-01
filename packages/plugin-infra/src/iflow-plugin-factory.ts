@@ -17,6 +17,8 @@ type BuiltinAgentName = import('./agents/types.js').BuiltinAgentName;
 import { IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolError, detectAgnesProvider } from './types.js';
 
 import { getAgentMode, createAgent } from './agents/index.js';
+import { appendChainUnavailableNotice } from './agents/agent-builder.js';
+import type { ModelValidation } from './agents/model-availability.js';
 import { loadCascadedSFlowConfig, agentOverridesFromConfig } from './agents/config-loader.js';
 import { validateConfiguredModels } from './agents/model-availability.js';
 import { createIFlowRouterTool } from './tools/iflow-router.js';
@@ -116,8 +118,10 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
     const sflowClient = input.client;
 
     // P1-4：启动期与 provider 实际可用列表对账（失败不阻断插件启动）
+    // W6/D1：对账结果保留，供 description 降级提示使用（方案 B）
+    let modelValidation: ModelValidation = { unknown: [], unconnected: [] };
     try {
-      await validateConfiguredModels(sflowClient as never, cascadedConfig);
+      modelValidation = await validateConfiguredModels(sflowClient as never, cascadedConfig);
     } catch (err) {
       void Logger.warn(`[model-availability] 启动期模型校验失败: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -225,9 +229,14 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
             tools: agentTools,
             color: AGENT_COLORS[name],
             temperature: override?.temperature ?? temperature,
-            description: (typeof agentCfg.id === 'string')
-              ? `${agentCfg.id} agent from iFlow plugin`
-              : undefined,
+            description: appendChainUnavailableNotice(
+              (typeof agentCfg.id === 'string')
+                ? `${agentCfg.id} agent from iFlow plugin`
+                : undefined,
+              name as BuiltinAgentName,
+              cascadedConfig,
+              modelValidation,
+            ),
           };
 
           if (modelName) {
@@ -259,7 +268,12 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
             tools: agentTools,
             color: AGENT_COLORS[name],
             temperature: override?.temperature ?? temperature,
-            description: `${name} agent from iFlow plugin (shared, cross-workflow)`,
+            description: appendChainUnavailableNotice(
+              `${name} agent from iFlow plugin (shared, cross-workflow)`,
+              name as BuiltinAgentName,
+              cascadedConfig,
+              modelValidation,
+            ),
           };
 
           if (modelName) {
