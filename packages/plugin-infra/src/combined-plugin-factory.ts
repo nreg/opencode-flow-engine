@@ -44,6 +44,7 @@ import { applyTokenBudgetToContent } from './features/token-budget-limiter.js';
 import { resolveChangeDir } from './helpers/resolve-change-dir.js';
 import { getGlobalEventBus } from './features/event-bus.js';
 import { handleSessionIdleEvent } from './features/event-hook-handler.js';
+import { createSessionErrorHandler, type SessionErrorHandler } from './features/session-error-handler.js';
 import { PollingLogger } from './features/polling-logger.js';
 import { Logger } from './utils/logger.js';
 
@@ -54,6 +55,18 @@ const globalLogger = new PollingLogger();
 
 const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
 let backgroundTaskCounter = { value: 0 };
+
+// D2 / W7：session.error 事件驱动预降级 handler
+const combinedSessionErrorHandler: SessionErrorHandler = createSessionErrorHandler({
+  changeDir: process.cwd(),
+  modelResolver: (sessionID) => {
+    if (!sessionID) return undefined;
+    for (const entry of backgroundTaskRegistry.values()) {
+      if (entry.sessionID === sessionID) return entry.resolvedModel;
+    }
+    return undefined;
+  },
+});
 
 // ─── Agent model map (populated during config hook) ───────────────────────────
 
@@ -269,6 +282,14 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
             action: 'session.deleted',
           });
         }
+      } else if (event.type === 'session.error') {
+        // D2 / W7：session.error 事件驱动预降级
+        const props = event.properties as { sessionID?: string; error?: unknown } | undefined;
+        await combinedSessionErrorHandler.handle({
+          sessionID: props?.sessionID,
+          error: props?.error as never,
+        });
+        await globalLogger.log('Combined', 'session.error event handled (pre-degradation)');
       } else {
         // P1-2: 使用共享函数处理 session.idle 和 session.status 事件
         const handled = await handleSessionIdleEvent(event, 'Combined');

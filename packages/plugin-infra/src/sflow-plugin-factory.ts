@@ -44,6 +44,7 @@ import { createNotificationManager } from './features/notification-manager.js';
 import { pollSessionCompletion } from './helpers/polling.js';
 import { getGlobalEventBus } from './features/event-bus.js';
 import { handleSessionIdleEvent } from './features/event-hook-handler.js';
+import { createSessionErrorHandler, type SessionErrorHandler } from './features/session-error-handler.js';
 import { PollingLogger } from './features/polling-logger.js';
 import { Logger } from './utils/logger.js';
 
@@ -63,6 +64,18 @@ import { resolveChangeDir } from './helpers/resolve-change-dir.js';
 
 const backgroundTaskRegistry: BackgroundTaskRegistry = new Map();
 let backgroundTaskCounter = { value: 0 };
+
+// D2 / W7：session.error 事件驱动预降级 handler（生命周期随工厂单例，复用 backgroundTaskRegistry 解析 sessionID → 模型）
+const sflowSessionErrorHandler: SessionErrorHandler = createSessionErrorHandler({
+  changeDir: process.cwd(),
+  modelResolver: (sessionID) => {
+    if (!sessionID) return undefined;
+    for (const entry of backgroundTaskRegistry.values()) {
+      if (entry.sessionID === sessionID) return entry.resolvedModel;
+    }
+    return undefined;
+  },
+});
 
 // ─── Agent model map (populated during config hook) ───────────────────────────
 
@@ -545,6 +558,14 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
                 action: 'session.deleted',
               });
             }
+          } else if (event.type === 'session.error') {
+            // D2 / W7：session.error 事件驱动预降级（错误码驱动，零文案匹配）
+            const props = event.properties as { sessionID?: string; error?: unknown } | undefined;
+            await sflowSessionErrorHandler.handle({
+              sessionID: props?.sessionID,
+              error: props?.error as never,
+            });
+            await globalLogger.log('sFlow', 'session.error event handled (pre-degradation)');
           } else {
             // P1-2: 使用共享函数处理 session.idle 和 session.status 事件
             const handled = await handleSessionIdleEvent(event, 'sFlow');
