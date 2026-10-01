@@ -87,11 +87,24 @@ export {
   getSflowSessionErrorHandler as getSflowSessionErrorHandlerForTest,
   sflowSessionErrorHandlers as sflowSessionErrorHandlersForTest,
 };
+/**
+ * P2-3″ 测试观测点：记录各 workDir 下 handler 创建时实际收到的 changeDir。
+ *
+ * 目的：此前的接线测试只观测缓存 Map 的 key，若工厂把 `changeDir` 回退为
+ * `process.cwd()`，全量套件仍绿（P1-2 回归可无声复现）。此处记录「真正传进
+ * createSessionErrorHandler 的值」，使该接线可被直接断言。
+ * 仅作测试观测，不参与任何生产分支。
+ */
+const sflowSessionErrorHandlerChangeDir = new Map<string, string>();
+export {
+  sflowSessionErrorHandlerChangeDir as sflowSessionErrorHandlerChangeDirForTest,
+};
 function getSflowSessionErrorHandler(workDir: string): SessionErrorHandler {
   let handler = sflowSessionErrorHandlers.get(workDir);
   if (!handler) {
+    const changeDir = workDir;
     handler = createSessionErrorHandler({
-      changeDir: workDir,
+      changeDir,
       modelResolver: (sessionID) => {
         if (!sessionID) return undefined;
         for (const entry of backgroundTaskRegistry.values()) {
@@ -102,6 +115,7 @@ function getSflowSessionErrorHandler(workDir: string): SessionErrorHandler {
         return undefined;
       },
     });
+    sflowSessionErrorHandlerChangeDir.set(workDir, changeDir);
     sflowSessionErrorHandlers.set(workDir, handler);
   }
   return handler;

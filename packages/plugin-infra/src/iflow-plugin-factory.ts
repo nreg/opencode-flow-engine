@@ -89,12 +89,19 @@ export {
   getIflowSessionErrorHandler as getIflowSessionErrorHandlerForTest,
   iflowSessionErrorHandlers as iflowSessionErrorHandlersForTest,
 };
+/**
+ * P2-3″ 测试观测点：记录 handler 创建时实际收到的 changeDir（语义同 sflow 版本）。
+ * 仅作测试观测，不参与任何生产分支。
+ */
+const iflowSessionErrorHandlerChangeDir = new Map<string, string>();
+export { iflowSessionErrorHandlerChangeDir as iflowSessionErrorHandlerChangeDirForTest };
 
 function getIflowSessionErrorHandler(workDir: string): SessionErrorHandler {
   let handler = iflowSessionErrorHandlers.get(workDir);
   if (!handler) {
+    const changeDir = workDir;
     handler = createSessionErrorHandler({
-      changeDir: workDir,
+      changeDir,
       modelResolver: (sessionID) => {
         if (!sessionID) return undefined;
         for (const entry of backgroundTaskRegistry.values()) {
@@ -105,6 +112,7 @@ function getIflowSessionErrorHandler(workDir: string): SessionErrorHandler {
         return undefined;
       },
     });
+    iflowSessionErrorHandlerChangeDir.set(workDir, changeDir);
     iflowSessionErrorHandlers.set(workDir, handler);
   }
   return handler;

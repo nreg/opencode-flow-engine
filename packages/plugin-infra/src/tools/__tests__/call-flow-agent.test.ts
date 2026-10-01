@@ -3691,6 +3691,90 @@ describe('P2-1′: sync 换模后 registry 条目写入 attemptedModels', () => 
   });
 });
 
+// ─── P2-4″：sync exhausted 分支的 attemptedModels 写入必须被钉死 ─────────────
+
+describe('P2-4″: sync 换模耗尽（exhausted）分支写入完整 attemptedModels', () => {
+  let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
+  let registry: BackgroundTaskRegistry;
+
+  /**
+   * 换模全链耗尽：首模型 + 两个 fallback 全部返回 402（非瞬态、可分类），
+   * 换模链走完仍无可用模型 → runWithModelFallback 返回 exhausted。
+   * 走的是 call-flow-agent.ts:1830 的 exhausted 分支（此前无任何测试覆盖）。
+   */
+  function createSyncExhaustedClient() {
+    return {
+      session: {
+        create: mock(async () => ({ data: { id: 'test-session-001' } })),
+        prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+          promptCalls.push({ id: args.path.id, body: args.body });
+          // 全链一律 402：模型依次被尝试，走完链后耗尽
+          throw Object.assign(new Error('quota exceeded'), {
+            status: 402,
+            data: { status: 402 },
+          });
+        }),
+        messages: mock(async () => ({
+          data: [{ parts: [{ type: 'text', text: 'Build done [TASK_COMPLETE]' }] }],
+        })),
+        status: mock(async () => ({ data: { 'test-session-001': { type: 'idle' } } })),
+        abort: mock(async () => {}),
+      },
+    } as const;
+  }
+
+  beforeEach(() => {
+    promptCalls = [];
+    registry = new Map();
+    clearUnavailableModels();
+  });
+
+  it('sync 换模耗尽 → 终态条目 status=error 且带完整 attemptedModels', async () => {
+    const client = createSyncExhaustedClient();
+    const options = createTestOptions(client);
+    options.backgroundTaskRegistry = registry;
+    (options as Record<string, unknown>).modelProfiles = {};
+    (options as Record<string, unknown>).configOverrides = {
+      'build-executor': { fallback_models: ['provider/alt-1', 'provider/alt-2'] },
+    };
+    const tools = createTestTools(options);
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'sync exhausted',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(false);
+
+    // 断言前提：确实走了 exhausted 分支（防止断言漂移成别的失败分支）
+    expect(data.error).toContain('model fallback exhausted');
+
+    const entries = [...registry.values()];
+    expect(entries).toHaveLength(1);
+    const entry = entries[0];
+
+    // 核心钉死：exhausted 分支（call-flow-agent.ts:1830-1846）必须写入完整换模链，
+    // 否则事件层护栏（attemptedModels.length>1）认不出「已换模」。
+    expect(entry.status).toBe('error');
+    expect(entry.attemptedModels).toEqual([
+      'provider/test-model',
+      'provider/alt-1',
+      'provider/alt-2',
+    ]);
+    expect(entry.attemptedModels!.length).toBeGreaterThan(1);
+
+    // 护栏反查：已换模 → undefined（与 completed 分支的断言路径区分开）
+    const { sessionErrorModelForBlacklist } = await import('../../features/session-error-fence.js');
+    expect(sessionErrorModelForBlacklist(entry)).toBeUndefined();
+  });
+});
+
 describe('R3-fix P1-2: pollAndComplete 初次 poll 回显不判 completed', () => {
   it('prompt 含 Markdown 标题 + 初次 poll 返回回显 → 不判 completed、不换模', async () => {
     const promptCalls: Array<{ id: string; body: Record<string, unknown> }> = [];

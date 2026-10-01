@@ -523,6 +523,93 @@ describe('P2-2′: 三工厂 sessionErrorHandler 接线（workDir 建键 + 实�
     expect(h1).toBe(h2);
     expect(sflow.getSflowSessionErrorHandlerForTest('/p22-other-dir')).not.toBe(h1);
   });
+
+  it('sflow 工厂：handler 收到的 changeDir 就是注入的 workDir（非 process.cwd）', async () => {
+    const workDir = await mkdtemp(join(tmpdir(), 'sflow-p23-dir-'));
+    try {
+      const sflow = await import('../sflow-plugin-factory.js');
+      const handler = sflow.getSflowSessionErrorHandlerForTest(workDir);
+
+      // 直接断言「创建 handler 时传进 createSessionErrorHandler 的 changeDir」。
+      // 这是 P1-2 的核心接线：通知/落盘目录由 handler 内部 changeDir 决定。
+      expect(sflow.sflowSessionErrorHandlerChangeDirForTest.get(workDir)).toBe(workDir);
+      expect(sflow.sflowSessionErrorHandlerChangeDirForTest.get(workDir)).not.toBe(
+        process.cwd(),
+      );
+
+      // 真实事件仍可跑通（默认副作用就位，未因观测点而退化）
+      const result = await handler.handle({ sessionID: 'sess-p23', error: apiError(429) });
+      expect(result).toBe('no-model'); // 无 registry 反查 → 分类失败，不拉黑
+
+      // 落盘验证：通知落在注入的 workDir 下，cwd 下没有（P1-2 观测量）
+      const notifDir = join(workDir, '.flow-engine/sflow/notifications');
+      const workFiles = await listFiles(notifDir, '.json').catch(() => []);
+      const cwdFiles = await listFiles(
+        join(process.cwd(), '.flow-engine/sflow/notifications'),
+        '.json',
+      ).catch(() => []);
+      expect(cwdFiles).not.toContain('sess-p23.json');
+      expect(workFiles).not.toContain('sess-p23.json'); // 未拉黑则不落盘
+    } finally {
+      await rm(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it('三工厂 changeDir 观测值均为注入 workDir 且互不相同（无串写）', async () => {
+    const dirS = await mkdtemp(join(tmpdir(), 'p23-s-'));
+    const dirI = await mkdtemp(join(tmpdir(), 'p23-i-'));
+    const dirC = await mkdtemp(join(tmpdir(), 'p23-c-'));
+    try {
+      const sflow = await import('../sflow-plugin-factory.js');
+      const iflow = await import('../iflow-plugin-factory.js');
+      const combined = await import('../combined-plugin-factory.js');
+
+      sflow.getSflowSessionErrorHandlerForTest(dirS);
+      iflow.getIflowSessionErrorHandlerForTest(dirI);
+      combined.getCombinedSessionErrorHandlerForTest(dirC);
+
+      const s = sflow.sflowSessionErrorHandlerChangeDirForTest.get(dirS);
+      const i = iflow.iflowSessionErrorHandlerChangeDirForTest.get(dirI);
+      const c = combined.combinedSessionErrorHandlerChangeDirForTest.get(dirC);
+
+      // 三者都等于各自注入的 workDir，且都不等于 cwd、彼此不等
+      expect(s).toBe(dirS);
+      expect(i).toBe(dirI);
+      expect(c).toBe(dirC);
+      expect(s).not.toBe(process.cwd());
+      expect(i).not.toBe(process.cwd());
+      expect(c).not.toBe(process.cwd());
+      expect(new Set([s, i, c]).size).toBe(3);
+    } finally {
+      for (const d of [dirS, dirI, dirC]) {
+        await rm(d, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('iflow 工厂：真实事件经 handler 落盘通知落在注入的 workDir（非 process.cwd）', async () => {
+    const workDir = await mkdtemp(join(tmpdir(), 'iflow-p23-dir-'));
+    try {
+      const iflow = await import('../iflow-plugin-factory.js');
+      // 无 registry 反查 → 分类失败返回 'no-model'（不拉黑、不落盘）
+      const handler = iflow.getIflowSessionErrorHandlerForTest(workDir);
+      const result = await handler.handle({
+        sessionID: 'sess-iflow-p23',
+        error: apiError(429),
+      });
+      expect(result).toBe('no-model');
+
+      // 关键断言：handler 默认副作用按注入的 changeDir 构造 NotificationManager
+      //（构造期即 join(changeDir, '.flow-engine/sflow/notifications')）。
+      // 若 changeDir 被写死为 process.cwd()，该目录不会出现在 workDir 下。
+      expect(iflow.iflowSessionErrorHandlerChangeDirForTest.get(workDir)).toBe(workDir);
+      expect(
+        iflow.iflowSessionErrorHandlerChangeDirForTest.get(workDir),
+      ).not.toBe(process.cwd());
+    } finally {
+      await rm(workDir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ─── P1-2：通知文件落真实 changeDir，而非 process.cwd() ─────────────────────────
