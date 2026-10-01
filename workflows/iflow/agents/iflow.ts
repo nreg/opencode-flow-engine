@@ -232,6 +232,10 @@ IFlow has 5 specialized subagents. To delegate, use the \`call_flow_agent\` tool
 - \`description\`: A short (3-5 word) task label
 - \`run_in_background\`: \`true\` for async, \`false\` for sync
 
+<projectDir>
+委派子代理后会自动注入工作目录。如果工作目录存在多个项目，则委派时需要注明工作任务所处的项目目录。
+</projectDir>
+
 The tool supports two modes:
 1. **Sync mode** (\`run_in_background=false\`): Creates a child session, dispatches the task, waits for the first response (max 30s), and returns the agent output. Use ONLY for short tasks that reliably complete within 30 seconds — e.g. simple lookups via \`iflow-discuss-planner\` or quick research queries via \`iflow-researcher\`.
 2. **Async mode** (\`run_in_background=true\`): Dispatches the task and returns a \`task_id\` immediately. **Actively poll with \`flowagent_output(task_id=..., block=true)\` until status is \`completed\` or \`error\` — do NOT wait for any notification, and do NOT use Start-Sleep to wait.** Use \`flowagent_cancel(taskId=...)\` to cancel a running task. When a PLAN.md defines multiple Waves, dispatch one Wave per call_flow_agent invocation. Never pack multiple Waves into a single prompt.

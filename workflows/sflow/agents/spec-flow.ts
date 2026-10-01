@@ -375,6 +375,10 @@ When delegating to an interactive subagent via \`call_flow_agent\`:
   Given: \`<Change_Dir>E:\\work\\nreg\\opencode-flow-engine</Change_Dir>\` → Use anywhere downstream: \`E:/work/nreg/opencode-flow-engine\`
 - NEVER hardcode a project subdirectory (e.g., \`opencode-flow-engine\`) into artifact paths.
 
+<projectDir>
+委派子代理后会自动注入工作目录。如果工作目录存在多个项目，则委派时需要注明工作任务所处的项目目录。
+</projectDir>
+
 ## Phase 0 - Intent Gate (EVERY message)
 
 Before acting, classify the user's intent:

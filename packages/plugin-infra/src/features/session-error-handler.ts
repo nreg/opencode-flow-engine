@@ -48,16 +48,16 @@ export interface SessionErrorSideEffects {
   }) => Promise<void>;
   /** 写 subagent-store 事件流水（默认 SubagentStore.appendEvent） */
   writeStoreEvent?: (params: {
-    changeDir: string;
+    workDir: string;
     sessionID: string;
     detail: string;
   }) => Promise<void>;
 }
 
 /** 默认副作用（生产路径） */
-function defaultSideEffects(changeDir: string): SessionErrorSideEffects {
-  const nm: NotificationManager = createNotificationManager({ changeDir });
-  const store: SubagentStore = createSubagentStore({ changeDir });
+function defaultSideEffects(workDir: string): SessionErrorSideEffects {
+  const nm: NotificationManager = createNotificationManager({ workDir });
+  const store: SubagentStore = createSubagentStore({ workDir });
   return {
     blacklistModel: (model, opts) => markModelUnavailable(model, opts),
     writeNotification: (params) => nm.writeNotification(params),
@@ -81,8 +81,8 @@ function defaultSideEffects(changeDir: string): SessionErrorSideEffects {
 
 /** 创建有状态 handler 的可注入依赖 */
 export interface CreateSessionErrorHandlerDeps {
-  /** changeDir，用于通知 / store 落地 */
-  changeDir: string;
+  /** workDir，用于通知 / store 落地（插件工作目录） */
+  workDir: string;
   /** sessionID → 模型字符串 解析器（如后台任务注册表反查） */
   modelResolver: (sessionID: string | undefined) => string | undefined;
   /** 可选：覆盖副作用（测试用） */
@@ -115,7 +115,7 @@ export function createSessionErrorHandler(
   deps: CreateSessionErrorHandlerDeps,
 ): SessionErrorHandler {
   const windowMs = deps.dedupWindowMs ?? SESSION_ERROR_DEDUP_WINDOW_MS;
-  const effects = deps.sideEffects ?? defaultSideEffects(deps.changeDir);
+  const effects = deps.sideEffects ?? defaultSideEffects(deps.workDir);
   // 去重窗口：sessionID → 最近一次处理时间戳
   const lastSeen = new Map<string, number>();
 
@@ -190,7 +190,7 @@ export function createSessionErrorHandler(
     if (effects.writeStoreEvent && sessionID) {
       try {
         await effects.writeStoreEvent({
-          changeDir: deps.changeDir,
+          workDir: deps.workDir,
           sessionID,
           detail: `session.error 事件预降级拉黑：${kind} → ${model}`,
         });

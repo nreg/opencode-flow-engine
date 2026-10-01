@@ -95,16 +95,15 @@ export {
  * createSessionErrorHandler 的值」，使该接线可被直接断言。
  * 仅作测试观测，不参与任何生产分支。
  */
-const sflowSessionErrorHandlerChangeDir = new Map<string, string>();
+const sflowSessionErrorHandlerWorkDir = new Map<string, string>();
 export {
-  sflowSessionErrorHandlerChangeDir as sflowSessionErrorHandlerChangeDirForTest,
+  sflowSessionErrorHandlerWorkDir as sflowSessionErrorHandlerWorkDirForTest,
 };
 function getSflowSessionErrorHandler(workDir: string): SessionErrorHandler {
   let handler = sflowSessionErrorHandlers.get(workDir);
   if (!handler) {
-    const changeDir = workDir;
     handler = createSessionErrorHandler({
-      changeDir,
+      workDir,
       modelResolver: (sessionID) => {
         if (!sessionID) return undefined;
         for (const entry of backgroundTaskRegistry.values()) {
@@ -115,7 +114,7 @@ function getSflowSessionErrorHandler(workDir: string): SessionErrorHandler {
         return undefined;
       },
     });
-    sflowSessionErrorHandlerChangeDir.set(workDir, changeDir);
+    sflowSessionErrorHandlerWorkDir.set(workDir, workDir);
     sflowSessionErrorHandlers.set(workDir, handler);
   }
   return handler;
@@ -573,7 +572,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           if (event.type === 'session.created') {
             // P0: 主 agent 启动时消费未读通知
             try {
-              const nm = createNotificationManager({ changeDir: workDir });
+              const nm = createNotificationManager({ workDir });
               const notifications = await nm.consumeNotifications();
               if (notifications.length > 0) {
                 const notifSummary = notifications.map(n => n.formatted).join('\n');

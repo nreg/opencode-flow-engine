@@ -26,8 +26,8 @@ export interface BackgroundTaskEntry {
   warning?: string;
   /** R1.4: flag to prevent double slot release (watcher vs pollAndComplete race) */
   slotReleased?: boolean;
-  /** R1: changeDir for notification and subagent-store updates */
-  changeDir?: string;
+  /** R1: workDir for notification and subagent-store updates */
+  workDir?: string;
   /** P1-5: resolved model used for this task (for tracing and retry consistency) */
   resolvedModel?: string;
   /** P1-2: original prompt sent to the subagent (carried for async fallback re-send, mirroring sync path) */

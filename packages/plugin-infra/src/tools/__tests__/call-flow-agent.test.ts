@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentModelMap, BackgroundTaskRegistry } from '../../types.js';
 import { createCallFlowAgentTools, resetRunningSubagentCounts, createBackgroundTaskWatcher } from '../call-flow-agent.js';
+import { normalizeToPosix } from '../../helpers/normalize-to-posix.js';
 import { resetGlobalEventBus, getGlobalEventBus } from '../../features/event-bus.js';
 import { clearUnavailableModels, markModelUnavailable, getAlternativeModel, isModelAvailable } from '../../agents/agent-builder.js';
 import { Logger } from '../../utils/logger.js';
@@ -1732,7 +1733,7 @@ describe('Wave 1: Change_Dir 标记注入', () => {
     // 验证路径正确
     const changeDirMatch = promptText.match(/<Change_Dir>(.*?)<\/Change_Dir>/);
     expect(changeDirMatch).not.toBeNull();
-    expect(changeDirMatch![1]).toBe(testDirectory);
+    expect(changeDirMatch![1]).toBe(normalizeToPosix(testDirectory));
   });
 
   it('异步模式：后台任务 prompt 也包含 <Change_Dir> 标记', async () => {
@@ -1774,7 +1775,7 @@ describe('Wave 1: Change_Dir 标记注入', () => {
     // 验证路径正确
     const changeDirMatch = promptText.match(/<Change_Dir>(.*?)<\/Change_Dir>/);
     expect(changeDirMatch).not.toBeNull();
-    expect(changeDirMatch![1]).toBe(testDirectory);
+    expect(changeDirMatch![1]).toBe(normalizeToPosix(testDirectory));
   });
 
   it('resume 模式：恢复会话时 prompt 也包含 <Change_Dir> 标记', async () => {
@@ -1790,7 +1791,7 @@ describe('Wave 1: Change_Dir 标记注入', () => {
     const testDirectory = 'E:\\test\\resume-project';
     
     // 先创建一个 agent 记录（模拟之前的运行）
-    const store = await import('../../features/subagent-store.js').then(m => m.createSubagentStore({ changeDir: testDirectory }));
+    const store = await import('../../features/subagent-store.js').then(m => m.createSubagentStore({ workDir: testDirectory }));
     const agentId = 'agent_resume_test';
     await store.createAgent({
       agent_id: agentId,
@@ -1824,7 +1825,46 @@ describe('Wave 1: Change_Dir 标记注入', () => {
     // 验证路径正确
     const changeDirMatch = promptText.match(/<Change_Dir>(.*?)<\/Change_Dir>/);
     expect(changeDirMatch).not.toBeNull();
-    expect(changeDirMatch![1]).toBe(testDirectory);
+    expect(changeDirMatch![1]).toBe(normalizeToPosix(testDirectory));
+  });
+
+  it('Task 2/3: 注入块为正斜杠路径，且 <projectDir> 与 <Change_Dir> 并列、值一致', async () => {
+    const client = createMockClient({
+      pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+      promptCalls,
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    const testDirectory = 'E:\\test\\posix-project';
+
+    await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: testDirectory },
+    );
+
+    expect(promptCalls.length).toBeGreaterThan(0);
+    const firstPromptCall = promptCalls[0];
+    const parts = firstPromptCall.body.parts as Array<{ type: string; text: string }>;
+    const promptText = parts[0].text;
+
+    // <Change_Dir> 值为正斜杠
+    const changeDirMatch = promptText.match(/<Change_Dir>(.*?)<\/Change_Dir>/);
+    expect(changeDirMatch?.[1]).toBe('E:/test/posix-project');
+    expect(changeDirMatch?.[1]).not.toContain('\\');
+
+    // <projectDir> 与 <Change_Dir> 并列注入且值为同一正斜杠路径
+    const projectDirMatch = promptText.match(/<projectDir>(.*?)<\/projectDir>/);
+    expect(projectDirMatch?.[1]).toBe('E:/test/posix-project');
+    expect(projectDirMatch?.[1]).not.toContain('\\');
+    expect(promptText.indexOf('<Change_Dir>')).toBeLessThan(promptText.indexOf('<projectDir>'));
   });
 });
 
@@ -4021,6 +4061,7 @@ describe('FIX-P3-2: no-valid-output 路径补写降级通知', () => {
         status: 'running',
         createdAt: Date.now(),
         changeDir: tmp,
+        workDir: tmp,
         resolvedModel: 'provider/no-signal-primary',
         attemptedModels: ['provider/no-signal-primary'],
       });
@@ -4166,6 +4207,7 @@ describe('FIX-P3-2: no-valid-output 路径补写降级通知', () => {
         status: 'running',
         createdAt: Date.now(),
         changeDir: tmpError,
+        workDir: tmpError,
         resolvedModel: 'provider/error-primary',
         attemptedModels: ['provider/error-primary'],
       });

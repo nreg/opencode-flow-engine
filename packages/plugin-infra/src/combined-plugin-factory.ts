@@ -73,15 +73,14 @@ export {
  * P2-3″ 测试观测点：记录 handler 创建时实际收到的 changeDir（语义同 sflow 版本）。
  * 仅作测试观测，不参与任何生产分支。
  */
-const combinedSessionErrorHandlerChangeDir = new Map<string, string>();
-export { combinedSessionErrorHandlerChangeDir as combinedSessionErrorHandlerChangeDirForTest };
+const combinedSessionErrorHandlerWorkDir = new Map<string, string>();
+export { combinedSessionErrorHandlerWorkDir as combinedSessionErrorHandlerWorkDirForTest };
 
 function getCombinedSessionErrorHandler(workDir: string): SessionErrorHandler {
   let handler = combinedSessionErrorHandlers.get(workDir);
   if (!handler) {
-    const changeDir = workDir;
     handler = createSessionErrorHandler({
-      changeDir,
+      workDir,
       modelResolver: (sessionID) => {
         if (!sessionID) return undefined;
         for (const entry of backgroundTaskRegistry.values()) {
@@ -92,7 +91,7 @@ function getCombinedSessionErrorHandler(workDir: string): SessionErrorHandler {
         return undefined;
       },
     });
-    combinedSessionErrorHandlerChangeDir.set(workDir, changeDir);
+    combinedSessionErrorHandlerWorkDir.set(workDir, workDir);
     combinedSessionErrorHandlers.set(workDir, handler);
   }
   return handler;

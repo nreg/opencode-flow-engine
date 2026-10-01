@@ -532,8 +532,8 @@ describe('P2-2′: 三工厂 sessionErrorHandler 接线（workDir 建键 + 实�
 
       // 直接断言「创建 handler 时传进 createSessionErrorHandler 的 changeDir」。
       // 这是 P1-2 的核心接线：通知/落盘目录由 handler 内部 changeDir 决定。
-      expect(sflow.sflowSessionErrorHandlerChangeDirForTest.get(workDir)).toBe(workDir);
-      expect(sflow.sflowSessionErrorHandlerChangeDirForTest.get(workDir)).not.toBe(
+      expect(sflow.sflowSessionErrorHandlerWorkDirForTest.get(workDir)).toBe(workDir);
+      expect(sflow.sflowSessionErrorHandlerWorkDirForTest.get(workDir)).not.toBe(
         process.cwd(),
       );
 
@@ -568,9 +568,9 @@ describe('P2-2′: 三工厂 sessionErrorHandler 接线（workDir 建键 + 实�
       iflow.getIflowSessionErrorHandlerForTest(dirI);
       combined.getCombinedSessionErrorHandlerForTest(dirC);
 
-      const s = sflow.sflowSessionErrorHandlerChangeDirForTest.get(dirS);
-      const i = iflow.iflowSessionErrorHandlerChangeDirForTest.get(dirI);
-      const c = combined.combinedSessionErrorHandlerChangeDirForTest.get(dirC);
+      const s = sflow.sflowSessionErrorHandlerWorkDirForTest.get(dirS);
+      const i = iflow.iflowSessionErrorHandlerWorkDirForTest.get(dirI);
+      const c = combined.combinedSessionErrorHandlerWorkDirForTest.get(dirC);
 
       // 三者都等于各自注入的 workDir，且都不等于 cwd、彼此不等
       expect(s).toBe(dirS);
@@ -602,9 +602,9 @@ describe('P2-2′: 三工厂 sessionErrorHandler 接线（workDir 建键 + 实�
       // 关键断言：handler 默认副作用按注入的 changeDir 构造 NotificationManager
       //（构造期即 join(changeDir, '.flow-engine/sflow/notifications')）。
       // 若 changeDir 被写死为 process.cwd()，该目录不会出现在 workDir 下。
-      expect(iflow.iflowSessionErrorHandlerChangeDirForTest.get(workDir)).toBe(workDir);
+      expect(iflow.iflowSessionErrorHandlerWorkDirForTest.get(workDir)).toBe(workDir);
       expect(
-        iflow.iflowSessionErrorHandlerChangeDirForTest.get(workDir),
+        iflow.iflowSessionErrorHandlerWorkDirForTest.get(workDir),
       ).not.toBe(process.cwd());
     } finally {
       await rm(workDir, { recursive: true, force: true });
@@ -622,7 +622,7 @@ describe('P1-2 ① 通知文件落在真实 changeDir 而非 process.cwd()', () 
     try {
       // 真实副作用（默认 NotificationManager），changeDir 传入临时目录
       const handler = createSessionErrorHandler({
-        changeDir: dir,
+        workDir: dir,
         modelResolver: () => 'provider/p1-2-model',
         dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
       });
@@ -655,7 +655,7 @@ describe('P1-2 ① 通知文件落在真实 changeDir 而非 process.cwd()', () 
     // 验证 createSessionErrorHandler 的 deps.changeDir 被默认副作用采用：
     // 用真实 NotificationManager 探测目录是否按注入值创建（不实际写文件，仅构造）。
     const handler = createSessionErrorHandler({
-      changeDir: '/nonexistent/injected-dir-p1-2',
+      workDir: '/nonexistent/injected-dir-p1-2',
       modelResolver: () => undefined,
       dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
     });
@@ -671,12 +671,12 @@ describe('P1-2 ① 通知文件落在真实 changeDir 而非 process.cwd()', () 
       // 分别构造两个 changeDir 的 handler，各自写入同名 sessionID 的错误事件。
       // 若 changeDir 被写死为 process.cwd()，两者会串写到同一份通知文件。
       const handlerA = createSessionErrorHandler({
-        changeDir: dirA,
+        workDir: dirA,
         modelResolver: () => 'provider/model-a',
         dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
       });
       const handlerB = createSessionErrorHandler({
-        changeDir: dirB,
+        workDir: dirB,
         modelResolver: () => 'provider/model-b',
         dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
       });

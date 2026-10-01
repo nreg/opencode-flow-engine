@@ -113,11 +113,11 @@ async function moveFile(src: string, dst: string): Promise<boolean> {
 /**
  * 创建 NotificationManager 实例
  *
- * @param config.changeDir - 项目根目录路径
+ * @param config.workDir - 项目根目录路径（插件工作目录）
  * @returns NotificationManager 实例
  */
-export function createNotificationManager(config: { changeDir: string }): NotificationManager {
-  const notificationsDir = join(config.changeDir, NOTIFICATIONS_SUBDIR);
+export function createNotificationManager(config: { workDir: string }): NotificationManager {
+  const notificationsDir = join(config.workDir, NOTIFICATIONS_SUBDIR);
   const consumedDir = join(notificationsDir, CONSUMED_SUBDIR);
 
   /**

@@ -33,6 +33,7 @@ import {
   DEFAULT_SYNC_MAX_WAIT_MS,
 } from '../helpers/polling.js';
 import { resolveChangeDir } from '../helpers/resolve-change-dir.js';
+import { normalizeToPosix } from '../helpers/normalize-to-posix.js';
 import type {
   AgentModelMap,
   BackgroundTaskEntry,
@@ -604,13 +605,13 @@ async function tryAsyncModelFallback(params: {
   client: SFlowClient;
   registry: BackgroundTaskRegistry;
   taskId: string;
-  changeDir: string;
+  workDir: string;
   /** P1-1: 用户配置 fallback 链（configOverrides/modelProfiles 构建结果） */
   extraFallbacks?: string[];
   /** NEW-P0-B: 配额错误信息（长冷却 TTL 语义）；kind='error' 时走默认短冷却 */
   quota?: { resetAt: number | null } | null;
 }): Promise<{ retried: true; nextModel: string } | { retried: false }> {
-  const { client, registry, taskId, changeDir, extraFallbacks, quota } = params;
+  const { client, registry, taskId, workDir, extraFallbacks, quota } = params;
   const task = registry.get(taskId);
   if (!task || !task.resolvedModel) return { retried: false };
 
@@ -671,7 +672,7 @@ async function tryAsyncModelFallback(params: {
 
   // 写 model_fallback 事件（反查 agent_id，找不到则跳过，不阻塞）
   try {
-    const store = createSubagentStore({ changeDir });
+    const store = createSubagentStore({ workDir });
     const agents = await store.listAgents();
     const matched = agents.find((a) => a.session_id === task.sessionID);
     if (matched) {
@@ -724,7 +725,7 @@ async function finalizeAbortedTask(params: {
   }
 
   try {
-    const nm = createNotificationManager({ changeDir: task.changeDir || '' });
+    const nm = createNotificationManager({ workDir: task.workDir || '' });
     await nm.writeNotification({
       type: 'async_error',
       subagent: task.subagentType,
@@ -795,7 +796,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
       client,
       registry,
       taskId,
-      changeDir: task.changeDir || '',
+      workDir: task.workDir || '',
       // P1-1 残留: 补传用户 fallback 链
       extraFallbacks: resolveWatcherFallbacks(task.subagentType),
       quota: failure.kind === 'quota' ? { resetAt: failure.resetAt } : null,
@@ -832,7 +833,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
     registry.set(taskId, completedEntry);
     releaseSlot(taskId, completedEntry);
     try {
-      const nm = createNotificationManager({ changeDir: baseEntry.changeDir || '' });
+      const nm = createNotificationManager({ workDir: baseEntry.workDir || '' });
       await nm.writeNotification({
         type: 'async_completed',
         subagent: baseEntry.subagentType,
@@ -847,7 +848,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
       );
     }
     try {
-      const store = createSubagentStore({ changeDir: baseEntry.changeDir || '' });
+      const store = createSubagentStore({ workDir: baseEntry.workDir || '' });
       const agents = await store.listAgents();
       const matchedAgent = agents.find((a) => a.session_id === baseEntry.sessionID);
       if (matchedAgent) {
@@ -884,7 +885,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
     registry.set(taskId, updated);
     releaseSlot(taskId, updated);
     try {
-      const nm = createNotificationManager({ changeDir: baseEntry.changeDir || '' });
+      const nm = createNotificationManager({ workDir: baseEntry.workDir || '' });
       await nm.writeNotification({
         type: 'async_error',
         subagent: baseEntry.subagentType,
@@ -899,7 +900,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
     }
     if (!storeDetail) return;
     try {
-      const store = createSubagentStore({ changeDir: baseEntry.changeDir || '' });
+      const store = createSubagentStore({ workDir: baseEntry.workDir || '' });
       const agents = await store.listAgents();
       const matchedAgent = agents.find((a) => a.session_id === baseEntry.sessionID);
       if (matchedAgent) {
@@ -939,7 +940,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
     const attemptedForNotif = noSignalEntry.attemptedModels ?? [];
     const notifSummary = `${NO_VALID_OUTPUT_DETAIL} (attempted: ${attemptedForNotif.join(', ') || 'none'}); raw output preserved`;
     try {
-      const nm = createNotificationManager({ changeDir: baseEntry.changeDir || '' });
+      const nm = createNotificationManager({ workDir: baseEntry.workDir || '' });
       await nm.writeNotification({
         type: 'async_error',
         subagent: baseEntry.subagentType,
@@ -974,7 +975,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
         {
           maxWaitMs: 300,
           probeMode: true,
-          directory: task.changeDir,
+          directory: task.workDir,
           eventDriven: false,
           pollIntervalMs: 50,
         },
@@ -1094,7 +1095,7 @@ export function createBackgroundTaskWatcher(options: CreateWatcherOptions): Back
         const probeResult = await pollSessionCompletion(
           client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
           task.sessionID,
-          { maxWaitMs: 1000, probeMode: true, directory: task.changeDir },
+          { maxWaitMs: 1000, probeMode: true, directory: task.workDir },
         );
 
         // W4（P2-3）：recoverable 判定分支落地——probe null 且非 abort 类错误名时，
@@ -1444,7 +1445,7 @@ export function createCallFlowAgentTools(
       );
 
       // P1: subagent-store 实例
-      const store = createSubagentStore({ changeDir });
+      const store = createSubagentStore({ workDir: changeDir });
 
       try {
         let sessionID: string;
@@ -1583,8 +1584,8 @@ export function createCallFlowAgentTools(
           isNew = true;
         }
 
-        // Wave 1: 注入 Change_Dir 标记
-        const changeDirTag = `<Change_Dir>${changeDir}</Change_Dir>`;
+        // Wave 1: 注入 Change_Dir 标记；Task 2/3: 子代理可见路径统一正斜杠 + projectDir 并列注入
+        const changeDirTag = `<Change_Dir>${normalizeToPosix(changeDir)}</Change_Dir>\n<projectDir>${normalizeToPosix(changeDir)}</projectDir>`;
         let finalPrompt = `${changeDirTag}\n\n${effectivePrompt}`;
 
         // P2: structured 模式下注入 schema hint
@@ -1658,7 +1659,7 @@ export function createCallFlowAgentTools(
             status: 'running',
             createdAt: Date.now(),
             output_mode: output_mode as 'last_message' | 'structured' | undefined,
-            changeDir,
+            workDir: changeDir,
             resolvedModel: subagentModel,
             modelType: model_type as string | undefined,
             prompt: finalPrompt,
@@ -1924,7 +1925,7 @@ export function createCallFlowAgentTools(
 
         // P0: 同步模式完成时写入通知
         try {
-          const nm = createNotificationManager({ changeDir });
+          const nm = createNotificationManager({ workDir: changeDir });
           await nm.writeNotification({
             type: 'sync_completed',
             subagent: subagent_type as string,
@@ -2123,7 +2124,7 @@ export function createCallFlowAgentTools(
                 client,
                 registry: backgroundTaskRegistry,
                 taskId: task_id,
-                changeDir,
+                workDir: changeDir,
                 extraFallbacks: buildAgentFallbackChain(
                   task.subagentType as BuiltinAgentName,
                   configOverrides,
@@ -2157,7 +2158,7 @@ export function createCallFlowAgentTools(
               const attemptedForNotif = noSignalEntry.attemptedModels ?? [];
               const noSignalSummary = `${NO_VALID_OUTPUT_DETAIL} (attempted: ${attemptedForNotif.join(', ') || 'none'}); raw output preserved`;
               try {
-                const nm = createNotificationManager({ changeDir });
+                const nm = createNotificationManager({ workDir: changeDir });
                 await nm.writeNotification({
                   type: 'async_error',
                   subagent: task.subagentType,
@@ -2195,7 +2196,7 @@ export function createCallFlowAgentTools(
               client,
               registry: backgroundTaskRegistry,
               taskId: task_id,
-              changeDir,
+              workDir: changeDir,
               extraFallbacks: buildAgentFallbackChain(
                 task.subagentType as BuiltinAgentName,
                 configOverrides,
@@ -2261,7 +2262,7 @@ export function createCallFlowAgentTools(
               client,
               registry: backgroundTaskRegistry,
               taskId: task_id,
-              changeDir,
+              workDir: changeDir,
               extraFallbacks: buildAgentFallbackChain(
                 task.subagentType as BuiltinAgentName,
                 configOverrides,
@@ -2309,7 +2310,7 @@ export function createCallFlowAgentTools(
             }
 
             try {
-              const nm = createNotificationManager({ changeDir });
+              const nm = createNotificationManager({ workDir: changeDir });
               await nm.writeNotification({
                 type: 'async_error',
                 subagent: task.subagentType,
@@ -2326,7 +2327,7 @@ export function createCallFlowAgentTools(
             }
 
             try {
-              const asyncStore = createSubagentStore({ changeDir });
+              const asyncStore = createSubagentStore({ workDir: changeDir });
               const agents = await asyncStore.listAgents();
               const matchedAgent = agents.find((a) => a.session_id === task.sessionID);
               if (matchedAgent) {
@@ -2368,7 +2369,7 @@ export function createCallFlowAgentTools(
             }
 
             try {
-              const nm = createNotificationManager({ changeDir });
+              const nm = createNotificationManager({ workDir: changeDir });
               await nm.writeNotification({
                 type: 'async_error',
                 subagent: task.subagentType,
@@ -2383,7 +2384,7 @@ export function createCallFlowAgentTools(
             }
 
             try {
-              const asyncStore = createSubagentStore({ changeDir });
+              const asyncStore = createSubagentStore({ workDir: changeDir });
               const agents = await asyncStore.listAgents();
               const matchedAgent = agents.find((a) => a.session_id === task.sessionID);
               if (matchedAgent) {
@@ -2425,7 +2426,7 @@ export function createCallFlowAgentTools(
           }
 
           try {
-            const nm = createNotificationManager({ changeDir });
+            const nm = createNotificationManager({ workDir: changeDir });
             await nm.writeNotification({
               type: 'async_completed',
               subagent: task.subagentType,
@@ -2441,7 +2442,7 @@ export function createCallFlowAgentTools(
           }
 
           try {
-            const asyncStore = createSubagentStore({ changeDir });
+            const asyncStore = createSubagentStore({ workDir: changeDir });
             const agents = await asyncStore.listAgents();
             const matchedAgent = agents.find((a) => a.session_id === task.sessionID);
             if (matchedAgent) {
@@ -2487,7 +2488,7 @@ export function createCallFlowAgentTools(
           }
 
           try {
-            const nm = createNotificationManager({ changeDir });
+            const nm = createNotificationManager({ workDir: changeDir });
             await nm.writeNotification({
               type: 'async_error',
               subagent: task.subagentType,
@@ -2502,7 +2503,7 @@ export function createCallFlowAgentTools(
           }
 
           try {
-            const asyncStore = createSubagentStore({ changeDir });
+            const asyncStore = createSubagentStore({ workDir: changeDir });
             const agents = await asyncStore.listAgents();
             const matchedAgent = agents.find((a) => a.session_id === task.sessionID);
             if (matchedAgent) {

@@ -39,7 +39,7 @@ describe('NotificationManager', () => {
     // 清理并创建临时目录
     await rm(TEST_TMP, { recursive: true, force: true });
     await mkdir(TEST_TMP, { recursive: true });
-    nm = createNotificationManager({ changeDir: TEST_TMP });
+    nm = createNotificationManager({ workDir: TEST_TMP });
   });
 
   afterEach(async () => {
@@ -100,7 +100,7 @@ describe('NotificationManager', () => {
 
     it('should not throw when write fails (graceful degradation)', async () => {
       // Create a NotificationManager pointing to a read-only path (will fail)
-      const badNm = createNotificationManager({ changeDir: '/nonexistent-root-path-that-cannot-be-created/__test__' });
+      const badNm = createNotificationManager({ workDir: '/nonexistent-root-path-that-cannot-be-created/__test__' });
       // Should not throw
       await expect(badNm.writeNotification(makeWriteParams())).resolves.toBeUndefined();
     });
@@ -151,7 +151,7 @@ describe('NotificationManager', () => {
     });
 
     it('should return empty array when directory does not exist', async () => {
-      const badNm = createNotificationManager({ changeDir: join(TEST_TMP, 'nonexistent') });
+      const badNm = createNotificationManager({ workDir: join(TEST_TMP, 'nonexistent') });
       const pending = await badNm.getPendingNotifications();
       expect(pending).toEqual([]);
     });
@@ -209,7 +209,7 @@ describe('NotificationManager', () => {
     });
 
     it('should return empty array when directory does not exist', async () => {
-      const badNm = createNotificationManager({ changeDir: join(TEST_TMP, 'nonexistent') });
+      const badNm = createNotificationManager({ workDir: join(TEST_TMP, 'nonexistent') });
       const consumed = await badNm.consumeNotifications();
       expect(consumed).toEqual([]);
     });

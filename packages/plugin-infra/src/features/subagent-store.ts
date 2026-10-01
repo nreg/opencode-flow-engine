@@ -167,11 +167,11 @@ function parseEventsLog(content: string): AgentEvent[] {
 /**
  * 创建 SubagentStore 实例
  *
- * @param config.changeDir - 项目根目录路径
+ * @param config.workDir - 项目根目录路径（插件工作目录）
  * @returns SubagentStore 实例
  */
-export function createSubagentStore(config: { changeDir: string }): SubagentStore {
-  const storeDir = join(config.changeDir, SUBAGENT_STORE_SUBDIR);
+export function createSubagentStore(config: { workDir: string }): SubagentStore {
+  const storeDir = join(config.workDir, SUBAGENT_STORE_SUBDIR);
   const indexPath = join(storeDir, INDEX_FILE);
 
   /**

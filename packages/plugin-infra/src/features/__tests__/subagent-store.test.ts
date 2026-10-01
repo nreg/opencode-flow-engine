@@ -49,7 +49,7 @@ describe('SubagentStore', () => {
     // 清理并创建临时目录
     await rm(TEST_TMP, { recursive: true, force: true });
     await mkdir(TEST_TMP, { recursive: true });
-    store = createSubagentStore({ changeDir: TEST_TMP });
+    store = createSubagentStore({ workDir: TEST_TMP });
   });
 
   afterEach(async () => {

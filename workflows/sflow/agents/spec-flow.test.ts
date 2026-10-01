@@ -130,6 +130,15 @@ describe('SFlow Agent - Routing Logic (Batch 3)', () => {
       expect(instructions).toMatch(/non-frontend|skip.*ui-design|directly.*bridging/i);
     });
   });
+
+  describe('projectDir Tag Block (Task 3)', () => {
+    it('should contain <projectDir> tag block in instructions', () => {
+      expect(instructions).toContain('<projectDir>');
+      expect(instructions).toContain('</projectDir>');
+      expect(instructions).toContain('委派子代理后会自动注入工作目录');
+      expect(instructions).toContain('如果工作目录存在多个项目，则委派时需要注明工作任务所处的项目目录');
+    });
+  });
 });
 
 describe('Wave 2 - Dynamic Prompt Assembly', () => {
