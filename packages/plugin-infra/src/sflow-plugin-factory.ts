@@ -76,6 +76,17 @@ let backgroundTaskCounter = { value: 0 };
 // 反查到的 resolvedModel 已是新模型；此时不再由事件路径拉黑，避免误伤健康模型。
 // 仅当该 session 尚未换模（attemptedModels.length <= 1）时，事件路径才反查并拉黑。
 const sflowSessionErrorHandlers = new Map<string, SessionErrorHandler>();
+/**
+ * 导出 getter 与 handler 缓存 Map 作为测试钩子（P2-2′ / P3-8′）。
+ *
+ * 目的：让「工厂把 workDir 传给 handler、而非写死 process.cwd()」这一接线可被测试
+ * 观测——此前 getter 未导出，即便回退为 process.cwd() 现有测试仍全绿。
+ * 生产代码调用点不变，仍走内部同名函数。
+ */
+export {
+  getSflowSessionErrorHandler as getSflowSessionErrorHandlerForTest,
+  sflowSessionErrorHandlers as sflowSessionErrorHandlersForTest,
+};
 function getSflowSessionErrorHandler(workDir: string): SessionErrorHandler {
   let handler = sflowSessionErrorHandlers.get(workDir);
   if (!handler) {

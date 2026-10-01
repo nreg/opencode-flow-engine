@@ -3598,6 +3598,99 @@ describe('R3-fix P1-1: sync 超时回显不拉黑换模', () => {
   });
 });
 
+// ─── P2-1′：sync 换模记录必须进 registry（护栏读 attemptedModels）──────────────
+
+describe('P2-1′: sync 换模后 registry 条目写入 attemptedModels', () => {
+  let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
+  let registry: BackgroundTaskRegistry;
+
+  /** 首发送失败（402 非瞬态）→ 触发 sync 换模；后续 poll 返回成功产出 */
+  function createSyncFallbackClient() {
+    return {
+      session: {
+        create: mock(async () => ({ data: { id: 'test-session-001' } })),
+        prompt: mock(async (args: { path: { id: string }; body: Record<string, unknown> }) => {
+          promptCalls.push({ id: args.path.id, body: args.body });
+          // 首次发送即配额错误（非瞬态，可分类）；换模重发成功
+          const model = args.body.model as { providerID: string; modelID: string };
+          if (model.modelID === 'test-model') {
+            throw Object.assign(new Error('quota exceeded'), {
+              status: 402,
+              data: { status: 402 },
+            });
+          }
+        }),
+        messages: mock(async () => ({
+          data: [{ parts: [{ type: 'text', text: 'Build done [TASK_COMPLETE]' }] }],
+        })),
+        status: mock(async () => ({ data: { 'test-session-001': { type: 'idle' } } })),
+        abort: mock(async () => {}),
+      },
+    } as const;
+  }
+
+  beforeEach(() => {
+    promptCalls = [];
+    registry = new Map();
+  });
+
+  it('sync 换模成功后条目带完整 attemptedModels（护栏可识别已换模）', async () => {
+    const client = createSyncFallbackClient();
+    const options = createTestOptions(client);
+    options.backgroundTaskRegistry = registry;
+    (options as Record<string, unknown>).modelProfiles = {};
+    (options as Record<string, unknown>).configOverrides = {
+      'build-executor': { fallback_models: ['provider/alt-1'] },
+    };
+    const tools = createTestTools(options);
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'sync fallback',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+
+    expect(JSON.parse(result.output).success).toBe(true);
+
+    // 关键断言：换模发生的依据是 entry.attemptedModels.length > 1（护栏判据）
+    const entries = [...registry.values()];
+    expect(entries).toHaveLength(1);
+    const entry = entries[0];
+    expect(entry.resolvedModel).toBe('provider/alt-1');
+    expect(entry.attemptedModels).toEqual(['provider/test-model', 'provider/alt-1']);
+  });
+
+  it('护栏判据成立：sync 换模后迟到旧模型事件不拉黑健康模型', async () => {
+    const client = createSyncFallbackClient();
+    const options = createTestOptions(client);
+    options.backgroundTaskRegistry = registry;
+    (options as Record<string, unknown>).modelProfiles = {};
+    (options as Record<string, unknown>).configOverrides = {
+      'build-executor': { fallback_models: ['provider/alt-1'] },
+    };
+    const tools = createTestTools(options);
+
+    await tools.call_flow_agent.execute(
+      {
+        description: 'sync fallback',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+
+    // 以工厂同款护栏反查该条目：已换模 → 返回 undefined（不拉黑，交由轮询路径）
+    const { sessionErrorModelForBlacklist } = await import('../../features/session-error-fence.js');
+    const entry = [...registry.values()][0];
+    expect(sessionErrorModelForBlacklist(entry)).toBeUndefined();
+  });
+});
+
 describe('R3-fix P1-2: pollAndComplete 初次 poll 回显不判 completed', () => {
   it('prompt 含 Markdown 标题 + 初次 poll 返回回显 → 不判 completed、不换模', async () => {
     const promptCalls: Array<{ id: string; body: Record<string, unknown> }> = [];

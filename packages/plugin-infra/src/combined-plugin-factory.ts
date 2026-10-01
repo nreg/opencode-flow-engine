@@ -61,6 +61,14 @@ let backgroundTaskCounter = { value: 0 };
 // 不能在模块顶层创建（曾写死 process.cwd()，P1-2）；改为按 workDir 惰性创建并缓存。
 // modelResolver 内置 P1-1 护栏：已换模（attemptedModels>1）的 session 不再反查拉黑。
 const combinedSessionErrorHandlers = new Map<string, SessionErrorHandler>();
+/**
+ * 导出 getter 与 handler 缓存 Map 作为测试钩子（P2-2′ / P3-8′）。
+ * 语义同 sflow 版本：使 workDir 接线可被测试观测。生产调用点不变。
+ */
+export {
+  getCombinedSessionErrorHandler as getCombinedSessionErrorHandlerForTest,
+  combinedSessionErrorHandlers as combinedSessionErrorHandlersForTest,
+};
 function getCombinedSessionErrorHandler(workDir: string): SessionErrorHandler {
   let handler = combinedSessionErrorHandlers.get(workDir);
   if (!handler) {

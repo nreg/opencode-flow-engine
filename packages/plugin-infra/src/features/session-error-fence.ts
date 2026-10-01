@@ -43,13 +43,26 @@
  *         不允许拉黑（已换模 / 无记录 / 无模型）返回 undefined。
  */
 export function sessionErrorModelForBlacklist(
-  entry: { resolvedModel?: string; attemptedModels?: string[] } | undefined,
+  entry:
+    | {
+        resolvedModel?: string;
+        attemptedModels?: string[];
+        /** sync 路径历史字段：与 attemptedModels 语义等价（见函数内注释） */
+        fallbackAttempted?: string[];
+      }
+    | undefined,
 ): string | undefined {
   if (!entry) {
     return undefined;
   }
   // P1-1 护栏：已换模（attemptedModels 长度 > 1）→ 事件路径不拉黑，交由轮询路径兜底
-  const attempted = entry.attemptedModels ?? [];
+  //
+  // P2-1′：换模链的写入表示统一取「attemptedModels 优先，fallbackAttempted 兜底」。
+  // `fallbackAttempted` 是 sync 路径（call-flow-agent.ts sync 分支）的历史字段，
+  // 二者语义等价（均为「已尝试模型链，含首模型」）。历史条目 / 未同步写入的条目
+  // 也须被识别为「已换模」，否则 sync 换模后迟到的旧模型 session.error 会把
+  // 当前健康新模型误拉黑。
+  const attempted = entry.attemptedModels ?? entry.fallbackAttempted ?? [];
   if (attempted.length > 1) {
     return undefined;
   }

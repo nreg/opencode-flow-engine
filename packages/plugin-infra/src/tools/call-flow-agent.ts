@@ -1837,6 +1837,11 @@ export function createCallFlowAgentTools(
             slotReleased: false,
             resolvedModel: fallbackResult.model,
             modelType: model_type as string | undefined,
+            // P2-1′：与 async 路径（tryAsyncModelFallback）对齐写入换模链——
+            // 事件层护栏（sessionErrorModelForBlacklist）以 attemptedModels.length>1
+            // 判「已换模」；此前的 sync 条目只写 fallbackAttempted，导致护栏对 sync
+            // 任务恒判「未换模」，换模后迟到的旧模型 session.error 仍会误拉黑健康新模型。
+            attemptedModels: fallbackResult.attemptedModels,
             fallbackAttempted: fallbackResult.attemptedModels,
           });
           return {
@@ -1908,6 +1913,9 @@ export function createCallFlowAgentTools(
           // Wave 2 Task 4 / D-8：registry 写入最终生效模型与故障转移链，供追踪与重试一致性
           resolvedModel: fallbackResult.model,
           modelType: model_type as string | undefined,
+          // P2-1′：同 async 路径写入 attemptedModels，使事件层护栏能识别 sync 已换模
+          //（详见 exhausted 分支注释）。fallbackAttempted 保留供既有排障字段使用。
+          attemptedModels: fallbackResult.attemptedModels,
           fallbackAttempted: fallbackResult.attemptedModels,
         });
 

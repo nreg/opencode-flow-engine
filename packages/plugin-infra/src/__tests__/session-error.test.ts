@@ -31,6 +31,7 @@ import {
   isAbortSessionError,
   serializeErrorForClassifier,
 } from '../features/session-error-classifier.js';
+import { sessionErrorModelForBlacklist } from '../features/session-error-fence.js';
 import {
   createSessionErrorHandler,
   SESSION_ERROR_DEDUP_WINDOW_MS,
@@ -367,6 +368,160 @@ describe('P1-1 ① 换模后旧 session 迟到事件不拉黑新模型', () => {
     expect(fx.blacklistCalls).toHaveLength(1);
     expect(fx.blacklistCalls[0].model).toBe('provider/current-model');
     expect(fx.notificationCalls).toHaveLength(1);
+  });
+});
+
+// ─── P2-2′：护栏纯函数 sessionErrorModelForBlacklist 直接单测 ─────────────────
+
+describe('P2-2′: sessionErrorModelForBlacklist 边界（护栏直接单测）', () => {
+  it('entry 为 undefined → 返回 undefined（无记录则不拉黑）', () => {
+    expect(sessionErrorModelForBlacklist(undefined)).toBeUndefined();
+  });
+
+  it('attemptedModels 缺省 → 返回 resolvedModel（未换模，事件路径可拉黑）', () => {
+    expect(sessionErrorModelForBlacklist({ resolvedModel: 'provider/B' })).toBe('provider/B');
+  });
+
+  it('attemptedModels=[] → 返回 resolvedModel', () => {
+    expect(
+      sessionErrorModelForBlacklist({ resolvedModel: 'provider/B', attemptedModels: [] }),
+    ).toBe('provider/B');
+  });
+
+  it('attemptedModels=[A] (length=1) → 返回 resolvedModel（未换模）', () => {
+    expect(
+      sessionErrorModelForBlacklist({
+        resolvedModel: 'provider/B',
+        attemptedModels: ['provider/A'],
+      }),
+    ).toBe('provider/B');
+  });
+
+  it('attemptedModels=[A,B] (length>1) → 返回 undefined（已换模，交轮询路径）', () => {
+    expect(
+      sessionErrorModelForBlacklist({
+        resolvedModel: 'provider/B',
+        attemptedModels: ['provider/A', 'provider/B'],
+      }),
+    ).toBeUndefined();
+  });
+
+  it('length>1 且 resolvedModel 缺失 → 仍返回 undefined（护栏先于模型判空）', () => {
+    expect(
+      sessionErrorModelForBlacklist({ attemptedModels: ['provider/A', 'provider/B'] }),
+    ).toBeUndefined();
+  });
+
+  it('resolvedModel 缺失且未换模 → 返回 undefined（无模型可拉黑）', () => {
+    expect(sessionErrorModelForBlacklist({ attemptedModels: ['provider/A'] })).toBeUndefined();
+  });
+
+  // P2-1′：sync 路径历史字段 fallbackAttempted 亦须被识别为「已换模」
+  it('仅 fallbackAttempted=[A,B]（attemptedModels 缺省）→ 返回 undefined（sync 历史条目）', () => {
+    expect(
+      sessionErrorModelForBlacklist({
+        resolvedModel: 'provider/B',
+        fallbackAttempted: ['provider/A', 'provider/B'],
+      }),
+    ).toBeUndefined();
+  });
+
+  it('fallbackAttempted=[A]（length=1）→ 返回 resolvedModel', () => {
+    expect(
+      sessionErrorModelForBlacklist({
+        resolvedModel: 'provider/B',
+        fallbackAttempted: ['provider/A'],
+      }),
+    ).toBe('provider/B');
+  });
+
+  it('护栏判据单调：attemptedModels 增长不导致结果在「拉黑 / 不拉黑」间抖动', () => {
+    const grow: string[] = ['provider/A'];
+    expect(
+      sessionErrorModelForBlacklist({ resolvedModel: 'provider/A', attemptedModels: grow }),
+    ).toBe('provider/A');
+    grow.push('provider/B');
+    expect(
+      sessionErrorModelForBlacklist({ resolvedModel: 'provider/B', attemptedModels: grow }),
+    ).toBeUndefined();
+  });
+});
+
+// ─── P2-2′：三工厂护栏接线（getter 导出为测试钩子）───────────────────────────
+
+describe('P2-2′: 三工厂 sessionErrorHandler 接线（workDir 建键 + 实例隔离）', () => {
+  /**
+   * 工厂 modelResolver 反查工厂私有 backgroundTaskRegistry（测试无法注入），
+   * 空 registry → 解析不到模型 → 'no-model'。因此「changeDir 是否为 workDir」
+   * 用两条可观测锚点钉死：
+   *   1) handler 缓存 Map 以 workDir 为 key（写死 process.cwd() 则所有 workDir
+   *      共用一个 key，不同 workDir 共享实例 → 串写）；
+   *   2) 去重窗口 lastSeen 是 per-handler 状态：共享实例时同一 sessionID 的第二条
+   *      事件会被判 'deduped'，据此可反证实例独立。
+   */
+  async function assertWorkDirKeyed(
+    label: string,
+    getter: (dir: string) => { handle: (e: unknown) => Promise<string> },
+    cache: Map<string, unknown>,
+  ): Promise<void> {
+    const dirA = await mkdtemp(join(tmpdir(), `sflow-p22-${label}-a-`));
+    const dirB = await mkdtemp(join(tmpdir(), `sflow-p22-${label}-b-`));
+    try {
+      const handlerA = getter(dirA);
+      const handlerB = getter(dirB);
+
+      // 锚点 1：两个不同 workDir 各自持有独立 handler 实例（未串写）
+      expect(cache.has(dirA)).toBe(true);
+      expect(cache.has(dirB)).toBe(true);
+      expect(handlerA).not.toBe(handlerB);
+      // key 必须是注入的 workDir，绝不能是 process.cwd()
+      for (const key of cache.keys()) {
+        expect(key).not.toBe(process.cwd());
+      }
+
+      // 锚点 2：per-handler 去重窗口独立（共享实例则共享 lastSeen → 第二事件被 dedup）
+      await handlerA.handle({ sessionID: 'sess-p22-shared', error: apiError(429) });
+      const resB = await handlerB.handle({ sessionID: 'sess-p22-shared', error: apiError(429) });
+      expect(resB).not.toBe('deduped');
+    } finally {
+      await rm(dirA, { recursive: true, force: true });
+      await rm(dirB, { recursive: true, force: true });
+    }
+  }
+
+  it('sflow 工厂：handler 按 workDir 建键与隔离（非 process.cwd）', async () => {
+    const sflow = await import('../sflow-plugin-factory.js');
+    await assertWorkDirKeyed(
+      'sflow',
+      sflow.getSflowSessionErrorHandlerForTest,
+      sflow.sflowSessionErrorHandlersForTest,
+    );
+  });
+
+  it('iflow 工厂：handler 按 workDir 建键与隔离（非 process.cwd）', async () => {
+    const iflow = await import('../iflow-plugin-factory.js');
+    await assertWorkDirKeyed(
+      'iflow',
+      iflow.getIflowSessionErrorHandlerForTest,
+      iflow.iflowSessionErrorHandlersForTest,
+    );
+  });
+
+  it('combined 工厂：handler 按 workDir 建键与隔离（非 process.cwd）', async () => {
+    const combined = await import('../combined-plugin-factory.js');
+    await assertWorkDirKeyed(
+      'combined',
+      combined.getCombinedSessionErrorHandlerForTest,
+      combined.combinedSessionErrorHandlersForTest,
+    );
+  });
+
+  it('三工厂 getter 复用同一 handler（per-workDir 缓存命中，非每次新建）', async () => {
+    const sflow = await import('../sflow-plugin-factory.js');
+    const h1 = sflow.getSflowSessionErrorHandlerForTest('/p22-cache-dir');
+    const h2 = sflow.getSflowSessionErrorHandlerForTest('/p22-cache-dir');
+    expect(h1).toBe(h2);
+    expect(sflow.getSflowSessionErrorHandlerForTest('/p22-other-dir')).not.toBe(h1);
   });
 });
 

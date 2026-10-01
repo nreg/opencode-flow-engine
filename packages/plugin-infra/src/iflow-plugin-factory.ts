@@ -8,46 +8,70 @@
  * - IFlow hooks (iflow_state_transition, iflow_guard, session_start, session_end)
  */
 
-import type { PluginInput, PluginOptions, Hooks, PluginModule } from '@opencode-ai/plugin';
-import type { LocalToolDefinition } from './types/local-tool-definition.js';
+import type { Hooks, PluginInput, PluginModule, PluginOptions } from '@opencode-ai/plugin';
 import { z } from 'zod';
+import type { LocalToolDefinition } from './types/local-tool-definition.js';
 
-import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentModelMap } from './types.js';
+import type {
+  AgentModelMap,
+  BackgroundTaskEntry,
+  BackgroundTaskRegistry,
+  SFlowClient,
+} from './types.js';
+
 type BuiltinAgentName = import('./agents/types.js').BuiltinAgentName;
-import { IFLOW_STATES, AGENT_COLORS, generateTaskId, formatToolError, detectAgnesProvider } from './types.js';
 
-import { getAgentMode, createAgent } from './agents/index.js';
-import { appendChainUnavailableNotice } from './agents/agent-builder.js';
-import type { ModelValidation } from './agents/model-availability.js';
-import { loadCascadedSFlowConfig, agentOverridesFromConfig } from './agents/config-loader.js';
-import { validateConfiguredModels } from './agents/model-availability.js';
-import { createIFlowRouterTool } from './tools/iflow-router.js';
-import { createCallFlowAgentTools } from './tools/call-flow-agent.js';
-import { createHookComposer } from './hooks/hook-composer.js';
-import { createSkillLoader } from './features/skill-loader.js';
-import type { HookContext } from './hooks/types.js';
 import { ensureDir, writeJsonFile } from '@opencode-flow-engine/shared';
-import { getStateFilePath } from './features/state-manager.js';
-import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
+import { appendChainUnavailableNotice } from './agents/agent-builder.js';
 import { setHasAgnesProvider } from './agents/agent-tools.js';
-import { pollSessionCompletion } from './helpers/polling.js';
-import { resolveChangeDir } from './helpers/resolve-change-dir.js';
+import { agentOverridesFromConfig, loadCascadedSFlowConfig } from './agents/config-loader.js';
+import { createAgent, getAgentMode } from './agents/index.js';
+import type { ModelValidation } from './agents/model-availability.js';
+import { validateConfiguredModels } from './agents/model-availability.js';
 import { getGlobalEventBus } from './features/event-bus.js';
 import { handleSessionIdleEvent } from './features/event-hook-handler.js';
-import { createSessionErrorHandler, type SessionErrorHandler } from './features/session-error-handler.js';
-import { sessionErrorModelForBlacklist } from './features/session-error-fence.js';
+import { createMcpManager, loadProjectMcpConfig } from './features/mcp-manager.js';
 import { PollingLogger } from './features/polling-logger.js';
+import { sessionErrorModelForBlacklist } from './features/session-error-fence.js';
+import {
+  createSessionErrorHandler,
+  type SessionErrorHandler,
+} from './features/session-error-handler.js';
+import { createSkillLoader } from './features/skill-loader.js';
+import { getStateFilePath } from './features/state-manager.js';
+import { pollSessionCompletion } from './helpers/polling.js';
+import { resolveChangeDir } from './helpers/resolve-change-dir.js';
+import { createHookComposer } from './hooks/hook-composer.js';
+import type { HookContext } from './hooks/types.js';
+import { createCallFlowAgentTools } from './tools/call-flow-agent.js';
+import { createIFlowRouterTool } from './tools/iflow-router.js';
+import {
+  AGENT_COLORS,
+  detectAgnesProvider,
+  formatToolError,
+  generateTaskId,
+  IFLOW_STATES,
+} from './types.js';
 import { Logger } from './utils/logger.js';
 
 // 全局 PollingLogger 实例（复用 polling.log）
 const globalLogger = new PollingLogger();
+
+import {
+  type IFlowCheckpointFile,
+  readIFlowCheckpoint,
+  recoverIFlowState,
+  saveIFlowCheckpoint,
+} from '../../../workflows/iflow/iflow-state-manager.js';
 import { IFLOW_AGENT_NAMES } from '../../../workflows/iflow/index.js';
 import { SFLOW_AGENT_NAMES } from '../../../workflows/sflow/index.js';
+import {
+  type CompactionState,
+  createCompactionContext,
+} from '../../../workflows/shared/compaction-context.js';
 import { SHARED_AGENT_NAMES } from '../../../workflows/shared/index.js';
-import { createTaskTracker } from './features/task-tracker.js';
-import { recoverIFlowState, saveIFlowCheckpoint, readIFlowCheckpoint, type IFlowCheckpointFile } from '../../../workflows/iflow/iflow-state-manager.js';
 import { registerFlowCommands } from '../../../workflows/shared/slash-commands.js';
-import { createCompactionContext, type CompactionState } from '../../../workflows/shared/compaction-context.js';
+import { createTaskTracker } from './features/task-tracker.js';
 
 // ─── Background task registry (per-factory instance) ──────────────────────────
 
@@ -58,6 +82,14 @@ let backgroundTaskCounter = { value: 0 };
 // 不能在模块顶层创建（曾写死 process.cwd()，P1-2）；改为按 workDir 惰性创建并缓存。
 // modelResolver 内置 P1-1 护栏：已换模（attemptedModels>1）的 session 不再反查拉黑。
 const iflowSessionErrorHandlers = new Map<string, SessionErrorHandler>();
+
+// 导出 getter 与 handler 缓存 Map 作为测试钩子（P2-2′ / P3-8′）：
+// 使「工厂传入 workDir 而非 process.cwd()」的接线可被测试观测。生产调用点不变。
+export {
+  getIflowSessionErrorHandler as getIflowSessionErrorHandlerForTest,
+  iflowSessionErrorHandlers as iflowSessionErrorHandlersForTest,
+};
+
 function getIflowSessionErrorHandler(workDir: string): SessionErrorHandler {
   let handler = iflowSessionErrorHandlers.get(workDir);
   if (!handler) {
@@ -118,12 +150,16 @@ function createIFlowTools(
 
   return {
     iflow_router: {
-      description: 'Detect current IFlow state from .flow-engine/iflow/ directory artifacts and route to the appropriate agent. Supports IFlow-specific intent patterns.',
+      description:
+        'Detect current IFlow state from .flow-engine/iflow/ directory artifacts and route to the appropriate agent. Supports IFlow-specific intent patterns.',
       args: {
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
       execute: async (args, context) => {
-        return createIFlowRouterTool().execute({ ...args, changeDir: resolveChangeDir(undefined, context.directory) }, context);
+        return createIFlowRouterTool().execute(
+          { ...args, changeDir: resolveChangeDir(undefined, context.directory) },
+          context,
+        );
       },
     },
 
@@ -133,7 +169,9 @@ function createIFlowTools(
 
 // ─── IFlow plugin module (server function) ────────────────────────────────────
 
-function createIFlowPluginServer(pluginId: string): (input: PluginInput, _options?: PluginOptions) => Promise<Hooks> {
+function createIFlowPluginServer(
+  pluginId: string,
+): (input: PluginInput, _options?: PluginOptions) => Promise<Hooks> {
   return async (input: PluginInput, _options?: PluginOptions) => {
     const cascadedConfig = await loadCascadedSFlowConfig();
     const configOverrides = agentOverridesFromConfig(cascadedConfig);
@@ -149,7 +187,9 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
     try {
       modelValidation = await validateConfiguredModels(sflowClient as never, cascadedConfig);
     } catch (err) {
-      void Logger.warn(`[model-availability] 启动期模型校验失败: ${err instanceof Error ? err.message : String(err)}`);
+      void Logger.warn(
+        `[model-availability] 启动期模型校验失败: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     const hookComposer = createHookComposer();
@@ -166,14 +206,18 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
           try {
             await mcpManager.stopServer(server.name);
           } catch (err) {
-            await Logger.warn(`[iFlow] Failed to stop MCP server ${server.name}: ${err instanceof Error ? err.message : String(err)}`);
+            await Logger.warn(
+              `[iFlow] Failed to stop MCP server ${server.name}: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
         if (taskTracker && taskTracker.dispose) {
           try {
             await taskTracker.dispose();
           } catch (err) {
-            await Logger.warn(`[iFlow] Failed to dispose TaskTracker: ${err instanceof Error ? err.message : String(err)}`);
+            await Logger.warn(
+              `[iFlow] Failed to dispose TaskTracker: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
       },
@@ -195,7 +239,9 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
           try {
             await recoverIFlowState(workDir);
           } catch (err) {
-            await Logger.warn(`[iFlow] Failed to recover state: ${err instanceof Error ? err.message : String(err)}`);
+            await Logger.warn(
+              `[iFlow] Failed to recover state: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         } else if (event.type === 'session.deleted') {
           const sessionEndHook = hookComposer.getHook('session_end');
@@ -207,21 +253,24 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
               action: 'session.deleted',
             });
           }
-          } else if (event.type === 'session.error') {
-            // D2 / W7：session.error 事件驱动预降级
-            const props = event.properties as { sessionID?: string; error?: unknown } | undefined;
-            await getIflowSessionErrorHandler(workDir).handle({
-              sessionID: props?.sessionID,
-              error: props?.error as never,
-            });
-            await globalLogger.log('iFlow', 'session.error event handled (pre-degradation)');
-          } else {
-            // P1-2: 使用共享函数处理 session.idle 和 session.status 事件
-            const handled = await handleSessionIdleEvent(event, 'iFlow');
-            if (handled) {
-              await globalLogger.log('iFlow', 'session.idle/status event handled and dispatched to event bus');
-            }
+        } else if (event.type === 'session.error') {
+          // D2 / W7：session.error 事件驱动预降级
+          const props = event.properties as { sessionID?: string; error?: unknown } | undefined;
+          await getIflowSessionErrorHandler(workDir).handle({
+            sessionID: props?.sessionID,
+            error: props?.error as never,
+          });
+          await globalLogger.log('iFlow', 'session.error event handled (pre-degradation)');
+        } else {
+          // P1-2: 使用共享函数处理 session.idle 和 session.status 事件
+          const handled = await handleSessionIdleEvent(event, 'iFlow');
+          if (handled) {
+            await globalLogger.log(
+              'iFlow',
+              'session.idle/status event handled and dispatched to event bus',
+            );
           }
+        }
       },
 
       // config hook: register IFlow agents only, MCP servers, detect plugins
@@ -229,7 +278,10 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
         // 注册 slash 命令
         registerFlowCommands(cfg);
 
-        const hasAgnes = await detectAgnesProvider({ provider: cfg.provider as Record<string, unknown> | undefined, plugin: cfg.plugin });
+        const hasAgnes = await detectAgnesProvider({
+          provider: cfg.provider as Record<string, unknown> | undefined,
+          plugin: cfg.plugin,
+        });
         setHasAgnesProvider(hasAgnes);
 
         if (!cfg.agent) cfg.agent = {};
@@ -249,11 +301,20 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
             }
           }
 
-          const agentCfg = await createAgent(name as BuiltinAgentName, undefined, undefined, skillContent, 'iflow');
+          const agentCfg = await createAgent(
+            name as BuiltinAgentName,
+            undefined,
+            undefined,
+            skillContent,
+            'iflow',
+          );
 
-          const instructions = (typeof agentCfg.instructions === 'string' ? agentCfg.instructions : '') || (typeof agentCfg.prompt === 'string' ? agentCfg.prompt : '');
+          const instructions =
+            (typeof agentCfg.instructions === 'string' ? agentCfg.instructions : '') ||
+            (typeof agentCfg.prompt === 'string' ? agentCfg.prompt : '');
           const modelName = typeof agentCfg.model === 'string' ? agentCfg.model : undefined;
-          const temperature = typeof agentCfg.temperature === 'number' ? agentCfg.temperature : undefined;
+          const temperature =
+            typeof agentCfg.temperature === 'number' ? agentCfg.temperature : undefined;
           const agentTools = agentCfg.tools ?? undefined;
 
           cfg.agent[name] = {
@@ -264,7 +325,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
             color: AGENT_COLORS[name],
             temperature: override?.temperature ?? temperature,
             description: appendChainUnavailableNotice(
-              (typeof agentCfg.id === 'string')
+              typeof agentCfg.id === 'string'
                 ? `${agentCfg.id} agent from iFlow plugin`
                 : undefined,
               name as BuiltinAgentName,
@@ -288,11 +349,20 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
         const sharedNames = SHARED_AGENT_NAMES as readonly string[];
         for (const name of sharedNames) {
           const override = configOverrides[name as BuiltinAgentName];
-          const agentCfg = await createAgent(name as BuiltinAgentName, undefined, undefined, undefined, 'iflow');
+          const agentCfg = await createAgent(
+            name as BuiltinAgentName,
+            undefined,
+            undefined,
+            undefined,
+            'iflow',
+          );
 
-          const instructions = (typeof agentCfg.instructions === 'string' ? agentCfg.instructions : '') || (typeof agentCfg.prompt === 'string' ? agentCfg.prompt : '');
+          const instructions =
+            (typeof agentCfg.instructions === 'string' ? agentCfg.instructions : '') ||
+            (typeof agentCfg.prompt === 'string' ? agentCfg.prompt : '');
           const modelName = typeof agentCfg.model === 'string' ? agentCfg.model : undefined;
-          const temperature = typeof agentCfg.temperature === 'number' ? agentCfg.temperature : undefined;
+          const temperature =
+            typeof agentCfg.temperature === 'number' ? agentCfg.temperature : undefined;
           const agentTools = agentCfg.tools ?? undefined;
 
           cfg.agent[name] = {
@@ -316,8 +386,8 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
         }
 
         // 屏蔽 OpenCode 默认的 build 和 plan agents
-        cfg.agent["build"] = { mode: "subagent", hidden: true };
-        cfg.agent["plan"] = { mode: "subagent", hidden: true };
+        cfg.agent['build'] = { mode: 'subagent', hidden: true };
+        cfg.agent['plan'] = { mode: 'subagent', hidden: true };
 
         // Register skill-embedded MCPs (Tier 3)
         if (!cfg.mcp) cfg.mcp = {};
@@ -330,8 +400,10 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
                 command: [server.command, ...(server.args || [])],
                 environment: server.env,
               };
-              mcpManager.startServer(server.name, server).catch(async err => {
-                await Logger.warn(`[iFlow] Failed to start MCP server ${server.name}: ${err.message}`);
+              mcpManager.startServer(server.name, server).catch(async (err) => {
+                await Logger.warn(
+                  `[iFlow] Failed to start MCP server ${server.name}: ${err.message}`,
+                );
                 if (cfg.mcp) delete cfg.mcp[server.name];
               });
             }
@@ -339,9 +411,15 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
         }
 
         // Register project-level MCPs (Tier 2)
-        const projectMcpConfig = (await loadProjectMcpConfig()) as Record<string, { command: string | string[]; environment?: Record<string, string> }>;
+        const projectMcpConfig = (await loadProjectMcpConfig()) as Record<
+          string,
+          { command: string | string[]; environment?: Record<string, string> }
+        >;
         for (const [name, server] of Object.entries(projectMcpConfig)) {
-          const srv = server as { command: string | string[]; environment?: Record<string, string> };
+          const srv = server as {
+            command: string | string[];
+            environment?: Record<string, string>;
+          };
           if (srv && srv.command) {
             cfg.mcp[name] = {
               type: 'local',
@@ -351,10 +429,14 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
             const cmd = Array.isArray(srv.command) ? srv.command[0] : srv.command;
             const cmdArgs = Array.isArray(srv.command) ? srv.command.slice(1) : [];
             if (cmd) {
-              mcpManager.startServer(name, { name, command: cmd, args: cmdArgs, env: srv.environment }).catch(async err => {
-                await Logger.warn(`[iFlow] Failed to start project MCP server ${name}: ${err.message}`);
-                if (cfg.mcp) delete cfg.mcp[name];
-              });
+              mcpManager
+                .startServer(name, { name, command: cmd, args: cmdArgs, env: srv.environment })
+                .catch(async (err) => {
+                  await Logger.warn(
+                    `[iFlow] Failed to start project MCP server ${name}: ${err.message}`,
+                  );
+                  if (cfg.mcp) delete cfg.mcp[name];
+                });
             }
           }
         }
@@ -364,7 +446,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
       tool: tools,
 
       // command.execute.before hook — skill content injection
-      "command.execute.before": async (input, output) => {
+      'command.execute.before': async (input, output) => {
         const command = input.command;
         if (!command.startsWith('/')) return;
         const skillName = command.slice(1);
@@ -382,7 +464,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
       },
 
       // tool.execute.before hook — IFlow guard
-      "tool.execute.before": async (input, output) => {
+      'tool.execute.before': async (input, output) => {
         const toolName = input.tool;
         const lowerTool = toolName?.toLowerCase();
 
@@ -404,7 +486,8 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
             output.args = {
               ...(output.args ?? {}),
               _iflow_guard_blocked: true,
-              _iflow_guard_reason: guardResult.blockReason ?? guardResult.error ?? 'IFlow guard condition not met',
+              _iflow_guard_reason:
+                guardResult.blockReason ?? guardResult.error ?? 'IFlow guard condition not met',
             };
             return;
           }
@@ -416,7 +499,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
       },
 
       // tool.execute.after hook — IFlow state transition
-      "tool.execute.after": async (input, output) => {
+      'tool.execute.after': async (input, output) => {
         const toolName = input.tool;
 
         // IFlow state transition via hook
@@ -435,7 +518,6 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
                 action: 'state-transition',
                 data: { newState },
               });
-
             } else {
               try {
                 await ensureDir(`${workDir}/.flow-engine/iflow`);
@@ -502,11 +584,14 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
               // 幂等性：仅当 checkpoint 存在且仍为 running 时更新
               // （避免重复写入，或覆盖同步模式已在 call_flow_agent after 中落盘的 completed）
               if (existing && existing.status === 'running') {
-                const resultStr = typeof parsed.result === 'string'
-                  ? parsed.result
-                  : JSON.stringify(parsed.result ?? '');
+                const resultStr =
+                  typeof parsed.result === 'string'
+                    ? parsed.result
+                    : JSON.stringify(parsed.result ?? '');
                 const completedAt = new Date().toISOString();
-                const startedAtTs = existing.startedAt ? new Date(existing.startedAt).getTime() : NaN;
+                const startedAtTs = existing.startedAt
+                  ? new Date(existing.startedAt).getTime()
+                  : NaN;
                 const durationMs = Number.isNaN(startedAtTs)
                   ? 0
                   : Math.max(0, new Date(completedAt).getTime() - startedAtTs);
@@ -528,11 +613,11 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
         }
       },
 
-      "experimental.session.compacting": async (input, output) => {
+      'experimental.session.compacting': async (input, output) => {
         try {
           const stateFile = `${workDir}/${getStateFilePath('iflow')}`;
           const { readJsonFile } = await import('@opencode-flow-engine/shared');
-          const state = await readJsonFile(stateFile) as Record<string, unknown> | null;
+          const state = (await readJsonFile(stateFile)) as Record<string, unknown> | null;
           if (!state || !state.state) return;
           const context = createCompactionContext('iFlow', state as unknown as CompactionState);
           if (context) {
@@ -543,7 +628,7 @@ function createIFlowPluginServer(pluginId: string): (input: PluginInput, _option
         }
       },
 
-      "experimental.compaction.autocontinue": async (input, output) => {
+      'experimental.compaction.autocontinue': async (input, output) => {
         // IFlow: 默认允许自动继续
         output.enabled = true;
       },
