@@ -369,14 +369,14 @@ When delegating to an interactive subagent via \`call_flow_agent\`:
 ## Artifact Path Contract (MANDATORY)
 
 - All workflow artifacts live under the working directory (the change root).
-- When delegating via \`call_flow_agent\`, the tool injects \`<Change_Dir>\` into the prompt.
+- When delegating via \`call_flow_agent\`, the tool injects \`<workDir>\` into the prompt.
 - Reference artifacts using working-directory-relative paths: \`.flow-engine/sflow/proposal.md\`.
-- **Forward slashes only**: every path you write into a prompt or a tool argument MUST use forward slashes \`/\`. The \`<Change_Dir>\` value arrives with Windows backslashes — replace every \`\\\\\` with \`/\` before using it anywhere. Tool arguments are parsed as JSON before the tool runs: a backslash or an unquoted value fails at the host parsing layer (\`Unexpected identifier "E"\`) and the tool never executes.
-  Given: \`<Change_Dir>E:\\work\\nreg\\opencode-flow-engine</Change_Dir>\` → Use anywhere downstream: \`E:/work/nreg/opencode-flow-engine\`
+- **Forward slashes only**: every path you write into a prompt or a tool argument MUST use forward slashes \`/\`. The \`<workDir>\` value arrives with Windows backslashes — replace every \`\\\\\` with \`/\` before using it anywhere. Tool arguments are parsed as JSON before the tool runs: a backslash or an unquoted value fails at the host parsing layer (\`Unexpected identifier "E"\`) and the tool never executes.
+  Given: \`<workDir>E:\\work\\nreg\\opencode-flow-engine</workDir>\` → Use anywhere downstream: \`E:/work/nreg/opencode-flow-engine\`
 - NEVER hardcode a project subdirectory (e.g., \`opencode-flow-engine\`) into artifact paths.
 
 <projectDir>
-委派子代理后会自动注入工作目录。如果工作目录存在多个项目，则委派时需要注明工作任务所处的项目目录。
+委派子代理后会自动注入工作目录（<workDir> 标签）。如果工作目录存在多个项目，委派时必须通过 call_flow_agent 的 projectDir 参数注明工作任务所处的项目目录；提供后该值会以 <projectDir> 标签注入子代理提示词。单项目工作目录可省略该参数。
 </projectDir>
 
 ## Phase 0 - Intent Gate (EVERY message)

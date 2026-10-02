@@ -1,7 +1,7 @@
 /**
  * Path normalization for subagent-visible text (Task 2).
  *
- * Windows 路径（反斜杠 / 盘符）注入子代理可见文本（<Change_Dir> / <projectDir> /
+ * Windows 路径（反斜杠 / 盘符）注入子代理可见文本（<workDir> / <projectDir> /
  * 路径回显）时统一转为正斜杠，避免下游解析歧义。纯内部 fs 写入路径不经此函数。
  */
 

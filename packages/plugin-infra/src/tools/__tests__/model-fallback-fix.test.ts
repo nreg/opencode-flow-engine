@@ -257,8 +257,8 @@ describe('P0-1/P0-2/P0-4: runWithModelFallback 成功判定与换模', () => {
 
   it('user prompt echo from poll is NOT success', async () => {
     const c = makeClient({ outputs: [] });
-    // Echo equals the base prompt (including Change_Dir tag, as in real dispatch)
-    const echoText = '<Change_Dir>/x</Change_Dir>\n\ndo the work';
+    // Echo equals the base prompt (including workDir tag, as in real dispatch)
+    const echoText = '<workDir>/x</workDir>\n\ndo the work';
     let pollCount = 0;
     const poll = async () => {
       pollCount++;
@@ -1418,7 +1418,7 @@ describe('FIX-P0-1: 产出正向判定', () => {
     });
 
     it('U2: prompt 回显语义不变 → 仍走 model-failure 分支（不落入 no-valid-output）', async () => {
-      const echoText = '<Change_Dir>/x</Change_Dir>\n\ndo the work';
+      const echoText = '<workDir>/x</workDir>\n\ndo the work';
       let sendIdx = 0;
       const promptCalls: Array<{ model?: { providerID: string; modelID: string } }> = [];
       const client = {

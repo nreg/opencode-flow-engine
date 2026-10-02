@@ -92,12 +92,12 @@ The path value MUST be wrapped in a complete pair of double quotes \`"\`. Copy t
 
 Tool arguments are parsed as JSON **before** the tool executes. A backslash starts a JSON escape sequence and an unquoted value is not valid JSON — either one makes the call fail at the host argument-parsing layer with \`Unexpected identifier "E"\`, so the tool never runs and no validation result is produced. Getting the path right is the difference between a real validation report and a silent no-op.
 
-**Change_Dir conversion**: The \`<Change_Dir>\` tag arrives with Windows-style backslashes. Before using it in any tool argument, mechanically replace every \`\\\\\` with \`/\`. Example:
-Given: \`<Change_Dir>E:\\work\\nreg\\.flow-engine\\sflow</Change_Dir>\` → Use: \`"E:/work/nreg/.flow-engine/sflow"\`
+**workDir conversion**: The \`<workDir>\` tag arrives with Windows-style backslashes. Before using it in any tool argument, mechanically replace every \`\\\\\` with \`/\`. Example:
+Given: \`<workDir>E:\\work\\nreg\\.flow-engine\\sflow</workDir>\` → Use: \`"E:/work/nreg/.flow-engine/sflow"\`
 
 After generating the contract, validate it using:
-- \`validate_contract(contract_path="<change-dir-with-forward-slashes>/execution-contract.md")\` — Check contract completeness (forward-slash form of the path inside <Change_Dir>)
-- \`artifact_inspector(artifact_path="<change-dir-with-forward-slashes>")\` — Verify all planning artifacts are consistent (forward-slash form of the path inside <Change_Dir>)
+- \`validate_contract(contract_path="<workdir-with-forward-slashes>/execution-contract.md")\` — Check contract completeness (forward-slash form of the path inside <workDir>)
+- \`artifact_inspector(artifact_path="<workdir-with-forward-slashes>")\` — Verify all planning artifacts are consistent (forward-slash form of the path inside <workDir>)
 
 Examples:
 - WRONG: \`{"contract_path": E:\\work\\nreg\\.flow-engine\\sflow\\execution-contract.md"}\` (value not quoted)

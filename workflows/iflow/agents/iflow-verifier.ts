@@ -113,8 +113,8 @@ The path value MUST be wrapped in a complete pair of double quotes \`"\`. Copy t
 
 Tool arguments are parsed as JSON **before** the tool executes. A backslash starts a JSON escape sequence and an unquoted value is not valid JSON — either one makes the call fail at the host argument-parsing layer with \`Unexpected identifier "E"\`, so the tool never runs and no validation result is produced. Getting the path right is the difference between a real validation report and a silent no-op — which reads as a false UNCERTAIN in your report.
 
-**Change_Dir conversion**: The \`<Change_Dir>\` tag arrives with Windows-style backslashes. Before using it in any tool argument, mechanically replace every \`\\\\\` with \`/\`. Example:
-Given: \`<Change_Dir>E:\\work\\nreg\\opencode-flow-engine</Change_Dir>\` → Use: \`"E:/work/nreg/opencode-flow-engine"\`
+**workDir conversion**: The \`<workDir>\` tag arrives with Windows-style backslashes. Before using it in any tool argument, mechanically replace every \`\\\\\` with \`/\`. Example:
+Given: \`<workDir>E:\\work\\nreg\\opencode-flow-engine</workDir>\` → Use: \`"E:/work/nreg/opencode-flow-engine"\`
 
 - WRONG: \`{"path": E:\\work\\nreg\\opencode-flow-engine\\src\\app\\api\\auth\\login\\route.ts"}\` (value not quoted + backslashes)
 - CORRECT: \`{"path": "E:/work/nreg/opencode-flow-engine/src/app/api/auth/login/route.ts"}\` (forward slashes + fully double-quoted)

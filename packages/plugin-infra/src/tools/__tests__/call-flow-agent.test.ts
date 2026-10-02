@@ -1684,9 +1684,9 @@ describe('F-2: watcher catch state refresh', () => {
   });
 });
 
-// ─── Wave 1: Change_Dir 标记注入 ───────────────────────────────────────────
+// ─── Wave 1: workDir 标记注入 ───────────────────────────────────────────
 
-describe('Wave 1: Change_Dir 标记注入', () => {
+describe('Wave 1: workDir 标记注入', () => {
   let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
 
   beforeEach(() => {
@@ -1694,7 +1694,7 @@ describe('Wave 1: Change_Dir 标记注入', () => {
     currentTools = null;
   });
 
-  it('同步模式：prompt 头部包含 <Change_Dir> 且路径与 query.directory 一致', async () => {
+  it('同步模式：prompt 头部包含 <workDir> 且路径与 query.directory 一致', async () => {
     const client = createMockClient({
       pollOutputs: ['任务完成 [TASK_COMPLETE]'],
       promptCalls,
@@ -1717,26 +1717,26 @@ describe('Wave 1: Change_Dir 标记注入', () => {
       { sessionID: 'parent-session', directory: testDirectory },
     );
 
-    // 验证 prompt 调用中包含 <Change_Dir> 标记
+    // 验证 prompt 调用中包含 <workDir> 标记
     expect(promptCalls.length).toBeGreaterThan(0);
     const firstPromptCall = promptCalls[0];
     const parts = firstPromptCall.body.parts as Array<{ type: string; text: string }>;
     const promptText = parts[0].text;
     
     // 验证标记存在
-    expect(promptText).toContain('<Change_Dir>');
-    expect(promptText).toContain('</Change_Dir>');
+    expect(promptText).toContain('<workDir>');
+    expect(promptText).toContain('</workDir>');
     
     // 验证标记在头部
-    expect(promptText.startsWith('<Change_Dir>')).toBe(true);
+    expect(promptText.startsWith('<workDir>')).toBe(true);
     
     // 验证路径正确
-    const changeDirMatch = promptText.match(/<Change_Dir>(.*?)<\/Change_Dir>/);
+    const changeDirMatch = promptText.match(/<workDir>(.*?)<\/workDir>/);
     expect(changeDirMatch).not.toBeNull();
     expect(changeDirMatch![1]).toBe(normalizeToPosix(testDirectory));
   });
 
-  it('异步模式：后台任务 prompt 也包含 <Change_Dir> 标记', async () => {
+  it('异步模式：后台任务 prompt 也包含 <workDir> 标记', async () => {
     const client = createMockClient({
       pollOutputs: ['任务完成 [TASK_COMPLETE]'],
       promptCalls,
@@ -1762,23 +1762,23 @@ describe('Wave 1: Change_Dir 标记注入', () => {
     const startData = JSON.parse(startResult.output);
     expect(startData.success).toBe(true);
 
-    // 验证 prompt 调用中包含 <Change_Dir> 标记
+    // 验证 prompt 调用中包含 <workDir> 标记
     expect(promptCalls.length).toBeGreaterThan(0);
     const firstPromptCall = promptCalls[0];
     const parts = firstPromptCall.body.parts as Array<{ type: string; text: string }>;
     const promptText = parts[0].text;
     
     // 验证标记存在且在头部
-    expect(promptText.startsWith('<Change_Dir>')).toBe(true);
-    expect(promptText).toContain('</Change_Dir>');
+    expect(promptText.startsWith('<workDir>')).toBe(true);
+    expect(promptText).toContain('</workDir>');
     
     // 验证路径正确
-    const changeDirMatch = promptText.match(/<Change_Dir>(.*?)<\/Change_Dir>/);
+    const changeDirMatch = promptText.match(/<workDir>(.*?)<\/workDir>/);
     expect(changeDirMatch).not.toBeNull();
     expect(changeDirMatch![1]).toBe(normalizeToPosix(testDirectory));
   });
 
-  it('resume 模式：恢复会话时 prompt 也包含 <Change_Dir> 标记', async () => {
+  it('resume 模式：恢复会话时 prompt 也包含 <workDir> 标记', async () => {
     const client = createMockClient({
       pollOutputs: ['任务完成 [TASK_COMPLETE]'],
       promptCalls,
@@ -1812,23 +1812,23 @@ describe('Wave 1: Change_Dir 标记注入', () => {
       { sessionID: 'parent-session', directory: testDirectory },
     );
 
-    // 验证 prompt 调用中包含 <Change_Dir> 标记
+    // 验证 prompt 调用中包含 <workDir> 标记
     expect(promptCalls.length).toBeGreaterThan(0);
     const firstPromptCall = promptCalls[0];
     const parts = firstPromptCall.body.parts as Array<{ type: string; text: string }>;
     const promptText = parts[0].text;
     
     // 验证标记存在且在头部
-    expect(promptText.startsWith('<Change_Dir>')).toBe(true);
-    expect(promptText).toContain('</Change_Dir>');
+    expect(promptText.startsWith('<workDir>')).toBe(true);
+    expect(promptText).toContain('</workDir>');
     
     // 验证路径正确
-    const changeDirMatch = promptText.match(/<Change_Dir>(.*?)<\/Change_Dir>/);
+    const changeDirMatch = promptText.match(/<workDir>(.*?)<\/workDir>/);
     expect(changeDirMatch).not.toBeNull();
     expect(changeDirMatch![1]).toBe(normalizeToPosix(testDirectory));
   });
 
-  it('Task 2/3: 注入块为正斜杠路径，且 <projectDir> 与 <Change_Dir> 并列、值一致', async () => {
+  it('未提供 projectDir：只注入 <workDir>，不出现 <projectDir> 标签', async () => {
     const client = createMockClient({
       pollOutputs: ['任务完成 [TASK_COMPLETE]'],
       promptCalls,
@@ -1838,7 +1838,7 @@ describe('Wave 1: Change_Dir 标记注入', () => {
     const tools = createTestTools(options);
     currentTools = tools;
 
-    const testDirectory = 'E:\\test\\posix-project';
+    const testDirectory = 'E:\\test\\no-projectdir';
 
     await tools.call_flow_agent.execute(
       {
@@ -1851,20 +1851,56 @@ describe('Wave 1: Change_Dir 标记注入', () => {
     );
 
     expect(promptCalls.length).toBeGreaterThan(0);
-    const firstPromptCall = promptCalls[0];
-    const parts = firstPromptCall.body.parts as Array<{ type: string; text: string }>;
+    const parts = promptCalls[0].body.parts as Array<{ type: string; text: string }>;
     const promptText = parts[0].text;
 
-    // <Change_Dir> 值为正斜杠
-    const changeDirMatch = promptText.match(/<Change_Dir>(.*?)<\/Change_Dir>/);
-    expect(changeDirMatch?.[1]).toBe('E:/test/posix-project');
-    expect(changeDirMatch?.[1]).not.toContain('\\');
+    expect(promptText).toContain('<workDir>');
+    expect(promptText).toContain('</workDir>');
+    expect(promptText).not.toContain('<projectDir>');
+    expect(promptText).not.toContain('</projectDir>');
+  });
 
-    // <projectDir> 与 <Change_Dir> 并列注入且值为同一正斜杠路径
+  it('提供 projectDir：注入 <projectDir> 且与 <workDir> 值不同（正斜杠归一）', async () => {
+    const client = createMockClient({
+      pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+      promptCalls,
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    const testDirectory = 'E:\\test\\multi-project-root';
+    const testProjectDir = 'E:\\test\\multi-project-root\\packages\\app';
+
+    await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+        projectDir: testProjectDir,
+      },
+      { sessionID: 'parent-session', directory: testDirectory },
+    );
+
+    expect(promptCalls.length).toBeGreaterThan(0);
+    const parts = promptCalls[0].body.parts as Array<{ type: string; text: string }>;
+    const promptText = parts[0].text;
+
+    // <workDir> 恒注入，值为工作目录正斜杠形式
+    const workDirMatch = promptText.match(/<workDir>(.*?)<\/workDir>/);
+    expect(workDirMatch?.[1]).toBe('E:/test/multi-project-root');
+
+    // <projectDir> 值为参数提供的项目目录（正斜杠归一），与 workDir 不同
     const projectDirMatch = promptText.match(/<projectDir>(.*?)<\/projectDir>/);
-    expect(projectDirMatch?.[1]).toBe('E:/test/posix-project');
+    expect(projectDirMatch?.[1]).toBe('E:/test/multi-project-root/packages/app');
     expect(projectDirMatch?.[1]).not.toContain('\\');
-    expect(promptText.indexOf('<Change_Dir>')).toBeLessThan(promptText.indexOf('<projectDir>'));
+    expect(projectDirMatch?.[1]).not.toBe(workDirMatch?.[1]);
+
+    // 两标签同一行块，workDir 在前
+    expect(promptText.indexOf('<workDir>')).toBeLessThan(promptText.indexOf('<projectDir>'));
+    expect(promptText.indexOf('</workDir>')).toBeLessThan(promptText.indexOf('<projectDir>'));
   });
 });
 

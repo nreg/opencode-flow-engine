@@ -26,7 +26,7 @@ Invoke this skill when the user says things like:
 
 Before reading any `.flow-engine/sflow/` artifact:
 
-1. Parse the prompt for `<Change_Dir>绝对路径</Change_Dir>`.
+1. Parse the prompt for `<workDir>绝对路径</workDir>`.
 2. If found, use that path as the artifact root.
 3. Resolve all relative paths (e.g., `.flow-engine/sflow/state.json`) against this root.
 4. If not found, fall back to cwd-relative resolution (legacy behavior).
@@ -205,7 +205,7 @@ The minimal contract still requires explicit user approval (DP-3) before executi
 After `execution-contract.md` is written and validated:
 
 1. Use `artifact_inspector` to verify the contract's completeness and consistency
-2. **Forward slashes only**: When calling `artifact_inspector` or any tool with a path argument, the path MUST use forward slashes `/` and be fully double-quoted. The `<Change_Dir>` tag contains Windows backslashes — replace every `\` with `/` before using it in a tool argument. Example: given `<Change_Dir>E:\work\nreg\.flow-engine\sflow</Change_Dir>`, use `"E:/work/nreg/.flow-engine/sflow"`.
+2. **Forward slashes only**: When calling `artifact_inspector` or any tool with a path argument, the path MUST use forward slashes `/` and be fully double-quoted. The `<workDir>` tag contains Windows backslashes — replace every `\` with `/` before using it in a tool argument. Example: given `<workDir>E:\work\nreg\.flow-engine\sflow</workDir>`, use `"E:/work/nreg/.flow-engine/sflow"`.
 2. Update `.flow-engine/sflow/state.json` with `artifacts_hash` and `contract_hash`
 3. The state file enables fast staleness detection in subsequent phases
 

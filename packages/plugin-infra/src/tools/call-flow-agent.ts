@@ -1360,6 +1360,12 @@ export function createCallFlowAgentTools(
         .describe(
           'Model tier to use for this call (lite/quick/standard/deep/ultra/review). Overrides agent static binding.',
         ),
+      projectDir: z
+        .string()
+        .optional()
+        .describe(
+          'Specific project directory the task targets. REQUIRED when the working directory contains multiple projects. When provided, injected to the subagent as a <projectDir> tag.',
+        ),
     } as Record<string, unknown>,
     execute: async (args, context) => {
       const changeDir = resolveChangeDir(undefined, context.directory);
@@ -1372,6 +1378,7 @@ export function createCallFlowAgentTools(
         agent_id,
         output_mode,
         model_type,
+        projectDir: projectDirParam,
       } = args;
 
       // F3: 严格布尔归一化 — zod v3 schema 在宿主侧不生效校验，LLM 可能把
@@ -1584,9 +1591,15 @@ export function createCallFlowAgentTools(
           isNew = true;
         }
 
-        // Wave 1: 注入 Change_Dir 标记；Task 2/3: 子代理可见路径统一正斜杠 + projectDir 并列注入
-        const changeDirTag = `<Change_Dir>${normalizeToPosix(changeDir)}</Change_Dir>\n<projectDir>${normalizeToPosix(changeDir)}</projectDir>`;
-        let finalPrompt = `${changeDirTag}\n\n${effectivePrompt}`;
+        // Wave 1: 注入 workDir 标记；projectDir 仅在调用方显式传入时注入
+        // （工具无法自行推断任务针对的项目目录，自动填充父目录值是错的）
+        const workDirTag = `<workDir>${normalizeToPosix(changeDir)}</workDir>`;
+        const projectDirTag =
+          typeof projectDirParam === 'string' && projectDirParam.trim() !== ''
+            ? `\n<projectDir>${normalizeToPosix(projectDirParam)}</projectDir>`
+            : '';
+        const dirTagBlock = `${workDirTag}${projectDirTag}`;
+        let finalPrompt = `${dirTagBlock}\n\n${effectivePrompt}`;
 
         // P2: structured 模式下注入 schema hint
         if (output_mode === 'structured') {

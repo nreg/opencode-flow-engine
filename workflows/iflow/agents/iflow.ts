@@ -233,7 +233,7 @@ IFlow has 5 specialized subagents. To delegate, use the \`call_flow_agent\` tool
 - \`run_in_background\`: \`true\` for async, \`false\` for sync
 
 <projectDir>
-委派子代理后会自动注入工作目录。如果工作目录存在多个项目，则委派时需要注明工作任务所处的项目目录。
+委派子代理后会自动注入工作目录（<workDir> 标签）。如果工作目录存在多个项目，委派时必须通过 call_flow_agent 的 projectDir 参数注明工作任务所处的项目目录；提供后该值会以 <projectDir> 标签注入子代理提示词。单项目工作目录可省略该参数。
 </projectDir>
 
 The tool supports two modes:

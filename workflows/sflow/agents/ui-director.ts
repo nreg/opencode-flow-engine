@@ -113,7 +113,7 @@ Output to \`.flow-engine/sflow/ui-design.md\` using template at \`workflows/sflo
 
 **Mandatory**: Fill the \`### Component Visual Rules\` section (under \`## 3. Component Architecture\`) with concrete token references from Step 4 decisions. Must define visual rules for all 5 required component types: Button (all variants), Input/Form Field, Card, Navigation, Typography Hierarchy. Use the design tokens from §2 and interaction patterns from §4 as building blocks.
 
-After writing, call \`validate_ui_design\` tool to verify V1-V8. Fix any issues. **Forward slashes only**: the \`ui_design_path\` argument MUST use forward slashes \`/\` and be fully double-quoted — e.g. CORRECT \`{"ui_design_path": "E:/work/nreg/.flow-engine/sflow/ui-design.md"}\` vs WRONG \`{"ui_design_path": E:\\work\\nreg\\.flow-engine\\sflow\\ui-design.md"}\` (unquoted + backslashes). The \`<Change_Dir>\` tag arrives with Windows backslashes — replace every \`\\\\\` with \`/\` before using it.
+After writing, call \`validate_ui_design\` tool to verify V1-V8. Fix any issues. **Forward slashes only**: the \`ui_design_path\` argument MUST use forward slashes \`/\` and be fully double-quoted — e.g. CORRECT \`{"ui_design_path": "E:/work/nreg/.flow-engine/sflow/ui-design.md"}\` vs WRONG \`{"ui_design_path": E:\\work\\nreg\\.flow-engine\\sflow\\ui-design.md"}\` (unquoted + backslashes). The \`<workDir>\` tag arrives with Windows backslashes — replace every \`\\\\\` with \`/\` before using it.
 
 ### Step 7 — Anti-AI-Slop Self-Check
 
@@ -136,8 +136,8 @@ The path value MUST be wrapped in a complete pair of double quotes \`"\`. Copy t
 
 Tool arguments are parsed as JSON **before** the tool executes. A backslash starts a JSON escape sequence and an unquoted value is not valid JSON — either one makes the call fail at the host argument-parsing layer with \`Unexpected identifier "E"\`, so the tool never runs and no validation result is produced. Getting the path right is the difference between a real validation report and a silent no-op.
 
-**Change_Dir conversion**: The \`<Change_Dir>\` tag arrives with Windows-style backslashes. Before using it in any tool argument, mechanically replace every \`\\\\\` with \`/\`. Example:
-Given: \`<Change_Dir>E:\\work\\nreg\\.flow-engine\\sflow</Change_Dir>\` → Use: \`"E:/work/nreg/.flow-engine/sflow"\`
+**workDir conversion**: The \`<workDir>\` tag arrives with Windows-style backslashes. Before using it in any tool argument, mechanically replace every \`\\\\\` with \`/\`. Example:
+Given: \`<workDir>E:\\work\\nreg\\.flow-engine\\sflow</workDir>\` → Use: \`"E:/work/nreg/.flow-engine/sflow"\`
 
 Examples:
 - WRONG: \`{"ui_design_path": E:\\work\\nreg\\.flow-engine\\sflow\\ui-design.md"}\` (value not quoted)

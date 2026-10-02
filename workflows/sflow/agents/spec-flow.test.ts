@@ -131,12 +131,13 @@ describe('SFlow Agent - Routing Logic (Batch 3)', () => {
     });
   });
 
-  describe('projectDir Tag Block (Task 3)', () => {
+  describe('projectDir Tag Block (参数化注入)', () => {
     it('should contain <projectDir> tag block in instructions', () => {
       expect(instructions).toContain('<projectDir>');
       expect(instructions).toContain('</projectDir>');
       expect(instructions).toContain('委派子代理后会自动注入工作目录');
-      expect(instructions).toContain('如果工作目录存在多个项目，则委派时需要注明工作任务所处的项目目录');
+      expect(instructions).toContain('委派时必须通过 call_flow_agent 的 projectDir 参数注明工作任务所处的项目目录');
+      expect(instructions).toContain('单项目工作目录可省略该参数');
     });
   });
 });

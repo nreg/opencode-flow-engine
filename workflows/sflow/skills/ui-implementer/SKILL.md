@@ -23,7 +23,7 @@ description: "前端 UI 实现专用智能体。将 ui-design.md 设计规范转
 
 Before reading any `.flow-engine/sflow/` artifact:
 
-1. Parse the prompt for `<Change_Dir>绝对路径</Change_Dir>`.
+1. Parse the prompt for `<workDir>绝对路径</workDir>`.
 2. If found, use that path as the artifact root.
 3. Resolve all relative paths (e.g., `.flow-engine/sflow/state.json`) against this root.
 4. If not found, fall back to cwd-relative resolution (legacy behavior).
