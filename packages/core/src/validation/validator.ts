@@ -957,11 +957,16 @@ export class Validator {
     const lines = normalized.split('\n');
     // Match any heading level from ## to ###### (number prefix optional, dot optional).
     // Case-insensitive. Escapes regex-special chars in the heading text.
+    // The heading may carry an OPTIONAL decorative suffix: heading text, then either
+    // end-of-line, or whitespace followed by ONE separator (em dash — / en dash – /
+    // hyphen - / colon : ： / vertical bar | ｜) and arbitrary decorative text.
+    // A heading glued to plain alphanumeric text with no separator must NOT match
+    // (anti-swallow: "Anti-AI-Slop Checklist for v2", "Placeholder Strategy5").
     const escapedHeading = heading
       .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       .replace(/\s+/g, '\\s+');
     const headingRegex = new RegExp(
-      `^#{2,6}\\s+\\d*\\.?\\s*${escapedHeading}\\s*$`,
+      `^#{2,6}\\s+\\d*\\.?\\s*${escapedHeading}(?:\\s*[—–\\-:：|｜].*)?$`,
       'i',
     );
     const startIdx = lines.findIndex((l) => headingRegex.test(l));

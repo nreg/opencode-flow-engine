@@ -525,4 +525,123 @@ type.
     const result = validator.validateUiDesignContent(design);
     expect(result.issues.some(i => i.type === 'V8_COMPONENT_VISUAL_RULES')).toBe(false);
   });
+
+  // FIX 4: extractUiDesignSection heading regex must tolerate a decorative
+  // suffix after the heading — separated by one of the separators
+  // (em dash — / en dash – / hyphen - / colon : ： / vertical bar | ｜)
+  // optionally followed by arbitrary decorative text. A heading followed by
+  // plain alphanumeric text with no separator must NOT match (anti-swallow).
+
+  it('FIX4: V6 no longer reports Missing when section title carries a — decorative suffix', () => {
+    const design = `---
+tone: minimal
+---
+
+## 7. Anti-AI-Slop Checklist — 反 AI-slop 自检（8 类全覆盖）
+
+| 类别 | 覆盖情况 |
+|------|---------|
+| Color（色彩） | ✅ |
+| Typography（字体） | ✅ |
+| Layout（布局） | ✅ |
+| Components（组件） | ✅ |
+| Content（内容） | ✅ |
+| Motion（动效） | ✅ |
+| Color Usage（状态色滥用） | ✅ |
+| Rendering（闪烁与渲染） | ✅ |
+`;
+    const result = validator.validateUiDesignContent(design);
+    expect(result.issues.some(i => i.type === 'V6_ANTI_AI_SLOP_COVERAGE')).toBe(false);
+  });
+
+  it('FIX4: V8 no longer reports Missing when "Component Visual Rules" carries a — decorative suffix', () => {
+    const design = `---
+tone: minimal
+---
+
+### Component Visual Rules — 组件视觉规约
+
+#### Button
+
+btn.
+
+#### Input
+
+input.
+
+#### Card
+
+card.
+
+#### Navigation
+
+nav.
+
+#### Typography
+
+type.
+`;
+    const result = validator.validateUiDesignContent(design);
+    expect(result.issues.some(i => i.type === 'V8_COMPONENT_VISUAL_RULES')).toBe(false);
+  });
+
+  it('FIX4: heading regex matches a ":" separator decorative suffix', () => {
+    const doc = `## Anti-AI-Slop Checklist: 反 AI-slop 自检\n\nbody\n`;
+    const section = extractSection(doc, 'Anti-AI-Slop Checklist');
+    expect(section).toBeDefined();
+    expect(section).toContain('body');
+  });
+
+  it('FIX4: heading regex matches a fullwidth "：" separator decorative suffix', () => {
+    const doc = `## Anti-AI-Slop Checklist：反 AI-slop 自检\n\nbody\n`;
+    const section = extractSection(doc, 'Anti-AI-Slop Checklist');
+    expect(section).toBeDefined();
+    expect(section).toContain('body');
+  });
+
+  it('FIX4: heading regex matches a "|" separator decorative suffix', () => {
+    const doc = `## Anti-AI-Slop Checklist | 反 AI-slop 自检\n\nbody\n`;
+    const section = extractSection(doc, 'Anti-AI-Slop Checklist');
+    expect(section).toBeDefined();
+    expect(section).toContain('body');
+  });
+
+  it('FIX4: heading regex does NOT match when suffix has no separator (anti-swallow)', () => {
+    const doc = `## Anti-AI-Slop Checklist for v2\n\nbody\n`;
+    const section = extractSection(doc, 'Anti-AI-Slop Checklist');
+    expect(section).toBeUndefined();
+  });
+
+  it('FIX4: V6 still reports Missing when title differs only by a trailing alphanumeric suffix', () => {
+    const design = `---
+tone: minimal
+---
+
+## Anti-AI-Slop Checklist for v2
+
+| 类别 | 覆盖情况 |
+|------|---------|
+| Color（色彩） | ✅ |
+| Typography（字体） | ✅ |
+| Layout（布局） | ✅ |
+| Components（组件） | ✅ |
+| Content（内容） | ✅ |
+| Motion（动效） | ✅ |
+| Color Usage（状态色滥用） | ✅ |
+| Rendering（闪烁与渲染） | ✅ |
+`;
+    const result = validator.validateUiDesignContent(design);
+    expect(result.issues.some(i => i.type === 'V6_ANTI_AI_SLOP_COVERAGE' && i.level === 'WARNING')).toBe(true);
+  });
+
+  it('FIX4: heading regex does NOT match a suffix glued without separator (e.g. "Strategy5")', () => {
+    const doc = `## Placeholder Strategy5\n\nbody\n`;
+    const section = extractSection(doc, 'Placeholder Strategy');
+    expect(section).toBeUndefined();
+  });
+
+  function extractSection(content: string, heading: string): string | undefined {
+    return (validator as unknown as { extractUiDesignSection: (c: string, h: string) => string | undefined })
+      .extractUiDesignSection(content, heading);
+  }
 });
