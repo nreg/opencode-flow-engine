@@ -321,4 +321,208 @@ Incomplete.
     const result = validator.validateUiDesignContent(legitBorderDesign);
     expect(result.issues.some(i => i.type === 'V9_BORDER_LEFT_DECORATION')).toBe(false);
   });
+
+  // --- Regression tests for validated ui-design matcher fixes (Fix 1/2/3) ---
+
+  // FIX 1: extractUiDesignSection must match headings at any level (## ... ######)
+  // and truncate on a heading of equal-or-higher level (fewer/more-equal '#' count).
+
+  it('FIX1: matches a section whose heading is a level-3 (###) heading', () => {
+    const doc = `---
+tone: minimal
+---
+
+## 1. Visual Direction
+
+Top.
+
+### 2. Component Architecture
+
+Some architecture detail.
+
+## 3. Next Section
+
+Unrelated.
+`;
+    const section = (validator as any).extractUiDesignSection(doc, 'Component Architecture');
+    expect(section).toBeDefined();
+    expect(section).toContain('Some architecture detail.');
+    expect(section).not.toContain('Unrelated.');
+  });
+
+  it('FIX1: level-3 section is truncated by the next level-2 heading but not by a level-4 sub-heading', () => {
+    const doc = `---
+tone: minimal
+---
+
+## 1. Visual Direction
+
+Top.
+
+### 2. Component Architecture
+
+Arch body.
+
+#### Button
+
+Button detail that must remain inside the section.
+
+## 3. Next Section
+
+Unrelated.
+`;
+    const section = (validator as any).extractUiDesignSection(doc, 'Component Architecture');
+    expect(section).toBeDefined();
+    expect(section).toContain('Arch body.');
+    expect(section).toContain('Button detail that must remain inside the section.');
+    expect(section).not.toContain('Unrelated.');
+  });
+
+  // FIX 2: V6 must count categories in three formats: numeric-row table (old),
+  // category-name-first-column table (new), and keyword fallback.
+
+  it('FIX2: V6 counts numeric-row table as 8 categories (old format)', () => {
+    const design = `---
+tone: minimal
+---
+
+## 8. Anti-AI-Slop Checklist
+
+| # | Category | Check | Result |
+|---|----------|-------|--------|
+| 1 | Typography | Check | PASS |
+| 2 | Colors | Check | PASS |
+| 3 | Shadows | Check | PASS |
+| 4 | Borders | Check | PASS |
+| 5 | Motion | Check | PASS |
+| 6 | Layout | Check | PASS |
+| 7 | Copy | Check | PASS |
+| 8 | Components | Check | PASS |
+`;
+    const result = validator.validateUiDesignContent(design);
+    expect(result.issues.some(i => i.type === 'V6_ANTI_AI_SLOP_COVERAGE')).toBe(false);
+  });
+
+  it('FIX2: V6 counts category-name-first-column table as 8 categories (new format)', () => {
+    const design = `---
+tone: minimal
+---
+
+## 7. Anti-AI-Slop Checklist
+
+| 类别 | 覆盖情况 |
+|------|---------|
+| Color（色彩） | ✅ covered |
+| Typography（字体） | ✅ covered |
+| Layout（布局） | ✅ covered |
+| Components（组件） | ✅ covered |
+| Content（内容） | ✅ covered |
+| Motion（动效） | ✅ covered |
+| Color Usage（状态色滥用） | ✅ covered |
+| Rendering（闪烁与渲染） | ✅ covered |
+`;
+    const result = validator.validateUiDesignContent(design);
+    expect(result.issues.some(i => i.type === 'V6_ANTI_AI_SLOP_COVERAGE')).toBe(false);
+  });
+
+  it('FIX2: V6 still reports WARNING when fewer than 6 categories in new format', () => {
+    const design = `---
+tone: minimal
+---
+
+## 7. Anti-AI-Slop Checklist
+
+| 类别 | 覆盖情况 |
+|------|---------|
+| Color（色彩） | ✅ covered |
+| Typography（字体） | ✅ covered |
+| Layout（布局） | ✅ covered |
+| Components（组件） | ✅ covered |
+`;
+    const result = validator.validateUiDesignContent(design);
+    expect(result.issues.some(i => i.type === 'V6_ANTI_AI_SLOP_COVERAGE' && i.level === 'WARNING')).toBe(true);
+  });
+
+  // FIX 3: V8 must find the 5 required component types when the Component Visual
+  // Rules section is nested (###) under Component Architecture (##) — matching the
+  // real opencode-provider-manager ui-design.md structure.
+
+  it('FIX3: V8 counts 5 component types when nested under Component Architecture', () => {
+    const design = `---
+tone: minimal
+---
+
+## 3. Component Architecture
+
+组件视觉规约（Component Visual Rules）。
+
+### Component Visual Rules
+
+#### Button
+
+btn.
+
+#### Input
+
+input.
+
+#### Card
+
+card.
+
+#### Navigation
+
+nav.
+
+#### Typography
+
+type.
+
+## 7. Anti-AI-Slop Checklist
+
+| 类别 | 覆盖情况 |
+|------|---------|
+| Color（色彩） | ✅ |
+| Typography（字体） | ✅ |
+| Layout（布局） | ✅ |
+| Components（组件） | ✅ |
+| Content（内容） | ✅ |
+| Motion（动效） | ✅ |
+| Color Usage（状态色滥用） | ✅ |
+| Rendering（闪烁与渲染） | ✅ |
+`;
+    const result = validator.validateUiDesignContent(design);
+    expect(result.issues.some(i => i.type === 'V8_COMPONENT_VISUAL_RULES')).toBe(false);
+  });
+
+  it('FIX3: V8 still passes for the legacy standalone (## ) Component Visual Rules section', () => {
+    const design = `---
+tone: minimal
+---
+
+## Component Visual Rules
+
+#### Button
+
+btn.
+
+#### Input
+
+input.
+
+#### Card
+
+card.
+
+#### Navigation
+
+nav.
+
+#### Typography
+
+type.
+`;
+    const result = validator.validateUiDesignContent(design);
+    expect(result.issues.some(i => i.type === 'V8_COMPONENT_VISUAL_RULES')).toBe(false);
+  });
 });

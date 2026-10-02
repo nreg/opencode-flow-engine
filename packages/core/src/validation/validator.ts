@@ -836,8 +836,7 @@ export class Validator {
     // V6: Anti-AI-slop coverage check — at least 6/8 categories
     const antiSlopSection = this.extractUiDesignSection(content, 'Anti-AI-Slop Checklist');
     if (antiSlopSection) {
-      const categoryRows = antiSlopSection.match(/^\|\s*\d+\s*\|/gm);
-      const categoryCount = categoryRows ? categoryRows.length : 0;
+      const categoryCount = this.countAntiSlopCategories(antiSlopSection);
       if (categoryCount < 6) {
         issues.push({
           level: 'WARNING',
@@ -864,26 +863,29 @@ export class Validator {
     }
 
     // V8: Component visual rules check — must define visual rules for at least 5 component types
-    const visualRulesSection = this.extractUiDesignSection(content, 'Component Visual Rules');
-    if (visualRulesSection) {
-      // Match exact component headings: "#### Button", "#### Input / Form Field", "#### Typography Hierarchy", etc.
-      // Use heading name + optional suffix (e.g. "Typography" matches "Typography Hierarchy")
-      const requiredComponents = ['Button', 'Input', 'Card', 'Navigation', 'Typography'];
-      const definedComponents = requiredComponents.filter(comp =>
-        new RegExp(`^####\\s+${comp}(\\s|/|$)` , 'im').test(visualRulesSection),
+    const requiredComponents = ['Button', 'Input', 'Card', 'Navigation', 'Typography'];
+    const countDefinedComponents = (section: string): string[] =>
+      requiredComponents.filter(comp =>
+        new RegExp(`^####\\s+${comp}(\\s|/|—|$)`, 'im').test(section),
       );
-      if (definedComponents.length < 5) {
-        issues.push({
-          level: 'WARNING',
-          type: 'V8_COMPONENT_VISUAL_RULES',
-          message: `Component Visual Rules should define all 5 required types. Found: ${definedComponents.length}/5 (${definedComponents.join(', ') || 'none'}). Missing: ${requiredComponents.filter(c => !definedComponents.includes(c)).join(', ')}.`,
-        });
-      }
+
+    const visualRulesSection = this.extractUiDesignSection(content, 'Component Visual Rules');
+    let definedComponents: string[];
+    if (visualRulesSection) {
+      definedComponents = countDefinedComponents(visualRulesSection);
     } else {
+      // Fallback: Component Visual Rules may be nested (###) under Component Architecture (##).
+      // The heading-level-aware extractor already includes the nested content when we read the
+      // parent section, so search for the 5 component #### headings there.
+      const componentArchSection = this.extractUiDesignSection(content, 'Component Architecture');
+      definedComponents = componentArchSection ? countDefinedComponents(componentArchSection) : [];
+    }
+
+    if (definedComponents.length < 5) {
       issues.push({
         level: 'WARNING',
         type: 'V8_COMPONENT_VISUAL_RULES',
-        message: 'Missing "Component Visual Rules" section. Define visual rules for at least 5 component types: Button, Input, Card, Navigation, Typography.',
+        message: `Component Visual Rules should define all 5 required types. Found: ${definedComponents.length}/5 (${definedComponents.join(', ') || 'none'}). Missing: ${requiredComponents.filter(c => !definedComponents.includes(c)).join(', ')}.`,
       });
     }
 
@@ -953,23 +955,75 @@ export class Validator {
   private extractUiDesignSection(content: string, heading: string): string | undefined {
     const normalized = normalizeLineEndings(content);
     const lines = normalized.split('\n');
-    // Match "## N. Title" or "## Title" (number prefix optional, dot optional)
+    // Match any heading level from ## to ###### (number prefix optional, dot optional).
+    // Case-insensitive. Escapes regex-special chars in the heading text.
+    const escapedHeading = heading
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/\s+/g, '\\s+');
     const headingRegex = new RegExp(
-      `^##\\s+\\d*\\.?\\s*${heading.replace(/\s+/g, '\\s+')}\\s*$`,
+      `^#{2,6}\\s+\\d*\\.?\\s*${escapedHeading}\\s*$`,
       'i',
     );
-    const idx = lines.findIndex((l) => headingRegex.test(l));
-    if (idx === -1) return undefined;
+    const startIdx = lines.findIndex((l) => headingRegex.test(l));
+    if (startIdx === -1) return undefined;
+
+    // Determine the heading level (number of leading '#') of the matched heading.
+    const levelMatch = lines[startIdx]!.match(/^#+/);
+    const startLevel = levelMatch ? levelMatch[0].length : 2;
 
     let endIdx = lines.length;
-    for (let i = idx + 1; i < lines.length; i++) {
-      if (/^##\s+/.test(lines[i]!)) {
-        endIdx = i;
-        break;
+    for (let i = startIdx + 1; i < lines.length; i++) {
+      const m = lines[i]!.match(/^(#+)\s/);
+      if (m) {
+        const level = m[1]!.length;
+        // Truncate on a heading of equal or higher level (fewer-or-equal '#' count).
+        // Sub-headings of a deeper level (more '#') stay inside the section.
+        if (level <= startLevel) {
+          endIdx = i;
+          break;
+        }
       }
     }
 
-    return lines.slice(idx + 1, endIdx).join('\n').trim();
+    return lines.slice(startIdx + 1, endIdx).join('\n').trim();
+  }
+
+  /**
+   * Count anti-AI-slop categories covered in a section.
+   * Supports three formats (first non-zero wins):
+   *   1. Numeric-first-column table rows: `| 1 | Typography | ... |`
+   *   2. Category-name-first-column table rows: `| Color（色彩） | ✅ ... |`
+   *      (excludes separator and header rows)
+   *   3. Keyword fallback: deduplicated presence of the 8 known category keywords.
+   */
+  private countAntiSlopCategories(section: string): number {
+    // Format 1: numeric-first-column table rows
+    const numericRows = section.match(/^\|\s*\d+\s*\|/gm);
+    const numericCount = numericRows ? numericRows.length : 0;
+    if (numericCount > 0) return numericCount;
+
+    // Format 2: category-name-first-column table rows (first cell starts with a letter,
+    // excluding separator rows like `|---|---|` and header rows without a letter-first cell)
+    const nameRows = section.match(/^\|\s*([A-Za-z][^|\n]*)\s*\|/gm);
+    let nameCount = 0;
+    if (nameRows) {
+      for (const row of nameRows) {
+        // separator rows such as |---|---| start with a dash, not a letter, so skipped
+        if (/^\|\s*:?-{2,}/.test(row)) continue;
+        nameCount++;
+      }
+    }
+    if (nameCount > 0) return nameCount;
+
+    // Format 3: keyword fallback (deduplicated — "Color" and "Color Usage" share one slot)
+    const keywords = [
+      'Color', 'Typography', 'Layout', 'Component', 'Content', 'Motion', 'Rendering',
+    ];
+    const found = new Set<string>();
+    for (const kw of keywords) {
+      if (new RegExp(kw, 'i').test(section)) found.add(kw);
+    }
+    return found.size;
   }
 }
 
