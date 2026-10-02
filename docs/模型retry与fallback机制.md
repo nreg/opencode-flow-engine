@@ -464,6 +464,71 @@ const PROVIDER_LIST_TIMEOUT_MS = 3_000;
 
 ---
 
+## 八点五、第 2.5 轮：审查修复与工程化改造（fix-loop + workDir，20261002）
+
+> 本轮包含两块工作：① 对 §八 W1-W7 变更的审查-修复循环（3 轮，报告
+> REVIEW-20261001-round2-r1/r2/r3.md）；② workDir 工程化改造（用户 3 项需求）。
+
+### 1. 审查-修复循环 3 轮总账
+
+| 轮次 | 级别 | 修复项 | commit |
+|------|------|--------|--------|
+| R1 | P1×1 | session-error 预降级模型误拉黑 → `sessionErrorModelForBlacklist` 护栏 | `7ca3452` |
+| R1 | P1×1 | 通知目录错位（changeDir 写死 `process.cwd()`）→ per-workDir 惰性 handler | `7ca3452` |
+| R2 | P2′×1 | sync 路径两处 registry 写入未带 attemptedModels → 补齐换模护栏 | `d556517` |
+| R2 | P2′×1 | 护栏缺少直接测试 → 10 边界 + 4 接线 + 2 sync 钉死测试（含变异验证） | `d556517` |
+| R3 | P2″×2 | 纯测试逃逸：changeDir 注入断言 + sync exhausted 分支钉死 | `72369b5` |
+
+#### session-error 事件拉黑护栏（features/session-error-fence.ts）
+
+`sessionErrorModelForBlacklist` 决定"换模后该不该把模型写进黑名单"：
+
+- **attemptedModels 优先 / fallbackAttempted 兜底**：优先从 registry 条目读
+  `attemptedModels`（本轮换模链），缺失时回退读 `fallbackAttempted`（历史兜底字段）；
+- **length<=1 才事件拉黑**：只有当该 session 尝试过的模型数 ≤1（尚未真正换过模）时，
+  session.error 事件才允许拉黑；已换过模的场景说明错误属于链尾兜底模型，
+  拉黑会误伤后续轮次中的健康模型；
+- **sync 接线补齐**：`runWithModelFallback` 中两处 registry 写入
+  （提交失败写回 / exhausted 兜底写回）补齐 `attemptedModels` 字段，
+  保证事件层护栏读得到完整换模链；
+- 护栏测试：10 边界 + 4 接线 + 2 sync 钉死用例，均含变异验证
+  （改坏代码 → 套件必须 fail）。
+
+#### per-workDir 惰性 handler（通知目录修复）
+
+- 三工厂改造为 `getXXXSessionErrorHandler(workDir)` 惰性工厂：
+  `sflow-plugin-factory.ts` / `iflow-plugin-factory.ts` / `combined-plugin-factory.ts`；
+- handler 内部对通知目录 / subagent-store 的解析一律基于传入的 `workDir`，
+  不再依赖 `process.cwd()`——多工作目录（monorepo / 多开 opencode）下通知不再错位落盘。
+
+#### 测试钉死纪律：变异验证范式
+
+本轮确立"变异验证"为测试补齐标准流程：**先手动改坏被测代码 → 跑套件确认必须 fail →
+还原代码 → 确认 pass**。只有经历红-绿循环的测试才算钉死，防止断言永真的伪覆盖。
+R2/R3 的护栏测试与逃逸测试均按此范式执行并在 commit body 记录变异证据。
+
+### 2. workDir 工程化改造（3 项，commit `8d96007`）
+
+1. **changeDir 更名 workDir**：语义分叉实证（编排代理的 changeDir 指"变更目录"，
+   插件基础设施的 changeDir 实际语义是"插件工作目录"）后，仅对插件工作目录语义
+   统一更名为 `workDir`，编排代理的 changeDir 语义保持不变；
+2. **normalizeToPosix 注入路径归一**：所有注入路径统一正斜杠，
+   8 个边界单测（反斜杠 / 混合分隔符 / 已是正斜杠 / 空 / 多重斜杠等）；
+3. **\<projectDir\> 标签**：sFlow / iFlow 编排代理 instructions 增加
+   `<projectDir>` 标签块，`call_flow_agent` 委派注入块并列输出实际项目目录值，
+   子代理不再猜测 cwd。
+
+### 3. 第 2.5 轮 commit 清单与测试基线演进
+
+| commit | 首行摘要 | 测试基线 |
+|--------|----------|----------|
+| `7ca3452` | fix(hooks): 修复 session.error 预降级的模型误拉黑与通知目录错位 | 2103 → 2109 |
+| `d556517` | fix(hooks): sync 路径接入换模护栏并为护栏补齐直接测试 | 2109 → 2125 |
+| `72369b5` | test(hooks): 钉死 changeDir 注入与 sync exhausted 分支的护栏写入 | 2125 → 2129 |
+| `8d96007` | refactor(agent): changeDir 更名 workDir 并统一注入路径正斜杠，编排代理增加 projectDir 标签 | 2129 → **2140 pass / 0 fail** |
+
+---
+
 ## 九、遗留项（已闭环记录）
 
 > 以下问题由 R4 审查报告（REVIEW-20260930-1413-r4.md）摘录，**已于第 2 轮（§八）全部修复闭环**。
