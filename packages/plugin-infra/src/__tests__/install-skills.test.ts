@@ -49,16 +49,16 @@ describe('install-skills CLI', () => {
   });
 
   describe('技能目录结构验证', () => {
-    it('skills/ 目录应包含 18 个轨道 2 技能', async () => {
+    it('skills/ 目录应包含 19 个轨道 2 技能', async () => {
       const skillsDir = join(process.cwd(), 'skills');
       const entries = await readdir(skillsDir, { withFileTypes: true });
       const skillDirs = entries
         .filter(entry => entry.isDirectory())
         .map(entry => entry.name);
-      
+
       // 验证数量
-      expect(skillDirs.length).toBe(18);
-      
+      expect(skillDirs.length).toBe(19);
+
       // 验证关键技能存在
       const expectedSkills = [
         'taste-skill',
@@ -79,6 +79,7 @@ describe('install-skills CLI', () => {
         'gsap-scrolltrigger',
         'gsap-timeline',
         'gsap-utils',
+        'web-interface-guidelines',
       ];
       
       for (const skill of expectedSkills) {
@@ -124,15 +125,15 @@ describe('install-skills CLI', () => {
       }
     });
 
-    it('workflows/sflow/skills/ 应仅包含 11 个轨道 1 技能', async () => {
+    it('workflows/sflow/skills/ 应仅包含 12 个轨道 1 技能', async () => {
       const track1Dir = join(process.cwd(), 'workflows', 'sflow', 'skills');
       const entries = await readdir(track1Dir, { withFileTypes: true });
       const skillDirs = entries
         .filter(entry => entry.isDirectory())
         .map(entry => entry.name);
-      
+
       // 验证数量
-      expect(skillDirs.length).toBe(11);
+      expect(skillDirs.length).toBe(12);
       
       // 验证关键技能存在
       const expectedSkills = [
@@ -147,6 +148,7 @@ describe('install-skills CLI', () => {
         'spec-merger',
         'ui-director',
         'ui-implementer',
+        'ui-reviewer',
       ];
       
       for (const skill of expectedSkills) {
@@ -234,7 +236,7 @@ describe('install-skills CLI', () => {
       // 验证输出包含关键信息
       expect(output).toContain('安装分发源技能到全局目录');
       expect(output).toContain('源目录:');
-      expect(output).toContain('找到 18 个技能目录');
+      expect(output).toContain('找到 19 个技能目录');
       expect(output).toContain('安装完成:');
 
       // 验证输出包含关键技能名称

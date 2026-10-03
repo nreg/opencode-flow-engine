@@ -238,7 +238,7 @@ describe('T3.3: 横向命令豁免逻辑', () => {
     expect(output.data?.skill).toBe('test-engineer');
   });
 
-  it('全面review 命令在 closing 下仍可执行', async () => {
+  it('/flow-review 命令在 closing 下仍可执行', async () => {
     // Given: state.json 中 state='closing'
     await writeJsonFile(join(testDir, '.flow-engine', 'sflow', 'state.json'), {
       state: 'closing',
@@ -247,9 +247,9 @@ describe('T3.3: 横向命令豁免逻辑', () => {
       updatedAt: new Date().toISOString(),
     });
 
-    // When: 用户输入横向命令（全面review）
+    // When: 用户输入横向命令（/flow-review）
     const result = await routerTool.execute(
-      { changeDir: testDir, intent: '全面review' },
+      { changeDir: testDir, intent: '/flow-review' },
       { directory: testDir }
     );
 

@@ -657,7 +657,24 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     expect(data.data.stateGuardBlocked).toBe(false);
   });
 
-  it('should detect "全面review" as horizontal command', async () => {
+  it('should detect "/flow-review" as horizontal command → review-engineer (action: review)', async () => {
+    const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
+    const tool = createIFlowRouterTool();
+    const result = await tool.execute(
+      { changeDir: dir, intent: '/flow-review' },
+      { directory: dir } as any,
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    expect(data.data.isHorizontalCommand).toBe(true);
+    expect(data.data.skill).toBe('review-engineer');
+    expect(data.data.action).toBe('review');
+    expect(data.data.state).toBeNull();
+    expect(data.data.stateGuardBlocked).toBe(false);
+  });
+
+  it('should NOT match collapsed natural-language alias "全面review" (no horizontal match)', async () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
@@ -667,10 +684,8 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
 
     const data = JSON.parse(result.output);
     expect(data.success).toBe(true);
-    expect(data.data.isHorizontalCommand).toBe(true);
-    expect(data.data.skill).toBe('review-engineer');
-    expect(data.data.state).toBeNull();
-    expect(data.data.stateGuardBlocked).toBe(false);
+    // matchHorizontalCommand returns null for the removed alias — falls through to normal routing
+    expect(data.data.isHorizontalCommand).toBeUndefined();
   });
 
   it('should detect "comprehensive test" as horizontal command', async () => {
@@ -702,11 +717,11 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     expect(data.data.action).toBe('partial-test');
   });
 
-  it('should detect "只看代码质量" as partial review horizontal command', async () => {
+  it('should detect "/flow-review scope=代码质量" as single-entry review (scope passed via params, action stays review)', async () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: '只看代码质量' },
+      { changeDir: dir, intent: '/flow-review scope=代码质量' },
       { directory: dir } as any,
     );
 
@@ -714,7 +729,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     expect(data.success).toBe(true);
     expect(data.data.isHorizontalCommand).toBe(true);
     expect(data.data.skill).toBe('review-engineer');
-    expect(data.data.action).toBe('partial-review');
+    expect(data.data.action).toBe('review');
   });
 
   it('should bypass state guard even when in a non-discussing state', async () => {
