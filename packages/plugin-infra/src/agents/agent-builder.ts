@@ -28,6 +28,7 @@ import {
   createSpecMergerAgent,
   createUiDirectorAgent,
   createUiImplementerAgent,
+  createUiReviewerAgent,
 } from '../../../../workflows/sflow/index.js';
 import {
   createIFlowAgent,
@@ -71,6 +72,7 @@ const AGENT_MODES: Record<BuiltinAgentName, AgentMode> = {
   'spec-merger': 'subagent',
   'ui-director': 'subagent',
   'ui-implementer': 'subagent',
+  'ui-reviewer': 'subagent',
   // IFlow
   iFlow: 'primary',
   'iflow-discuss-planner': 'subagent',
@@ -126,6 +128,7 @@ export const AGENT_PROFILES: AGENT_PROFILES_TYPE = {
   
   // review tier - review tasks
   'code-reviewer': 'review',
+  'ui-reviewer': 'review',
   'test-engineer': 'review',
   'review-engineer': 'review',
   'flow-health': 'review',
@@ -148,6 +151,7 @@ const AGENT_REGISTRY: Record<BuiltinAgentName, AgentFactory> = {
   'spec-merger': createSpecMergerAgent,
   'ui-director': createUiDirectorAgent,
   'ui-implementer': createUiImplementerAgent,
+  'ui-reviewer': createUiReviewerAgent,
   // IFlow
   iFlow: createIFlowAgent,
   'iflow-discuss-planner': createIFlowDiscussPlannerAgent,

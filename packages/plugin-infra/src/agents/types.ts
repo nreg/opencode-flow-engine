@@ -63,6 +63,7 @@ export type BuiltinAgentName =
   | 'spec-merger'        // Sync (subagent)
   | 'ui-director'        // UI aesthetic decision-making (subagent)
   | 'ui-implementer'     // Frontend UI implementation (subagent)
+  | 'ui-reviewer'        // Design-consistency review, report-only (subagent)
   // IFlow workflow
   | 'iFlow'              // Main orchestrator (primary)
   | 'iflow-discuss-planner'   // Discussion + planning (subagent)

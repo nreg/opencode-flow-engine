@@ -14,6 +14,7 @@ export { createReleaseArchivistAgent } from './agents/release-archivist.js';
 export { createSpecMergerAgent } from './agents/spec-merger.js';
 export { createUiDirectorAgent } from './agents/ui-director.js';
 export { createUiImplementerAgent } from './agents/ui-implementer.js';
+export { createUiReviewerAgent } from './agents/ui-reviewer.js';
 
 /** SFlow agent names for registration */
 export const SFLOW_AGENT_NAMES = [
@@ -28,6 +29,7 @@ export const SFLOW_AGENT_NAMES = [
   'spec-merger',
   'ui-director',
   'ui-implementer',
+  'ui-reviewer',
 ] as const;
 
 /** SFlow workflow directory name */

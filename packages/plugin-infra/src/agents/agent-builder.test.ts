@@ -149,7 +149,7 @@ describe('Agent Builder', () => {
     it('should create all agents', async () => {
       const agents = await createAllAgents();
       expect(agents).toBeDefined();
-      expect(Object.keys(agents)).toHaveLength(24);
+      expect(Object.keys(agents)).toHaveLength(25);
     });
 
     it('should have all required agents', async () => {
@@ -165,6 +165,7 @@ describe('Agent Builder', () => {
       expect(agents['spec-merger']).toBeDefined();
       expect(agents['ui-director']).toBeDefined();
       expect(agents['ui-implementer']).toBeDefined();
+      expect(agents['ui-reviewer']).toBeDefined();
       // IFlow agents
       expect(agents.iFlow).toBeDefined();
       expect(agents['iflow-discuss-planner']).toBeDefined();
@@ -225,6 +226,7 @@ describe('Agent Builder', () => {
       expect(names).toContain('spec-merger');
       expect(names).toContain('ui-director');
       expect(names).toContain('ui-implementer');
+      expect(names).toContain('ui-reviewer');
       // IFlow agents
       expect(names).toContain('iFlow');
       expect(names).toContain('iflow-discuss-planner');
@@ -241,7 +243,7 @@ describe('Agent Builder', () => {
       expect(names).toContain('flow-evolve');
       expect(names).toContain('flow-health');
       expect(names).toContain('flow-restyle');
-      expect(names).toHaveLength(24);
+      expect(names).toHaveLength(25);
     });
   });
 
@@ -261,6 +263,7 @@ describe('Agent Builder', () => {
       expect(getAgentMode('spec-merger')).toBe('subagent');
       expect(getAgentMode('ui-director')).toBe('subagent');
       expect(getAgentMode('ui-implementer')).toBe('subagent');
+      expect(getAgentMode('ui-reviewer')).toBe('subagent');
       expect(getAgentMode('test-engineer')).toBe('subagent');
       expect(getAgentMode('review-engineer')).toBe('subagent');
     });
@@ -278,7 +281,7 @@ describe('Agent Builder', () => {
   describe('getSubagentAgents', () => {
     it('should return all subagents', () => {
       const subagents = getSubagentAgents();
-      expect(subagents).toHaveLength(22);
+      expect(subagents).toHaveLength(23);
       expect(subagents).toContain('need-explorer');
       expect(subagents).toContain('spec-writer');
       expect(subagents).toContain('contract-builder');
@@ -289,6 +292,7 @@ describe('Agent Builder', () => {
       expect(subagents).toContain('spec-merger');
       expect(subagents).toContain('ui-director');
       expect(subagents).toContain('ui-implementer');
+      expect(subagents).toContain('ui-reviewer');
       // IFlow subagents
       expect(subagents).toContain('iflow-discuss-planner');
       expect(subagents).toContain('iflow-plan-executor');

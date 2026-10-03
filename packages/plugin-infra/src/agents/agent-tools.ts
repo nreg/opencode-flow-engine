@@ -274,6 +274,18 @@ export const AGENT_TOOLS: Record<string, AgentTools> = {
     lsp_find_references: true,
   },
 
+  /** UI Reviewer - design-consistency review, write reports only (no edit) */
+  'ui-reviewer': {
+    ...COMMON_TOOLS,
+    write: true,
+    edit: false,
+    bash: true,
+    skill: false,
+    lsp_diagnostics: true,
+    lsp_goto_definition: true,
+    lsp_find_references: true,
+  },
+
   // ── Horizontal Commands (cross-workflow, standalone) ──
 
   /** Flow Intel - 入场扫描，生成 CONTEXT.md */

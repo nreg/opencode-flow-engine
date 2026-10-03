@@ -90,6 +90,7 @@ export const AGENT_COLORS: Record<string, string> = {
   iFlow: '#FFB6C1',
   'test-engineer': '#7CB342',
   'review-engineer': '#42A5F5',
+  'ui-reviewer': '#26C6DA',
   'flow-intel': '#AB47BC',
   'flow-architect': '#FF7043',
   'flow-evolve': '#26A69A',
