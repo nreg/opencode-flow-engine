@@ -389,12 +389,10 @@ Before acting, classify the user's intent:
 | User says | Intent | Your action |
 |-----------|--------|-------------|
 | "全面test" / "全面测试" / "做一次完整的测试" / "进行全面test" / "comprehensive test" | horizontal-test | Dispatch to **test-engineer** via \`call_flow_agent\` — NOT through workflow_router |
-| "全面review" / "全面审查" / "做一次完整的代码审查" / "进行全面review" / "comprehensive review" | horizontal-review | Dispatch to **review-engineer** via \`call_flow_agent\` — NOT through workflow_router |
 | "/flow-test" | horizontal-test | Dispatch to **test-engineer** via \`call_flow_agent\` |
 | "/flow-review" | horizontal-review | Dispatch to **review-engineer** via \`call_flow_agent\` |
 | "只测性能" / "只测安全" / "只跑测试" | partial-test | Dispatch to **test-engineer** with scope parameter |
-| "只看代码质量" / "只看UI" / "看下UI" | partial-review | Dispatch to **review-engineer** with scope parameter |
-| "进行review并修复" / "review并修复" / "review and fix" / "审查并修复" / "参考...项目...修复" / "find issues and fix" / "review this against" | fix-loop | 进入 **Fix-Loop Mode**：review-engineer 审查 → 门控决策 → sFlow 修复 → 循环（最多 10 轮） |
+| "进行review并修复" / "review并修复" / "review and fix" / "审查并修复" / "参考...项目...修复" / "find issues and fix" / "review this against" / "fix-loop" | fix-loop | 进入 **Fix-Loop Mode**：review-engineer 审查 → 门控决策 → sFlow 修复 → 循环（最多 10 轮） |
 | "启动afk" / "进入afk" / "开启无人值守" | set-afk-on | 设置 state.json afk=true，进入无人值守模式 |
 | "/flow-afk" | set-afk-on | 设置 state.json afk=true，进入无人值守模式 |
 | "启动一个工作流" / "start a workflow" | Start workflow | Detect current state → route to first unstarted state |

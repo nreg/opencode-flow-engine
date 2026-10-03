@@ -84,55 +84,28 @@ describe('matchHorizontalCommand — Partial Test', () => {
   }
 });
 
-describe('matchHorizontalCommand — Full Review', () => {
-  const testCases = [
-    { input: '全面review', expected: 'review-engineer' },
-    { input: '全面审查', expected: 'review-engineer' },
-    { input: '做一次完整的审查', expected: 'review-engineer' },
-    { input: '完整审查', expected: 'review-engineer' },
-    { input: '彻底审查', expected: 'review-engineer' },
-    { input: '审查所有', expected: 'review-engineer' },
-    { input: '代码审计', expected: 'review-engineer' },
-    { input: 'code audit', expected: 'review-engineer' },
-    { input: 'comprehensive review', expected: 'review-engineer' },
-    { input: '3轮审查', expected: 'review-engineer' },
-    // English patterns
-    { input: 'full review', expected: 'review-engineer' },
-    { input: '全面代码审查', expected: 'review-engineer' },
-  ];
+describe('matchHorizontalCommand — Review (single /flow-review)', () => {
+  it('should match "/flow-review" → review-engineer (action: review)', () => {
+    const result = matchHorizontalCommand('/flow-review');
+    expect(result).not.toBeNull();
+    expect(result!.agent).toBe('review-engineer');
+    expect(result!.action).toBe('review');
+  });
 
-  for (const { input, expected } of testCases) {
-    it(`should match "${input}" → ${expected}`, () => {
-      const result = matchHorizontalCommand(input);
-      expect(result).not.toBeNull();
-      expect(result!.agent).toBe(expected);
-      expect(result!.action).toBe('full-review');
-    });
-  }
-});
+  it('should match "/flow-review scope=代码质量" → review-engineer (action: review)', () => {
+    const result = matchHorizontalCommand('/flow-review scope=代码质量');
+    expect(result).not.toBeNull();
+    expect(result!.agent).toBe('review-engineer');
+    expect(result!.action).toBe('review');
+  });
 
-describe('matchHorizontalCommand — Partial Review', () => {
-  const testCases = [
-    { input: '只看代码质量', expected: 'review-engineer' },
-    { input: '只看代码', expected: 'review-engineer' },
-    { input: '只看UI', expected: 'review-engineer' },
-    { input: '只看视觉', expected: 'review-engineer' },
-    { input: '只看合规', expected: 'review-engineer' },
-    { input: '只看R1', expected: 'review-engineer' },
-    { input: '只看R2', expected: 'review-engineer' },
-    { input: '只看R3', expected: 'review-engineer' },
-    { input: '只看R4', expected: 'review-engineer' },
-    { input: 'partial review', expected: 'review-engineer' },
-  ];
-
-  for (const { input, expected } of testCases) {
-    it(`should match "${input}" → ${expected} (partial)`, () => {
-      const result = matchHorizontalCommand(input);
-      expect(result).not.toBeNull();
-      expect(result!.agent).toBe(expected);
-      expect(result!.action).toBe('partial-review');
-    });
-  }
+  it('should NOT match natural-language aliases (collapsed) — "全面review" returns null', () => {
+    expect(matchHorizontalCommand('全面review')).toBeNull();
+    expect(matchHorizontalCommand('全面审查')).toBeNull();
+    expect(matchHorizontalCommand('comprehensive review')).toBeNull();
+    expect(matchHorizontalCommand('full review')).toBeNull();
+    expect(matchHorizontalCommand('代码审计')).toBeNull();
+  });
 });
 
 describe('matchHorizontalCommand — Edge Cases', () => {
@@ -159,9 +132,10 @@ describe('matchHorizontalCommand — Edge Cases', () => {
     expect(result1).not.toBeNull();
     expect(result1!.agent).toBe('test-engineer');
 
-    const result2 = matchHorizontalCommand('Full Review');
+    const result2 = matchHorizontalCommand('/FLOW-REVIEW');
     expect(result2).not.toBeNull();
     expect(result2!.agent).toBe('review-engineer');
+    expect(result2!.action).toBe('review');
   });
 
   it('should prefer full-test over partial-test when both match', () => {
@@ -171,10 +145,11 @@ describe('matchHorizontalCommand — Edge Cases', () => {
     expect(result!.action).toBe('full-test');
   });
 
-  it('should prefer full-review over partial-review when both match', () => {
-    const result = matchHorizontalCommand('全面审查');
+  it('should route /flow-review to review (not fix-loop)', () => {
+    const result = matchHorizontalCommand('/flow-review');
     expect(result).not.toBeNull();
-    expect(result!.action).toBe('full-review');
+    expect(result!.agent).toBe('review-engineer');
+    expect(result!.action).toBe('review');
   });
 
   it('should match chinese text with surrounding context', () => {
@@ -183,7 +158,7 @@ describe('matchHorizontalCommand — Edge Cases', () => {
     expect(testResult).not.toBeNull();
     expect(testResult!.agent).toBe('test-engineer');
 
-    const reviewResult = matchHorizontalCommand('请进行一次全面审查');
+    const reviewResult = matchHorizontalCommand('请进行 /flow-review 代码质量');
     expect(reviewResult).not.toBeNull();
     expect(reviewResult!.agent).toBe('review-engineer');
   });
@@ -357,6 +332,8 @@ describe('matchHorizontalCommand — Fix-Loop Mode', () => {
     { input: 'review this against', expected: 'sFlow', action: 'fix-loop' },
     { input: 'find issues and fix', expected: 'sFlow', action: 'fix-loop' },
     { input: '对比xxx项目进行修复', expected: 'sFlow', action: 'fix-loop' },
+    { input: '使用 fix-loop', expected: 'sFlow', action: 'fix-loop' },
+    { input: '全面审查并修复', expected: 'sFlow', action: 'fix-loop' },
   ];
 
   for (const { input, expected, action } of testCases) {
@@ -368,11 +345,9 @@ describe('matchHorizontalCommand — Fix-Loop Mode', () => {
     });
   }
 
-  it('should not interfere with existing commands — "全面审查" still matches review-engineer', () => {
+  it('should not interfere with existing commands — "全面审查" no longer matches (collapsed to /flow-review)', () => {
     const result = matchHorizontalCommand('全面审查');
-    expect(result).not.toBeNull();
-    expect(result!.agent).toBe('review-engineer');
-    expect(result!.action).toBe('full-review');
+    expect(result).toBeNull();
   });
 
   it('should not interfere with existing commands — "帮我检查项目健康" still matches flow-health', () => {
@@ -395,7 +370,7 @@ describe('HORIZONTAL_COMMANDS — All agents uniqueness', () => {
     expect(agents.has('sFlow')).toBe(true);
   });
 
-  it('should have at least 9 commands (2 test + 2 review + 4 new + 1 afk)', () => {
-    expect(HORIZONTAL_COMMANDS.length).toBeGreaterThanOrEqual(9);
+  it('should have at least 8 commands (2 test + 1 review + 4 new + 1 afk)', () => {
+    expect(HORIZONTAL_COMMANDS.length).toBeGreaterThanOrEqual(8);
   });
 });

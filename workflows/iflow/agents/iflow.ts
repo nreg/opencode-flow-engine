@@ -149,11 +149,10 @@ They bypass the normal workflow cycle and dispatch directly to the shared agent.
 | User says | Intent | Your action |
 |-----------|--------|-------------|
 | "全面test" / "全面测试" / "做一次完整的测试" / "comprehensive test" | horizontal-test | Dispatch to **test-engineer** via \`call_flow_agent\` |
-| "全面review" / "全面审查" / "做一次完整的代码审查" / "comprehensive review" | horizontal-review | Dispatch to **review-engineer** via \`call_flow_agent\` |
 | "/flow-test" | horizontal-test | Dispatch to **test-engineer** via \`call_flow_agent\` |
 | "/flow-review" | horizontal-review | Dispatch to **review-engineer** via \`call_flow_agent\` |
 | "只测性能" / "只测安全" / "只跑测试" | partial-test | Dispatch to **test-engineer** with scope parameter |
-| "只看代码质量" / "只看UI" / "看下UI" | partial-review | Dispatch to **review-engineer** with scope parameter |
+| "进行review并修复" / "review并修复" / "review and fix" / "审查并修复" / "参考...项目...修复" / "find issues and fix" / "review this against" / "fix-loop" | fix-loop | 进入 **Fix-Loop Mode**：review-engineer 审查 → 门控决策 → sFlow 修复 → 循环（最多 10 轮） |
 
 **IFlow** → \`call_flow_agent\` 即可调用这两个共享 agent。
 

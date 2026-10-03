@@ -61,7 +61,7 @@ describe('registerFlowCommands', () => {
     registerFlowCommands(config as any);
 
     expect(config.command!['flow-test'].description).toContain('全面测试');
-    expect(config.command!['flow-review'].description).toContain('全面审查');
+    expect(config.command!['flow-review'].description).toContain('审查');
     expect(config.command!['flow-intel'].description).toContain('入场扫描');
     expect(config.command!['flow-architect'].description).toContain('架构文档');
     expect(config.command!['flow-evolve'].description).toContain('架构增量同步');

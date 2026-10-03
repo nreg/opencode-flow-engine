@@ -41,25 +41,18 @@ export const HORIZONTAL_COMMANDS: HorizontalCommandEntry[] = [
     tokens: ['只测', '只跑R', '部分测试', 'partial test'],
   },
 
-  // --- review-engineer (全面审查) ---
+  // --- review-engineer (审查) ---
   {
-    pattern: /全面.*review|全面.*审查|full.*review|完整.*审查|彻底.*审查|全线.*审|审查所有|代码审计|code.*audit|comprehensive.*review|3轮.*审查/i,
+    pattern: /\/flow-review/i,
     agent: 'review-engineer',
-    action: 'full-review',
-    description: '全面审查（3 轮审查）',
-    tokens: ['全面review', '全面审查', 'full review', '完整审查', '彻底审查', '代码审计', 'code audit', 'comprehensive review', '3轮审查'],
-  },
-  {
-    pattern: /只看代码质量|只看代码|只看UI|只看视觉|只看合规|只看R1|只看R2|只看R3|只看R4|只看.*质量|只看.*合规|partial.*review/i,
-    agent: 'review-engineer',
-    action: 'partial-review',
-    description: '部分审查（指定轮次）',
-    tokens: ['只看', '只看R', '部分审查', 'partial review'],
+    action: 'review',
+    description: '审查（/flow-review 触发，单轮只读，范围经参数传递）',
+    tokens: ['/flow-review'],
   },
 
   // --- fix-loop (审查并修复循环) ---
   {
-    pattern: /.*review.*修复|.*审查.*修复|review.*并.*修复|审查.*并.*修复|review.*and.*fix|review this against|find issues and fix|参考.*项目.*修复|对比.*项目.*修复|review.*fix.*loop/i,
+    pattern: /fix.?loop|.*review.*修复|.*审查.*修复|review.*并.*修复|审查.*并.*修复|review.*and.*fix|review this against|find issues and fix|参考.*项目.*修复|对比.*项目.*修复|review.*fix.*loop/i,
     agent: 'sFlow',
     action: 'fix-loop',
     description: 'Fix-Loop Mode：review-engineer 审查 → 门控决策 → sFlow 修复 → 循环（最多 10 轮）',
