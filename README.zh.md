@@ -67,7 +67,7 @@ npm install -g opencode-flow-engine
 
 ```
 /flow-test           → 全面测试（5 轮测试金字塔）
-/flow-review         → 全面审查（3 轮审查）
+/flow-review         → 独立审查（5 轮：Spec 合规/代码质量+测试质量/工程正确性/技术债/跨模型 Spot-Check）
 /flow-afk            → 开启 AFK 无人值守模式
 /flow-intel          → 入场扫描，生成 CONTEXT.md
 /flow-architect      → 创建或重构架构文档 ARCHITECTURE.md
@@ -195,12 +195,19 @@ flow-engine --help
 | 智能体 | 模式 | 说明 |
 |--------|------|------|
 | **test-engineer** | 子智能体 | **独立全面测试**：5 轮测试金字塔（功能、性能、安全、兼容、可观测性）。通过 `/flow-test` 或"全面test"/"全面测试"触发，独立于任何工作流状态。 |
-| **review-engineer** | 子智能体 | **独立全面审查**：3 轮审查（Spec 合规、代码质量、UI 视觉）。通过 `/flow-review` 或"全面review"/"全面审查"触发，独立于任何工作流状态。 |
+| **review-engineer** | 子智能体 | **独立全面审查**：5 轮审查（R1 Spec 合规、R2 代码质量+测试质量、R3 工程正确性 Web Interface Guidelines、R4 技术债、R5 跨模型 Spot-Check）。通过 `/flow-review` 触发；fix-loop 的 REVIEWING 阶段也消费它。独立于任何工作流状态。 |
 | **flow-intel** | 子智能体 | **入场扫描**：扫描代码库生成项目级 CONTEXT.md（架构、约定、抽象层）。通过 `/flow-intel` 触发。 |
 | **flow-architect** | 子智能体 | **架构文档**：创建或重构 ARCHITECTURE.md（模块图、依赖规则、ADR）。通过 `/flow-architect` 触发。 |
 | **flow-evolve** | 子智能体 | **架构增量同步**：从归档 change 中同步架构沉淀到 CONTEXT.md。通过 `/flow-evolve` 触发。 |
 | **flow-health** | 子智能体 | **健康巡检**：6+6 维风险评估、冗余扫描、健康报告生成。通过 `/flow-health` 触发。 |
 | **flow-restyle** | 子智能体 | **一键换调性**：保留功能不变，只换视觉风格。仅前端项目。通过 `/flow-restyle` 触发。 |
+| **ui-reviewer** | 子智能体（sFlow 专属） | **设计一致性审查**：对照 `ui-design.md` 做 token 一致性 + 8 维度 anti-slop + 可访问性。仅报告不修改。在 code-reviewer 审查通过后，且 diff 含 UI 文件（.css/.tsx/.vue/.html/.svelte）且 `ui-design.md` 存在时派发。 |
+
+### Fix-Loop 模式
+
+触发词："审查并修复" / "fix-loop"（以及类似的"审查并修复"类请求）。
+
+触发后由 sFlow 编排闭环的审查-修复循环：**review-engineer** 审查 → 门控决策（继续/停止）→ sFlow 修复 → 循环，最多 **10 轮**。每轮均为全新、无状态的审查，避免受之前修复的影响。
 
 ### 路由原则
 

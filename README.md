@@ -180,12 +180,19 @@ On context restoration, sFlow detects artifact/state mismatches and auto-repairs
 | Agent | Mode | Description |
 |-------|------|-------------|
 | **test-engineer** | Subagent | **Independent comprehensive testing**: 5-tier test pyramid (functional, performance, security, compatibility, observability). Triggered by `/flow-test` or "全面test" / "comprehensive test". Not bound to any workflow state. |
-| **review-engineer** | Subagent | **Independent comprehensive review**: 3-round review (spec compliance, code quality, UI visual). Triggered by `/flow-review` or "全面review" / "comprehensive review". Not bound to any workflow state. |
+| **review-engineer** | Subagent | **Independent comprehensive review**: 5 rounds (R1 spec compliance, R2 code quality + test quality, R3 engineering correctness / Web Interface Guidelines, R4 tech debt, R5 cross-model Spot-Check). Triggered by `/flow-review`; also consumed by the fix-loop's REVIEWING phase. Not bound to any workflow state. |
 | **flow-intel** | Subagent | **Entry scan**: Scans codebase to generate project-level CONTEXT.md (architecture, conventions, abstractions). Triggered by `/flow-intel`. |
 | **flow-architect** | Subagent | **Architecture documentation**: Creates or refactors ARCHITECTURE.md (module map, dependency rules, ADR). Triggered by `/flow-architect`. |
 | **flow-evolve** | Subagent | **Architecture evolution**: Syncs architecture decisions from archived changes into CONTEXT.md. Triggered by `/flow-evolve`. |
 | **flow-health** | Subagent | **Codebase health check**: 6+6 dimension risk assessment, redundancy scan, health report generation. Triggered by `/flow-health`. |
 | **flow-restyle** | Subagent | **One-click visual restyle**: Preserves functionality, changes only visual style. Frontend projects only. Triggered by `/flow-restyle`. |
+| **ui-reviewer** | Subagent (sFlow-only) | **Design-consistency review**: token consistency against `ui-design.md` + 8-dimension anti-slop + accessibility. Report-only. Dispatched after code-reviewer passes when the diff contains UI files (.css/.tsx/.vue/.html/.svelte) and `ui-design.md` exists. |
+
+### Fix-Loop Mode
+
+Trigger phrases: "审查并修复" / "fix-loop" (and similar "review and fix" requests).
+
+When triggered, sFlow orchestrates a closed review-fix cycle: **review-engineer** reviews → gate decision (continue/stop) → sFlow applies fixes → repeat, for a maximum of **10 rounds**. Each round is a fresh, stateless review to avoid bias from prior fixes.
 
 ### Routing Principles
 

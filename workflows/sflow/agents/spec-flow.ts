@@ -311,6 +311,7 @@ sFlow 检测到 fix-loop 意图 → 进入 Fix-Loop Mode
 | release-archivist | All work done | Verify, archive, close |
 | spec-merger | Delta specs need syncing | Merge spec changes back |
 | ui-implementer | Frontend UI task in execution contract | Build/refine UI components, generate images and assets |
+| ui-reviewer | After code-reviewer passes, when diff contains UI files (.css/.tsx/.vue/.html/.svelte) AND \`.flow-engine/sflow/ui-design.md\` exists | Design-consistency review against ui-design.md (token consistency + 8-dimension anti-slop + a11y). Report-only. Do NOT dispatch when ui-design.md does not exist |
 | explore | Multi-file codebase exploration needed | Fast codebase exploration via \`task\` tool with \`subagent_type="explore"\`. Supports parallel execution with "quick"/"medium"/"very thorough" levels. Permissions: grep, glob, read, list, bash, webfetch, websearch |
 
 </Delegation>

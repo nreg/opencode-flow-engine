@@ -212,8 +212,8 @@ export const SHARED_AGENT_NAMES = [
 
 | 用户说 | 意图 | 动作 |
 |--------|------|------|
-| "进行全面review" / "全面审查" | full-review | dispatch → review-engineer |
-| "进行全面test" / "全面测试" | full-test | dispatch → test-engineer |
+| "/flow-review" | full-review | dispatch → review-engineer |
+| "/flow-test" | full-test | dispatch → test-engineer |
 | "只测性能" / "安全扫描" | partial-test | dispatch → test-engineer（指定轮次） |
 | "只看代码质量" | partial-review | dispatch → review-engineer（指定轮次） |
 
@@ -222,7 +222,7 @@ export const SHARED_AGENT_NAMES = [
 直接从 flow-kit 的 `prompts/5-test.md` 和 `prompts/6-review.md` 移植核心逻辑，转化为子代理的 system prompt：
 
 - `test-engineer` ← 移植 5-test.md 的 5 轮金字塔 + `reference/test-pyramid.md`
-- `review-engineer` ← 移植 6-review.md 的 3 轮审查 + `reference/ui-anti-patterns.md`
+- `review-engineer` ← 移植 6-review.md 的审查轮次，UI 视觉审查参考 `workflows/sflow/skills/ui-reviewer/references/ui-visual-review.md` 与 `workflows/sflow/skills/ui-implementer/references/anti-patterns.md`
 
 ---
 
@@ -377,8 +377,8 @@ const IFLOW_HORIZONTAL_COMMANDS: Array<{
 
 | 用户说 | 意图 | 动作 |
 |--------|------|------|
-| "进行全面test" / "帮我做一次完整的测试" / "全面测试" | horizontal-test | dispatch → test-engineer |
-| "进行全面review" / "帮我审查代码" / "全面审查" | horizontal-review | dispatch → review-engineer |
+| "/flow-test" | horizontal-test | dispatch → test-engineer |
+| "/flow-review" | horizontal-review | dispatch → review-engineer |
 | "只测性能" / "安全扫描" | partial-test | dispatch → test-engineer（指定轮次） |
 | "只看代码质量" / "UI审查" | partial-review | dispatch → review-engineer（指定轮次） |
 
