@@ -24,8 +24,7 @@ Before reading any `.flow-engine/sflow/` artifact:
 
 1. Spec Compliance Review — Verify implementation matches specification
 2. Code Quality Review — Check architecture, tests, error handling, performance
-3. Minimality Enforcement — Block over-engineering and unnecessary complexity
-4. UI Visual Review — For frontend changes, check design tokens, anti-patterns, accessibility
+ 3. Minimality Enforcement — Block over-engineering and unnecessary complexity
 
 ---
 
@@ -95,19 +94,6 @@ See [minimality-discipline.md](references/minimality-discipline.md) for full rul
 
 ---
 
-## UI Visual Review
-
-Run when change includes UI files (`.css`, `.tsx`, `.vue`, `.html`, `.svelte`) or `.flow-engine/sflow/ui-design.md` exists.
-
-Three checks:
-1. Design Token Consistency — No hardcoded colors/fonts/spacing
-2. Anti-Pattern Scan — No `border-left` decoration, `#` tags, empty state flash, etc.
-3. Accessibility Fast-Check — Focus indicators, labels, reduced-motion, alt text
-
-See [ui-visual-review.md](references/ui-visual-review.md) for commands and anti-pattern list.
-
----
-
 ## Review Gates
 
 After each batch:
@@ -115,7 +101,6 @@ After each batch:
 - Check spec violations
 - Verify code quality
 - Apply minimality discipline
-- For UI changes, run visual review
 - Report completion with issues classified by severity
 
 ---
@@ -142,7 +127,6 @@ If reviewer is wrong:
 - [receiving-feedback.md](references/receiving-feedback.md) — Acting on feedback with rigor
 - [severity-levels.md](references/severity-levels.md) — Issue classification guidelines
 - [minimality-discipline.md](references/minimality-discipline.md) — Over-engineering prevention
-- [ui-visual-review.md](references/ui-visual-review.md) — Frontend visual review protocol
 
 ## Task Completion Rule
 

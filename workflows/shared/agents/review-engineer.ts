@@ -43,7 +43,7 @@ Before reading any \`.flow-engine/sflow/\` artifact:
 |------|------|------|----------|
 | R1: Spec 合规 | ✅ 必跑 | AC 逐条对实现 | — |
 | R2: 代码质量 | ✅ 必跑 | 6 维衰退风险 | — |
-| R3: UI 视觉 | ⚠️ 按需 | 前端项目 | — |
+| R3: 工程正确性 | ⚠️ 按需 | 前端项目（Web Interface Guidelines） | — |
 | R4: 技术债评估 | ⚠️ 可选 | 里程碑/大版本 | — |
 | R5: 跨模型 Spot-Check | ⚠️ 触发 | 高风险变更 | 见触发条件 |
 
@@ -53,7 +53,7 @@ Before reading any \`.flow-engine/sflow/\` artifact:
 
 ## R1: Spec 合规审查
 
-逐条对照 REQUIREMENT.md（如有）的 AC，看实现是否真做到：
+逐条对照 sFlow \`specs/\` 下的 AC，看实现是否真做到；若项目根存在 REQUIREMENT.md 则以其为准（兼容兜底），但不得以 REQUIREMENT.md 为唯一基准：
 
 - [ ] 每条 AC 是否被实现
 - [ ] 每条 AC 是否被测试覆盖
@@ -100,35 +100,32 @@ Before reading any \`.flow-engine/sflow/\` artifact:
 - 是否出现「业务层→低层」线路以外的反向依赖
 - 是否出现跨边界依赖
 
+### 测试质量子节（Test Quality）
+
+在 R2 代码质量审查中，额外评估测试本身的质量（不涉及合并请求 / Pull Request 层面的评审）：
+
+- 测试是否验证真实行为而非 mock — 警惕仅断言 mock 调用、\`jest.mock\` 覆盖核心逻辑导致测试形同虚设
+- 边界与异常路径覆盖 — 空值 / 超长输入 / 错误码 / 超时 / 并发失败等异常分支是否被覆盖
+- 测试坏味道（test smells）— 过度断言、脆弱快照、测试间共享可变状态、无意义 \`expect(true).toBe(true)\`、mock 过度导致不测真实交互
+
 ---
 
-## R3: UI 视觉审查（仅前端项目）
+## R3: 工程正确性审查（Web Interface Guidelines，仅前端项目）
 
 触发条件：本次 diff 涉及任何 UI 文件（.css / .tsx / .vue / .html / .svelte 等）。
 
-### 3.1 Design Tokens 一致性
-- [ ] 实现里的颜色值是否全部来自 UI-DESIGN.md frontmatter（CSS variables / theme）？
-- [ ] 是否有硬编码的 hex / 字号 / 间距数值？（命中即 🔴 Critical）
-- [ ] 字体是否与 UI-DESIGN.md 声明一致？
+本清单倾向 React/Next 框架项目，需按框架适用性取舍。
 
-### 3.2 Anti-Pattern 扫描
-逐项对照检查：
-- [ ] 字体类（无 AI slop 默认字体：Inter / Roboto / Arial / system-ui）
-- [ ] 颜色类（无纯黑/纯白、无紫色渐变、无彩底灰字）
-- [ ] 阴影类（at rest 平面、alpha ≤ 0.15）
-- [ ] 边框类（无彩色侧条 > 1px）
-- [ ] 动效类（无 bounce/elastic、支持 reduced-motion）
-- [ ] 布局类（无卡片嵌套、无 SaaS hero-metric template）
-- [ ] 文案类（无 hedging、无 lorem ipsum）
-- [ ] 组件类（无 placeholder 充当 label、模态可 ESC 关闭）
+### 引用方式（Token Budget 合规）
+仓库根 \`skills/web-interface-guidelines/SKILL.md\` 共 191 行，超过 review-engineer 单轮 reference 150 行预算。使用 read 工具以 offset + limit 分段读取，按需定位相关章节（Accessibility / Focus States / Forms / Animation / Performance / i18n 等），避免一次性加载全文。
 
-### 3.3 无障碍快检
-- [ ] 颜色对比 ≥ WCAG 2.1 AA
-- [ ] 所有交互元素键盘可达
-- [ ] 焦点环可见
-- [ ] prefers-reduced-motion 响应正确
-- [ ] 表单 label 显式关联
-- [ ] 图片 alt 文本
+### 工程正确性概览（纯代码可判定要点）
+仅保留代码层可直接判定的 a11y 快检要点；其余规则（含 Anti-Pattern 扫描、动效、性能、主题、i18n 等）以仓库根 \`skills/web-interface-guidelines/SKILL.md\` 为准：
+- [ ] 所有交互元素键盘可达（非仅 \`<div onClick>\` 充当按钮）
+- [ ] 焦点环可见（\`:focus-visible\`，禁止 \`outline: none\` 无替代）
+- [ ] \`prefers-reduced-motion\` 正确响应
+- [ ] 表单控件显式 label 关联（\`<label>\` / \`aria-label\`）
+- [ ] 图片具备 alt 文本（装饰图 \`alt=""\`）
 
 ---
 
