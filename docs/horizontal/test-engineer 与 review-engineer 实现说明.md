@@ -1,5 +1,7 @@
 # test-engineer 与 review-engineer 实现说明
 
+> 2026-10 更新：审查模型已演进为 5 轮（R1 Spec 合规、R2 代码质量+测试质量、R3 工程正确性 Web Interface Guidelines、R4 技术债、R5 跨模型 spot-check，其中 R4/R5 为触发式）。本文为历史实现说明，部分细节以 README 与 `workflows/shared/agents/review-engineer.ts` 为准。
+
 ---
 
 ## 一、实现讨论
@@ -47,7 +49,7 @@
 │  │                            │  │                                │ │
 │  │  R1: 功能测试（全量）      │  │  R1: Spec 合规审查             │ │
 │  │  R2: 性能测试              │  │  R2: 代码质量 6 维             │ │
-│  │  R3: 安全测试              │  │  R3: UI 视觉审查               │ │
+│  │  R3: 安全测试              │  │  R3: 工程正确性审查            │ │
 │  │  R4: 兼容性测试            │  │  R4: 技术债评估(可选)          │ │
 │  │  R5: 可观测性验证          │  │  R5: 跨模型 spot-check(可选)   │ │
 │  │                            │  │                                │ │
@@ -161,7 +163,7 @@ call_flow_agent(
 ├── 本次审查范围声明
 ├── R1 Spec 合规：AC 逐条对实现 + 测试覆盖 + 范围蔓延检测
 ├── R2 代码质量：6 维衰退风险 + 书本引用 + 4 要素格式
-├── R3 UI 视觉：Design Tokens + Anti-pattern + 无障碍
+├── R3 工程正确性：Web Interface Guidelines（前端项目按需）
 ├── [R4 技术债评估(可选)]
 ├── [R5 跨模型 spot-check(可选)]
 ├── 严重度汇总：🔴 Critical / 🟡 Major / 🟢 Minor
@@ -222,7 +224,7 @@ export const SHARED_AGENT_NAMES = [
 直接从 flow-kit 的 `prompts/5-test.md` 和 `prompts/6-review.md` 移植核心逻辑，转化为子代理的 system prompt：
 
 - `test-engineer` ← 移植 5-test.md 的 5 轮金字塔 + `reference/test-pyramid.md`
-- `review-engineer` ← 移植 6-review.md 的审查轮次，UI 视觉审查参考 `workflows/sflow/skills/ui-reviewer/references/ui-visual-review.md` 与 `workflows/sflow/skills/ui-implementer/references/anti-patterns.md`
+- `review-engineer` ← 移植 6-review.md 的审查轮次，工程正确性审查（R3，Web Interface Guidelines）参考前端项目实践，无障碍与 Design Tokens 检查参考 `workflows/sflow/skills/ui-reviewer/references/ui-visual-review.md` 与 `workflows/sflow/skills/ui-implementer/references/anti-patterns.md`
 
 ---
 
@@ -547,7 +549,7 @@ const allowedAgents = [...SFLOW_AGENT_NAMES, ...SHARED_AGENT_NAMES];
 |------|------|
 | `workflows/shared/index.ts` | 共享 agent 导出入口 + `SHARED_AGENT_NAMES` 常量 |
 | `workflows/shared/agents/test-engineer.ts` | test-engineer agent 定义（5 轮测试金字塔） |
-| `workflows/shared/agents/review-engineer.ts` | review-engineer agent 定义（3 轮审查） |
+| `workflows/shared/agents/review-engineer.ts` | review-engineer agent 定义（5 轮审查，R4/R5 触发式） |
 
 ### 修改文件
 

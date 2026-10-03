@@ -11,9 +11,10 @@ import { getAgentTools } from '../../../packages/plugin-infra/src/agents/agent-t
 /**
  * Create the ui-reviewer agent configuration.
  *
- * Report-only subagent: tools resolve to COMMON_TOOLS (read/glob/grep) only,
- * because 'ui-reviewer' is intentionally NOT registered in AGENT_TOOLS. This
- * guarantees no write/edit authority — the agent reports, it does not fix.
+ * Report-only subagent: 'ui-reviewer' IS registered in AGENT_TOOLS
+ * (agent-tools.ts) with write: true and edit: false, so its tools resolve
+ * to COMMON_TOOLS plus write authority for producing the report. No edit
+ * authority — the agent reports, it does not fix.
  */
 export const createUiReviewerAgent: AgentFactory = (model: string, options?: { temperature?: number; skillContent?: string }): AgentConfig => {
   return {

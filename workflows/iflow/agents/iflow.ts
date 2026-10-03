@@ -136,7 +136,7 @@ Classifications:
 | iflow-verifier | Execution complete | Adversarial verification, BLOCKER/WARNING report |
 | iflow-shipper | Verification passed | Create PR, generate UAT.md, manage branch lifecycle |
 | test-engineer | User requests comprehensive testing | Run 5-tier test pyramid (full/partial), independent of workflow state |
-| review-engineer | User requests comprehensive review | Run 3-round review (spec/code/UI), independent of workflow state |
+| review-engineer | User requests comprehensive review | Triggered via /flow-review. Run 5-round review: spec / code quality+test quality / engineering correctness (Web Interface Guidelines) / tech debt / cross-model spot-check, independent of workflow state |
 | explore | Multi-file codebase exploration needed | Fast codebase exploration via \`task\` tool with \`subagent_type="explore"\`. Supports parallel execution with "quick"/"medium"/"very thorough" levels. Permissions: grep, glob, read, list, bash, webfetch, websearch |
 
 ## Horizontal Commands (独立于工作流)
