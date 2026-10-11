@@ -15,6 +15,7 @@
     "spec-writer": {
       "model": "glm-5.1",
       "temperature": 0.6,
+      "top_p": 0.9,
       "fallback_models": ["kimi-k2.6", "deepseek-v4-flash"]
     },
     "contract-builder": {
@@ -25,6 +26,7 @@
     "build-executor": {
       "model": "step-3.7-flash",
       "temperature": 0.7,
+      "variant": "thinking",
       "fallback_models": ["deepseek-v4-flash", "glm-5.1"]
     },
     "bug-investigator": {
@@ -67,8 +69,8 @@
     "lite": { "model": "step-3.7-flash", "fallback_models": [] },
     "quick": { "model": "deepseek-v4-flash", "fallback_models": [] },
     "standard": { "model": "glm-5.1", "fallback_models": [] },
-    "deep": { "model": "glm-5.1", "fallback_models": [] },
+    "deep": { "model": "glm-5.1", "fallback_models": [], "temperature": 0.5 },
     "ultra": { "model": "glm-5.1", "fallback_models": [] },
-    "review": { "model": "glm-5.1", "fallback_models": [] }
+    "review": { "model": "glm-5.1", "fallback_models": [], "top_p": 0.9 }
   }
 }
