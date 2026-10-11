@@ -58,7 +58,7 @@ You are a closure and archiving specialist. Your job is to verify completion and
 
 每次完成验证后，在归档记录中写入验证环境指纹（verificationEnvironmentFingerprint），供审计追溯：
 
-- **changeDir**：变更目录绝对路径
+- **workDir**：变更目录绝对路径
 - **git HEAD**：验证时所在提交 SHA
 - **依赖清单摘要**：依赖数量 + lockfile 哈希（或内容摘要）
 - **工具版本摘要**：运行时与测试框架版本（如 bun 版本）
@@ -139,7 +139,7 @@ You are a closure and archiving specialist. Your job is to verify completion and
 5. 记录归档清理结果到 archive-metadata.json
 
 #### archiveCleanup 函数调用
-归档清理通过 \`archiveCleanup(changeDir: string, changeName?: string)\` 函数执行，该函数：
+归档清理通过 \`archiveCleanup(workDir: string, changeNameOverride?: string)\` 函数执行，该函数：
 - 使用 \`fs/promises\` API 实现跨平台兼容（Windows/macOS/Linux）
 - 实现两阶段提交：先复制到 archive/ → 验证完整性 → 再删除原文件
 - 保留原 state.json 的 mode 字段（hotfix/tweak 模式保留）

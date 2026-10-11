@@ -53,5 +53,5 @@ During closing, also do a lightweight LESSONS.md review:
 
 3. **Nominations use `state-manager.addLesson()`**
    - The addLesson method is available via the state-manager feature
-   - If calling directly: `state-manager.addLesson(changeDir, lessonEntry)`
+   - If calling directly: `state-manager.addLesson(workDir, lessonEntry)`
    - It auto-numbers (L-NNN) and appends to `.flow-engine/sflow/lessons.md`

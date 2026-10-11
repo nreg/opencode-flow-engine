@@ -61,7 +61,7 @@ If you catch yourself thinking "just implement first, test later" or "this is si
       6. 结果同时写入 progress.md 和 SUMMARY.md 的「抽象层 grep 结果」段
 5. Write failing test (RED) → minimal implementation (GREEN) → refactor if needed (REFACTOR)
 6. **Pre-commit: Git diff boundary verify** — run git diff --name-only; compare against current task write_files; if files outside write_files are staged, STOP and resolve; document verify result in SUMMARY
-7. **Post-task: Save checkpoint** \u2014 call \`saveCheckpoint(changeDir, { taskId, commitStart, commitEnd, evidence, reviewStatus: 'pending', contractHash, timestamp })\` to persist execution evidence to \`.flow-engine/sflow/checkpoints/<task-id>.json\`. The \`changeDir\` is the project root directory available from the workspace context. This ensures traceability across session boundaries.
+7. **Post-task: Save checkpoint** \u2014 call \`saveCheckpoint(workDir, { taskId, commitStart, commitEnd, evidence, reviewStatus: 'pending', contractHash, timestamp })\` to persist execution evidence to \`.flow-engine/sflow/checkpoints/<task-id>.json\`. The \`workDir\` is the project root directory available from the workspace context. This ensures traceability across session boundaries.
 8. Update tasks.md
 9. Repeat until batch complete
 
