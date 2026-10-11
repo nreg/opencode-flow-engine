@@ -279,6 +279,25 @@ export function isModelAvailable(model: string): boolean {
 }
 
 /**
+ * D3: 只读冷却查询——返回模型剩余冷却毫秒；未拉黑或已过期返回 null。
+ *
+ * 供组错误信息（全候选拉黑时的可诊断报错）：调用方可据此列出每个候选的
+ * 冷却剩余时间，区分「档位未配置」与「档位候选全在冷却中」（后者是黑名单
+ * 被误写 + 时区误解析长冷却的典型症状）。不写入黑名单；过期条目的惰性
+ * 清理与 isModelAvailable 语义一致。
+ */
+export function getModelCooldownRemaining(model: string): number | null {
+  const expireAt = UNAVAILABLE_MODELS.get(model);
+  if (expireAt === undefined) return null;
+  const remaining = expireAt - Date.now();
+  if (remaining <= 0) {
+    UNAVAILABLE_MODELS.delete(model);
+    return null;
+  }
+  return remaining;
+}
+
+/**
  * Normalize fallback_models to a flat string array.
  */
 function normalizeFallbackList(
@@ -313,6 +332,14 @@ export interface ModelResolutionResult {
    * 本轮只 warn + 标注，不改变解析结果。
    */
   unverifiedModels?: string[];
+  /**
+   * D3（毒化链修复）：落 unconfigured 时，若全部候选均因黑名单冷却不可用
+   * （isModelAvailable=false 且有未过期条目），列出候选模型名——档位本身
+   * 已配置，只是主模型与全部 fallback 都在冷却中。调用方据此组可诊断报错
+   * （候选 + 剩余冷却，经 getModelCooldownRemaining 查询），而非误导性的
+   * "No model configured"。纯未配置（无任何候选）时为 undefined。
+   */
+  cooldownCandidates?: string[];
 }
 
 /**
@@ -398,6 +425,10 @@ function resolveModelWithFallbackCore(
   // Priority 3: modelType parameter (highest priority tier signal)
   // When modelType is specified, it overrides per-agent config and AGENT_PROFILES.
   // Resolution reads ONLY user-configured modelProfiles[tier] (no built-in default).
+  //
+  // D3: 档位候选全黑诊断传播——档位主模型 + 档位 fallback 链全部不可用时记录候选，
+  // 供链尾（Priority 7）区分「未配置」与「全候选冷却中」。
+  let tierExhaustedCandidates: string[] = [];
   if (modelType && VALID_MODEL_TIERS.has(modelType as ModelTier)) {
     const tier = modelType as ModelTier;
     const tierConfig = profileOptions?.modelProfiles?.[tier];
@@ -416,10 +447,14 @@ function resolveModelWithFallbackCore(
         return { model: result.model, provenance: 'provider-fallback', fallbackAttempted: result.attempted };
       }
       // Tier model + its fallbacks exhausted → fall through to lower priorities
+      tierExhaustedCandidates = [tierConfig.model, ...fallbacks];
     }
   }
 
   // Priority 4: configModel (per-agent override, used when no modelType specified)
+  //
+  // D3: per-agent 候选全黑诊断传播（同 Priority 3）。
+  let configExhaustedCandidates: string[] = [];
   if (configModel) {
     if (isModelAvailable(configModel)) {
       return { model: configModel, provenance: 'config-override' };
@@ -434,6 +469,7 @@ function resolveModelWithFallbackCore(
       }
     }
     // per-agent fallbacks exhausted, continue to tier resolution
+    configExhaustedCandidates = attempted;
   }
 
   // Priority 5: AGENT_PROFILES static binding → user tier model resolution
@@ -493,10 +529,24 @@ function resolveModelWithFallbackCore(
   }
 
   // Priority 7: Chain tail — no user model configured → graceful degradation
+  //
+  // D3（毒化链修复）：落 unconfigured 前区分「未配置」与「全候选冷却中」。
+  // 后者是黑名单被误写（请求级错误误判为模型故障 / 重置时间时区误解析长冷却）
+  // 的典型症状：档位本身已配置，但主模型与全部 fallback 均在冷却中。此时返回
+  // cooldownCandidates 诊断列表（候选 + 可经 getModelCooldownRemaining 查询的
+  // 剩余冷却），让调用方报可区分的错误，而非误导性的 "No model configured"。
+  const allCandidates = [
+    ...new Set([...attempted, ...tierExhaustedCandidates, ...configExhaustedCandidates]),
+  ];
+  const cooldownCandidates =
+    allCandidates.length > 0 && allCandidates.every((m) => getModelCooldownRemaining(m) !== null)
+      ? allCandidates
+      : undefined;
   return {
     model: undefined,
     provenance: 'unconfigured',
     fallbackAttempted: attempted.length > 0 ? attempted : undefined,
+    cooldownCandidates,
   };
 }
 

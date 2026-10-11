@@ -50,6 +50,7 @@ import {
   markModelUnavailable,
   buildAgentFallbackChain,
   isModelAvailable,
+  getModelCooldownRemaining,
   MIN_QUOTA_COOLDOWN_TTL_MS,
   TRANSIENT_COOLDOWN_TTL_MS,
   VALID_MODEL_TIERS,
@@ -74,6 +75,20 @@ const MAX_MODEL_RETRIES = 2;
 
 /** subagent-store 事件类型：记录一次模型故障转移（D-8） */
 const MODEL_FALLBACK_EVENT = 'model_fallback';
+
+/**
+ * D3: 冷却剩余时间格式化（可诊断报错用）——如 7h58m / 30m / 45s。
+ * 与 agent-builder 的 getModelCooldownRemaining 配对使用。
+ */
+function formatCooldownRemaining(remainingMs: number): string {
+  const totalSeconds = Math.ceil(remainingMs / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const totalMinutes = Math.ceil(remainingMs / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) return `${hours}h${String(minutes).padStart(2, '0')}m`;
+  return `${totalMinutes}m`;
+}
 
 /** sendPromptOnce 的返回结构：区分 ok / HTTP status / message（D-1） */
 interface PromptSendResult {
@@ -1535,6 +1550,24 @@ export function createCallFlowAgentTools(
             model_type as string | undefined,
           );
           if (!result.model) {
+            // D3（毒化链修复）：档位候选全黑（黑名单被误写 + 时区误解析长冷却）时，
+            // 档位本身已配置但主模型与全部 fallback 均在冷却中——返回可区分的错误：
+            // 列出每个候选及其冷却剩余时间，而非误导性的 "No model configured"。
+            if (result.cooldownCandidates && result.cooldownCandidates.length > 0) {
+              const cooldownDetails = result.cooldownCandidates
+                .map((candidate) => {
+                  const remaining = getModelCooldownRemaining(candidate);
+                  return remaining !== null
+                    ? `${candidate}（剩余 ${formatCooldownRemaining(remaining)}）`
+                    : candidate;
+                })
+                .join('、');
+              return await formatToolError(
+                `所有候选均在冷却中：${cooldownDetails}；档位本身已配置（model_type "${model_type}"）。` +
+                  `若冷却时长异常（如数小时），可能是请求级错误被误判为模型故障或重置时间时区误解析所致；` +
+                  `可等待冷却到期或更新模型配置后重试。`,
+              );
+            }
             // Wave 3 (P2-4)："未配置该 tier" 属于配置缺失而非系统故障 —— 先记录降级诊断日志
             // （Logger 目前无 debug 级别，LOG 为最低级别），再保留显式报错：既不注入假模型，
             // 也不静默回退。不带 model_type 调用时 agent 将使用 OpenCode 默认模型；

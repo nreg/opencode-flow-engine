@@ -8,6 +8,7 @@ import {
   clearUnavailableModels,
   markModelUnavailable,
   isModelAvailable,
+  getModelCooldownRemaining,
   AGENT_PROFILES,
   clearConfigCache,
 } from '../agents/agent-builder.js';
@@ -280,6 +281,89 @@ describe('resolveModelWithFallback — unconfigured (Wave 2 gate)', () => {
     );
     expect(result.model).toBeUndefined();
     expect(result.provenance).toBe('unconfigured');
+  });
+});
+
+// ─── D3: 全候选拉黑时的可诊断解析（黑名单毒化链修复） ───────────────────────
+//
+// 背景（毒化链末端）：档位候选全黑后解析落 unconfigured，报误导性的
+// "No model configured"——用户以为没配模型，实际是配了但全部在冷却中
+// （黑名单被误写 + 时区误解析长冷却）。修复：落 unconfigured 前区分
+// 「未配置」与「全候选冷却中」，后者返回 cooldownCandidates 诊断列表。
+
+describe('D3: getModelCooldownRemaining 与全候选冷却诊断', () => {
+  beforeEach(() => {
+    clearUnavailableModels();
+  });
+  afterEach(() => {
+    clearUnavailableModels();
+  });
+
+  it('getModelCooldownRemaining：未拉黑 → null；拉黑 → 剩余毫秒；已过期 → null', () => {
+    expect(getModelCooldownRemaining('provider/never-marked')).toBeNull();
+    markModelUnavailable('provider/cooling', { ttlMs: 60_000 });
+    const remaining = getModelCooldownRemaining('provider/cooling');
+    expect(remaining).not.toBeNull();
+    expect(remaining!).toBeGreaterThan(0);
+    expect(remaining!).toBeLessThanOrEqual(60_000);
+    // 过期条目 → null（与 isModelAvailable 一致的惰性过期语义）
+    markModelUnavailable('provider/expired', { resetAt: Date.now() - 1000 });
+    expect(getModelCooldownRemaining('provider/expired')).toBeNull();
+    expect(isModelAvailable('provider/expired')).toBe(true);
+  });
+
+  it('tier model + fallback 全黑 → cooldownCandidates 列出全部候选（provenance 仍为 unconfigured）', () => {
+    markModelUnavailable('deep/primary');
+    markModelUnavailable('deep/fallback-1');
+    const result = resolveModelWithFallback(
+      'spec-writer',
+      undefined,
+      {},
+      undefined,
+      {
+        modelProfiles: {
+          deep: { model: 'deep/primary', fallback_models: ['deep/fallback-1'] },
+        },
+        activeWorkflow: 'sflow',
+      },
+      'deep',
+    );
+    expect(result.model).toBeUndefined();
+    expect(result.provenance).toBe('unconfigured');
+    expect(result.cooldownCandidates).toEqual(['deep/primary', 'deep/fallback-1']);
+  });
+
+  it('档位未配置（无任何候选）→ 无 cooldownCandidates（保持纯 unconfigured 语义）', () => {
+    const result = resolveModelWithFallback(
+      'spec-writer',
+      undefined,
+      {},
+      undefined,
+      { modelProfiles: {}, activeWorkflow: 'sflow' },
+      'ultra',
+    );
+    expect(result.provenance).toBe('unconfigured');
+    expect(result.cooldownCandidates).toBeUndefined();
+  });
+
+  it('部分候选仍可用 → 正常返回可用模型（不进冷却诊断）', () => {
+    markModelUnavailable('deep/primary');
+    const result = resolveModelWithFallback(
+      'spec-writer',
+      undefined,
+      {},
+      undefined,
+      {
+        modelProfiles: {
+          deep: { model: 'deep/primary', fallback_models: ['deep/fallback-1'] },
+        },
+        activeWorkflow: 'sflow',
+      },
+      'deep',
+    );
+    expect(result.model).toBe('deep/fallback-1');
+    expect(result.provenance).toBe('provider-fallback');
+    expect(result.cooldownCandidates).toBeUndefined();
   });
 });
 

@@ -2501,6 +2501,54 @@ describe('P0: model_type routing priority chain', () => {
       (Logger as unknown as { log: unknown }).log = originalLog;
     }
   });
+
+  it('D3: 档位候选全黑 → 可诊断报错（含冷却与候选名），而非误导的 No model configured', async () => {
+    // 毒化链末端场景：档位本身已配置（model + fallback），但两者都被误写入
+    // 黑名单（请求级错误误判 + 时区误解析长冷却）→ 解析落 unconfigured。
+    // 修复后必须返回可区分的错误：列出每个候选及其冷却剩余时间。
+    const client = createMockClient({
+      pollOutputs: ['Task completed [TASK_COMPLETE]'],
+      promptCalls,
+    });
+
+    const options = createTestOptions(client);
+    (options as any).modelProfiles = {
+      deep: {
+        model: 'provider/tier-deep-model',
+        fallback_models: ['provider/tier-fallback-model'],
+      },
+    };
+    (options as any).configOverrides = {};
+
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    // 档位主模型与全部 fallback 均被拉黑（模拟毒化后的黑名单状态）
+    markModelUnavailable('provider/tier-deep-model', { ttlMs: 60 * 60 * 1000 });
+    markModelUnavailable('provider/tier-fallback-model', { ttlMs: 60 * 60 * 1000 });
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test all-cooldown tier',
+        prompt: 'Test prompt',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+        model_type: 'deep',
+      },
+      { sessionID: 'parent-session', directory: '/test' },
+    );
+
+    const output = (result as { output: string }).output;
+    // 可区分：含「冷却」与每个候选名，且含剩余时间
+    expect(output).toContain('冷却');
+    expect(output).toContain('provider/tier-deep-model');
+    expect(output).toContain('provider/tier-fallback-model');
+    expect(output).toContain('剩余');
+    // 不得再报误导性的 "No model configured"（档位本身已配置）
+    expect(output).not.toContain('No model configured');
+    // 不注入任何模型 ⇒ 不应发起 prompt
+    expect(promptCalls.length).toBe(0);
+  });
 });
 
 // ─── F2: Watcher Probe Mode Tests ────────────────────────────────────────────
