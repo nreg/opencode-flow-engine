@@ -208,6 +208,29 @@ describe('extractPatchTextPaths：patchText 全部行头路径提取', () => {
     expect(extractPatchTextPaths('  *** add file:   a.md  \n*** DELETE FILE: b.md')).toEqual(['a.md', 'b.md']);
   });
 
+  it('提取 *** Move to: 行头路径（Update File 之后的移动/重命名目标）', () => {
+    // Gate-4 定向复核（P0）：二进制实证 `*** Move to:` 仅出现在 Update File 行之后，
+    // 执行期 writeWithDirs(movePath) + remove(filePath)——移动目标同样落盘。
+    // 旧守卫不提取该行头，「合法 Update File + 非法 Move to」patchText 被放行。
+    const patchText = [
+      '*** Begin Patch',
+      '*** Update File: a.md',
+      '@@',
+      '-1',
+      '+2',
+      '*** Move to: b.md',
+      '*** End Patch',
+    ].join('\n');
+    expect(extractPatchTextPaths(patchText)).toEqual(['a.md', 'b.md']);
+  });
+
+  it('Move to 行头大小写不敏感且容忍行前后空白', () => {
+    expect(extractPatchTextPaths('  *** update file:   a.md\n   *** MOVE TO:   b.md  ')).toEqual([
+      'a.md',
+      'b.md',
+    ]);
+  });
+
   it('非字符串 / 空串 / 无行头 → 空数组', () => {
     expect(extractPatchTextPaths(42)).toEqual([]);
     expect(extractPatchTextPaths('')).toEqual([]);
@@ -257,5 +280,44 @@ describe('enforceArtifactRootPaths：多路径任一非法即阻断（Gate-4 修
 
   it('空路径列表 → 不抛错（维持无行头返空语义下的放行）', () => {
     expect(() => enforceArtifactRootPaths([], WORK_DIR)).not.toThrow();
+  });
+
+  it('合法 Update + 非法 Move to（Gate-4 定向复核 P0）→ 阻断且点名移动目标', () => {
+    // 二进制实证：Update File 行后紧跟的 `*** Move to:` 读取 move_path，执行期
+    // writeWithDirs(movePath) + remove(filePath)。旧守卫只提取 Add/Update/Delete
+    // File 行头——「合法 Update + 非法 Move to」patchText 放行，内容经移动目标
+    // 写入 <projectDir>/.flow-engine/** 且原文件被删。
+    const patchText = [
+      '*** Begin Patch',
+      '*** Update File: .flow-engine/sflow/legal.md',
+      '@@',
+      '-a',
+      '+b',
+      '*** Move to: opencode-flow-engine/.flow-engine/sflow/moved.json',
+      '*** End Patch',
+    ].join('\n');
+    const paths = extractWriteTargetPaths('apply_patch', { patchText }, WORK_DIR);
+    expect(paths).toEqual([
+      join(WORK_DIR, '.flow-engine', 'sflow', 'legal.md'),
+      join(PROJECT_DIR, '.flow-engine', 'sflow', 'moved.json'),
+    ]);
+    expect(() => enforceArtifactRootPaths(paths, WORK_DIR, PROJECT_DIR)).toThrow(/工件目录锁定/);
+    // 阻断消息必须点名 offending path（非法移动目标）
+    expect(() => enforceArtifactRootPaths(paths, WORK_DIR, PROJECT_DIR)).toThrow(/moved\.json/);
+  });
+
+  it('合法 Update + 合法 Move to → 放行不抛错', () => {
+    const patchText = [
+      '*** Begin Patch',
+      '*** Update File: .flow-engine/sflow/src.md',
+      '@@',
+      '-a',
+      '+b',
+      '*** Move to: .flow-engine/sflow/dst.md',
+      '*** End Patch',
+    ].join('\n');
+    const paths = extractWriteTargetPaths('apply_patch', { patchText }, WORK_DIR);
+    expect(paths).toHaveLength(2);
+    expect(() => enforceArtifactRootPaths(paths, WORK_DIR)).not.toThrow();
   });
 });

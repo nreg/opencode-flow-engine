@@ -70,10 +70,18 @@ export const GUARDED_WRITE_TOOLS: ReadonlySet<string> = new Set([
 
 /**
  * apply_patch 的 patchText 文件行头（OpenCode 1.19.0 二进制实证）：
- * `*** Add File: <path>` / `*** Update File: <path>` / `*** Delete File: <path>`。
+ * `*** Add File: <path>` / `*** Update File: <path>` / `*** Delete File: <path>`，
+ * 以及仅出现在 Update File 行之后的移动目标行头 `*** Move to: <path>`
+ * （执行期 `writeWithDirs(movePath) + remove(filePath)`，移动目标同样落盘）。
  * 大小写不敏感；行前后空白容忍（匹配前先 trim 行）。
+ *
+ * Gate-4 定向复核（P0）：`*** Move to:` 不出现在提取范围时，「合法 Update File +
+ * 非法 Move to」patchText 被守卫放行——内容经移动目标写入
+ * `<projectDir>/.flow-engine/**` 且原文件被删（二进制实证的执行期语义）。
+ * 故四类行头全部纳入逐行匹配；二进制中 Move to 仅紧接 Update File 之后，
+ * 此处按任意行匹配（超集）——多校验只会更严，不影响放行语义。
  */
-const PATCH_FILE_HEADER = /^\*\*\*\s*(Add|Update|Delete)\s+File:\s*(.+)$/i;
+const PATCH_FILE_HEADER = /^\*\*\*\s*(?:(?:Add|Update|Delete)\s+File|Move\s+to):\s*(.+)$/i;
 
 /**
  * 从 apply_patch 的 patchText 中提取**全部**目标文件路径（多文件补丁）。
@@ -89,13 +97,18 @@ const PATCH_FILE_HEADER = /^\*\*\*\s*(Add|Update|Delete)\s+File:\s*(.+)$/i;
  * 合法落 `<workDir>/.flow-engine`、后续行头指向 `<projectDir>/.flow-engine/**`
  * 时，守卫判定放行，非法写入得逞（审查探针实证）。故改为返回全部行头路径，
  * 由调用方逐一校验。
+ *
+ * Gate-4 定向复核（P0）：提取范围覆盖全部四类行头——Add/Update/Delete File
+ * 与 Update File 行之后的 `*** Move to:` 移动目标（二进制实证：执行期
+ * `writeWithDirs(movePath) + remove(filePath)`）。缺失 Move to 时，「合法
+ * Update + 非法 Move to」patchText 放行，非法移动写入得逞。
  */
 export function extractPatchTextPaths(patchText: unknown): string[] {
   if (typeof patchText !== 'string' || patchText.length === 0) return [];
   const paths: string[] = [];
   for (const rawLine of patchText.split('\n')) {
     const m = rawLine.trim().match(PATCH_FILE_HEADER);
-    const p = m?.[2]?.trim();
+    const p = m?.[1]?.trim();
     if (p && p.length > 0) paths.push(p);
   }
   return paths;
@@ -105,7 +118,8 @@ export function extractPatchTextPaths(patchText: unknown): string[] {
  * 从写工具参数中提取**全部**目标文件路径。
  *
  * - write / edit：读 `filePath` / `path` / `file_path`（兼容三种命名），单元素数组
- * - apply_patch：读 `patchText`，逐行匹配 `*** (Add|Update|Delete) File:` 行头取全部命中
+ * - apply_patch：读 `patchText`，逐行匹配 `*** (Add|Update|Delete) File:` 与
+ *   `*** Move to:` 行头取全部命中（四类行头均为落盘目标）
  *
  * 相对路径在提供 `workDir` 时解析为绝对路径（守卫的归一化基准），
  * 保证后续判定不受调用方 cwd 影响；未提供时原样返回（由

@@ -16,7 +16,11 @@
  * - 非写工具（read/bash）不受该守卫阻断；
  * - 多文件 patchText（Gate-4 修复）：apply_patch 逐 hunk 应用于**全部**行头路径，
  *   守卫必须校验全部行头——首个行头合法 + 后续行头非法时阻断，且任何目标
- *   （含首个合法目标）都不得落盘。
+ *   （含首个合法目标）都不得落盘；
+ * - `*** Move to:` 行头（Gate-4 定向复核 P0）：二进制实证该行头仅出现在
+ *   Update File 行之后，执行期 writeWithDirs(movePath) + remove(filePath)——
+ *   「合法 Update + 非法 Move to」必须阻断，且合法 Update 目标与非法移动
+ *   目标都不得落盘。
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
@@ -86,12 +90,33 @@ async function dispatchWrite(
   return null;
 }
 
-/** 从 apply_patch 的 patchText 提取全部 `*** Add/Update/Delete File:` 行头路径（模拟真实多文件工具行为） */
+/**
+ * 从 apply_patch 的 patchText 提取全部落盘目标路径（模拟真实多文件工具行为）。
+ *
+ * 忠实对齐 OpenCode 1.19.0 二进制实证的执行期语义：
+ * - add → writeWithDirs(path)；delete → remove(path)；
+ * - update → move_path ? writeWithDirs(movePath) + remove(path) : writeWithDirs(path)。
+ * 即 Update File 行后紧跟的 `*** Move to:` 行使**移动目标**成为实际落盘路径
+ * （原文件被删）——守卫必须提取该行头，否则经移动目标写
+ * `<projectDir>/.flow-engine/**` 并删原文件的绕过成立。
+ */
 function patchTextTargetPaths(patchText: string): string[] {
   const paths: string[] = [];
+  let pendingUpdate = false;
   for (const line of patchText.split('\n')) {
-    const m = line.trim().match(/^\*\*\*\s*(?:Add|Update|Delete)\s+File:\s*(.+)$/i);
-    if (m) paths.push(m[1].trim());
+    const trimmed = line.trim();
+    const header = trimmed.match(/^\*\*\*\s*(Add|Update|Delete)\s+File:\s*(.+)$/i);
+    if (header) {
+      pendingUpdate = header[1].toLowerCase() === 'update';
+      paths.push(header[2].trim());
+      continue;
+    }
+    const move = trimmed.match(/^\*\*\*\s*Move\s+to:\s*(.+)$/i);
+    if (move && pendingUpdate && paths.length > 0) {
+      // move 语义：实际落盘目标是移动目标，原 Update File 路径被删——以移动目标替换
+      paths[paths.length - 1] = move[1].trim();
+      pendingUpdate = false;
+    }
   }
   return paths;
 }
@@ -125,6 +150,23 @@ function buildMixedVerbPatchText(addPath: string, deletePath: string): string {
     `*** Add File: ${addPath}`,
     '+new-content',
     `*** Delete File: ${deletePath}`,
+    '*** End Patch',
+  ].join('\n');
+}
+
+/**
+ * 构造含 `*** Move to:` 行头的 patchText（Update File + 移动目标）。
+ * 二进制实证：该行头紧接 Update File 行之后，执行期以移动目标为落盘路径
+ * 并删除原文件（重命名形态）。
+ */
+function buildMovePatchText(updatePath: string, moveToPath: string): string {
+  return [
+    '*** Begin Patch',
+    `*** Update File: ${updatePath}`,
+    '@@',
+    '-old-line',
+    '+new-line',
+    `*** Move to: ${moveToPath}`,
     '*** End Patch',
   ].join('\n');
 }
@@ -301,6 +343,35 @@ describe('P0-1：工件根写路径守卫 —— 工厂 hook 真阻断', () => {
     });
   }
 
+  // ─── `*** Move to:` 行头（Gate-4 定向复核 P0）：移动目标同样纳入守卫 ────
+
+  for (const [name, createHooks] of factories) {
+    it(`${name} 工厂：合法 Update + 非法 Move to（Gate-4 定向复核 P0）被阻断且均未落盘`, async () => {
+      const hooks = await createHooks();
+      try {
+        // 复核二进制实证的绕过形态：Update File 行头合法落 workDir/.flow-engine，
+        // 紧随的 *** Move to: 行头指向 <projectDir>/.flow-engine/**——执行期
+        // writeWithDirs(movePath) + remove(filePath)，内容经移动目标落盘且原文件被删。
+        // 旧守卫不提取 Move to 行头 → 合法 Update 行头使守卫放行，绕过成立。
+        const legalTarget = join(workDir, '.flow-engine', 'sflow', 'move-src.md');
+        const illegalMoveTarget = join(projectDir, '.flow-engine', 'sflow', 'move-dst.json');
+        const err = await dispatchWrite(hooks, 'apply_patch', {
+          patchText: buildMovePatchText(legalTarget, illegalMoveTarget),
+        });
+
+        expect(err).toBeInstanceOf(Error);
+        expect(err!.message).toContain('工件目录锁定');
+        // 阻断消息点名 offending path（非法移动目标）
+        expect(err!.message).toContain(illegalMoveTarget);
+        // 关键：钩子抛错即整个工具调用中止——合法 Update 目标与非法移动目标均不得落盘
+        expect(existsSync(legalTarget)).toBe(false);
+        expect(existsSync(illegalMoveTarget)).toBe(false);
+      } finally {
+        await disposeHooks(hooks);
+      }
+    });
+  }
+
   it('sflow 工厂：多文件 patchText 混合动词（Add 合法 + Delete 非法）被阻断且未落盘', async () => {
     const hooks = await createSFlowPluginModule().server({
       client: createMockClient(),
@@ -338,6 +409,28 @@ describe('P0-1：工件根写路径守卫 —— 工厂 hook 真阻断', () => {
       expect(err).toBeNull();
       expect(existsSync(targetA)).toBe(true);
       expect(existsSync(targetB)).toBe(true);
+    } finally {
+      await disposeHooks(hooks);
+    }
+  });
+
+  it('sflow 工厂：合法 Update + 合法 Move to → 放行且移动目标落盘', async () => {
+    const hooks = await createSFlowPluginModule().server({
+      client: createMockClient(),
+      directory: workDir,
+    } as never);
+    try {
+      // 合法重命名：Update 源与移动目标均落 workDir/.flow-engine——守卫放行，
+      // 执行期以移动目标为落盘路径（原文件被删，此处模拟落盘目标存在即可）。
+      const srcTarget = join(workDir, '.flow-engine', 'sflow', 'move-ok-src.md');
+      const dstTarget = join(workDir, '.flow-engine', 'sflow', 'move-ok-dst.md');
+      const err = await dispatchWrite(hooks, 'apply_patch', {
+        patchText: buildMovePatchText(srcTarget, dstTarget),
+      });
+
+      expect(err).toBeNull();
+      expect(existsSync(dstTarget)).toBe(true);
+      expect(await readFile(dstTarget, 'utf-8')).toBe('patched-content');
     } finally {
       await disposeHooks(hooks);
     }
