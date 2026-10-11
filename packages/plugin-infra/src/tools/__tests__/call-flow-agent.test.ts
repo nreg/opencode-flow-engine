@@ -1905,6 +1905,10 @@ describe('Wave 1: workDir 标记注入', () => {
     expect(promptText).toContain('子项目目录下都不允许创建 .flow-engine');
     // 声明写路径守卫已启用
     expect(promptText).toContain('写路径守卫');
+    // P1-1：守卫文案只声明真实覆盖的工具（OpenCode 1.19.0 实证 write/edit/apply_patch 存在），
+    // 不得出现二进制中不存在的工具名（multiedit/patch）——承诺与能力必须一致
+    expect(promptText).toContain('write/edit/apply_patch');
+    expect(promptText).not.toContain('multiedit');
     // 规则块必须紧随 workDir/projectDir 标签块，早于用户 prompt
     expect(promptText.indexOf('<artifact-root-rules>')).toBeGreaterThan(
       promptText.indexOf('<workDir>'),

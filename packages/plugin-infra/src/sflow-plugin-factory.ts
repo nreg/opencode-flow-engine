@@ -740,7 +740,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           // tool.execute.before 无正式拒绝机制，抛错是 OpenCode 标准中止手段（官方 .env 保护示例同款），
           // 抛出后写入不会发生，错误信息（含正确工件目录指引）回显给模型。
           // 子项目目录（projectDir）不允许出现 .flow-engine。
-          const artifactTargetPath = extractWriteTargetPath(toolName, output.args);
+          const artifactTargetPath = extractWriteTargetPath(toolName, output.args, workDir);
           if (artifactTargetPath) {
             enforceArtifactRootPath({ filePath: artifactTargetPath, workDir });
           }

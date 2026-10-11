@@ -55,20 +55,72 @@ function touchesArtifactSegment(absolutePath: string): boolean {
   return normalizeForCompare(absolutePath).split('/').includes(ARTIFACT_ROOT_SEGMENT);
 }
 
-/** 受守卫覆盖的写工具（带明确文件路径参数的） */
+/**
+ * 受守卫覆盖的写工具。
+ *
+ * P1-1 Gate 修复：对齐 OpenCode 1.19.0 二进制实证的工具注册表——仅
+ * `write` / `edit` / `apply_patch` 三个真实存在的工具 ID。此前列举的
+ * `multiedit` / `patch` 在该版本不存在（二进制无此工具 ID），属于虚假覆盖。
+ */
 export const GUARDED_WRITE_TOOLS: ReadonlySet<string> = new Set([
   'write',
   'edit',
-  'multiedit',
-  'patch',
   'apply_patch',
 ]);
 
-/** 从写工具参数中提取目标文件路径（兼容 filePath / path / file_path 三种命名） */
-export function extractWriteTargetPath(toolName: string | undefined, args: unknown): string {
+/**
+ * apply_patch 的 patchText 文件行头（OpenCode 1.19.0 二进制实证）：
+ * `*** Add File: <path>` / `*** Update File: <path>` / `*** Delete File: <path>`。
+ * 大小写不敏感；行前后空白容忍（匹配前先 trim 行）。
+ */
+const PATCH_FILE_HEADER = /^\*\*\*\s*(Add|Update|Delete)\s+File:\s*(.+)$/i;
+
+/**
+ * 从 apply_patch 的 patchText 中提取首个目标文件路径。
+ *
+ * 背景（P1-1 Gate 修复）：OpenCode 1.19.0 的 apply_patch 工具 schema 仅
+ * `{ patchText }`（PatchSchema），**没有 filePath/path/file_path 参数**——
+ * 文件路径只存在于 patchText 的 `*** Add/Update/Delete File:` 行头内。
+ * provider 适配器在 write/edit 不可用时会回落合成 apply_patch，若不解析
+ * patchText，经 apply_patch 写 `<projectDir>/.flow-engine/**` 将绕过守卫。
+ */
+function extractPatchTextPath(patchText: unknown): string {
+  if (typeof patchText !== 'string' || patchText.length === 0) return '';
+  for (const rawLine of patchText.split('\n')) {
+    const m = rawLine.trim().match(PATCH_FILE_HEADER);
+    const p = m?.[2]?.trim();
+    if (p && p.length > 0) return p;
+  }
+  return '';
+}
+
+/**
+ * 从写工具参数中提取目标文件路径。
+ *
+ * - write / edit：读 `filePath` / `path` / `file_path`（兼容三种命名）
+ * - apply_patch：读 `patchText`，逐行匹配 `*** (Add|Update|Delete) File:` 行头取首个命中
+ *
+ * 相对路径在提供 `workDir` 时解析为绝对路径（守卫的归一化基准），
+ * 保证后续判定不受调用方 cwd 影响；未提供时原样返回（由
+ * `checkArtifactRootPath` 的 toAbsolute 二次解析兜底）。
+ */
+export function extractWriteTargetPath(
+  toolName: string | undefined,
+  args: unknown,
+  workDir?: string,
+): string {
   const lower = (toolName ?? '').toLowerCase();
   if (!GUARDED_WRITE_TOOLS.has(lower)) return '';
   const record = (args ?? {}) as Record<string, unknown>;
+
+  if (lower === 'apply_patch') {
+    const patchPath = extractPatchTextPath(record.patchText);
+    if (!patchPath) return '';
+    return workDir && workDir.trim().length > 0 && !isAbsolute(patchPath)
+      ? resolve(workDir, patchPath)
+      : patchPath;
+  }
+
   const candidate = record.filePath ?? record.path ?? record.file_path;
   return typeof candidate === 'string' ? candidate : '';
 }

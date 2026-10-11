@@ -9,7 +9,10 @@
  * - 非法路径（workDir 之外含 .flow-engine 目录层级）→ 钩子抛错，
  *   模拟 OpenCode 的中止语义（钩子抛错即工具调用中止），文件不得落盘；
  * - 合法路径（<workDir>/.flow-engine/ 下）→ 放行，写入正常完成；
- * - 覆盖工具列表维持 write/edit/multiedit/patch/apply_patch；
+ * - 覆盖工具列表对齐 OpenCode 1.19.0 实证：仅 write/edit/apply_patch
+ *   （二进制无 multiedit/patch 工具 ID）；
+ * - apply_patch 用例使用真实 `{ patchText }` 形态（PatchSchema 仅此一参），
+ *   文件路径在 patchText 的 `*** Update File:` 行头内；
  * - 非写工具（read/bash）不受该守卫阻断。
  */
 
@@ -50,6 +53,10 @@ function getToolBeforeHook(hooks: unknown): ToolBeforeHook {
  * 模拟 OpenCode 的工具派发语义：
  * 先跑 `tool.execute.before` 钩子——抛错则工具调用中止（不执行写入）；
  * 放行则执行写入。返回钩子错误（无错误返回 null）。
+ *
+ * apply_patch 的真实 schema 仅 `{ patchText }`（PatchSchema），文件路径在
+ * patchText 的 `*** Update File:` 行头内——放行后按该行头路径落盘，
+ * 与 OpenCode 1.19.0 二进制实证的 apply_patch 行为一致。
  */
 async function dispatchWrite(
   hooks: unknown,
@@ -63,9 +70,38 @@ async function dispatchWrite(
     return e instanceof Error ? e : new Error(String(e));
   }
   // 放行则执行写入（真实 write 工具会递归创建父目录）
+  if (tool === 'apply_patch') {
+    const target = patchTextTargetPath(String(args.patchText ?? ''));
+    if (target) {
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, 'patched-content', 'utf-8');
+    }
+    return null;
+  }
   await mkdir(dirname(args.filePath as string), { recursive: true });
   await writeFile(args.filePath as string, (args.content as string) ?? '', 'utf-8');
   return null;
+}
+
+/** 从 apply_patch 的 patchText 提取首个 `*** Update File:` 行头路径（模拟真实工具行为） */
+function patchTextTargetPath(patchText: string): string {
+  for (const line of patchText.split('\n')) {
+    const m = line.trim().match(/^\*\*\*\s*(?:Add|Update|Delete)\s+File:\s*(.+)$/i);
+    if (m) return m[1].trim();
+  }
+  return '';
+}
+
+/** 构造 apply_patch 真实形态的 patchText（PatchSchema 仅 { patchText }） */
+function buildPatchText(targetPath: string): string {
+  return [
+    '*** Begin Patch',
+    `*** Update File: ${targetPath}`,
+    '@@',
+    '-old-line',
+    '+new-line',
+    '*** End Patch',
+  ].join('\n');
 }
 
 /**
@@ -176,15 +212,16 @@ describe('P0-1：工件根写路径守卫 —— 工厂 hook 真阻断', () => {
     });
   }
 
-  // ─── 工具列表覆盖：write/edit/multiedit/patch/apply_patch 全部阻断 ──────────
+  // ─── 工具列表覆盖：write/edit/apply_patch 三个真实工具全部阻断 ─────────────
 
-  it('sflow 工厂：GUARDED_WRITE_TOOLS 五个写工具全部被阻断', async () => {
+  it('sflow 工厂：GUARDED_WRITE_TOOLS 三个真实写工具全部被阻断（apply_patch 走 patchText）', async () => {
     const hooks = await createSFlowPluginModule().server({
       client: createMockClient(),
       directory: workDir,
     } as never);
     try {
-      for (const tool of ['write', 'edit', 'multiedit', 'patch', 'apply_patch']) {
+      // write / edit：真实参数形态 { filePath, content / oldString, newString }
+      for (const tool of ['write', 'edit']) {
         const target = join(projectDir, '.flow-engine', 'sflow', `${tool}.md`);
         const err = await dispatchWrite(hooks, tool, {
           filePath: target,
@@ -196,6 +233,46 @@ describe('P0-1：工件根写路径守卫 —— 工厂 hook 真阻断', () => {
         expect(err!.message).toContain('工件目录锁定');
         expect(existsSync(target)).toBe(false);
       }
+
+      // apply_patch：真实 schema 仅 { patchText }，路径在 *** Update File: 行头内
+      const patchTarget = join(projectDir, '.flow-engine', 'sflow', 'apply_patch.md');
+      const err = await dispatchWrite(hooks, 'apply_patch', {
+        patchText: buildPatchText(patchTarget),
+      });
+      expect(err).toBeInstanceOf(Error);
+      expect(err!.message).toContain('工件目录锁定');
+      // 关键：patchText 内嵌的非法路径被提取并阻断，文件未落盘
+      expect(existsSync(patchTarget)).toBe(false);
+    } finally {
+      await disposeHooks(hooks);
+    }
+  });
+
+  // ─── 合法写回归：write/edit/apply_patch 三条路径在工件根下均放行 ────────────
+
+  it('sflow 工厂：合法工件写经 write/edit/apply_patch 三条路径均放行落盘', async () => {
+    const hooks = await createSFlowPluginModule().server({
+      client: createMockClient(),
+      directory: workDir,
+    } as never);
+    try {
+      const writeTarget = join(workDir, '.flow-engine', 'sflow', 'via-write.md');
+      const errWrite = await dispatchWrite(hooks, 'write', { filePath: writeTarget, content: '# w' });
+      expect(errWrite).toBeNull();
+      expect(existsSync(writeTarget)).toBe(true);
+
+      const editTarget = join(workDir, '.flow-engine', 'sflow', 'via-edit.md');
+      const errEdit = await dispatchWrite(hooks, 'edit', { filePath: editTarget, content: '# e' });
+      expect(errEdit).toBeNull();
+      expect(existsSync(editTarget)).toBe(true);
+
+      const patchTarget = join(workDir, '.flow-engine', 'sflow', 'via-apply-patch.md');
+      const errPatch = await dispatchWrite(hooks, 'apply_patch', {
+        patchText: buildPatchText(patchTarget),
+      });
+      expect(errPatch).toBeNull();
+      expect(existsSync(patchTarget)).toBe(true);
+      expect(await readFile(patchTarget, 'utf-8')).toBe('patched-content');
     } finally {
       await disposeHooks(hooks);
     }
