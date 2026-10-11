@@ -27,6 +27,20 @@ import {
 } from '../../agents/model-availability.js';
 import type { ProviderListClient, SFlowConfig } from '../../agents/model-availability.js';
 import { createCombinedPluginModule } from '../../combined-plugin-factory.js';
+import { rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// 机器级运行时目录隔离：notifications / subagent-store 已从 workDir/cwd 解耦，
+// 统一落 %USERPROFILE%/.flow-engine。此处用 FLOW_ENGINE_RUNTIME_ROOT 指向 tmpdir，
+// 使测试既不污染真实用户目录，也不依赖 cwd。
+const TEST_RUNTIME_ROOT = join(tmpdir(), `mff-runtime-${process.pid}-${Date.now()}`);
+process.env.FLOW_ENGINE_RUNTIME_ROOT = TEST_RUNTIME_ROOT;
+
+afterAll(() => {
+  rm(TEST_RUNTIME_ROOT, { recursive: true, force: true });
+  delete process.env.FLOW_ENGINE_RUNTIME_ROOT;
+});
 
 /** 临时把 Date.now 前进 offsetMs，返回恢复函数 */
 function advanceClock(offsetMs: number): () => void {

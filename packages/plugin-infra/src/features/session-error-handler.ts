@@ -55,9 +55,9 @@ export interface SessionErrorSideEffects {
 }
 
 /** 默认副作用（生产路径） */
-function defaultSideEffects(workDir: string): SessionErrorSideEffects {
-  const nm: NotificationManager = createNotificationManager({ workDir });
-  const store: SubagentStore = createSubagentStore({ workDir });
+function defaultSideEffects(runtimeRoot?: string): SessionErrorSideEffects {
+  const nm: NotificationManager = createNotificationManager({ runtimeRoot });
+  const store: SubagentStore = createSubagentStore({ runtimeRoot });
   return {
     blacklistModel: (model, opts) => markModelUnavailable(model, opts),
     writeNotification: (params) => nm.writeNotification(params),
@@ -81,8 +81,10 @@ function defaultSideEffects(workDir: string): SessionErrorSideEffects {
 
 /** 创建有状态 handler 的可注入依赖 */
 export interface CreateSessionErrorHandlerDeps {
-  /** workDir，用于通知 / store 落地（插件工作目录） */
+  /** workDir，用于事件诊断与 store 事件流水回溯（插件工作目录） */
   workDir: string;
+  /** 可选：机器级运行时根目录（通知 / store 落点，默认 %USERPROFILE%/.flow-engine） */
+  runtimeRoot?: string;
   /** sessionID → 模型字符串 解析器（如后台任务注册表反查） */
   modelResolver: (sessionID: string | undefined) => string | undefined;
   /** 可选：覆盖副作用（测试用） */
@@ -115,7 +117,7 @@ export function createSessionErrorHandler(
   deps: CreateSessionErrorHandlerDeps,
 ): SessionErrorHandler {
   const windowMs = deps.dedupWindowMs ?? SESSION_ERROR_DEDUP_WINDOW_MS;
-  const effects = deps.sideEffects ?? defaultSideEffects(deps.workDir);
+  const effects = deps.sideEffects ?? defaultSideEffects(deps.runtimeRoot);
   // 去重窗口：sessionID → 最近一次处理时间戳
   const lastSeen = new Map<string, number>();
 

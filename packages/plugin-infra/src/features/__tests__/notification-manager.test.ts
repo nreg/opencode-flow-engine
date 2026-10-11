@@ -39,7 +39,7 @@ describe('NotificationManager', () => {
     // 清理并创建临时目录
     await rm(TEST_TMP, { recursive: true, force: true });
     await mkdir(TEST_TMP, { recursive: true });
-    nm = createNotificationManager({ workDir: TEST_TMP });
+    nm = createNotificationManager({ runtimeRoot: TEST_TMP });
   });
 
   afterEach(async () => {
@@ -53,7 +53,7 @@ describe('NotificationManager', () => {
       const params = makeWriteParams({ type: 'sync_completed' });
       await nm.writeNotification(params);
 
-      const notifDir = join(TEST_TMP, '.flow-engine/sflow/notifications');
+      const notifDir = join(TEST_TMP, 'notifications');
       const files = await Array.prototype.filter.call(
         await import('fs/promises').then(m => m.readdir(notifDir)),
         (f: string) => f.endsWith('.json'),
@@ -74,7 +74,7 @@ describe('NotificationManager', () => {
       const params = makeWriteParams({ type: 'async_completed' });
       await nm.writeNotification(params);
 
-      const notifDir = join(TEST_TMP, '.flow-engine/sflow/notifications');
+      const notifDir = join(TEST_TMP, 'notifications');
       const { readdir } = await import('fs/promises');
       const files = (await readdir(notifDir)).filter((f: string) => f.endsWith('.json'));
       expect(files.length).toBe(1);
@@ -89,7 +89,7 @@ describe('NotificationManager', () => {
       await nm.writeNotification(params);
       const after = new Date().toISOString();
 
-      const notifDir = join(TEST_TMP, '.flow-engine/sflow/notifications');
+      const notifDir = join(TEST_TMP, 'notifications');
       const { readdir } = await import('fs/promises');
       const files = (await readdir(notifDir)).filter((f: string) => f.endsWith('.json'));
       const content = JSON.parse(await readFile(join(notifDir, files[0]), 'utf-8'));
@@ -100,7 +100,7 @@ describe('NotificationManager', () => {
 
     it('should not throw when write fails (graceful degradation)', async () => {
       // Create a NotificationManager pointing to a read-only path (will fail)
-      const badNm = createNotificationManager({ workDir: '/nonexistent-root-path-that-cannot-be-created/__test__' });
+      const badNm = createNotificationManager({ runtimeRoot: '/nonexistent-root-path-that-cannot-be-created/__test__' });
       // Should not throw
       await expect(badNm.writeNotification(makeWriteParams())).resolves.toBeUndefined();
     });
@@ -109,7 +109,7 @@ describe('NotificationManager', () => {
       const params = makeWriteParams({ has_completion_signal: true });
       await nm.writeNotification(params);
 
-      const notifDir = join(TEST_TMP, '.flow-engine/sflow/notifications');
+      const notifDir = join(TEST_TMP, 'notifications');
       const { readdir } = await import('fs/promises');
       const files = (await readdir(notifDir)).filter((f: string) => f.endsWith('.json'));
       const content = JSON.parse(await readFile(join(notifDir, files[0]), 'utf-8'));
@@ -121,7 +121,7 @@ describe('NotificationManager', () => {
       const params = makeWriteParams();
       await nm.writeNotification(params);
 
-      const notifDir = join(TEST_TMP, '.flow-engine/sflow/notifications');
+      const notifDir = join(TEST_TMP, 'notifications');
       const { readdir } = await import('fs/promises');
       const files = (await readdir(notifDir)).filter((f: string) => f.endsWith('.json'));
       const content = JSON.parse(await readFile(join(notifDir, files[0]), 'utf-8'));
@@ -133,7 +133,7 @@ describe('NotificationManager', () => {
       const params = makeWriteParams({ has_completion_signal: false });
       await nm.writeNotification(params);
 
-      const notifDir = join(TEST_TMP, '.flow-engine/sflow/notifications');
+      const notifDir = join(TEST_TMP, 'notifications');
       const { readdir } = await import('fs/promises');
       const files = (await readdir(notifDir)).filter((f: string) => f.endsWith('.json'));
       const content = JSON.parse(await readFile(join(notifDir, files[0]), 'utf-8'));
@@ -151,7 +151,7 @@ describe('NotificationManager', () => {
     });
 
     it('should return empty array when directory does not exist', async () => {
-      const badNm = createNotificationManager({ workDir: join(TEST_TMP, 'nonexistent') });
+      const badNm = createNotificationManager({ runtimeRoot: join(TEST_TMP, 'nonexistent') });
       const pending = await badNm.getPendingNotifications();
       expect(pending).toEqual([]);
     });
@@ -192,7 +192,7 @@ describe('NotificationManager', () => {
       expect(consumed.length).toBe(2);
 
       // Files should be moved to consumed/
-      const notifDir = join(TEST_TMP, '.flow-engine/sflow/notifications');
+      const notifDir = join(TEST_TMP, 'notifications');
       const consumedDir = join(notifDir, 'consumed');
       const { readdir } = await import('fs/promises');
 
@@ -209,7 +209,7 @@ describe('NotificationManager', () => {
     });
 
     it('should return empty array when directory does not exist', async () => {
-      const badNm = createNotificationManager({ workDir: join(TEST_TMP, 'nonexistent') });
+      const badNm = createNotificationManager({ runtimeRoot: join(TEST_TMP, 'nonexistent') });
       const consumed = await badNm.consumeNotifications();
       expect(consumed).toEqual([]);
     });
@@ -218,7 +218,7 @@ describe('NotificationManager', () => {
       await nm.writeNotification(makeWriteParams({ task_id: 'sf_200_1' }));
 
       // Pre-create the same file in consumed/
-      const notifDir = join(TEST_TMP, '.flow-engine/sflow/notifications');
+      const notifDir = join(TEST_TMP, 'notifications');
       const consumedDir = join(notifDir, 'consumed');
       await mkdir(consumedDir, { recursive: true });
       await writeFile(
@@ -238,7 +238,7 @@ describe('NotificationManager', () => {
 
     it('should consume new notification alongside existing consumed ones', async () => {
       // Pre-create a consumed notification
-      const notifDir = join(TEST_TMP, '.flow-engine/sflow/notifications');
+      const notifDir = join(TEST_TMP, 'notifications');
       const consumedDir = join(notifDir, 'consumed');
       await mkdir(consumedDir, { recursive: true });
       await writeFile(
@@ -311,5 +311,51 @@ describe('NotificationManager', () => {
       expect(consumed[0].formatted).not.toContain('输出包含完成信号');
       expect(consumed[0].formatted).not.toContain('输出可能不完整');
     });
+  });
+});
+
+// ─── 机器级运行时目录（不再由 workDir / cwd 决定）────────────────────────────
+
+describe('NotificationManager 机器级运行时目录', () => {
+  const ENV_KEY = 'FLOW_ENGINE_RUNTIME_ROOT';
+  const RUNTIME_TMP = join(import.meta.dir, '__nm_runtime_tmp__');
+
+  beforeEach(async () => {
+    await rm(RUNTIME_TMP, { recursive: true, force: true });
+    await mkdir(RUNTIME_TMP, { recursive: true });
+    process.env[ENV_KEY] = RUNTIME_TMP;
+  });
+
+  afterEach(async () => {
+    delete process.env[ENV_KEY];
+    await rm(RUNTIME_TMP, { recursive: true, force: true });
+  });
+
+  it('默认落盘到 <runtimeRoot>/notifications/，与 workDir / cwd 无关', async () => {
+    const defaultNm = createNotificationManager();
+    await defaultNm.writeNotification(makeWriteParams({ task_id: 'sf_runtime_1' }));
+
+    // 平铺：<runtimeRoot>/notifications/<task_id>.json（不再有 sflow 层级）
+    const file = join(RUNTIME_TMP, 'notifications', 'sf_runtime_1.json');
+    expect(await exists(file)).toBe(true);
+    expect(await exists(join(RUNTIME_TMP, 'notifications', 'consumed'))).toBe(false);
+  });
+
+  it('runtimeRoot 显式传参优先于环境变量', async () => {
+    const explicitRoot = join(RUNTIME_TMP, 'explicit');
+    const nm2 = createNotificationManager({ runtimeRoot: explicitRoot });
+    await nm2.writeNotification(makeWriteParams({ task_id: 'sf_runtime_2' }));
+
+    expect(await exists(join(explicitRoot, 'notifications', 'sf_runtime_2.json'))).toBe(true);
+    expect(await exists(join(RUNTIME_TMP, 'notifications', 'sf_runtime_2.json'))).toBe(false);
+  });
+
+  it('即使传入 workDir，通知也不再落到 workDir 下', async () => {
+    const workDirLike = join(RUNTIME_TMP, 'some-project');
+    const nm3 = createNotificationManager({ workDir: workDirLike } as never);
+    await nm3.writeNotification(makeWriteParams({ task_id: 'sf_runtime_3' }));
+
+    expect(await exists(join(RUNTIME_TMP, 'notifications', 'sf_runtime_3.json'))).toBe(true);
+    expect(await exists(join(workDirLike, '.flow-engine'))).toBe(false);
   });
 });

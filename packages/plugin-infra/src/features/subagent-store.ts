@@ -3,8 +3,10 @@
  *
  * 将子 agent 的执行状态持久化到文件系统，支持长任务中断后恢复上下文继续执行。
  *
+ * 落点是**机器级运行时产物**，与 cwd / projectDir 无关（见 helpers/runtime-paths.ts）。
+ *
  * 存储结构：
- * .flow-engine/sflow/subagent-store/
+ * %USERPROFILE%/.flow-engine/subagent-store/
  * ├── index.json
  * ├── agent_001/
  * │   ├── meta.json       # agent_id, subagent_type, session_id, created_at, updated_at, completed_at, status
@@ -18,6 +20,7 @@
  *     └── events.log
  */
 import { Logger } from '../utils/logger.js';
+import { resolveRuntimeRoot } from '../helpers/runtime-paths.js';
 
 import { join } from 'path';
 import {
@@ -34,7 +37,7 @@ import {
 
 // ─── 常量 ──────────────────────────────────────────────────────────────────
 
-const SUBAGENT_STORE_SUBDIR = '.flow-engine/sflow/subagent-store';
+const SUBAGENT_STORE_SUBDIR = 'subagent-store';
 const INDEX_FILE = 'index.json';
 const META_FILE = 'meta.json';
 const PROMPT_FILE = 'prompt.md';
@@ -167,11 +170,11 @@ function parseEventsLog(content: string): AgentEvent[] {
 /**
  * 创建 SubagentStore 实例
  *
- * @param config.workDir - 项目根目录路径（插件工作目录）
+ * @param config.runtimeRoot - 可选：机器级运行时根目录（默认 %USERPROFILE%/.flow-engine）
  * @returns SubagentStore 实例
  */
-export function createSubagentStore(config: { workDir: string }): SubagentStore {
-  const storeDir = join(config.workDir, SUBAGENT_STORE_SUBDIR);
+export function createSubagentStore(config?: { runtimeRoot?: string }): SubagentStore {
+  const storeDir = join(resolveRuntimeRoot(config?.runtimeRoot), SUBAGENT_STORE_SUBDIR);
   const indexPath = join(storeDir, INDEX_FILE);
 
   /**

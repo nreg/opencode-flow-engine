@@ -572,7 +572,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           if (event.type === 'session.created') {
             // P0: 主 agent 启动时消费未读通知
             try {
-              const nm = createNotificationManager({ workDir });
+              const nm = createNotificationManager();
               const notifications = await nm.consumeNotifications();
               if (notifications.length > 0) {
                 const notifSummary = notifications.map(n => n.formatted).join('\n');

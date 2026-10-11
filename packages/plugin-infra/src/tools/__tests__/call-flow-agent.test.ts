@@ -9,7 +9,7 @@
  * - P3-async: JSON code fence 被识别为完成信号
  */
 
-import { beforeEach, describe, expect, it, mock, afterEach } from 'bun:test';
+import { beforeEach, describe, expect, it, mock, afterEach, afterAll } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -150,6 +150,12 @@ async function waitFor(
 // P0-3: Store tools reference for cleanup
 let currentTools: ReturnType<typeof createCallFlowAgentTools> | null = null;
 
+// 机器级运行时目录隔离：notifications / subagent-store 已从 workDir/cwd 解耦，
+// 统一落 %USERPROFILE%/.flow-engine。此处用 FLOW_ENGINE_RUNTIME_ROOT 指向 tmpdir，
+// 使测试既不污染真实用户目录，也不依赖 cwd。
+const TEST_RUNTIME_ROOT = join(tmpdir(), `cfa-runtime-${process.pid}-${Date.now()}`);
+process.env.FLOW_ENGINE_RUNTIME_ROOT = TEST_RUNTIME_ROOT;
+
 afterEach(() => {
   if (currentTools && '_stopWatcher' in currentTools && typeof currentTools._stopWatcher === 'function') {
     currentTools._stopWatcher();
@@ -158,6 +164,11 @@ afterEach(() => {
   resetRunningSubagentCounts();
   resetGlobalEventBus(); // Batch 4: Reset event bus between tests
   clearUnavailableModels(); // Wave 2: 统一兜底，清理模块级 UNAVAILABLE_MODELS（故障转移测试会写入拉黑），防止跨测试泄漏
+});
+
+afterAll(() => {
+  rm(TEST_RUNTIME_ROOT, { recursive: true, force: true });
+  delete process.env.FLOW_ENGINE_RUNTIME_ROOT;
 });
 
 // ─── P3: 异步模式 completion enforcement ────────────────────────────────────
@@ -1791,7 +1802,7 @@ describe('Wave 1: workDir 标记注入', () => {
     const testDirectory = 'E:\\test\\resume-project';
     
     // 先创建一个 agent 记录（模拟之前的运行）
-    const store = await import('../../features/subagent-store.js').then(m => m.createSubagentStore({ workDir: testDirectory }));
+    const store = await import('../../features/subagent-store.js').then(m => m.createSubagentStore());
     const agentId = 'agent_resume_test';
     await store.createAgent({
       agent_id: agentId,
@@ -4010,9 +4021,9 @@ describe('FIX-P3-2: no-valid-output 路径补写降级通知', () => {
     currentTools = null;
   });
 
-  /** 读取 changeDir 下通知目录中的全部通知 JSON */
-  async function readNotifications(changeDir: string): Promise<Array<Record<string, unknown>>> {
-    const notifDir = join(changeDir, '.flow-engine/sflow/notifications');
+  /** 读取机器级运行时根下通知目录中的全部通知 JSON */
+  async function readNotifications(_workDir: string): Promise<Array<Record<string, unknown>>> {
+    const notifDir = join(TEST_RUNTIME_ROOT, 'notifications');
     try {
       const { readdir, readFile } = await import('node:fs/promises');
       const files = (await readdir(notifDir)).filter((f) => f.endsWith('.json'));

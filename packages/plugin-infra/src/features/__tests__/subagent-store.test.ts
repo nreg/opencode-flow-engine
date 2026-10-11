@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { join } from 'path';
-import { mkdir, rm, readFile, readdir, stat } from 'fs/promises';
+import { mkdir, rm, readFile, readdir, stat, exists } from 'fs/promises';
 import { createSubagentStore } from '../subagent-store.js';
 import type { CreateAgentParams, AgentEvent } from '../subagent-store.js';
 
@@ -49,7 +49,7 @@ describe('SubagentStore', () => {
     // 清理并创建临时目录
     await rm(TEST_TMP, { recursive: true, force: true });
     await mkdir(TEST_TMP, { recursive: true });
-    store = createSubagentStore({ workDir: TEST_TMP });
+    store = createSubagentStore({ runtimeRoot: TEST_TMP });
   });
 
   afterEach(async () => {
@@ -62,7 +62,7 @@ describe('SubagentStore', () => {
     it('should create agent directory with 4 files', async () => {
       const meta = await store.createAgent(makeCreateParams());
 
-      const agentDir = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001');
+      const agentDir = join(TEST_TMP, 'subagent-store/agent_001');
       const files = await readdir(agentDir);
       expect(files.sort()).toEqual(['events.log', 'meta.json', 'output.md', 'prompt.md']);
     });
@@ -70,7 +70,7 @@ describe('SubagentStore', () => {
     it('should write meta.json with correct fields', async () => {
       const meta = await store.createAgent(makeCreateParams());
 
-      const metaPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/meta.json');
+      const metaPath = join(TEST_TMP, 'subagent-store/agent_001/meta.json');
       const content = JSON.parse(await readFile(metaPath, 'utf-8'));
 
       expect(content.agent_id).toBe('agent_001');
@@ -85,7 +85,7 @@ describe('SubagentStore', () => {
     it('should write prompt.md with original prompt', async () => {
       await store.createAgent(makeCreateParams({ prompt: 'Build the feature' }));
 
-      const promptPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/prompt.md');
+      const promptPath = join(TEST_TMP, 'subagent-store/agent_001/prompt.md');
       const content = await readFile(promptPath, 'utf-8');
       expect(content).toBe('Build the feature');
     });
@@ -93,7 +93,7 @@ describe('SubagentStore', () => {
     it('should create empty output.md', async () => {
       await store.createAgent(makeCreateParams());
 
-      const outputPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/output.md');
+      const outputPath = join(TEST_TMP, 'subagent-store/agent_001/output.md');
       const content = await readFile(outputPath, 'utf-8');
       expect(content).toBe('');
     });
@@ -101,7 +101,7 @@ describe('SubagentStore', () => {
     it('should create empty events.log', async () => {
       await store.createAgent(makeCreateParams());
 
-      const eventsPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/events.log');
+      const eventsPath = join(TEST_TMP, 'subagent-store/agent_001/events.log');
       const content = await readFile(eventsPath, 'utf-8');
       expect(content).toBe('');
     });
@@ -109,7 +109,7 @@ describe('SubagentStore', () => {
     it('should update index.json with new agent entry', async () => {
       await store.createAgent(makeCreateParams());
 
-      const indexPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/index.json');
+      const indexPath = join(TEST_TMP, 'subagent-store/index.json');
       const index = JSON.parse(await readFile(indexPath, 'utf-8'));
 
       expect(index.length).toBe(1);
@@ -134,7 +134,7 @@ describe('SubagentStore', () => {
       await store.createAgent(makeCreateParams({ agent_id: 'agent_001' }));
       await store.createAgent(makeCreateParams({ agent_id: 'agent_002' }));
 
-      const indexPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/index.json');
+      const indexPath = join(TEST_TMP, 'subagent-store/index.json');
       const index = JSON.parse(await readFile(indexPath, 'utf-8'));
 
       expect(index.length).toBe(2);
@@ -150,7 +150,7 @@ describe('SubagentStore', () => {
       await store.createAgent(makeCreateParams());
       await store.updateOutput('agent_001', 'Build completed successfully');
 
-      const outputPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/output.md');
+      const outputPath = join(TEST_TMP, 'subagent-store/agent_001/output.md');
       const content = await readFile(outputPath, 'utf-8');
       expect(content).toBe('Build completed successfully');
     });
@@ -159,7 +159,7 @@ describe('SubagentStore', () => {
       await store.createAgent(makeCreateParams());
       await store.updateOutput('agent_001', 'Build completed');
 
-      const metaPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/meta.json');
+      const metaPath = join(TEST_TMP, 'subagent-store/agent_001/meta.json');
       const meta = JSON.parse(await readFile(metaPath, 'utf-8'));
 
       expect(meta.status).toBe('completed');
@@ -171,7 +171,7 @@ describe('SubagentStore', () => {
       await store.createAgent(makeCreateParams());
       await store.updateOutput('agent_001', 'Build completed');
 
-      const indexPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/index.json');
+      const indexPath = join(TEST_TMP, 'subagent-store/index.json');
       const index = JSON.parse(await readFile(indexPath, 'utf-8'));
 
       expect(index[0].status).toBe('completed');
@@ -182,7 +182,7 @@ describe('SubagentStore', () => {
       await store.createAgent(makeCreateParams());
       await store.updateOutput('agent_001', 'Error occurred', { status: 'error' });
 
-      const metaPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/meta.json');
+      const metaPath = join(TEST_TMP, 'subagent-store/agent_001/meta.json');
       const meta = JSON.parse(await readFile(metaPath, 'utf-8'));
 
       expect(meta.status).toBe('error');
@@ -194,7 +194,7 @@ describe('SubagentStore', () => {
       await store.createAgent(makeCreateParams());
       await store.updateOutput('agent_001', 'Build completed');
 
-      const metaPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/meta.json');
+      const metaPath = join(TEST_TMP, 'subagent-store/agent_001/meta.json');
       const meta = JSON.parse(await readFile(metaPath, 'utf-8'));
 
       expect(meta.status).toBe('completed');
@@ -205,7 +205,7 @@ describe('SubagentStore', () => {
       await store.createAgent(makeCreateParams());
       await store.updateOutput('agent_001', 'Done', { status: 'completed' });
 
-      const metaPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/meta.json');
+      const metaPath = join(TEST_TMP, 'subagent-store/agent_001/meta.json');
       const meta = JSON.parse(await readFile(metaPath, 'utf-8'));
 
       expect(meta.status).toBe('completed');
@@ -216,7 +216,7 @@ describe('SubagentStore', () => {
       await store.createAgent(makeCreateParams());
       await store.updateOutput('agent_001', 'Error occurred', { status: 'error' });
 
-      const indexPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/index.json');
+      const indexPath = join(TEST_TMP, 'subagent-store/index.json');
       const index = JSON.parse(await readFile(indexPath, 'utf-8'));
 
       expect(index[0].status).toBe('error');
@@ -238,7 +238,7 @@ describe('SubagentStore', () => {
       const event = makeEvent({ event_type: 'started', detail: 'Task started' });
       await store.appendEvent('agent_001', event);
 
-      const eventsPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/events.log');
+      const eventsPath = join(TEST_TMP, 'subagent-store/agent_001/events.log');
       const content = await readFile(eventsPath, 'utf-8');
       const lines = content.trim().split('\n');
       expect(lines.length).toBe(1);
@@ -254,7 +254,7 @@ describe('SubagentStore', () => {
       await store.appendEvent('agent_001', makeEvent({ event_type: 'started', detail: 'Task started' }));
       await store.appendEvent('agent_001', makeEvent({ event_type: 'completed', detail: 'Task completed' }));
 
-      const eventsPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/events.log');
+      const eventsPath = join(TEST_TMP, 'subagent-store/agent_001/events.log');
       const content = await readFile(eventsPath, 'utf-8');
       const lines = content.trim().split('\n');
       expect(lines.length).toBe(2);
@@ -269,7 +269,7 @@ describe('SubagentStore', () => {
     it('should update meta.json updated_at', async () => {
       await store.createAgent(makeCreateParams());
       const metaBefore = JSON.parse(
-        await readFile(join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/meta.json'), 'utf-8'),
+        await readFile(join(TEST_TMP, 'subagent-store/agent_001/meta.json'), 'utf-8'),
       );
 
       // 等待一小段时间确保 updated_at 变化
@@ -278,7 +278,7 @@ describe('SubagentStore', () => {
       await store.appendEvent('agent_001', makeEvent());
 
       const metaAfter = JSON.parse(
-        await readFile(join(TEST_TMP, '.flow-engine/sflow/subagent-store/agent_001/meta.json'), 'utf-8'),
+        await readFile(join(TEST_TMP, 'subagent-store/agent_001/meta.json'), 'utf-8'),
       );
 
       expect(metaAfter.updated_at >= metaBefore.updated_at).toBe(true);
@@ -407,7 +407,7 @@ describe('SubagentStore', () => {
     it('should include session_id and completed_at in index.json entry', async () => {
       await store.createAgent(makeCreateParams({ agent_id: 'agent_001', session_id: 'sess_xyz' }));
 
-      const indexPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/index.json');
+      const indexPath = join(TEST_TMP, 'subagent-store/index.json');
       const index = JSON.parse(await readFile(indexPath, 'utf-8'));
 
       expect(index[0].session_id).toBe('sess_xyz');
@@ -454,7 +454,7 @@ describe('SubagentStore', () => {
 
       await store.resumeAgent('agent_001', 'Continue');
 
-      const indexPath = join(TEST_TMP, '.flow-engine/sflow/subagent-store/index.json');
+      const indexPath = join(TEST_TMP, 'subagent-store/index.json');
       const index = JSON.parse(await readFile(indexPath, 'utf-8'));
 
       expect(index[0].status).toBe('resumed');
@@ -474,5 +474,49 @@ describe('SubagentStore', () => {
 
       expect(result.prompt).toBe('New prompt\n\n--- 之前的工作摘要 ---\nPrevious work output');
     });
+  });
+});
+
+// ─── 机器级运行时目录（不再由 workDir / cwd 决定）────────────────────────────
+
+describe('SubagentStore 机器级运行时目录', () => {
+  const ENV_KEY = 'FLOW_ENGINE_RUNTIME_ROOT';
+  const RUNTIME_TMP = join(import.meta.dir, '__ss_runtime_tmp__');
+
+  beforeEach(async () => {
+    await rm(RUNTIME_TMP, { recursive: true, force: true });
+    await mkdir(RUNTIME_TMP, { recursive: true });
+    process.env[ENV_KEY] = RUNTIME_TMP;
+  });
+
+  afterEach(async () => {
+    delete process.env[ENV_KEY];
+    await rm(RUNTIME_TMP, { recursive: true, force: true });
+  });
+
+  it('默认落盘到 <runtimeRoot>/subagent-store/，与 workDir / cwd 无关', async () => {
+    const defaultStore = createSubagentStore();
+    await defaultStore.createAgent(makeCreateParams({ agent_id: 'agent_runtime_1' }));
+
+    expect(await exists(join(RUNTIME_TMP, 'subagent-store', 'agent_runtime_1', 'meta.json'))).toBe(true);
+    expect(await exists(join(RUNTIME_TMP, 'subagent-store', 'index.json'))).toBe(true);
+  });
+
+  it('runtimeRoot 显式传参优先于环境变量', async () => {
+    const explicitRoot = join(RUNTIME_TMP, 'explicit');
+    const store2 = createSubagentStore({ runtimeRoot: explicitRoot });
+    await store2.createAgent(makeCreateParams({ agent_id: 'agent_runtime_2' }));
+
+    expect(await exists(join(explicitRoot, 'subagent-store', 'agent_runtime_2', 'meta.json'))).toBe(true);
+    expect(await exists(join(RUNTIME_TMP, 'subagent-store', 'agent_runtime_2', 'meta.json'))).toBe(false);
+  });
+
+  it('即使传入 workDir，store 也不再落到 workDir 下', async () => {
+    const workDirLike = join(RUNTIME_TMP, 'some-project');
+    const store3 = createSubagentStore({ workDir: workDirLike } as never);
+    await store3.createAgent(makeCreateParams({ agent_id: 'agent_runtime_3' }));
+
+    expect(await exists(join(RUNTIME_TMP, 'subagent-store', 'agent_runtime_3', 'meta.json'))).toBe(true);
+    expect(await exists(join(workDirLike, '.flow-engine'))).toBe(false);
   });
 });

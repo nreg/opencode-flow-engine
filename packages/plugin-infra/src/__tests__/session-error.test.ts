@@ -10,17 +10,28 @@
  * ⑥ 分类未命中不产生通知
  *
  * + P1-1：换模后旧 session 迟到事件不得误拉黑当前健康模型（attemptedModels 护栏）
- * + P1-2：通知文件必须落到真实 changeDir，而非 process.cwd()
+ * + P1-2：通知文件必须落到机器级运行时目录（%USERPROFILE%/.flow-engine/notifications），
+ *   既不落 process.cwd()，也不落任何子项目目录；测试用 FLOW_ENGINE_RUNTIME_ROOT 隔离。
  *
  * 设计：通过注入副作用（blacklistModel / writeNotification 计数）与可注入
  * modelResolver，对 handler 做纯逻辑验证；P1-2 另用真实文件系统验证目录落点。
  */
 
-import { beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtemp, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { listFiles, readJsonFile } from '@opencode-flow-engine/shared';
+
+/** 目录/文件是否存在（fs.access 包装，避免再引一个依赖） */
+async function exists(p: string): Promise<boolean> {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 import {
   clearUnavailableModels,
   isModelAvailable,
@@ -450,6 +461,20 @@ describe('P2-2′: sessionErrorModelForBlacklist 边界（护栏直接单测）'
 // ─── P2-2′：三工厂护栏接线（getter 导出为测试钩子）───────────────────────────
 
 describe('P2-2′: 三工厂 sessionErrorHandler 接线（workDir 建键 + 实例隔离）', () => {
+  const ENV_KEY = 'FLOW_ENGINE_RUNTIME_ROOT';
+  let runtimeTmp: string;
+
+  beforeEach(async () => {
+    // 隔离机器级运行时根，避免写入真实 %USERPROFILE%/.flow-engine
+    runtimeTmp = await mkdtemp(join(tmpdir(), 'sflow-runtime-'));
+    process.env[ENV_KEY] = runtimeTmp;
+  });
+
+  afterEach(async () => {
+    delete process.env[ENV_KEY];
+    await rm(runtimeTmp, { recursive: true, force: true });
+  });
+
   /**
    * 工厂 modelResolver 反查工厂私有 backgroundTaskRegistry（测试无法注入），
    * 空 registry → 解析不到模型 → 'no-model'。因此「changeDir 是否为 workDir」
@@ -541,8 +566,8 @@ describe('P2-2′: 三工厂 sessionErrorHandler 接线（workDir 建键 + 实�
       const result = await handler.handle({ sessionID: 'sess-p23', error: apiError(429) });
       expect(result).toBe('no-model'); // 无 registry 反查 → 分类失败，不拉黑
 
-      // 落盘验证：通知落在注入的 workDir 下，cwd 下没有（P1-2 观测量）
-      const notifDir = join(workDir, '.flow-engine/sflow/notifications');
+      // 落盘验证：通知落在机器级运行时目录（runtimeRoot），cwd 下没有
+      const notifDir = join(runtimeTmp, 'notifications');
       const workFiles = await listFiles(notifDir, '.json').catch(() => []);
       const cwdFiles = await listFiles(
         join(process.cwd(), '.flow-engine/sflow/notifications'),
@@ -550,6 +575,10 @@ describe('P2-2′: 三工厂 sessionErrorHandler 接线（workDir 建键 + 实�
       ).catch(() => []);
       expect(cwdFiles).not.toContain('sess-p23.json');
       expect(workFiles).not.toContain('sess-p23.json'); // 未拉黑则不落盘
+      // 也绝不落到注入的 workDir 下
+      expect(await listFiles(join(workDir, '.flow-engine'), 'sess-p23.json').catch(() => [])).toEqual(
+        [],
+      );
     } finally {
       await rm(workDir, { recursive: true, force: true });
     }
@@ -599,9 +628,9 @@ describe('P2-2′: 三工厂 sessionErrorHandler 接线（workDir 建键 + 实�
       });
       expect(result).toBe('no-model');
 
-      // 关键断言：handler 默认副作用按注入的 changeDir 构造 NotificationManager
-      //（构造期即 join(changeDir, '.flow-engine/sflow/notifications')）。
-      // 若 changeDir 被写死为 process.cwd()，该目录不会出现在 workDir 下。
+      // 关键断言：handler 默认副作用按机器级运行时目录构造 NotificationManager
+      //（构造期即 join(runtimeRoot, 'notifications')）。
+      // 若 runtimeRoot 被写死为 process.cwd() 或注入的 workDir，该目录不会出现在 runtimeTmp 下。
       expect(iflow.iflowSessionErrorHandlerWorkDirForTest.get(workDir)).toBe(workDir);
       expect(
         iflow.iflowSessionErrorHandlerWorkDirForTest.get(workDir),
@@ -612,15 +641,27 @@ describe('P2-2′: 三工厂 sessionErrorHandler 接线（workDir 建键 + 实�
   });
 });
 
-// ─── P1-2：通知文件落真实 changeDir，而非 process.cwd() ─────────────────────────
+// ─── P1-2：通知文件落机器级运行时目录，而非 process.cwd() / 子项目目录 ──────────
 
-describe('P1-2 ① 通知文件落在真实 changeDir 而非 process.cwd()', () => {
-  beforeEach(() => clearUnavailableModels());
+describe('P1-2 ① 通知文件落在机器级运行时目录而非 process.cwd()/workDir', () => {
+  const ENV_KEY = 'FLOW_ENGINE_RUNTIME_ROOT';
+  let runtimeTmp: string;
 
-  it('使用注入的 changeDir 写入通知，不与 process.cwd() 耦合', async () => {
+  beforeEach(async () => {
+    clearUnavailableModels();
+    runtimeTmp = await mkdtemp(join(tmpdir(), 'sflow-p1-2-runtime-'));
+    process.env[ENV_KEY] = runtimeTmp;
+  });
+
+  afterEach(async () => {
+    delete process.env[ENV_KEY];
+    await rm(runtimeTmp, { recursive: true, force: true });
+  });
+
+  it('写入通知到 <runtimeRoot>/notifications/，不与 process.cwd()/workDir 耦合', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'sflow-p1-2-'));
     try {
-      // 真实副作用（默认 NotificationManager），changeDir 传入临时目录
+      // 真实副作用（默认 NotificationManager），workDir 传入临时目录
       const handler = createSessionErrorHandler({
         workDir: dir,
         modelResolver: () => 'provider/p1-2-model',
@@ -630,15 +671,24 @@ describe('P1-2 ① 通知文件落在真实 changeDir 而非 process.cwd()', () 
       const result = await handler.handle({ sessionID: 'sess-p12', error: apiError(429) });
       expect(result).toBe('blacklisted');
 
-      // 通知文件应落在 <dir>/.flow-engine/sflow/notifications/ 下
-      const notifDir = join(dir, '.flow-engine/sflow/notifications');
+      // 通知文件应落在 <runtimeRoot>/notifications/ 下（平铺，无 sflow 层级）
+      const notifDir = join(runtimeTmp, 'notifications');
       const files = await listFiles(notifDir, '.json');
       expect(files).toHaveLength(1);
 
-      // 关键断言：process.cwd() 下不应出现本事件的通知文件（落点正确，非 cwd）
-      const cwdNotifDir = join(process.cwd(), '.flow-engine/sflow/notifications');
-      const cwdFiles = await listFiles(cwdNotifDir, '.json').catch(() => []);
+      // 关键断言：process.cwd() 下不应出现本事件的通知文件
+      const cwdFiles = await listFiles(
+        join(process.cwd(), '.flow-engine/sflow/notifications'),
+        '.json',
+      ).catch(() => []);
       expect(cwdFiles).not.toContain('sess-p12.json');
+
+      // 关键断言：注入的 workDir 下也不应出现（运行时产物不落子项目目录）
+      const workDirFiles = await listFiles(
+        join(dir, '.flow-engine'),
+        'sess-p12.json',
+      ).catch(() => []);
+      expect(workDirFiles).toEqual([]);
 
       // 通知内容正确
       const entry = await readJsonFile<{ session_id: string; failure_reason?: string }>(
@@ -651,25 +701,47 @@ describe('P1-2 ① 通知文件落在真实 changeDir 而非 process.cwd()', () 
     }
   });
 
-  it('changeDir 经构造参数注入，且默认副作用使用它（非 process.cwd）', () => {
-    // 验证 createSessionErrorHandler 的 deps.changeDir 被默认副作用采用：
-    // 用真实 NotificationManager 探测目录是否按注入值创建（不实际写文件，仅构造）。
+  it('runtimeRoot 显式传参优先于环境变量', async () => {
+    const explicitRoot = await mkdtemp(join(tmpdir(), 'sflow-p1-2-explicit-'));
+    try {
+      const handler = createSessionErrorHandler({
+        workDir: explicitRoot,
+        runtimeRoot: explicitRoot,
+        modelResolver: () => 'provider/explicit-model',
+        dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
+      });
+
+      expect(await handler.handle({ sessionID: 'sess-explicit', error: apiError(429) })).toBe(
+        'blacklisted',
+      );
+
+      expect(await listFiles(join(explicitRoot, 'notifications'), '.json')).toHaveLength(1);
+      expect(await listFiles(join(runtimeTmp, 'notifications'), '.json').catch(() => [])).toHaveLength(
+        0,
+      );
+    } finally {
+      await rm(explicitRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('changeDir 经构造参数注入，workDir 仍被接受（与 cwd 解耦）', () => {
+    // 验证 createSessionErrorHandler 的 deps.workDir 被接受：
+    // workDir 只用于事件诊断/回溯，不再决定通知落点（落点由 runtimeRoot 决定）。
     const handler = createSessionErrorHandler({
       workDir: '/nonexistent/injected-dir-p1-2',
       modelResolver: () => undefined,
       dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
     });
-    // 构造本身不抛错即说明 changeDir 被接受（真实落点在 handle 时惰性使用）
+    // 构造本身不抛错即说明 workDir 被接受（真实落点在 handle 时惰性使用）
     expect(typeof handler.handle).toBe('function');
     expect(typeof handler.resetDedup).toBe('function');
   });
 
-  it('两个不同 changeDir 各自落盘、互不串写（per-workDir handler 隔离）', async () => {
+  it('两个不同 workDir 的 handler 都不向子项目目录写通知（统一落机器级目录）', async () => {
     const dirA = await mkdtemp(join(tmpdir(), 'sflow-p1-2-a-'));
     const dirB = await mkdtemp(join(tmpdir(), 'sflow-p1-2-b-'));
     try {
-      // 分别构造两个 changeDir 的 handler，各自写入同名 sessionID 的错误事件。
-      // 若 changeDir 被写死为 process.cwd()，两者会串写到同一份通知文件。
+      // 运行时目录已从 workDir 解耦：两个 handler 共享同一份机器级通知目录
       const handlerA = createSessionErrorHandler({
         workDir: dirA,
         modelResolver: () => 'provider/model-a',
@@ -681,36 +753,26 @@ describe('P1-2 ① 通知文件落在真实 changeDir 而非 process.cwd()', () 
         dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
       });
 
-      expect(await handlerA.handle({ sessionID: 'sess-shared', error: apiError(402) })).toBe(
+      expect(await handlerA.handle({ sessionID: 'sess-a', error: apiError(402) })).toBe(
         'blacklisted',
       );
-      expect(await handlerB.handle({ sessionID: 'sess-shared', error: apiError(402) })).toBe(
+      expect(await handlerB.handle({ sessionID: 'sess-b', error: apiError(402) })).toBe(
         'blacklisted',
       );
 
-      // A 目录：落盘，且解析模型为 model-a
-      const notifAFiles = await listFiles(join(dirA, '.flow-engine/sflow/notifications'), '.json');
-      expect(notifAFiles).toHaveLength(1);
+      // 机器级目录：两份独立通知，均解析到各自 model
+      const notifFiles = await listFiles(join(runtimeTmp, 'notifications'), '.json');
+      expect(notifFiles.sort()).toEqual(['sess-a.json', 'sess-b.json']);
       const entryA = await readJsonFile<{ session_id: string }>(
-        join(dirA, '.flow-engine/sflow/notifications', notifAFiles[0]),
+        join(runtimeTmp, 'notifications', 'sess-a.json'),
       );
-      expect(entryA?.session_id).toBe('sess-shared');
+      expect(entryA?.session_id).toBe('sess-a');
 
-      // B 目录：同样落盘（独立一份，不与 A 串写）
-      const notifBFiles = await listFiles(join(dirB, '.flow-engine/sflow/notifications'), '.json');
-      expect(notifBFiles).toHaveLength(1);
-
-      // 关键：A/B 各自独立落盘 1 份（若 changeDir 写死为 process.cwd()，
-      // 第二次 handle 会覆盖/串写到同一目录，导致单侧文件数异常或两边落同一处）
-      expect(notifAFiles).toHaveLength(1);
-      expect(notifBFiles).toHaveLength(1);
-
-      // cwd 下不应出现本测试任一通知（真实落点由注入的 changeDir 决定）
-      const cwdFiles = await listFiles(
-        join(process.cwd(), '.flow-engine/sflow/notifications'),
-        '.json',
-      ).catch(() => []);
-      expect(cwdFiles).not.toContain('sess-shared.json');
+      // 关键：两个 workDir 下都不得产生任何 .flow-engine 目录
+      expect(await listFiles(dirA, '.json').catch(() => [])).toEqual([]);
+      expect(await listFiles(dirB, '.json').catch(() => [])).toEqual([]);
+      expect(await exists(join(dirA, '.flow-engine'))).toBe(false);
+      expect(await exists(join(dirB, '.flow-engine'))).toBe(false);
     } finally {
       await rm(dirA, { recursive: true, force: true });
       await rm(dirB, { recursive: true, force: true });

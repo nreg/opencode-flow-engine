@@ -1,11 +1,13 @@
 /**
  * NotificationManager — 子 agent 完成通知管理模块
  *
- * 子 agent 完成时写入通知文件到 .flow-engine/sflow/notifications/，
+ * 子 agent 完成时写入通知文件到 %USERPROFILE%/.flow-engine/notifications/，
  * 主 agent 启动时自动扫描消费，将通知内容注入 system prompt。
  *
+ * 落点是**机器级运行时产物**，与 cwd / projectDir 无关（见 helpers/runtime-paths.ts）。
+ *
  * 存储结构：
- * .flow-engine/sflow/notifications/
+ * %USERPROFILE%/.flow-engine/notifications/
  * ├── sf_1700000000_1.json    ← 未消费通知
  * └── consumed/               ← 已消费通知
  *     └── sf_1699999000_1.json
@@ -20,10 +22,11 @@ import {
   writeJsonFile,
 } from '@opencode-flow-engine/shared';
 import { Logger } from '../utils/logger.js';
+import { resolveRuntimeRoot } from '../helpers/runtime-paths.js';
 
 // ─── 常量 ──────────────────────────────────────────────────────────────────
 
-const NOTIFICATIONS_SUBDIR = '.flow-engine/sflow/notifications';
+const NOTIFICATIONS_SUBDIR = 'notifications';
 const CONSUMED_SUBDIR = 'consumed';
 
 // ─── 类型定义 ──────────────────────────────────────────────────────────────
@@ -113,11 +116,13 @@ async function moveFile(src: string, dst: string): Promise<boolean> {
 /**
  * 创建 NotificationManager 实例
  *
- * @param config.workDir - 项目根目录路径（插件工作目录）
+ * @param config.runtimeRoot - 可选：机器级运行时根目录（默认 %USERPROFILE%/.flow-engine）
  * @returns NotificationManager 实例
  */
-export function createNotificationManager(config: { workDir: string }): NotificationManager {
-  const notificationsDir = join(config.workDir, NOTIFICATIONS_SUBDIR);
+export function createNotificationManager(config?: {
+  runtimeRoot?: string;
+}): NotificationManager {
+  const notificationsDir = join(resolveRuntimeRoot(config?.runtimeRoot), NOTIFICATIONS_SUBDIR);
   const consumedDir = join(notificationsDir, CONSUMED_SUBDIR);
 
   /**
