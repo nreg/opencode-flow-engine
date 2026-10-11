@@ -11,17 +11,33 @@ import { Logger } from '../utils/logger.js';
 export interface AgentConfigEntry {
   model?: string;
   temperature?: number;
+  top_p?: number;
+  variant?: string;
   fallbackModels?: string[];
   fallback_models?: string[];
 }
 
+/**
+ * Per-tier model profile configuration (D3).
+ * `model`/`fallback_models` are required (unchanged semantics);
+ * `temperature`/`top_p` are optional tier-level sampling parameters
+ * applied at agent registration time to agents statically bound to
+ * the tier via AGENT_PROFILES.
+ */
+export interface ModelProfileTierConfig {
+  model: string;
+  fallback_models: string[];
+  temperature?: number;
+  top_p?: number;
+}
+
 export interface ModelProfileConfig {
-  lite?: { model: string; fallback_models: string[] };
-  quick?: { model: string; fallback_models: string[] };
-  standard?: { model: string; fallback_models: string[] };
-  deep?: { model: string; fallback_models: string[] };
-  ultra?: { model: string; fallback_models: string[] };
-  review?: { model: string; fallback_models: string[] };
+  lite?: ModelProfileTierConfig;
+  quick?: ModelProfileTierConfig;
+  standard?: ModelProfileTierConfig;
+  deep?: ModelProfileTierConfig;
+  ultra?: ModelProfileTierConfig;
+  review?: ModelProfileTierConfig;
 }
 
 // NOTE: the built-in profile model table was removed (model resolution now follows
@@ -205,6 +221,11 @@ export function agentOverridesFromConfig(config: SFlowConfig): AgentOverrides {
     const override: Partial<AgentOverrideConfig> = {};
     if (entry.model) override.model = entry.model;
     if (entry.temperature !== undefined) override.temperature = entry.temperature;
+    // top_p/variant mirror the temperature mapping pattern (D1/D2):
+    // write the key only when explicitly configured; no type-warnings here
+    // (same behavior as temperature — downstream factories guard types).
+    if (entry.top_p !== undefined) override.top_p = entry.top_p;
+    if (entry.variant !== undefined) override.variant = entry.variant;
     const fb = entry.fallback_models || entry.fallbackModels;
     if (fb && fb.length > 0) {
       override.fallback_models = fb;

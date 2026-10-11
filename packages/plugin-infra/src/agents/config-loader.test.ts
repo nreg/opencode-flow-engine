@@ -266,6 +266,55 @@ describe('Config Loader', () => {
       });
       expect(overrides).toEqual({});
     });
+
+    it('should map top_p into override when configured (SP1-R1a)', () => {
+      const overrides = agentOverridesFromConfig({
+        agents: {
+          'build-executor': { top_p: 0.9 },
+        },
+      });
+      expect(overrides['build-executor']?.top_p).toBe(0.9);
+    });
+
+    it('should map variant into override when configured (SP1-R3a mapping half)', () => {
+      const overrides = agentOverridesFromConfig({
+        agents: {
+          'spec-writer': { variant: 'max' },
+        },
+      });
+      expect(overrides['spec-writer']?.variant).toBe('max');
+    });
+
+    it('should still create override entry when only variant is configured (SP1-R3b)', () => {
+      const overrides = agentOverridesFromConfig({
+        agents: {
+          'spec-writer': { variant: 'max' },
+        },
+      });
+      const entry = overrides['spec-writer'];
+      expect(entry).toBeDefined();
+      expect(entry?.variant).toBe('max');
+      expect(entry?.model).toBeUndefined();
+      expect(entry?.temperature).toBeUndefined();
+    });
+
+    it('should keep old-format parsing field-for-field identical without top_p/variant keys (SP1-R1b/SP1-R1c backward compat)', () => {
+      const overrides = agentOverridesFromConfig({
+        agents: {
+          'build-executor': {
+            model: 'claude-sonnet-4-6',
+            temperature: 0.3,
+            fallback_models: ['gpt-4o'],
+          },
+        },
+      });
+      const entry = overrides['build-executor'];
+      expect(entry?.model).toBe('claude-sonnet-4-6');
+      expect(entry?.temperature).toBe(0.3);
+      expect(entry?.fallback_models).toEqual(['gpt-4o']);
+      // backward compat: new keys must NOT be injected when not configured
+      expect(Object.keys(entry ?? {}).sort()).toEqual(['fallback_models', 'model', 'temperature']);
+    });
   });
 
   describe('mergeOverrides', () => {
