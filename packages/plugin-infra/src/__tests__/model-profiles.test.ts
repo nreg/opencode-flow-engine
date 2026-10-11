@@ -2,7 +2,7 @@
  * Model Profile Config tests — Wave W4
  * Tests for ModelProfileConfig, AGENT_PROFILES, profile resolution, SFlow gating, template
  */
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import {
   resolveModelWithFallback,
   clearUnavailableModels,
@@ -11,9 +11,10 @@ import {
   AGENT_PROFILES,
 } from '../agents/agent-builder.js';
 import type { ModelProvenance, AGENT_PROFILES_TYPE } from '../agents/agent-builder.js';
-import {
-} from '../agents/config-loader.js';
+import { loadCascadedSFlowConfig } from '../agents/config-loader.js';
 import type { SFlowConfig, ModelProfileConfig } from '../agents/config-loader.js';
+import { writeFileSync, unlinkSync } from 'fs';
+import { join } from 'path';
 import {
   getAvailabilityState,
   refreshAvailableModels,
@@ -448,6 +449,76 @@ describe('Integration: modelProfiles through config pipeline', () => {
     // iflow-plan-executor is in AGENT_PROFILES → use profile
     expect(result.model).toBe('deep-model');
     expect(result.provenance).toBe('profile');
+  });
+});
+
+// ─── Wave 2: tier-level sampling parameters (temperature/top_p) ─────────────
+
+describe('Tier-level sampling parameters (Wave 2)', () => {
+  const TIER_SAMPLING_CONFIG_FILE = join(
+    process.env.TEMP || '/tmp',
+    'opencode-flow-engine-model-profiles-tier-sampling-test.json',
+  );
+
+  beforeEach(() => {
+    clearUnavailableModels();
+  });
+
+  afterEach(() => {
+    try {
+      unlinkSync(TIER_SAMPLING_CONFIG_FILE);
+    } catch {
+      // 该用例未写配置文件时忽略
+    }
+    delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+  });
+
+  it('SP2-R5b: 档位仅新增可选采样字段不影响模型解析（model/provenance 不变）', () => {
+    const result = resolveModelWithFallback(
+      'spec-writer',
+      undefined,
+      {},
+      undefined,
+      {
+        modelProfiles: {
+          deep: {
+            model: 'deep-sampling-model',
+            fallback_models: ['deep-sampling-fallback'],
+            temperature: 0.3,
+            top_p: 0.9,
+          },
+        },
+        activeWorkflow: 'sflow',
+      },
+    );
+    expect(result.model).toBe('deep-sampling-model');
+    expect(result.provenance).toBe('profile');
+  });
+
+  it('SP2-R1a: loadCascadedSFlowConfig 加载含采样参数的档位配置后字段原样保留', async () => {
+    writeFileSync(
+      TIER_SAMPLING_CONFIG_FILE,
+      JSON.stringify(
+        {
+          modelProfiles: {
+            deep: {
+              model: 'deep-sampling-model',
+              fallback_models: ['deep-sampling-fallback'],
+              temperature: 0.3,
+              top_p: 0.9,
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    process.env.FLOW_ENGINE_USER_CONFIG_FILE = TIER_SAMPLING_CONFIG_FILE;
+    const config = await loadCascadedSFlowConfig();
+    expect(config.modelProfiles?.deep?.model).toBe('deep-sampling-model');
+    expect(config.modelProfiles?.deep?.temperature).toBe(0.3);
+    expect(config.modelProfiles?.deep?.top_p).toBe(0.9);
+    expect(config.modelProfiles?.deep?.fallback_models).toEqual(['deep-sampling-fallback']);
   });
 });
 

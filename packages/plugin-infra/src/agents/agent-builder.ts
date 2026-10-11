@@ -576,11 +576,28 @@ export async function createAgent(
       activeWorkflow: activeWorkflow ?? 'sflow',
     });
 
-  // Resolve temperature: override > config > factory default
-  const resolvedTemperature = agentOverride?.temperature ?? configOverrides?.[name]?.temperature ?? undefined;
+  // Wave 2 (D4): tier-level sampling — resolve the statically bound tier profile
+  // for this agent from modelProfiles. Agents not in AGENT_PROFILES (sFlow/iFlow
+  // primary agents) skip level 3 entirely and fall through to the factory default.
+  const tierProfile = AGENT_PROFILES[name] ? config.modelProfiles?.[AGENT_PROFILES[name]] : undefined;
+
+  // Resolve temperature: override > config > tier profile > factory default
+  const resolvedTemperature = agentOverride?.temperature ?? configOverrides?.[name]?.temperature ?? tierProfile?.temperature;
+  // Resolve top_p independently through the same 4-level chain; level 4 = not injected
+  const resolvedTopP = agentOverride?.top_p ?? configOverrides?.[name]?.top_p ?? tierProfile?.top_p;
   // Wave 2: resolved.model may be undefined (unconfigured). Pass it through to the factory
   // and ensure we do NOT write a `model` field when no model was resolved.
   const agentConfig = factory(resolved.model as string, { temperature: resolvedTemperature, skillContent, config });
+
+  // Wave 2 (D4): post-apply top_p AFTER the factory call and BEFORE the override
+  // spread below. Priority rationale: the tier profile is the lowest configured
+  // source (level 3); the spread `{ ...agentConfig, ...agentOverride }` carries
+  // agentOverride.top_p (programmatic override = level 1 > per-agent config =
+  // level 2, both already merged into agentOverride), which overwrites the value
+  // written here — pinning the 4-level priority chain (contract §4.3).
+  if (typeof resolvedTopP === 'number') {
+    agentConfig.top_p = resolvedTopP;
+  }
 
   if (agentOverride) {
     const result: AgentConfig = {
@@ -631,8 +648,19 @@ export async function createAllAgents(
 
     const merged = mergeOverrides(configOverrides, overrides || {});
     const agentOverride = merged[name];
-    const resolvedTemperature = agentOverride?.temperature ?? configOverrides?.[name]?.temperature ?? undefined;
+    // Wave 2 (D4): tier-level sampling — createAllAgents mirrors createAgent
+    // (statically bound tier profile; sFlow/iFlow not in AGENT_PROFILES → skip level 3).
+    const tierProfile = AGENT_PROFILES[name] ? config.modelProfiles?.[AGENT_PROFILES[name]] : undefined;
+    const resolvedTemperature = agentOverride?.temperature ?? configOverrides?.[name]?.temperature ?? tierProfile?.temperature;
+    const resolvedTopP = agentOverride?.top_p ?? configOverrides?.[name]?.top_p ?? tierProfile?.top_p;
     const agentConfig = factory(resolved.model as string, { temperature: resolvedTemperature, skillContent: content, config });
+
+    // Wave 2 (D4): post-apply top_p BEFORE the override spread below — same
+    // priority rationale as createAgent (agentOverride.top_p overwrites via
+    // spread, pinning the 4-level priority chain; contract §4.3).
+    if (typeof resolvedTopP === 'number') {
+      agentConfig.top_p = resolvedTopP;
+    }
 
     let finalAgent: AgentConfig;
     if (agentOverride) {

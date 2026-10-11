@@ -17,6 +17,7 @@ import {
 } from './agent-builder.js';
 import { USER_CONFIG_FILE } from './config-loader.js';
 import { join } from 'path';
+import { writeFileSync, unlinkSync } from 'fs';
 
 // 隔离真实用户配置（~/.config/opencode/opencode-flow-engine.json），
 // 指向不存在的临时文件，使测试结果确定性
@@ -469,6 +470,164 @@ describe('Agent Builder', () => {
       const instructions = String(agent.instructions);
       expect(instructions).toContain('Single Wave per build-executor Call');
       expect(instructions).toContain('Execution Contract Wave Structure');
+    });
+  });
+
+  // ─── Wave 2: Tier-Level Sampling Resolution Chain (specs/tier-level-sampling.md) ──
+  //
+  // 四级优先级链（高→低）：程序化 override > agents.<name> per-agent 配置
+  // > modelProfiles.<AGENT_PROFILES[name] 静态绑定档位> > 工厂默认。
+  // temperature 与 top_p 各自独立走链（§6.3 覆盖矩阵）；sFlow/iFlow 主智能体
+  // 不在 AGENT_PROFILES，不参与档位级采样（SP2-R2c）。
+  describe('Wave 2 - Tier-Level Sampling Resolution Chain', () => {
+    const TIER_SAMPLING_CONFIG_FILE = join(
+      process.env.TEMP || '/tmp',
+      'opencode-flow-engine-tier-sampling-test.json',
+    );
+
+    // deep 档采样夹具：spec-writer / build-executor 静态绑定 deep（AGENT_PROFILES）
+    const DEEP_TIER_SAMPLING = {
+      model: 'provider/test-deep-model',
+      fallback_models: ['provider/test-deep-fallback'],
+      temperature: 0.3,
+      top_p: 0.9,
+    };
+
+    // 沿用隔离模式：FLOW_ENGINE_USER_CONFIG_FILE 指向临时配置 + clearConfigCache()
+    const writeTierConfig = (config: Record<string, unknown>): void => {
+      writeFileSync(TIER_SAMPLING_CONFIG_FILE, JSON.stringify(config, null, 2));
+      process.env.FLOW_ENGINE_USER_CONFIG_FILE = TIER_SAMPLING_CONFIG_FILE;
+      clearConfigCache();
+    };
+
+    beforeEach(() => {
+      clearConfigCache();
+    });
+
+    afterEach(() => {
+      try {
+        unlinkSync(TIER_SAMPLING_CONFIG_FILE);
+      } catch {
+        // 该用例未写配置文件时忽略
+      }
+      delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+      clearConfigCache();
+    });
+
+    it('T2.1① 仅档位配置：静态绑定智能体继承档位 temperature/top_p (SP2-R2a)', async () => {
+      writeTierConfig({ modelProfiles: { deep: DEEP_TIER_SAMPLING } });
+      const agent = await createAgent('spec-writer'); // AGENT_PROFILES['spec-writer'] === 'deep'
+      expect(agent.temperature).toBe(0.3);
+      expect(agent.top_p).toBe(0.9);
+    });
+
+    it('T2.1② per-agent temperature 覆盖档位 temperature，档位 top_p 独立走链 (SP2-R3a)', async () => {
+      writeTierConfig({
+        agents: { 'spec-writer': { temperature: 0.8 } },
+        modelProfiles: { deep: DEEP_TIER_SAMPLING },
+      });
+      const agent = await createAgent('spec-writer');
+      expect(agent.temperature).toBe(0.8); // 第 2 级压第 3 级
+      // 回归锚：per-agent 未配 top_p 时档位 top_p 仍经独立链解析生效
+      expect(agent.top_p).toBe(0.9);
+    });
+
+    it('T2.1②b 优先级锚：per-agent top_p 覆盖档位 top_p（§4.3，防 override spread 顺序重构回归）', async () => {
+      writeTierConfig({
+        agents: { 'spec-writer': { top_p: 0.7 } },
+        modelProfiles: { deep: DEEP_TIER_SAMPLING },
+      });
+      const agent = await createAgent('spec-writer');
+      expect(agent.top_p).toBe(0.7); // per-agent top_p（第 2 级）压档位 top_p（第 3 级）
+    });
+
+    it('T2.1③ 程序化 override 覆盖 per-agent 与档位配置 (SP2-R3b)', async () => {
+      writeTierConfig({
+        agents: { 'spec-writer': { temperature: 0.8, top_p: 0.7 } },
+        modelProfiles: { deep: DEEP_TIER_SAMPLING },
+      });
+      const agent = await createAgent('spec-writer', undefined, {
+        'spec-writer': { temperature: 0.1 },
+      });
+      expect(agent.temperature).toBe(0.1); // 第 1 级压第 2/3 级
+      expect(agent.top_p).toBe(0.7); // override 未携带 top_p → per-agent top_p 仍为该字段最高
+    });
+
+    it('T2.1④ sFlow/iFlow 主智能体豁免档位级采样 (SP2-R2c)', async () => {
+      writeTierConfig({
+        modelProfiles: {
+          standard: {
+            model: 'provider/test-standard-model',
+            fallback_models: ['provider/test-standard-fallback'],
+            temperature: 0.2,
+            top_p: 0.1,
+          },
+        },
+      });
+      const sflowAgent = await createAgent('sFlow'); // 不在 AGENT_PROFILES → 跳过第 3 级
+      expect(sflowAgent.temperature).toBe(0.6); // 工厂默认（workflows/sflow/agents/spec-flow.ts），非 0.2
+      expect(sflowAgent.top_p).toBeUndefined();
+      const iflowAgent = await createAgent('iFlow'); // 不在 AGENT_PROFILES → 跳过第 3 级
+      expect(iflowAgent.temperature).toBe(0.6); // 工厂默认（workflows/iflow/agents/iflow.ts），非 0.2
+      expect(iflowAgent.top_p).toBeUndefined();
+    });
+
+    it('T2.1⑤ 无任何配置：工厂默认 temperature 且不注入 top_p (SP2-R2b/SP2-R3d)', async () => {
+      writeTierConfig({});
+      const agent = await createAgent('spec-writer');
+      expect(agent.temperature).toBe(0.6); // 工厂默认（workflows/sflow/agents/spec-writer.ts）
+      expect(agent.top_p).toBeUndefined(); // top_p 不注入（第 4 级语义）
+    });
+
+    it('T2.1⑥ 档位配置采样参数时模型解析链 model/provenance 不变 (SP2-R5b)', () => {
+      const result = resolveModelWithFallback(
+        'spec-writer',
+        undefined,
+        {},
+        undefined,
+        { modelProfiles: { deep: DEEP_TIER_SAMPLING }, activeWorkflow: 'sflow' },
+      );
+      expect(result.model).toBe('provider/test-deep-model');
+      expect(result.provenance).toBe('profile');
+    });
+
+    it('SP2-R2d 补充断言：仅配置无静态绑定的 lite/ultra 档位不影响任何智能体', async () => {
+      writeTierConfig({
+        modelProfiles: {
+          lite: {
+            model: 'provider/test-lite-model',
+            fallback_models: ['provider/test-lite-fallback'],
+            temperature: 0.1,
+          },
+          ultra: {
+            model: 'provider/test-ultra-model',
+            fallback_models: ['provider/test-ultra-fallback'],
+            top_p: 0.8,
+          },
+        },
+      });
+      const agents = await createAllAgents();
+      for (const agent of Object.values(agents)) {
+        expect(agent.top_p).toBeUndefined();
+        expect(agent.temperature).not.toBe(0.1);
+      }
+    });
+
+    it('Task 2.3 验收镜像：SP2-R2/R3 全链在 createAllAgents 路径同样成立', async () => {
+      writeTierConfig({
+        agents: { 'spec-writer': { temperature: 0.8, top_p: 0.7 } },
+        modelProfiles: { deep: DEEP_TIER_SAMPLING },
+      });
+      const agents = await createAllAgents();
+      // 档位级采样到达所有静态绑定 deep 的智能体（top_p 经后置应用注入）
+      expect(agents['build-executor'].temperature).toBe(0.3);
+      expect(agents['build-executor'].top_p).toBe(0.9);
+      // per-agent 覆盖（第 2 级压第 3 级，temperature/top_p 独立锚）
+      expect(agents['spec-writer'].temperature).toBe(0.8);
+      expect(agents['spec-writer'].top_p).toBe(0.7);
+      // 主智能体豁免（sFlow 不在 AGENT_PROFILES）
+      expect(agents.sFlow.top_p).toBeUndefined();
+      expect(agents.sFlow.temperature).toBe(0.6);
     });
   });
 
