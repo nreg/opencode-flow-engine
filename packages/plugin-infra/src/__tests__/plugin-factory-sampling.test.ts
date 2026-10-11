@@ -143,7 +143,10 @@ describe('工厂层采样参数接线（Wave 3 · R-5 · SP-14..SP-18）', () =>
 
     const agent = (cfg.agent as Record<string, Record<string, unknown>>)['test-engineer'];
     expect(agent).toBeDefined();
-    expect(agent.mode).toBe('subagent'); // 锚定走的是 F4 共享注册路径（非 iFlow 专属循环）
+    // F4 独有锚：共享循环 description 固定含 "(shared, cross-workflow)"
+    // （iflow-plugin-factory.ts:392）。原 mode==='subagent' 锚无区分力——
+    // F3 getAgentMode 回落值与 F4 硬编码取值必然相同，无法识别走错注册循环。
+    expect(agent.description).toContain('shared, cross-workflow');
     expect(agent.top_p).toBe(0.6);
     // variant 无档位级来源，共享智能体 per-agent variant 不可达 → 未配置即 undefined
     expect(agent.variant).toBeUndefined();
