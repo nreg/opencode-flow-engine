@@ -1,16 +1,19 @@
 import { join, dirname } from 'path';
-import { homedir } from 'os';
 import { appendFile, mkdir } from 'fs/promises';
+import { DEFAULT_LOG_DIR, resolveLogRoot } from '../helpers/runtime-paths.js';
 
 /**
- * 机器级运行时日志根目录。
+ * 机器级运行时日志根目录（与 polling-logger 同源，经 runtime-paths 体系统一）。
  *
- * 动机：插件日志属「机器级运行时产物」，而非项目工件。原先默认根为
- * process.cwd()，导致从仓库根跑测试/从项目目录启动插件时，日志被写进
- * 项目目录的 .flow-engine/sflow/，与工件目录混在一起（并触发工件误删事故）。
- * 故默认根统一为 %USERPROFILE%/.flow-engine/，与 cwd 完全解耦。
+ * 动机：插件日志属「机器级运行时产物」，而非项目工件。原默认根为
+ * process.cwd()，且 initialize(dir) 会向调用方目录拼 .flow-engine/sflow，
+ * 导致工厂调用 initialize(workDir) 后 plugin.log 落进项目目录
+ * （与 polling.log 的 %USERPROFILE% 根分裂，并污染仓库）。
+ * 现默认根统一为 %USERPROFILE%/.flow-engine/sflow，与 cwd / workDir 完全解耦。
+ *
+ * re-export 保持既有导入路径（./logger）兼容。
  */
-export const DEFAULT_LOG_DIR = join(homedir(), '.flow-engine', 'sflow');
+export { DEFAULT_LOG_DIR };
 
 /**
  * Logger - 统一日志工具类
@@ -22,21 +25,43 @@ export const DEFAULT_LOG_DIR = join(homedir(), '.flow-engine', 'sflow');
  * - 写入失败时静默降级（不抛异常、不降级到 console）
  * - 队列串行化写入保证并发安全
  * - 时间戳精确到秒
+ *
+ * 路径解析优先级（P1-1 钉死）：
+ * 显式 initialize(logRoot) > FLOW_ENGINE_LOG_ROOT 环境变量 > %USERPROFILE%/.flow-engine/sflow
  */
 export class Logger {
-  private static logFilePath: string = join(DEFAULT_LOG_DIR, 'plugin.log');
+  /** 显式日志根覆盖（initialize 设置）；未设置时走 resolveLogRoot 默认解析 */
+  private static explicitLogRoot: string | undefined;
   private static writeQueue: Promise<void> = Promise.resolve();
 
   /**
-   * 初始化日志路径（显式指定日志根目录）
+   * 初始化日志路径（显式指定日志根目录）。
    *
-   * 注意：调用方传入的目录是**显式**的日志根（例如插件拿到的 workDir），
-   * 与 cwd 无关；未显式初始化时使用 DEFAULT_LOG_DIR（%USERPROFILE%/.flow-engine）。
+   * 语义（P1-1 钉死）：传入的目录**即日志根**，plugin.log 直接写在其下，
+   * **不再**向调用方目录拼 `.flow-engine/sflow`。生产链路（三工厂）不再
+   * 调用本方法——插件日志统一落机器级运行时目录
+   * （%USERPROFILE%/.flow-engine/sflow，与 polling-logger 同源）。
+   * 本方法保留给测试与运维做显式覆盖。
    *
    * @param logRootDir - 日志根目录路径
    */
   static initialize(logRootDir: string): void {
-    Logger.logFilePath = join(logRootDir, '.flow-engine', 'sflow', 'plugin.log');
+    Logger.explicitLogRoot = logRootDir;
+  }
+
+  /**
+   * 测试支持：清除显式覆盖，恢复默认解析（env > 机器级默认）。
+   * 避免测试根在同一进程内泄露给其它测试文件。
+   */
+  static reset(): void {
+    Logger.explicitLogRoot = undefined;
+  }
+
+  /**
+   * 当前生效的日志文件路径（供测试/观测断言接线，不产生写入）。
+   */
+  static getLogFilePath(): string {
+    return join(resolveLogRoot(Logger.explicitLogRoot), 'plugin.log');
   }
 
   /**
@@ -66,11 +91,12 @@ export class Logger {
   private static async writeLog(level: 'WARN' | 'LOG' | 'ERROR', message: string): Promise<void> {
     Logger.writeQueue = Logger.writeQueue.then(async () => {
       try {
-        const logDir = dirname(Logger.logFilePath);
+        const logFilePath = Logger.getLogFilePath();
+        const logDir = dirname(logFilePath);
         await mkdir(logDir, { recursive: true });
 
         const logLine = Logger.formatMessage(level, message);
-        await appendFile(Logger.logFilePath, logLine + '\n', 'utf-8');
+        await appendFile(logFilePath, logLine + '\n', 'utf-8');
       } catch {
         // 静默降级：不抛异常、不降级到 console
       }

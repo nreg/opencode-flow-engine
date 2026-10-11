@@ -523,8 +523,9 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
       const configOverrides = agentOverridesFromConfig(cascadedConfig);
 
       const workDir = resolveChangeDir(undefined, input.directory);
-      // 初始化 Logger 日志路径（确保日志写入正确的项目目录）
-      Logger.initialize(workDir);
+      // P1-1：插件日志统一落机器级运行时目录（%USERPROFILE%/.flow-engine/sflow，
+      // 与 polling-logger 同源），不再按 workDir 重定向 Logger 根——
+      // 旧实现 initialize(workDir) 会把 plugin.log 写进项目目录的 .flow-engine/sflow/。
       const sflowClient = input.client;
 
       // P1-4：启动期与 provider 实际可用列表对账（失败不阻断插件启动）

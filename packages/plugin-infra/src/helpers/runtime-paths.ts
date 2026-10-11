@@ -20,6 +20,9 @@ import { join } from 'node:path';
 /** 运行时根环境变量名（测试隔离 / 运维覆盖用） */
 export const RUNTIME_ROOT_ENV = 'FLOW_ENGINE_RUNTIME_ROOT';
 
+/** 日志根环境变量名（测试隔离 / 运维覆盖用，与 RUNTIME_ROOT_ENV 同构） */
+export const LOG_ROOT_ENV = 'FLOW_ENGINE_LOG_ROOT';
+
 /** 机器级运行时根目录：%USERPROFILE%/.flow-engine */
 export const RUNTIME_ROOT: string = join(homedir(), '.flow-engine');
 
@@ -28,6 +31,15 @@ export const NOTIFICATIONS_DIR: string = join(RUNTIME_ROOT, 'notifications');
 
 /** 子 agent store 目录：%USERPROFILE%/.flow-engine/subagent-store */
 export const SUBAGENT_STORE_DIR: string = join(RUNTIME_ROOT, 'subagent-store');
+
+/**
+ * 机器级运行时日志目录：%USERPROFILE%/.flow-engine/sflow
+ *
+ * Logger（plugin.log）与 PollingLogger（polling.log）共用此根，
+ * 保证两个日志不会因解析方式不同而分裂（P1-1 前 plugin.log 曾被
+ * 工厂重定向到 workDir/.flow-engine/sflow）。
+ */
+export const DEFAULT_LOG_DIR: string = join(RUNTIME_ROOT, 'sflow');
 
 /**
  * 解析实际生效的运行时根目录。
@@ -46,4 +58,27 @@ export function resolveRuntimeRoot(runtimeRoot?: string): string {
     return fromEnv;
   }
   return RUNTIME_ROOT;
+}
+
+/**
+ * 解析实际生效的日志根目录（Logger / PollingLogger 共用）。
+ *
+ * 优先级：显式 `logRoot` 参数 > `FLOW_ENGINE_LOG_ROOT` 环境变量 > `%USERPROFILE%/.flow-engine/sflow`
+ *
+ * 与 `resolveRuntimeRoot` 同构：测试设置 `FLOW_ENGINE_LOG_ROOT` 即可把
+ * plugin.log / polling.log 整体导向 tmpdir，既不写入真实 %USERPROFILE%，
+ * 也不依赖 cwd。
+ *
+ * @param logRoot - 显式覆盖（Logger.initialize），非空才生效
+ * @returns 日志根目录绝对路径
+ */
+export function resolveLogRoot(logRoot?: string): string {
+  if (logRoot && logRoot.trim().length > 0) {
+    return logRoot;
+  }
+  const fromEnv = process.env[LOG_ROOT_ENV];
+  if (fromEnv && fromEnv.trim().length > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_LOG_DIR;
 }

@@ -251,8 +251,8 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
   const configOverrides = agentOverridesFromConfig(cascadedConfig);
 
   const workDir = input.directory;
-  // 初始化 Logger 日志路径（确保日志写入正确的项目目录）
-  Logger.initialize(workDir);
+  // P1-1：插件日志统一落机器级运行时目录（%USERPROFILE%/.flow-engine/sflow，
+  // 与 polling-logger 同源），不再按 workDir 重定向 Logger 根。
   const sflowClient = input.client;
 
   // R3-fix P2（1357a31 接线缺口）：combined 工厂补齐启动期模型可用性对账

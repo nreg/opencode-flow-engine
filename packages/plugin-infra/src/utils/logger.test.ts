@@ -3,17 +3,19 @@ import { Logger, DEFAULT_LOG_DIR } from './logger';
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import { mkdir, rm, readFile, writeFile } from 'fs/promises';
+import { existsSync } from 'fs';
 
 /** 测试隔离根：tmpdir 下独立目录，绝不写入 %USERPROFILE%/.flow-engine，也不依赖 cwd */
 const TEST_ROOT = join(tmpdir(), `sflow-logger-test-${process.pid}-${Date.now()}`);
-const TEST_LOG_DIR = join(TEST_ROOT, '.flow-engine', 'sflow');
-const TEST_LOG_FILE = join(TEST_LOG_DIR, 'plugin.log');
+// P1-1：initialize(dir) 语义钉死——传入目录即日志根，plugin.log 直接写其下，
+// 不再向调用方目录拼 .flow-engine/sflow
+const TEST_LOG_FILE = join(TEST_ROOT, 'plugin.log');
 
 describe('Logger', () => {
   beforeEach(async () => {
     // 清理测试环境
     try {
-      await rm(TEST_LOG_DIR, { recursive: true, force: true });
+      await rm(TEST_ROOT, { recursive: true, force: true });
     } catch {
       // 目录不存在，忽略
     }
@@ -28,6 +30,8 @@ describe('Logger', () => {
     } catch {
       // 目录不存在，忽略
     }
+    // 清除显式覆盖，避免把测试根泄露给同一进程内的其它测试文件
+    Logger.reset();
   });
 
   describe('路径根：机器级运行时产物（%USERPROFILE%/.flow-engine）', () => {
@@ -165,7 +169,7 @@ describe('Logger', () => {
       expect(lines.length).toBe(2);
     });
 
-    it('应该创建 .flow-engine/sflow 目录（如果不存在）', async () => {
+    it('应该创建日志根目录（如果不存在）', async () => {
       await Logger.log('Test message');
 
       // 验证目录和文件被创建
@@ -189,23 +193,42 @@ describe('Logger', () => {
   });
 
   describe('Task 1.5: 路径初始化', () => {
-    it('应该支持显式 initialize(目录)', async () => {
-      const customDir = TEST_ROOT;
-      Logger.initialize(customDir);
+    it('initialize(目录) 即日志根：plugin.log 直接写其下（不再拼 .flow-engine/sflow）', async () => {
+      Logger.initialize(TEST_ROOT);
+
+      expect(Logger.getLogFilePath()).toBe(join(TEST_ROOT, 'plugin.log'));
 
       await Logger.log('Test with custom dir');
 
       const content = await readFile(TEST_LOG_FILE, 'utf-8');
       expect(content).toContain('Test with custom dir');
+      // 旧语义（拼 .flow-engine/sflow）不得复活
+      expect(existsSync(join(TEST_ROOT, '.flow-engine'))).toBe(false);
     });
 
-    it('应该支持默认路径（未 initialize 时沿用上一次的机器级路径）', async () => {
-      Logger.initialize(TEST_ROOT);
+    it('reset() 后恢复默认解析：FLOW_ENGINE_LOG_ROOT > 机器级默认', () => {
+      const saved = process.env.FLOW_ENGINE_LOG_ROOT;
+      try {
+        process.env.FLOW_ENGINE_LOG_ROOT = TEST_ROOT;
+        Logger.reset();
+        expect(Logger.getLogFilePath()).toBe(join(TEST_ROOT, 'plugin.log'));
 
-      await Logger.log('Test with default dir');
+        delete process.env.FLOW_ENGINE_LOG_ROOT;
+        expect(Logger.getLogFilePath()).toBe(join(homedir(), '.flow-engine', 'sflow', 'plugin.log'));
+      } finally {
+        if (saved === undefined) {
+          delete process.env.FLOW_ENGINE_LOG_ROOT;
+        } else {
+          process.env.FLOW_ENGINE_LOG_ROOT = saved;
+        }
+        Logger.reset();
+      }
+    });
 
-      const content = await readFile(TEST_LOG_FILE, 'utf-8');
-      expect(content).toContain('Test with default dir');
+    it('默认路径（未 initialize 时）落在机器级运行时目录，与 cwd 无关', () => {
+      Logger.reset();
+      expect(Logger.getLogFilePath()).toContain(join(homedir(), '.flow-engine', 'sflow'));
+      expect(Logger.getLogFilePath()).not.toContain(process.cwd());
     });
   });
 
