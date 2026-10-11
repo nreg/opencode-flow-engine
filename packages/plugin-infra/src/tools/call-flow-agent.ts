@@ -34,6 +34,7 @@ import {
 } from '../helpers/polling.js';
 import { resolveChangeDir } from '../helpers/resolve-change-dir.js';
 import { normalizeToPosix } from '../helpers/normalize-to-posix.js';
+import { join } from 'node:path';
 import type {
   AgentModelMap,
   BackgroundTaskEntry,
@@ -1594,12 +1595,27 @@ export function createCallFlowAgentTools(
         // Wave 1: 注入 workDir 标记；projectDir 仅在调用方显式传入时注入
         // （工具无法自行推断任务针对的项目目录，自动填充父目录值是错的）
         const workDirTag = `<workDir>${normalizeToPosix(changeDir)}</workDir>`;
-        const projectDirTag =
-          typeof projectDirParam === 'string' && projectDirParam.trim() !== ''
-            ? `\n<projectDir>${normalizeToPosix(projectDirParam)}</projectDir>`
-            : '';
+        const hasProjectDir = typeof projectDirParam === 'string' && projectDirParam.trim() !== '';
+        const projectDirTag = hasProjectDir
+          ? `\n<projectDir>${normalizeToPosix(projectDirParam)}</projectDir>`
+          : '';
         const dirTagBlock = `${workDirTag}${projectDirTag}`;
-        let finalPrompt = `${dirTagBlock}\n\n${effectivePrompt}`;
+
+        // ── 工件根硬规则（注入层）───────────────────────────────────────────
+        // 设计约定：工件目录 = <workDir>/.flow-engine/sflow/；子项目目录不允许出现 .flow-engine。
+        // spec-writer / contract-builder 等产出型子代理必须只往工件根写。
+        const artifactRootBlock = [
+          '<artifact-root-rules>',
+          `- 工件根目录（唯一允许的工件写入位置）：<workDir>/.flow-engine/sflow/（即 ${normalizeToPosix(join(changeDir, '.flow-engine', 'sflow'))}/）`,
+          hasProjectDir
+            ? `- <projectDir>（${normalizeToPosix(projectDirParam as string)}）是子项目目录：严禁在其下创建 .flow-engine/ 或写入任何工件`
+            : '- 任何子项目目录下都不允许创建 .flow-engine/',
+          '- spec-writer / contract-builder / build-executor 等产出型子代理，只能把工件写入上述工件根目录',
+          '- 插件已启用写路径守卫：指向子项目目录 .flow-engine/** 的 write/edit 会被直接阻断',
+          '</artifact-root-rules>',
+        ].join('\n');
+
+        let finalPrompt = `${dirTagBlock}\n\n${artifactRootBlock}\n\n${effectivePrompt}`;
 
         // P2: structured 模式下注入 schema hint
         if (output_mode === 'structured') {

@@ -1871,6 +1871,81 @@ describe('Wave 1: workDir 标记注入', () => {
     expect(promptText).not.toContain('</projectDir>');
   });
 
+  it('注入工件根硬规则块（<artifact-root-rules>）：工件根 = <workDir>/.flow-engine/sflow/', async () => {
+    const client = createMockClient({
+      pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+      promptCalls,
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    const testDirectory = 'E:\\test\\artifact-root-rules';
+
+    await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+      },
+      { sessionID: 'parent-session', directory: testDirectory },
+    );
+
+    const parts = promptCalls[0].body.parts as Array<{ type: string; text: string }>;
+    const promptText = parts[0].text;
+
+    expect(promptText).toContain('<artifact-root-rules>');
+    expect(promptText).toContain('</artifact-root-rules>');
+    // 工件根必须是 workDir 下的 .flow-engine/sflow
+    expect(promptText).toContain('.flow-engine/sflow/');
+    expect(promptText).toContain('唯一允许的工件写入位置');
+    // 未提供 projectDir 时也必须声明「子项目目录不允许出现 .flow-engine」
+    expect(promptText).toContain('子项目目录下都不允许创建 .flow-engine');
+    // 声明写路径守卫已启用
+    expect(promptText).toContain('写路径守卫');
+    // 规则块必须紧随 workDir/projectDir 标签块，早于用户 prompt
+    expect(promptText.indexOf('<artifact-root-rules>')).toBeGreaterThan(
+      promptText.indexOf('<workDir>'),
+    );
+    expect(promptText.indexOf('<artifact-root-rules>')).toBeLessThan(
+      promptText.indexOf('Build the feature'),
+    );
+  });
+
+  it('提供 projectDir：工件根硬规则点名该 projectDir 禁止 .flow-engine', async () => {
+    const client = createMockClient({
+      pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+      promptCalls,
+    });
+
+    const options = createTestOptions(client);
+    const tools = createTestTools(options);
+    currentTools = tools;
+
+    const testDirectory = 'E:\\test\\artifact-root-proj';
+    const testProjectDir = 'E:\\test\\artifact-root-proj\\packages\\app';
+
+    await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+        projectDir: testProjectDir,
+      },
+      { sessionID: 'parent-session', directory: testDirectory },
+    );
+
+    const parts = promptCalls[0].body.parts as Array<{ type: string; text: string }>;
+    const promptText = parts[0].text;
+
+    expect(promptText).toContain('<artifact-root-rules>');
+    expect(promptText).toContain('E:/test/artifact-root-proj/packages/app');
+    expect(promptText).toContain('严禁在其下创建 .flow-engine/');
+  });
+
   it('提供 projectDir：注入 <projectDir> 且与 <workDir> 值不同（正斜杠归一）', async () => {
     const client = createMockClient({
       pollOutputs: ['任务完成 [TASK_COMPLETE]'],

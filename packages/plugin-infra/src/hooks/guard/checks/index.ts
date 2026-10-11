@@ -38,3 +38,12 @@ export {
   checkDebuggingState,
   checkTaskCompletion,
 } from './transition-guards.js';
+
+export {
+  checkArtifactRootPath,
+  extractWriteTargetPath,
+  GUARDED_WRITE_TOOLS,
+  ARTIFACT_ROOT_SEGMENT,
+  ARTIFACT_DIR_SEGMENTS,
+} from './artifact-root-guards.js';
+export type { ArtifactRootGuardInput, ArtifactRootGuardResult } from './artifact-root-guards.js';
