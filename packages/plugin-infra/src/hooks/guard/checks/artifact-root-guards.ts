@@ -7,6 +7,12 @@
  *
  * 本守卫由 `tool.execute.before` 调用（OpenCode 插件 API 已暴露该拦截点），
  * 在写工具执行前阻断非法路径。
+ *
+ * 阻断手段（P0-1 Gate 修复）：该钩子的 output 仅暴露 `args`，**没有正式的
+ * 拒绝/拒绝码机制**；抛错是该钩子标准的中止方式——OpenCode 官方插件文档的
+ * .env 保护示例即通过 `throw new Error(...)` 阻断 read 工具。钩子抛错后
+ * OpenCode 中止本次工具调用，错误信息回显给模型，写入不会发生。
+ * （此前仅置 `_sflow_guard_blocked` flag、全仓无消费方，守卫形同虚设。）
  */
 
 import { isAbsolute, join, normalize, resolve } from 'node:path';
@@ -94,7 +100,9 @@ export function checkArtifactRootPath(
     return { block: false };
   }
 
-  const expectedDir = join(artifactRoot, ...ARTIFACT_DIR_SEGMENTS);
+  // 正确工件目录 = <workDir>/.flow-engine/sflow（注意：不能基于已含 .flow-engine 的
+  // artifactRoot 再拼 ARTIFACT_DIR_SEGMENTS，否则会产出 .flow-engine/.flow-engine/sflow）
+  const expectedDir = join(workDir, ...ARTIFACT_DIR_SEGMENTS);
   const where = projectDir && projectDir.trim().length > 0
     ? `子项目目录「${projectDir}」下`
     : 'workDir 之外';
@@ -106,4 +114,24 @@ export function checkArtifactRootPath(
       `工件必须写入工件目录「${expectedDir}/」下（工件根 = <workDir>/${ARTIFACT_ROOT_SEGMENT}/）。` +
       `请把目标路径改到工件目录后重试；如工件确实错位在子项目目录，请先迁移再继续。`,
   };
+}
+
+/**
+ * 工件根写路径守卫（强制执行版，供 `tool.execute.before` 钩子使用）。
+ *
+ * 与 `checkArtifactRootPath` 的纯判定不同，本函数在判定阻断时**抛出 Error**：
+ * OpenCode 插件 API 的 `tool.execute.before` 钩子输出仅暴露 `output.args`，
+ * 无正式拒绝机制，抛错是该钩子标准的中止手段（官方文档 .env 保护示例同款）。
+ * 抛出后工具调用被中止、写入不会发生，错误信息（含正确工件目录指引）回显给模型。
+ *
+ * @param input - 守卫输入（待写入路径 + workDir，可选 projectDir）
+ * @throws Error 当目标路径违反工件根锁定规则时
+ */
+export function enforceArtifactRootPath(input: ArtifactRootGuardInput): void {
+  const result = checkArtifactRootPath(input);
+  if (result.block) {
+    throw new Error(
+      result.blockReason ?? '工件目录锁定：禁止在 workDir 之外写入 .flow-engine',
+    );
+  }
 }

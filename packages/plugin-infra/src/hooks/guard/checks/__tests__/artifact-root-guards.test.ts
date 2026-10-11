@@ -28,6 +28,10 @@ describe('checkArtifactRootPath：工件根写路径守卫', () => {
     expect(r.block).toBe(true);
     expect(r.blockReason).toContain('.flow-engine');
     expect(r.blockReason).toContain(join(WORK_DIR, '.flow-engine'));
+    // 指引的正确工件目录必须是 <workDir>/.flow-engine/sflow（不得出现 .flow-engine/.flow-engine 双重拼接）
+    expect(r.blockReason).toContain(join(WORK_DIR, '.flow-engine', 'sflow'));
+    expect(r.blockReason).not.toContain('.flow-engine' + '/' + '.flow-engine');
+    expect(r.blockReason).not.toContain('.flow-engine\\.flow-engine');
   });
 
   it('阻断任意 workDir 之外的 .flow-engine 写入（不只 projectDir）', () => {

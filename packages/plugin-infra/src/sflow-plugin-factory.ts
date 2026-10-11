@@ -38,7 +38,7 @@ import { createValidatorTools, createWorkflowTools } from './features/builtin-mc
 import { createCheckToolAvailableTool } from './features/tool-availability.js';
 import { setHasAgnesProvider } from './agents/agent-tools.js';
 import { createAgentSpecificGuards } from './hooks/guard/agent-guards.js';
-import { checkArtifactRootPath, extractWriteTargetPath } from './hooks/guard/checks/artifact-root-guards.js';
+import { enforceArtifactRootPath, extractWriteTargetPath } from './hooks/guard/checks/artifact-root-guards.js';
 import { clearFrontendCache } from './features/frontend-detector.js';
 import { createTaskTracker } from './features/task-tracker.js';
 import { createNotificationManager } from './features/notification-manager.js';
@@ -735,23 +735,13 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           const lowerTool = toolName?.toLowerCase();
 
           // 工件根写路径守卫（硬规则，优先级最高）：
-          // 目标路径含 /.flow-engine/ 且不在 <workDir>/.flow-engine/ 下 → 阻断。
+          // 目标路径含 /.flow-engine/ 且不在 <workDir>/.flow-engine/ 下 → 抛错中止工具调用。
+          // tool.execute.before 无正式拒绝机制，抛错是 OpenCode 标准中止手段（官方 .env 保护示例同款），
+          // 抛出后写入不会发生，错误信息（含正确工件目录指引）回显给模型。
           // 子项目目录（projectDir）不允许出现 .flow-engine。
           const artifactTargetPath = extractWriteTargetPath(toolName, output.args);
           if (artifactTargetPath) {
-            const artifactRootResult = checkArtifactRootPath({
-              filePath: artifactTargetPath,
-              workDir,
-            });
-            if (artifactRootResult.block) {
-              output.args = {
-                ...(output.args ?? {}),
-                _sflow_guard_blocked: true,
-                _sflow_guard_reason:
-                  artifactRootResult.blockReason ?? '工件目录锁定：禁止在 workDir 之外写入 .flow-engine',
-              };
-              return;
-            }
+            enforceArtifactRootPath({ filePath: artifactTargetPath, workDir });
           }
 
           // Token Budget: 记录 read 工具的文件路径，供 tool.execute.after 截断使用

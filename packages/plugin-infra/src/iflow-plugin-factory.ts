@@ -22,7 +22,7 @@ import type {
 type BuiltinAgentName = import('./agents/types.js').BuiltinAgentName;
 
 import { ensureDir, writeJsonFile } from '@opencode-flow-engine/shared';
-import { checkArtifactRootPath, extractWriteTargetPath } from './hooks/guard/checks/artifact-root-guards.js';
+import { enforceArtifactRootPath, extractWriteTargetPath } from './hooks/guard/checks/artifact-root-guards.js';
 import { appendChainUnavailableNotice } from './agents/agent-builder.js';
 import { setHasAgnesProvider } from './agents/agent-tools.js';
 import { agentOverridesFromConfig, loadCascadedSFlowConfig } from './agents/config-loader.js';
@@ -484,19 +484,13 @@ function createIFlowPluginServer(
         const toolName = input.tool;
         const lowerTool = toolName?.toLowerCase();
 
-        // 工件根写路径守卫（硬规则）：禁止在 workDir 之外写入 .flow-engine
+        // 工件根写路径守卫（硬规则）：禁止在 workDir 之外写入 .flow-engine。
+        // tool.execute.before 无正式拒绝机制，抛错是 OpenCode 标准中止手段
+        // （官方 .env 保护示例同款）：抛出后工具调用中止、写入不会发生，
+        // 错误信息（含正确工件目录指引）回显给模型。
         const artifactTargetPath = extractWriteTargetPath(toolName, output.args);
         if (artifactTargetPath) {
-          const artifactRootResult = checkArtifactRootPath({ filePath: artifactTargetPath, workDir });
-          if (artifactRootResult.block) {
-            output.args = {
-              ...(output.args ?? {}),
-              _iflow_guard_blocked: true,
-              _iflow_guard_reason:
-                artifactRootResult.blockReason ?? '工件目录锁定：禁止在 workDir 之外写入 .flow-engine',
-            };
-            return;
-          }
+          enforceArtifactRootPath({ filePath: artifactTargetPath, workDir });
         }
 
         // IFlow-specific guard logic

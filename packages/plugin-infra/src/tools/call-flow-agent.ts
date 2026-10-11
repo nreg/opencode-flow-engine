@@ -1611,7 +1611,7 @@ export function createCallFlowAgentTools(
             ? `- <projectDir>（${normalizeToPosix(projectDirParam as string)}）是子项目目录：严禁在其下创建 .flow-engine/ 或写入任何工件`
             : '- 任何子项目目录下都不允许创建 .flow-engine/',
           '- spec-writer / contract-builder / build-executor 等产出型子代理，只能把工件写入上述工件根目录',
-          '- 插件已启用写路径守卫：指向子项目目录 .flow-engine/** 的 write/edit 会被直接阻断',
+          '- 插件已启用写路径守卫：指向子项目目录 .flow-engine/** 的 write/edit/multiedit/patch/apply_patch 会被直接阻断（工具调用中止并返回错误，文件不会落盘）',
           '</artifact-root-rules>',
         ].join('\n');
 
