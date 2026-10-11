@@ -13,7 +13,10 @@
  *   （二进制无 multiedit/patch 工具 ID）；
  * - apply_patch 用例使用真实 `{ patchText }` 形态（PatchSchema 仅此一参），
  *   文件路径在 patchText 的 `*** Update File:` 行头内；
- * - 非写工具（read/bash）不受该守卫阻断。
+ * - 非写工具（read/bash）不受该守卫阻断；
+ * - 多文件 patchText（Gate-4 修复）：apply_patch 逐 hunk 应用于**全部**行头路径，
+ *   守卫必须校验全部行头——首个行头合法 + 后续行头非法时阻断，且任何目标
+ *   （含首个合法目标）都不得落盘。
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
@@ -55,8 +58,9 @@ function getToolBeforeHook(hooks: unknown): ToolBeforeHook {
  * 放行则执行写入。返回钩子错误（无错误返回 null）。
  *
  * apply_patch 的真实 schema 仅 `{ patchText }`（PatchSchema），文件路径在
- * patchText 的 `*** Update File:` 行头内——放行后按该行头路径落盘，
- * 与 OpenCode 1.19.0 二进制实证的 apply_patch 行为一致。
+ * patchText 的 `*** Add/Update/Delete File:` 行头内——放行后按**全部**行头
+ * 路径落盘，与 OpenCode 1.19.0 二进制实证的 apply_patch 多文件行为一致
+ * （逐 hunk 应用，多文件补丁是常态）。
  */
 async function dispatchWrite(
   hooks: unknown,
@@ -71,8 +75,7 @@ async function dispatchWrite(
   }
   // 放行则执行写入（真实 write 工具会递归创建父目录）
   if (tool === 'apply_patch') {
-    const target = patchTextTargetPath(String(args.patchText ?? ''));
-    if (target) {
+    for (const target of patchTextTargetPaths(String(args.patchText ?? ''))) {
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, 'patched-content', 'utf-8');
     }
@@ -83,13 +86,14 @@ async function dispatchWrite(
   return null;
 }
 
-/** 从 apply_patch 的 patchText 提取首个 `*** Update File:` 行头路径（模拟真实工具行为） */
-function patchTextTargetPath(patchText: string): string {
+/** 从 apply_patch 的 patchText 提取全部 `*** Add/Update/Delete File:` 行头路径（模拟真实多文件工具行为） */
+function patchTextTargetPaths(patchText: string): string[] {
+  const paths: string[] = [];
   for (const line of patchText.split('\n')) {
     const m = line.trim().match(/^\*\*\*\s*(?:Add|Update|Delete)\s+File:\s*(.+)$/i);
-    if (m) return m[1].trim();
+    if (m) paths.push(m[1].trim());
   }
-  return '';
+  return paths;
 }
 
 /** 构造 apply_patch 真实形态的 patchText（PatchSchema 仅 { patchText }） */
@@ -100,6 +104,27 @@ function buildPatchText(targetPath: string): string {
     '@@',
     '-old-line',
     '+new-line',
+    '*** End Patch',
+  ].join('\n');
+}
+
+/** 构造多文件 apply_patch patchText（逐文件 Update 行头 + hunk） */
+function buildMultiFilePatchText(targetPaths: string[]): string {
+  const lines = ['*** Begin Patch'];
+  for (const p of targetPaths) {
+    lines.push(`*** Update File: ${p}`, '@@', '-old-line', '+new-line');
+  }
+  lines.push('*** End Patch');
+  return lines.join('\n');
+}
+
+/** 构造混合动词多文件 patchText（Add 合法行头 + Delete 非法行头） */
+function buildMixedVerbPatchText(addPath: string, deletePath: string): string {
+  return [
+    '*** Begin Patch',
+    `*** Add File: ${addPath}`,
+    '+new-content',
+    `*** Delete File: ${deletePath}`,
     '*** End Patch',
   ].join('\n');
 }
@@ -243,6 +268,76 @@ describe('P0-1：工件根写路径守卫 —— 工厂 hook 真阻断', () => {
       expect(err!.message).toContain('工件目录锁定');
       // 关键：patchText 内嵌的非法路径被提取并阻断，文件未落盘
       expect(existsSync(patchTarget)).toBe(false);
+    } finally {
+      await disposeHooks(hooks);
+    }
+  });
+
+  // ─── 多文件 patchText（Gate-4 修复）：全部行头逐一校验，任一非法即阻断 ────
+
+  for (const [name, createHooks] of factories) {
+    it(`${name} 工厂：多文件 patchText（合法行头在前 + 非法行头在后）被阻断且均未落盘`, async () => {
+      const hooks = await createHooks();
+      try {
+        // 审查实证的绕过形态：首个行头合法落 workDir/.flow-engine，
+        // 后续行头指向 <projectDir>/.flow-engine/**——旧守卫只取首个即放行。
+        const legalTarget = join(workDir, '.flow-engine', 'sflow', 'multi-legal.md');
+        const illegalTarget = join(projectDir, '.flow-engine', 'sflow', 'multi-illegal.json');
+        const err = await dispatchWrite(hooks, 'apply_patch', {
+          patchText: buildMultiFilePatchText([legalTarget, illegalTarget]),
+        });
+
+        expect(err).toBeInstanceOf(Error);
+        expect(err!.message).toContain('工件目录锁定');
+        // 阻断消息点名 offending path（后续非法行头目标）
+        expect(err!.message).toContain(illegalTarget);
+        // 关键：钩子抛错即整个工具调用中止——首个合法行头目标也不得落盘
+        expect(existsSync(legalTarget)).toBe(false);
+        // 关键：后续非法行头目标未落盘
+        expect(existsSync(illegalTarget)).toBe(false);
+      } finally {
+        await disposeHooks(hooks);
+      }
+    });
+  }
+
+  it('sflow 工厂：多文件 patchText 混合动词（Add 合法 + Delete 非法）被阻断且未落盘', async () => {
+    const hooks = await createSFlowPluginModule().server({
+      client: createMockClient(),
+      directory: workDir,
+    } as never);
+    try {
+      const legalTarget = join(workDir, '.flow-engine', 'sflow', 'mixed-add.md');
+      const illegalTarget = join(projectDir, '.flow-engine', 'sflow', 'mixed-delete.md');
+      const err = await dispatchWrite(hooks, 'apply_patch', {
+        patchText: buildMixedVerbPatchText(legalTarget, illegalTarget),
+      });
+
+      expect(err).toBeInstanceOf(Error);
+      expect(err!.message).toContain('工件目录锁定');
+      expect(err!.message).toContain(illegalTarget);
+      expect(existsSync(legalTarget)).toBe(false);
+      expect(existsSync(illegalTarget)).toBe(false);
+    } finally {
+      await disposeHooks(hooks);
+    }
+  });
+
+  it('sflow 工厂：多文件 patchText 全部合法 → 放行且全部行头目标落盘', async () => {
+    const hooks = await createSFlowPluginModule().server({
+      client: createMockClient(),
+      directory: workDir,
+    } as never);
+    try {
+      const targetA = join(workDir, '.flow-engine', 'sflow', 'multi-a.md');
+      const targetB = join(workDir, '.flow-engine', 'sflow', 'multi-b.md');
+      const err = await dispatchWrite(hooks, 'apply_patch', {
+        patchText: buildMultiFilePatchText([targetA, targetB]),
+      });
+
+      expect(err).toBeNull();
+      expect(existsSync(targetA)).toBe(true);
+      expect(existsSync(targetB)).toBe(true);
     } finally {
       await disposeHooks(hooks);
     }

@@ -22,7 +22,7 @@ import type {
 type BuiltinAgentName = import('./agents/types.js').BuiltinAgentName;
 
 import { ensureDir, writeJsonFile } from '@opencode-flow-engine/shared';
-import { enforceArtifactRootPath, extractWriteTargetPath } from './hooks/guard/checks/artifact-root-guards.js';
+import { enforceArtifactRootPaths, extractWriteTargetPaths } from './hooks/guard/checks/artifact-root-guards.js';
 import { appendChainUnavailableNotice } from './agents/agent-builder.js';
 import { setHasAgnesProvider } from './agents/agent-tools.js';
 import { agentOverridesFromConfig, loadCascadedSFlowConfig } from './agents/config-loader.js';
@@ -488,10 +488,9 @@ function createIFlowPluginServer(
         // tool.execute.before 无正式拒绝机制，抛错是 OpenCode 标准中止手段
         // （官方 .env 保护示例同款）：抛出后工具调用中止、写入不会发生，
         // 错误信息（含正确工件目录指引）回显给模型。
-        const artifactTargetPath = extractWriteTargetPath(toolName, output.args, workDir);
-        if (artifactTargetPath) {
-          enforceArtifactRootPath({ filePath: artifactTargetPath, workDir });
-        }
+        // Gate-4 修复：apply_patch 多文件 patchText 的全部行头路径逐一校验，
+        // 任一非法即阻断（此前仅校验首个行头，后续非法行头可绕过守卫）。
+        enforceArtifactRootPaths(extractWriteTargetPaths(toolName, output.args, workDir), workDir);
 
         // IFlow-specific guard logic
         const guardHook = hookComposer.getHook('guard');

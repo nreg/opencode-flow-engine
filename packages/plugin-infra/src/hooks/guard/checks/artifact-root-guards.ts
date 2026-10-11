@@ -76,53 +76,62 @@ export const GUARDED_WRITE_TOOLS: ReadonlySet<string> = new Set([
 const PATCH_FILE_HEADER = /^\*\*\*\s*(Add|Update|Delete)\s+File:\s*(.+)$/i;
 
 /**
- * 从 apply_patch 的 patchText 中提取首个目标文件路径。
+ * 从 apply_patch 的 patchText 中提取**全部**目标文件路径（多文件补丁）。
  *
  * 背景（P1-1 Gate 修复）：OpenCode 1.19.0 的 apply_patch 工具 schema 仅
  * `{ patchText }`（PatchSchema），**没有 filePath/path/file_path 参数**——
  * 文件路径只存在于 patchText 的 `*** Add/Update/Delete File:` 行头内。
  * provider 适配器在 write/edit 不可用时会回落合成 apply_patch，若不解析
  * patchText，经 apply_patch 写 `<projectDir>/.flow-engine/**` 将绕过守卫。
+ *
+ * Gate-4 修复：apply_patch 多文件是常态（Input 描述含 add/update/delete，
+ * 逐 hunk 应用）。此前只返回**首个**行头路径——多文件 patchText 首个行头
+ * 合法落 `<workDir>/.flow-engine`、后续行头指向 `<projectDir>/.flow-engine/**`
+ * 时，守卫判定放行，非法写入得逞（审查探针实证）。故改为返回全部行头路径，
+ * 由调用方逐一校验。
  */
-function extractPatchTextPath(patchText: unknown): string {
-  if (typeof patchText !== 'string' || patchText.length === 0) return '';
+export function extractPatchTextPaths(patchText: unknown): string[] {
+  if (typeof patchText !== 'string' || patchText.length === 0) return [];
+  const paths: string[] = [];
   for (const rawLine of patchText.split('\n')) {
     const m = rawLine.trim().match(PATCH_FILE_HEADER);
     const p = m?.[2]?.trim();
-    if (p && p.length > 0) return p;
+    if (p && p.length > 0) paths.push(p);
   }
-  return '';
+  return paths;
 }
 
 /**
- * 从写工具参数中提取目标文件路径。
+ * 从写工具参数中提取**全部**目标文件路径。
  *
- * - write / edit：读 `filePath` / `path` / `file_path`（兼容三种命名）
- * - apply_patch：读 `patchText`，逐行匹配 `*** (Add|Update|Delete) File:` 行头取首个命中
+ * - write / edit：读 `filePath` / `path` / `file_path`（兼容三种命名），单元素数组
+ * - apply_patch：读 `patchText`，逐行匹配 `*** (Add|Update|Delete) File:` 行头取全部命中
  *
  * 相对路径在提供 `workDir` 时解析为绝对路径（守卫的归一化基准），
  * 保证后续判定不受调用方 cwd 影响；未提供时原样返回（由
  * `checkArtifactRootPath` 的 toAbsolute 二次解析兜底）。
+ *
+ * 无命中返回空数组（调用方据此跳过守卫）。
  */
-export function extractWriteTargetPath(
+export function extractWriteTargetPaths(
   toolName: string | undefined,
   args: unknown,
   workDir?: string,
-): string {
+): string[] {
   const lower = (toolName ?? '').toLowerCase();
-  if (!GUARDED_WRITE_TOOLS.has(lower)) return '';
+  if (!GUARDED_WRITE_TOOLS.has(lower)) return [];
   const record = (args ?? {}) as Record<string, unknown>;
 
   if (lower === 'apply_patch') {
-    const patchPath = extractPatchTextPath(record.patchText);
-    if (!patchPath) return '';
-    return workDir && workDir.trim().length > 0 && !isAbsolute(patchPath)
-      ? resolve(workDir, patchPath)
-      : patchPath;
+    return extractPatchTextPaths(record.patchText).map((patchPath) =>
+      workDir && workDir.trim().length > 0 && !isAbsolute(patchPath)
+        ? resolve(workDir, patchPath)
+        : patchPath,
+    );
   }
 
   const candidate = record.filePath ?? record.path ?? record.file_path;
-  return typeof candidate === 'string' ? candidate : '';
+  return typeof candidate === 'string' && candidate.length > 0 ? [candidate] : [];
 }
 
 /**
@@ -185,5 +194,31 @@ export function enforceArtifactRootPath(input: ArtifactRootGuardInput): void {
     throw new Error(
       result.blockReason ?? '工件目录锁定：禁止在 workDir 之外写入 .flow-engine',
     );
+  }
+}
+
+/**
+ * 对一组写路径**逐一**执行工件根守卫，任一非法即抛错中止（Gate-4 修复）。
+ *
+ * 动机：apply_patch 多文件 patchText 含多个行头路径，旧调用点只校验首个
+ * 提取路径——后续非法行头（典型：`<projectDir>/.flow-engine/**`）绕过守卫。
+ * 本函数把「全部路径逐一 enforceArtifactRootPath、任一非法即阻断」收敛为
+ * 单一实现，供三工厂 `tool.execute.before` 钩子共用；阻断消息由
+ * `checkArtifactRootPath` 生成，天然点名 offending path。
+ *
+ * 空列表为无操作（无行头/非写工具的返空语义）。
+ *
+ * @param filePaths - 待校验的写路径列表（绝对或相对 workDir）
+ * @param workDir - 会话工作目录（工件根的上级）
+ * @param projectDir - 子项目目录（仅用于给出更精确的阻断提示，可选）
+ * @throws Error 当任一目标路径违反工件根锁定规则时
+ */
+export function enforceArtifactRootPaths(
+  filePaths: readonly string[],
+  workDir: string,
+  projectDir?: string,
+): void {
+  for (const filePath of filePaths) {
+    enforceArtifactRootPath({ filePath, workDir, projectDir });
   }
 }

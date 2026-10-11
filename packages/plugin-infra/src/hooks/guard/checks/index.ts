@@ -41,7 +41,10 @@ export {
 
 export {
   checkArtifactRootPath,
-  extractWriteTargetPath,
+  extractWriteTargetPaths,
+  extractPatchTextPaths,
+  enforceArtifactRootPath,
+  enforceArtifactRootPaths,
   GUARDED_WRITE_TOOLS,
   ARTIFACT_ROOT_SEGMENT,
   ARTIFACT_DIR_SEGMENTS,

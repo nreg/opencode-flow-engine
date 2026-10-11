@@ -12,7 +12,7 @@
 
 import type { PluginInput, PluginOptions, Hooks, PluginModule } from '@opencode-ai/plugin';
 import type { LocalToolDefinition } from './types/local-tool-definition.js';
-import { enforceArtifactRootPath, extractWriteTargetPath } from './hooks/guard/checks/artifact-root-guards.js';
+import { enforceArtifactRootPaths, extractWriteTargetPaths } from './hooks/guard/checks/artifact-root-guards.js';
 import { z } from 'zod';
 
 import type { SFlowClient, BackgroundTaskEntry, BackgroundTaskRegistry, AgentModelMap } from './types.js';
@@ -449,10 +449,9 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
       // 目标路径含 /.flow-engine/ 且不在 <workDir>/.flow-engine/ 下 → 抛错中止工具调用。
       // tool.execute.before 无正式拒绝机制，抛错是 OpenCode 标准中止手段（官方 .env 保护示例同款），
       // 抛出后写入不会发生，错误信息（含正确工件目录指引）回显给模型。
-      const artifactTargetPath = extractWriteTargetPath(toolName, output.args, workDir);
-      if (artifactTargetPath) {
-        enforceArtifactRootPath({ filePath: artifactTargetPath, workDir });
-      }
+      // Gate-4 修复：apply_patch 多文件 patchText 的全部行头路径逐一校验，
+      // 任一非法即阻断（此前仅校验首个行头，后续非法行头可绕过守卫）。
+      enforceArtifactRootPaths(extractWriteTargetPaths(toolName, output.args, workDir), workDir);
 
       // Token Budget: 记录 read 工具的文件路径，供 tool.execute.after 截断使用
       if (lowerTool === 'read') {
