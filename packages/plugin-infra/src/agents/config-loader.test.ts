@@ -1,7 +1,7 @@
 /**
  * Config Loader tests
  */
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { existsSync, unlinkSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
@@ -14,7 +14,15 @@ import {
   mergeOverrides,
   USER_CONFIG_FILE,
 } from './config-loader.js';
-import { createAgent, createAllAgents, clearConfigCache } from './agent-builder.js';
+import {
+  createAgent,
+  createAllAgents,
+  clearConfigCache,
+  markModelUnavailable,
+  isModelAvailable,
+  clearUnavailableModels,
+} from './agent-builder.js';
+import { Logger } from '../utils/logger.js';
 
 const TEST_DIR = `${import.meta.dir}/../__test_cfg__`;
 const TEST_CONFIG = join(TEST_DIR, '.flow-engine/sflow', 'config.json');
@@ -236,6 +244,95 @@ describe('Config Loader', () => {
         expect(profiles.lite).toBeDefined();
       } finally {
         delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // ─── D4: 黑名单运行时恢复（用户配置变化检测） ─────────────────────────────
+  //
+  // 背景（毒化链修复配套）：黑名单冷却基于某一时刻的模型配置决策写入。用户更换
+  // 模型配置后，旧冷却（可能因请求级错误误判 + 时区误解析长达数小时）不会自动
+  // 失效——档位候选全黑后解析落 unconfigured，报误导性错误。修复：检测用户
+  // 配置文件内容变化 → clearUnavailableModels() 并记录日志。
+  // 30s 缓存语义不变：变化检测只在 loadCascadedSFlowConfig 实际执行时生效
+  // （agent-builder 的 getCascadedConfig 缓存未命中时才调用本函数）。
+
+  describe('loadCascadedSFlowConfig — D4 黑名单运行时恢复', () => {
+    it('用户配置内容变化 → 清除黑名单冷却；同内容重复加载不触发', async () => {
+      const { dir, file } = createTempUserConfigDir();
+      process.env.FLOW_ENGINE_USER_CONFIG_FILE = file;
+      try {
+        writeFileSync(
+          file,
+          JSON.stringify({ modelProfiles: { deep: { model: 'provider/a', fallback_models: [] } } }),
+        );
+        // 首次加载：建立基线（不触发清理）
+        await loadCascadedSFlowConfig(TEST_DIR);
+
+        markModelUnavailable('provider/cooled-model', { ttlMs: 60 * 60 * 1000 });
+        expect(isModelAvailable('provider/cooled-model')).toBe(false);
+
+        // 同内容重复加载：不触发清理（冷却仍在）
+        await loadCascadedSFlowConfig(TEST_DIR);
+        expect(isModelAvailable('provider/cooled-model')).toBe(false);
+
+        // 修改用户配置（更换模型）→ 再次加载：旧冷却基于变更前的配置决策，全部失效
+        writeFileSync(
+          file,
+          JSON.stringify({ modelProfiles: { deep: { model: 'provider/b', fallback_models: [] } } }),
+        );
+        await loadCascadedSFlowConfig(TEST_DIR);
+        expect(isModelAvailable('provider/cooled-model')).toBe(true);
+      } finally {
+        delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+        clearUnavailableModels();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('用户配置内容未变 → 不清除黑名单冷却', async () => {
+      const { dir, file } = createTempUserConfigDir();
+      process.env.FLOW_ENGINE_USER_CONFIG_FILE = file;
+      try {
+        const content = JSON.stringify({
+          modelProfiles: { deep: { model: 'provider/a', fallback_models: [] } },
+        });
+        writeFileSync(file, content);
+        await loadCascadedSFlowConfig(TEST_DIR); // 基线
+
+        markModelUnavailable('provider/cooled-model', { ttlMs: 60 * 60 * 1000 });
+        // 连续两次加载、内容零变化：冷却不被清除
+        await loadCascadedSFlowConfig(TEST_DIR);
+        await loadCascadedSFlowConfig(TEST_DIR);
+        expect(isModelAvailable('provider/cooled-model')).toBe(false);
+      } finally {
+        delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+        clearUnavailableModels();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('配置变化时记录日志（可观测：说明已清除模型黑名单冷却）', async () => {
+      const { dir, file } = createTempUserConfigDir();
+      process.env.FLOW_ENGINE_USER_CONFIG_FILE = file;
+      const originalLog = Logger.log;
+      const logSpy = mock(() => Promise.resolve());
+      (Logger as unknown as { log: unknown }).log = logSpy;
+      try {
+        writeFileSync(file, JSON.stringify({ modelProfiles: { deep: { model: 'provider/a', fallback_models: [] } } }));
+        await loadCascadedSFlowConfig(TEST_DIR); // 基线
+        logSpy.mockClear();
+
+        writeFileSync(file, JSON.stringify({ modelProfiles: { deep: { model: 'provider/b', fallback_models: [] } } }));
+        await loadCascadedSFlowConfig(TEST_DIR);
+
+        const messages = logSpy.mock.calls.map((call) => String(call[0]));
+        expect(messages.some((msg) => msg.includes('黑名单') && msg.includes('配置'))).toBe(true);
+      } finally {
+        (Logger as unknown as { log: unknown }).log = originalLog;
+        delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+        clearUnavailableModels();
         rmSync(dir, { recursive: true, force: true });
       }
     });

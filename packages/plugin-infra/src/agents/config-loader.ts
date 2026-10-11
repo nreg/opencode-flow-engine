@@ -89,7 +89,7 @@ export async function loadSFlowConfig(projectDir?: string): Promise<SFlowConfig>
  * (or FLOW_ENGINE_USER_CONFIG_FILE env var override, used in tests).
  */
 export async function loadUserSFlowConfig(configPath?: string): Promise<SFlowConfig> {
-  const path = configPath || process.env.FLOW_ENGINE_USER_CONFIG_FILE || USER_CONFIG_FILE;
+  const path = configPath || resolveUserConfigPath();
 
   try {
     await access(path);
@@ -107,11 +107,81 @@ export async function loadUserSFlowConfig(configPath?: string): Promise<SFlowCon
   }
 }
 
+/** 用户配置文件路径解析（与 loadUserSFlowConfig 一致：env 覆盖优先） */
+function resolveUserConfigPath(): string {
+  return process.env.FLOW_ENGINE_USER_CONFIG_FILE || USER_CONFIG_FILE;
+}
+
+/**
+ * D4: 纯 JS FNV-1a 内容哈希——跨运行时可用（不依赖 Bun/Node 专有 API），
+ * 用于检测用户配置文件内容变化（比 mtime 更稳：同毫秒内的内容改写也能捕获）。
+ */
+function hashContent(content: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < content.length; i++) {
+    h ^= content.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16);
+}
+
+/**
+ * D4: 用户配置内容快照（按路径键控——测试经 FLOW_ENGINE_USER_CONFIG_FILE
+ * 切换临时路径时，每个路径独立建立基线，不会把路径切换误判为内容变化）。
+ */
+let _userConfigSnapshot: { path: string; hash: string } | null = null;
+
+/**
+ * D4: 黑名单运行时恢复——检测用户配置文件内容变化并清除模型黑名单冷却。
+ *
+ * 背景（毒化链修复配套）：黑名单冷却基于某一时刻的模型配置决策写入。用户更换
+ * 模型配置后，旧冷却（可能因请求级错误被误判为模型故障 + 重置时间时区误解析
+ * 长达数小时）不会自动失效——档位候选全黑后解析落 unconfigured，报误导性错误。
+ * 修复：用户配置内容与上次不同 → clearUnavailableModels() 并记录日志。
+ *
+ * 语义：
+ * - 首次加载（或路径切换）只建立基线，不触发清理（进程启动时黑名单本为空）；
+ * - 同内容重复加载不触发（30s 缓存语义不受影响：本检测只在
+ *   loadCascadedSFlowConfig 实际执行时生效，即 agent-builder 的
+ *   getCascadedConfig 缓存未命中时）；
+ * - 配置文件不存在/不可读时无可检测变化，静默跳过。
+ */
+async function clearBlacklistOnUserConfigChange(): Promise<void> {
+  const path = resolveUserConfigPath();
+  let raw: string;
+  try {
+    raw = await readFile(path, 'utf-8');
+  } catch {
+    return; // 无用户配置文件（或不可读）：无可检测变化
+  }
+  const hash = hashContent(raw);
+  if (_userConfigSnapshot && _userConfigSnapshot.path === path && _userConfigSnapshot.hash === hash) {
+    return; // 内容未变
+  }
+  const isContentChange =
+    _userConfigSnapshot !== null && _userConfigSnapshot.path === path && _userConfigSnapshot.hash !== hash;
+  _userConfigSnapshot = { path, hash };
+  if (!isContentChange) return; // 首次加载/路径切换：建立基线，不触发清理
+
+  // 用户修改了模型配置 → 旧黑名单冷却基于变更前的配置决策，全部失效
+  // （动态导入避免 config-loader ↔ agent-builder 静态循环依赖）
+  const { clearUnavailableModels } = await import('./agent-builder.js');
+  clearUnavailableModels();
+  await Logger.log(
+    `[sflow] 检测到用户配置变化（${path}）：已清除模型黑名单冷却` +
+      `（旧冷却基于变更前的模型配置决策，可能因请求级错误误判或重置时间时区误解析过长）`,
+  );
+}
+
 /**
  * Load cascading config: user-level (~/.config/opencode/opencode-flow-engine.json) as base,
  * project-level (.flow-engine/sflow/config.json) as higher-priority override.
  */
 export async function loadCascadedSFlowConfig(projectDir?: string): Promise<SFlowConfig> {
+  // D4: 用户配置变化 → 清除黑名单冷却（在读取新配置前完成，保证消费方拿到的是
+  // 与新配置匹配的可用性状态）
+  await clearBlacklistOnUserConfigChange();
+
   const user = await loadUserSFlowConfig();
   const project = await loadSFlowConfig(projectDir);
 
