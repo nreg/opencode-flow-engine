@@ -556,6 +556,109 @@ describe('R3-P1: parseQuotaResetTime 裸 UTC 支持', () => {
   });
 });
 
+// ─── D5: parseQuotaResetTime 时区误解析防护（黑名单毒化链修复） ─────────────
+//
+// 背景（毒化链第四环）：parseQuotaResetTime 把重置时间误解析到未来数小时
+// （疑似把本地时间当 UTC），黑名单 TTL 随之写到几小时后，档位候选长时间全黑。
+// 修复：① 仅当文本含配额/限流上下文时才尝试解析重置时间，无上下文的日期
+// 字符串不得作为 resetAt；② 时间戳必须带显式时区才按该时区解释，无时区的
+// 按本地时区解释并 warn 记录假设；③ 解析值超过 now+2h 时 warn 记录原文与
+// 解析值（可观测）。
+
+describe('D5: parseQuotaResetTime 时区误解析防护', () => {
+  // bun test 运行时强制 TZ=UTC，会掩盖「本地时区假设」问题——显式切到
+  // Asia/Shanghai（UTC+8）使本地解释与 UTC 可区分，测试后恢复。
+  beforeEach(() => {
+    process.env.TZ = 'Asia/Shanghai';
+  });
+  afterAll(() => {
+    process.env.TZ = 'UTC';
+  });
+
+  /** 捕获 Logger.warn 消息（fire-and-forget，替换后同步收集） */
+  function captureWarn(): { messages: string[]; restore: () => void } {
+    const messages: string[] = [];
+    const original = Logger.warn;
+    (Logger as unknown as { warn: unknown }).warn = mock((msg: string) => {
+      messages.push(String(msg));
+      return Promise.resolve();
+    });
+    return { messages, restore: () => { (Logger as unknown as { warn: unknown }).warn = original; } };
+  }
+
+  it('无配额上下文含日期 → 不得作为 resetAt（null）', () => {
+    // 正常产出/无关文本里的日期不是重置时间——修复前会被当作 resetAt 写进
+    // 黑名单 TTL（毒化链：误解析的长冷却）
+    expect(parseQuotaResetTime('Build completed on 2026-09-27 12:21:07')).toBeNull();
+    expect(parseQuotaResetTime('Report generated at 2026-09-27 12:21:07 UTC+8')).toBeNull();
+    expect(parseQuotaResetTime('The meeting is scheduled for 2026-09-27 12:21:07')).toBeNull();
+  });
+
+  it('配额上下文 + 无时区时间戳 → 按本地时区解释并 warn 记录假设', () => {
+    const warn = captureWarn();
+    try {
+      // TZ=Asia/Shanghai（UTC+8）：本地 2026-09-27 12:21:07 === UTC 2026-09-27 04:21:07
+      const resetAt = parseQuotaResetTime('您的使用量已超出频率限制，将在 2026-09-27 12:21:07 重置');
+      expect(resetAt).toBe(Date.UTC(2026, 8, 27, 4, 21, 7));
+      // 记录了本地时区假设（可观测：排障时能看出冷却是按本地时间推算的）
+      expect(warn.messages.some((m) => m.includes('本地时区'))).toBe(true);
+    } finally {
+      warn.restore();
+    }
+  });
+
+  it('配额上下文 + 显式时区（Z / UTC+08:00 / GMT+8 / ISO +08:00）→ 按时区解释', () => {
+    const warn = captureWarn();
+    try {
+      expect(parseQuotaResetTime('rate limit exceeded, resets at 2026-09-27T04:21:07Z')).toBe(
+        Date.UTC(2026, 8, 27, 4, 21, 7),
+      );
+      expect(parseQuotaResetTime('quota exceeded, resets at 2026-09-27 12:21:07 UTC+08:00')).toBe(
+        Date.UTC(2026, 8, 27, 4, 21, 7),
+      );
+      expect(parseQuotaResetTime('quota exceeded, resets at 2026-09-27 12:21:07 GMT+8')).toBe(
+        Date.UTC(2026, 8, 27, 4, 21, 7),
+      );
+      expect(parseQuotaResetTime('quota exceeded, resets at 2026-09-27T04:21:07+08:00')).toBe(
+        Date.UTC(2026, 8, 26, 20, 21, 7),
+      );
+      // 显式时区不得记录本地时区假设 warn
+      expect(warn.messages.some((m) => m.includes('本地时区'))).toBe(false);
+    } finally {
+      warn.restore();
+    }
+  });
+
+  it('解析出的 resetAt 超过 now+2h → warn 记录原文本与解析值（可观测）', () => {
+    const warn = captureWarn();
+    try {
+      // 相对时间构造（now + 5h，显式 UTC 时区，排除本地假设 warn 干扰）
+      const resetInstant = Date.now() + 5 * 60 * 60 * 1000;
+      const utcText = new Date(resetInstant).toISOString().slice(0, 19).replace('T', ' ');
+      const resetAt = parseQuotaResetTime(`rate limit exceeded, resets at ${utcText} UTC`);
+      expect(resetAt).not.toBeNull();
+      expect(Math.abs(resetAt! - resetInstant)).toBeLessThan(1000);
+      // 超过 now+2h → warn 记录原文本与解析值（仅观测，不拒绝合法重置时间）
+      expect(warn.messages.some((m) => m.includes('2h') && m.includes('rate limit exceeded'))).toBe(true);
+    } finally {
+      warn.restore();
+    }
+  });
+
+  it('回归保护：配额上下文 + 2h 内的近重置时间不触发远未来 warn', () => {
+    const warn = captureWarn();
+    try {
+      const resetInstant = Date.now() + 30 * 60 * 1000; // now + 30min
+      const utcText = new Date(resetInstant).toISOString().slice(0, 19).replace('T', ' ');
+      const resetAt = parseQuotaResetTime(`rate limit exceeded, resets at ${utcText} UTC`);
+      expect(resetAt).not.toBeNull();
+      expect(warn.messages.some((m) => m.includes('2h'))).toBe(false);
+    } finally {
+      warn.restore();
+    }
+  });
+});
+
 describe('R3-P2-2: 过期 resetAt delete 保守化（不绕过单调合并）', () => {
   beforeEach(() => clearUnavailableModels());
 

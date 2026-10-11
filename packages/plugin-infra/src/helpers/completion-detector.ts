@@ -22,6 +22,7 @@
  */
 
 import { extractJsonBlock } from './output-extractor.js';
+import { Logger } from '../utils/logger.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -91,6 +92,17 @@ export const DEFAULT_COMPLETION_ENABLED_AGENTS: string[] = [
 // ─── Model Failure Classification（错误码驱动，主判据）──────────────────────
 
 /**
+ * D5: 配额/限流上下文门控模式——仅当文本含配额/限流语义时才尝试解析重置时间。
+ * 覆盖中英文常见形态：rate limit / quota / 频率 / 使用量 / 429 /
+ * too many requests / reset / 重置。
+ */
+const QUOTA_CONTEXT_PATTERN =
+  /rate\s*limit|quota|频率|使用量|用量|429|too many requests|reset|重置/i;
+
+/** D5: 重置时间超过 now+2h 时记录 warn 的阈值（可观测，不改变解析结果） */
+const RESET_TIME_FAR_FUTURE_WARN_MS = 2 * 60 * 60 * 1000;
+
+/**
  * Quota / rate-limit reset time parsing（parseQuotaResetTime）。
  *
  * Supported formats:
@@ -105,10 +117,21 @@ export const DEFAULT_COMPLETION_ENABLED_AGENTS: string[] = [
  * 支持 UTC+n / UTC+HH:MM / GMT±n / ISO ±HH:MM 偏移。
  * 语义明确：无时区标记的时间戳按本地时间解释（不是 UTC）。
  *
+ * D5（毒化链修复）三项防护：
+ * 1. 配额/限流上下文门控——仅当文本含配额/限流语义（rate limit / quota /
+ *    频率 / 使用量 / 429 / reset 等）时才尝试解析；无上下文的日期字符串
+ *    （如正常产出里提到的日期）不得作为 resetAt，避免无关时间戳写进黑名单 TTL；
+ * 2. 显式时区才按该时区解释；无时区的时间戳按本地时区解释并 Logger.warn
+ *    记录假设（此前疑似把本地时间当 UTC，把冷却写到未来数小时）；
+ * 3. 解析值超过 now+2h 时 Logger.warn 记录原文本与解析值（可观测；
+ *    合法场景如月度配额重置可能确实很远——仅记录不拒绝）。
+ *
  * @returns epoch milliseconds of the reset time, or null when no absolute time found
  */
 export function parseQuotaResetTime(output: string): number | null {
   if (!output) return null;
+  // D5-1: 配额/限流上下文门控——无上下文的日期字符串不得作为 resetAt
+  if (!QUOTA_CONTEXT_PATTERN.test(output)) return null;
   const datePattern =
     /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|UTC([+-]\d{1,2}(?::?\d{2})?)?|GMT([+-]\d{1,2}(?::?\d{2})?)?|([+-]\d{2}:?\d{2}))?/i;
   // NP-1: 偏移量按「小时 + 分钟/60」解析为有限数值（Number 语义），
@@ -152,7 +175,30 @@ export function parseQuotaResetTime(output: string): number | null {
       return Date.UTC(year, month, day, hour, minute, second) - Math.round(offset * 3_600_000);
     }
     // No timezone: assume local time
-    return new Date(year, month, day, hour, minute, second).getTime();
+    // D5-2: 无显式时区的时间戳按本地时区解释，并 warn 记录假设——提供商报文
+    // 常省略时区，若按 UTC 解释会把冷却写到未来数小时（本地时区 +8h 即
+    // 「未来 8 小时」的毒化症状）；记录假设使排障时可识别冷却是按本地时间推算。
+    const localMs = new Date(year, month, day, hour, minute, second).getTime();
+    const p2 = (n: number): string => String(n).padStart(2, '0');
+    void Logger.warn(
+      `[parseQuotaResetTime] 时间戳无显式时区，按本地时区解释：` +
+        `本地时间=${year}-${p2(month + 1)}-${p2(day)} ${p2(hour)}:${p2(minute)}:${p2(second)}，` +
+        `原文="${output.slice(0, 200)}"`,
+    );
+    return localMs;
+  };
+
+  // D5-3: 解析值超过 now+2h → warn 记录原文本与解析值（可观测）。
+  // 合法场景（如月度配额重置）可能确实很远——仅记录不拒绝。
+  const finalize = (parsed: number | null): number | null => {
+    if (parsed === null || !Number.isFinite(parsed)) return null;
+    if (parsed > Date.now() + RESET_TIME_FAR_FUTURE_WARN_MS) {
+      void Logger.warn(
+        `[parseQuotaResetTime] 解析出的重置时间超过 now+2h：` +
+          `原文="${output.slice(0, 200)}"，解析值=${parsed}（${new Date(parsed).toISOString()}）`,
+      );
+    }
+    return parsed;
   };
 
   // NEW-P3-G: 优先取 reset/重置 关键词邻近的时间戳
@@ -163,9 +209,8 @@ export function parseQuotaResetTime(output: string): number | null {
     const match = segment.match(datePattern);
     if (match) {
       if (isResetSegment || segments.length === 1) {
-        const parsed = parseMatch(match);
         // NP-1: 非有限值不得进入 resetAt（NaN 会令 Math.max/比较失效，导致模型永久拉黑）
-        return parsed !== null && Number.isFinite(parsed) ? parsed : null;
+        return finalize(parseMatch(match));
       }
       // 非重置段的时间戳仅在无重置段匹配时作为兜底
     }
@@ -173,7 +218,7 @@ export function parseQuotaResetTime(output: string): number | null {
   // 兜底：全文首个时间戳
   const fallbackMatch = output.match(datePattern);
   const fallback = fallbackMatch ? parseMatch(fallbackMatch) : null;
-  return fallback !== null && Number.isFinite(fallback) ? fallback : null;
+  return finalize(fallback);
 }
 
 // ─── Error-code Driven Model Error Classification（错误码驱动分类，主判据）──────
