@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { Logger } from './logger';
+import { Logger, DEFAULT_LOG_DIR } from './logger';
 import { join } from 'path';
+import { homedir, tmpdir } from 'os';
 import { mkdir, rm, readFile, writeFile } from 'fs/promises';
 
-const TEST_LOG_DIR = join(process.cwd(), '.flow-engine', 'sflow');
+/** 测试隔离根：tmpdir 下独立目录，绝不写入 %USERPROFILE%/.flow-engine，也不依赖 cwd */
+const TEST_ROOT = join(tmpdir(), `sflow-logger-test-${process.pid}-${Date.now()}`);
+const TEST_LOG_DIR = join(TEST_ROOT, '.flow-engine', 'sflow');
 const TEST_LOG_FILE = join(TEST_LOG_DIR, 'plugin.log');
 
 describe('Logger', () => {
@@ -14,17 +17,24 @@ describe('Logger', () => {
     } catch {
       // 目录不存在，忽略
     }
-    // 重置 Logger 状态（重新初始化）
-    Logger.initialize(process.cwd());
+    // 重置 Logger 状态（重新初始化到隔离目录）
+    Logger.initialize(TEST_ROOT);
   });
 
   afterEach(async () => {
     // 清理测试环境
     try {
-      await rm(TEST_LOG_DIR, { recursive: true, force: true });
+      await rm(TEST_ROOT, { recursive: true, force: true });
     } catch {
       // 目录不存在，忽略
     }
+  });
+
+  describe('路径根：机器级运行时产物（%USERPROFILE%/.flow-engine）', () => {
+    it('默认日志目录必须位于 homedir 下，而不是 process.cwd()', () => {
+      expect(DEFAULT_LOG_DIR).toBe(join(homedir(), '.flow-engine', 'sflow'));
+      expect(DEFAULT_LOG_DIR).not.toBe(join(process.cwd(), '.flow-engine', 'sflow'));
+    });
   });
 
   describe('Task 1.1: Logger 类骨架', () => {
@@ -179,8 +189,8 @@ describe('Logger', () => {
   });
 
   describe('Task 1.5: 路径初始化', () => {
-    it('应该支持显式 initialize(changeDir)', async () => {
-      const customDir = process.cwd();
+    it('应该支持显式 initialize(目录)', async () => {
+      const customDir = TEST_ROOT;
       Logger.initialize(customDir);
 
       await Logger.log('Test with custom dir');
@@ -189,9 +199,8 @@ describe('Logger', () => {
       expect(content).toContain('Test with custom dir');
     });
 
-    it('应该支持默认 process.cwd()', async () => {
-      // 不调用 initialize，使用默认路径
-      Logger.initialize(process.cwd());
+    it('应该支持默认路径（未 initialize 时沿用上一次的机器级路径）', async () => {
+      Logger.initialize(TEST_ROOT);
 
       await Logger.log('Test with default dir');
 

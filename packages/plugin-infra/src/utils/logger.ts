@@ -1,11 +1,22 @@
 import { join, dirname } from 'path';
+import { homedir } from 'os';
 import { appendFile, mkdir } from 'fs/promises';
+
+/**
+ * 机器级运行时日志根目录。
+ *
+ * 动机：插件日志属「机器级运行时产物」，而非项目工件。原先默认根为
+ * process.cwd()，导致从仓库根跑测试/从项目目录启动插件时，日志被写进
+ * 项目目录的 .flow-engine/sflow/，与工件目录混在一起（并触发工件误删事故）。
+ * 故默认根统一为 %USERPROFILE%/.flow-engine/，与 cwd 完全解耦。
+ */
+export const DEFAULT_LOG_DIR = join(homedir(), '.flow-engine', 'sflow');
 
 /**
  * Logger - 统一日志工具类
  *
  * 功能：
- * - 将插件日志写入 .flow-engine/sflow/plugin.log
+ * - 将插件日志写入 %USERPROFILE%/.flow-engine/sflow/plugin.log（默认）
  * - 使用追加模式（appendFile），不覆盖已有内容
  * - 格式：[YYYY-MM-DD HH:mm:ss] [LEVEL] message
  * - 写入失败时静默降级（不抛异常、不降级到 console）
@@ -13,15 +24,19 @@ import { appendFile, mkdir } from 'fs/promises';
  * - 时间戳精确到秒
  */
 export class Logger {
-  private static logFilePath: string = join(process.cwd(), '.flow-engine', 'sflow', 'plugin.log');
+  private static logFilePath: string = join(DEFAULT_LOG_DIR, 'plugin.log');
   private static writeQueue: Promise<void> = Promise.resolve();
 
   /**
-   * 初始化日志路径
-   * @param changeDir - 项目根目录路径
+   * 初始化日志路径（显式指定日志根目录）
+   *
+   * 注意：调用方传入的目录是**显式**的日志根（例如插件拿到的 workDir），
+   * 与 cwd 无关；未显式初始化时使用 DEFAULT_LOG_DIR（%USERPROFILE%/.flow-engine）。
+   *
+   * @param logRootDir - 日志根目录路径
    */
-  static initialize(changeDir: string): void {
-    Logger.logFilePath = join(changeDir, '.flow-engine', 'sflow', 'plugin.log');
+  static initialize(logRootDir: string): void {
+    Logger.logFilePath = join(logRootDir, '.flow-engine', 'sflow', 'plugin.log');
   }
 
   /**

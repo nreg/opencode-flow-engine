@@ -1,12 +1,22 @@
 import { join, dirname } from 'path';
+import { homedir } from 'os';
 import { appendFile, writeFile, mkdir } from 'fs/promises';
 import { Logger } from '../utils/logger.js';
+
+/**
+ * 机器级运行时日志目录。
+ *
+ * 动机：轮询日志属「机器级运行时产物」，而非项目工件。原先默认目录为
+ * process.cwd()/.flow-engine/sflow，从项目目录跑测试/启动插件时会把日志写进
+ * 项目目录（并被用例的清理动作误删）。故默认统一为 %USERPROFILE%/.flow-engine/sflow。
+ */
+export const DEFAULT_LOG_DIR = join(homedir(), '.flow-engine', 'sflow');
 
 /**
  * PollingLogger - 轮询日志记录器
  *
  * 功能：
- * - 将轮询事件日志写入 .flow-engine/sflow/polling.log
+ * - 将轮询事件日志写入 %USERPROFILE%/.flow-engine/sflow/polling.log（默认）
  * - 使用追加模式（appendFile），不覆盖已有内容
  * - 结构化格式：[ISO-timestamp] [INFO] [sessionID] message | metadata
  * - 写入失败时降级到 console.warn，不抛出异常
@@ -27,8 +37,7 @@ export class PollingLogger {
     if (customLogPath) {
       this.logFilePath = customLogPath;
     } else {
-      const logDir = join(process.cwd(), '.flow-engine', 'sflow');
-      this.logFilePath = join(logDir, 'polling.log');
+      this.logFilePath = join(DEFAULT_LOG_DIR, 'polling.log');
     }
 
     // 插件初始化时清空旧日志文件，防止无限增长
@@ -45,12 +54,11 @@ export class PollingLogger {
   /**
    * 清空日志文件（覆盖为空内容）。
    * 静态方法，可在任意位置调用。
-   * @param filePath - 日志文件路径，默认使用 default 构造的路径
+   * @param filePath - 日志文件路径，默认使用 %USERPROFILE% 下的机器级路径
    */
   static async clear(filePath?: string): Promise<void> {
     try {
-      const logDir = filePath ? dirname(filePath) : join(process.cwd(), '.flow-engine', 'sflow');
-      const target = filePath ?? join(logDir, 'polling.log');
+      const target = filePath ?? join(DEFAULT_LOG_DIR, 'polling.log');
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, '', 'utf-8');
     } catch (error) {

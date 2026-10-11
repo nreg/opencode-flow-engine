@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { PollingLogger } from './polling-logger';
+import { PollingLogger, DEFAULT_LOG_DIR } from './polling-logger';
 import { join } from 'path';
+import { homedir, tmpdir } from 'os';
 import { mkdir, rm, readFile } from 'fs/promises';
 
-const TEST_LOG_DIR = join(process.cwd(), '.flow-engine', 'sflow');
+/** 测试隔离根：tmpdir 下独立目录，绝不写入 %USERPROFILE%/.flow-engine，也不依赖 cwd */
+const TEST_ROOT = join(tmpdir(), `sflow-polling-log-test-${process.pid}-${Date.now()}`);
+const TEST_LOG_DIR = join(TEST_ROOT, '.flow-engine', 'sflow');
 const TEST_LOG_FILE = join(TEST_LOG_DIR, 'polling.log');
 
 describe('PollingLogger', () => {
@@ -16,13 +19,13 @@ describe('PollingLogger', () => {
     } catch {
       // 目录不存在，忽略
     }
-    logger = new PollingLogger();
+    logger = new PollingLogger(TEST_LOG_FILE);
   });
 
   afterEach(async () => {
     // 清理测试环境
     try {
-      await rm(TEST_LOG_DIR, { recursive: true, force: true });
+      await rm(TEST_ROOT, { recursive: true, force: true });
     } catch {
       // 目录不存在，忽略
     }
@@ -248,7 +251,7 @@ describe('PollingLogger', () => {
       const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       // 使用一个临时路径，第一次会失败（目录不存在且无法创建），后续会成功
-      const tempPath = join(process.cwd(), '.flow-engine', 'sflow', 'temp-test.log');
+      const tempPath = join(TEST_ROOT, '.flow-engine', 'sflow', 'temp-test.log');
       const tempLogger = new PollingLogger(tempPath);
 
       // 第一次写入 - 可能失败（但不应该抛出异常）
@@ -274,6 +277,15 @@ describe('PollingLogger', () => {
       } catch {
         // 忽略清理失败
       }
+    });
+  });
+
+  // 放在文件末尾：PollingLogger 的静态 _cleared guard 只在进程内首次构造时清空一次，
+  // 本用例不做写入，置于末尾可避免构造出一个「携带浮动 clear」的实例干扰写入用例。
+  describe('路径根：机器级运行时产物（%USERPROFILE%/.flow-engine）', () => {
+    it('默认日志目录必须位于 homedir 下，而不是 process.cwd()', () => {
+      expect(DEFAULT_LOG_DIR).toBe(join(homedir(), '.flow-engine', 'sflow'));
+      expect(DEFAULT_LOG_DIR).not.toBe(join(process.cwd(), '.flow-engine', 'sflow'));
     });
   });
 });

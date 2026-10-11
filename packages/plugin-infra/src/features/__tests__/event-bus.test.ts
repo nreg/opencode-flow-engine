@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createEventBus } from '../event-bus';
 import type { EventBus, Event } from '../../types';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import { mkdir, rm, readFile } from 'fs/promises';
 
-const TEST_LOG_DIR = join(process.cwd(), '.flow-engine', 'sflow');
+/** 清理目标改为 tmpdir 隔离目录：绝不 rmSync 真实 cwd/project 的 .flow-engine/sflow */
+const TEST_LOG_DIR = join(tmpdir(), `sflow-event-bus-test-${process.pid}-${Date.now()}`);
 const TEST_LOG_FILE = join(TEST_LOG_DIR, 'polling.log');
 
 describe('EventBus', () => {
