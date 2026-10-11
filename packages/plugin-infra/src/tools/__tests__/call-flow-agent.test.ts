@@ -3344,6 +3344,148 @@ describe('Bugfix: nullish 可选参数兼容', () => {
   });
 });
 
+// ─── D1: 参数归一化防 "None" + 畸形 ID fail fast（黑名单毒化链修复） ─────────
+//
+// 背景（毒化链根因）：LLM 主编排器把 session_id/agent_id 传成字符串 "None" →
+// 旧归一化集合只防 ""/"null"，"None" 漏过 → 无效 resume → 服务端 schema 校验错误
+// （Expected a string starting with "ses", got "None"，HTTP 500）→ 请求级错误
+// 被误判为模型故障 → markModelUnavailable 拉黑无辜模型。
+// 修复：① 归一化集合扩充 ""/"null"/"none"/"undefined"（trim + 大小写不敏感）；
+//       ② 提供了但不符合形态的 ID（session_id 不以 ses 开头 / agent_id 不以
+//          agent_ 开头）→ fail fast：不建会话、不解析模型、不拉黑。
+
+describe('D1: 参数归一化防 "None" 与畸形 ID fail fast', () => {
+  let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
+
+  beforeEach(() => {
+    promptCalls = [];
+    currentTools = null;
+    clearUnavailableModels();
+  });
+
+  /** 读取 mock client 的 session.create 调用次数（证明"未创建会话"） */
+  const sessionCreateCalls = (client: unknown): number =>
+    (
+      client as { session: { create: { mock: { calls: unknown[] } } } }
+    ).session.create.mock.calls.length;
+
+  it('归一化："None"/"null"/"none"/"undefined"/""（trim + 大小写不敏感）均视为未提供，走新建 session', async () => {
+    for (const nullish of ['None', 'null', 'NULL', 'none', 'NoNe', 'undefined', '', '   ']) {
+      promptCalls = [];
+      const client = createMockClient({
+        pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+        promptCalls,
+      });
+      const tools = createTestTools(createTestOptions(client));
+      currentTools = tools;
+
+      const result = await tools.call_flow_agent.execute(
+        {
+          description: 'test task',
+          prompt: 'Build the feature',
+          subagent_type: 'build-executor',
+          run_in_background: false,
+          agent_id: nullish,
+          session_id: nullish,
+        },
+        { sessionID: 'parent-session', directory: '' },
+      );
+
+      const data = JSON.parse(result.output);
+      // 修复前 session_id="None" 会以字面量 "None" 复用 session（服务端 schema 校验失败）
+      expect(data.success).toBe(true);
+      expect(data.error).toBeUndefined();
+      expect(data.sessionID).toBe('test-session-001');
+      expect(promptCalls[0].id).toBe('test-session-001');
+    }
+  });
+
+  it('fail fast: session_id 畸形（不以 ses 开头）→ 明确报错，不建会话、不 prompt、不拉黑', async () => {
+    const client = createMockClient({
+      pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+      promptCalls,
+    });
+    const tools = createTestTools(createTestOptions(client));
+    currentTools = tools;
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+        session_id: 'invalid_session_001',
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(false);
+    expect(data.error).toContain('session_id');
+    expect(data.error).toContain('ses');
+    // 不创建会话、不发起 prompt（fail fast 早于会话创建与模型解析）
+    expect(sessionCreateCalls(client)).toBe(0);
+    expect(promptCalls.length).toBe(0);
+    // 不拉黑：agentModelMap 中 build-executor 的模型仍可用
+    expect(isModelAvailable('provider/test-model')).toBe(true);
+  });
+
+  it('fail fast: agent_id 畸形（不以 agent_ 开头）→ 明确报错，不建会话、不 prompt、不拉黑', async () => {
+    const client = createMockClient({
+      pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+      promptCalls,
+    });
+    const tools = createTestTools(createTestOptions(client));
+    currentTools = tools;
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+        agent_id: 'resume-123',
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(false);
+    expect(data.error).toContain('agent_id');
+    expect(data.error).toContain('agent_');
+    expect(sessionCreateCalls(client)).toBe(0);
+    expect(promptCalls.length).toBe(0);
+    expect(isModelAvailable('provider/test-model')).toBe(true);
+  });
+
+  it('合法形态 ID 不受影响：session_id 以 ses 开头正常复用、agent_id 以 agent_ 开头正常 resume', async () => {
+    // 合法 session_id：直接复用（不新建）
+    const client = createMockClient({
+      pollOutputs: ['任务完成 [TASK_COMPLETE]'],
+      promptCalls,
+    });
+    const tools = createTestTools(createTestOptions(client));
+    currentTools = tools;
+
+    const result = await tools.call_flow_agent.execute(
+      {
+        description: 'test task',
+        prompt: 'Build the feature',
+        subagent_type: 'build-executor',
+        run_in_background: false,
+        session_id: 'ses_legit_001',
+      },
+      { sessionID: 'parent-session', directory: '' },
+    );
+
+    const data = JSON.parse(result.output);
+    expect(data.success).toBe(true);
+    expect(data.sessionID).toBe('ses_legit_001');
+    expect(sessionCreateCalls(client)).toBe(0);
+    expect(promptCalls[0].id).toBe('ses_legit_001');
+  });
+});
+
 // ─── Wave 3: 模型级故障转移 (model fallback) 测试 ──────────────────────────────
 
 describe('模型级故障转移 (model fallback)', () => {

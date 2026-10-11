@@ -1460,18 +1460,40 @@ export function createCallFlowAgentTools(
         let isNew = false;
         let effectivePrompt = prompt as string;
 
-        // 归一化可选参数：null / 空字符串 / 字面量 "null" 均视为"未提供"。
-        // 背景：LLM 主编排器有时会把可选参数显式填成 null 或字符串 "null"，
+        // 归一化可选参数：null / 空字符串 / 字面量 "null"/"none"/"undefined"
+        // （trim + 大小写不敏感）均视为"未提供"。
+        // 背景：LLM 主编排器有时会把可选参数显式填成 null 或字符串 "None"/"null"，
         // 若直接透传会导致无效的 resume（"Agent null not found in subagent-store"）
-        // 或复用名为 "null" 的 session。这里统一降级为 undefined。
-        const normalizedAgentId =
-          typeof agent_id === 'string' && agent_id.trim() !== '' && agent_id !== 'null'
-            ? agent_id
-            : undefined;
-        const normalizedSessionId =
-          typeof session_id === 'string' && session_id.trim() !== '' && session_id !== 'null'
-            ? session_id
-            : undefined;
+        // 或复用名为 "null" 的 session，更严重的是字符串 "None" 会漏过旧归一化
+        // 集合直达服务端 schema 校验（Expected a string starting with "ses",
+        // got "None" → HTTP 500 → 请求级错误被误判为模型故障拉黑无辜模型，
+        // 即黑名单毒化链根因）。这里统一降级为 undefined。
+        const NULLISH_LITERALS = new Set(['', 'null', 'none', 'undefined']);
+        const normalizeOptionalId = (value: unknown): string | undefined => {
+          if (typeof value !== 'string') return undefined; // null / undefined / 非字符串
+          const trimmed = value.trim();
+          if (NULLISH_LITERALS.has(trimmed.toLowerCase())) return undefined;
+          return value;
+        };
+        const normalizedAgentId = normalizeOptionalId(agent_id);
+        const normalizedSessionId = normalizeOptionalId(session_id);
+
+        // D1: 畸形 ID fail fast —— 提供了但不符合形态的 session_id / agent_id
+        // 直接返回明确错误：不创建会话、不解析模型、不拉黑。
+        // 语义：只有"未提供"才走新建 session 流程；提供了就必须形态合法，
+        // 避免无效值穿过归一化后进入 resume / 服务端校验链路再被误判为模型故障。
+        if (normalizedSessionId !== undefined && !normalizedSessionId.startsWith('ses')) {
+          return await formatToolError(
+            `参数 session_id 无效：应以 ses 开头；如未提供恢复请传 null/空` +
+              `（当前值：${JSON.stringify(normalizedSessionId)}）`,
+          );
+        }
+        if (normalizedAgentId !== undefined && !normalizedAgentId.startsWith('agent_')) {
+          return await formatToolError(
+            `参数 agent_id 无效：应以 agent_ 开头；如未提供恢复请传 null/空` +
+              `（当前值：${JSON.stringify(normalizedAgentId)}）`,
+          );
+        }
 
         let resolvedAgentId = normalizedAgentId;
 
