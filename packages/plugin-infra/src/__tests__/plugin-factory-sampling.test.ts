@@ -122,8 +122,8 @@ describe('工厂层采样参数接线（Wave 3 · R-5 · SP-14..SP-18）', () =>
   //
   // 取值来源说明（偏离合约字面写法，已向用户报告）：
   // 合约 SP-17 字面要求「在 agents.<共享智能体> 上配置 top_p/variant」。
-  // 但 agentOverridesFromConfig（config-loader.ts:216）只遍历 BUILTIN_AGENTS
-  // （config-loader.ts:184-200），该白名单不含任何共享智能体，因此共享智能体的
+  // 但 agentOverridesFromConfig（config-loader.ts:275-310）只遍历 BUILTIN_AGENTS
+  // （config-loader.ts:254-270），该白名单不含任何共享智能体，因此共享智能体的
   // per-agent 配置（model/temperature/top_p/variant 一律）从来不会进入 override。
   // 此为 Wave 1/2 之前的既有行为，非本波次引入，且修复需改 config-loader.ts
   // ——超出 Wave 3 文件白名单（DC-7），故此处不修改，改用可达的档位级取值验证
