@@ -17,7 +17,6 @@ describe('机器级运行时目录（%USERPROFILE%/.flow-engine）', () => {
   afterEach(() => {
     delete process.env[ENV_KEY];
   });
-
   it('RUNTIME_ROOT 必须位于 homedir 下，且与 cwd 无关', () => {
     expect(RUNTIME_ROOT).toBe(join(homedir(), '.flow-engine'));
     expect(RUNTIME_ROOT).not.toBe(join(process.cwd(), '.flow-engine'));
@@ -48,8 +47,16 @@ describe('机器级运行时目录（%USERPROFILE%/.flow-engine）', () => {
 });
 
 describe('日志根（Logger / PollingLogger 共用）', () => {
+  /** 进程启动时全局 setup 设置的隔离根：afterEach 必须恢复而非删除，
+   *  否则同一进程内后续测试文件失去隔离、写回真实用户目录（P1-2） */
+  const savedLogRoot = process.env[LOG_ROOT_ENV];
+
   afterEach(() => {
-    delete process.env[LOG_ROOT_ENV];
+    if (savedLogRoot === undefined) {
+      delete process.env[LOG_ROOT_ENV];
+    } else {
+      process.env[LOG_ROOT_ENV] = savedLogRoot;
+    }
   });
 
   it('DEFAULT_LOG_DIR = %USERPROFILE%/.flow-engine/sflow，与 RUNTIME_ROOT 同源', () => {

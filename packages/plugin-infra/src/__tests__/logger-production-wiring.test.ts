@@ -36,10 +36,17 @@ type HooksWithDispose = { dispose?: () => Promise<void> };
 describe('P1-1：plugin.log 生产链路接线', () => {
   let workDir: string;
   let testLogRoot: string;
+  /** 进程启动时全局 setup 设置的隔离根：afterEach 必须恢复而非删除，
+   *  否则同一进程内后续测试文件失去隔离、写回真实用户目录（P1-2） */
+  const savedLogRoot = process.env.FLOW_ENGINE_LOG_ROOT;
 
   afterEach(async () => {
     // 恢复环境，避免污染同一进程内的其它测试文件
-    delete process.env.FLOW_ENGINE_LOG_ROOT;
+    if (savedLogRoot === undefined) {
+      delete process.env.FLOW_ENGINE_LOG_ROOT;
+    } else {
+      process.env.FLOW_ENGINE_LOG_ROOT = savedLogRoot;
+    }
     Logger.reset();
     await rm(join(workDir, '..'), { recursive: true, force: true }).catch(() => {});
     await rm(testLogRoot, { recursive: true, force: true }).catch(() => {});

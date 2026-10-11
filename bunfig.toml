@@ -1,0 +1,4 @@
+[test]
+# P1-2：全局测试 setup——把 FLOW_ENGINE_LOG_ROOT 导向 tmpdir，
+# 避免未显式 initialize 的测试路径向真实 %USERPROFILE%/.flow-engine 写日志
+preload = ["./scripts/test-setup.ts"]

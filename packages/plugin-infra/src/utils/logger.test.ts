@@ -226,9 +226,21 @@ describe('Logger', () => {
     });
 
     it('默认路径（未 initialize 时）落在机器级运行时目录，与 cwd 无关', () => {
-      Logger.reset();
-      expect(Logger.getLogFilePath()).toContain(join(homedir(), '.flow-engine', 'sflow'));
-      expect(Logger.getLogFilePath()).not.toContain(process.cwd());
+      // 全局测试 setup 会设置 FLOW_ENGINE_LOG_ROOT；临时移除以观测机器级默认
+      const saved = process.env.FLOW_ENGINE_LOG_ROOT;
+      delete process.env.FLOW_ENGINE_LOG_ROOT;
+      try {
+        Logger.reset();
+        expect(Logger.getLogFilePath()).toContain(join(homedir(), '.flow-engine', 'sflow'));
+        expect(Logger.getLogFilePath()).not.toContain(process.cwd());
+      } finally {
+        if (saved === undefined) {
+          delete process.env.FLOW_ENGINE_LOG_ROOT;
+        } else {
+          process.env.FLOW_ENGINE_LOG_ROOT = saved;
+        }
+        Logger.reset();
+      }
     });
   });
 
