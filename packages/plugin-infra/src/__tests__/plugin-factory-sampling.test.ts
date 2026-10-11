@@ -181,4 +181,77 @@ describe('工厂层采样参数接线（Wave 3 · R-5 · SP-14..SP-18）', () =>
       ['color', 'description', 'mode', 'model', 'prompt', 'temperature', 'tools', 'top_p', 'variant'].sort(),
     );
   });
+
+  // ─── SP-18 补充：F2/F3/F4 旧配置键集合回归锚（Gate-3 P2-①） ────────────
+  //
+  // 上方 SP-18 仅实例化 createSFlowPluginModule()（F1 路径）。F2/F3/F4 若误写
+  // 默认值（如 variant: override?.variant ?? 'thinking'），旧配置下新字段会出现
+  // 非 undefined 值。本参数化锚对三个此前未覆盖的工厂路径逐一断言：
+  //   ① top_p / variant 均为 undefined（无默认值泄漏）
+  //   ② 注册对象键集合与 F1 同构（9 键；新字段键存在但值为 undefined，
+  //      且不被新字段之外的键污染）
+  //
+  // 可达路径（按各工厂实际注册循环）：
+  //   F2 combined-plugin-factory.ts  → getAgentNames() 全量循环
+  //   F3 iflow-plugin-factory.ts     → IFLOW_AGENT_NAMES 专属循环
+  //   F4 iflow-plugin-factory.ts     → SHARED_AGENT_NAMES 共享循环（第二注册循环）
+  const SP18_OLD_CONFIG = {
+    agents: {
+      'spec-writer': { model: 'test-provider/spec-model', temperature: 0.4 },
+      'iflow-plan-executor': { model: 'test-provider/iflow-model', temperature: 0.5 },
+      'test-engineer': { model: 'test-provider/shared-model', temperature: 0.6 },
+    },
+  };
+
+  /** 四个工厂路径的 cfg.agent[name] 注册对象形状一致（9 键） */
+  const SP18_EXPECTED_KEYS = [
+    'color', 'description', 'mode', 'model', 'prompt', 'temperature', 'tools', 'top_p', 'variant',
+  ];
+
+  const SP18_FACTORY_CASES = [
+    {
+      label: 'F2 combined 工厂',
+      agent: 'spec-writer',
+      register: async () => {
+        const { createCombinedPluginModule } = await import('../combined-plugin-factory.js');
+        return createCombinedPluginModule().server(makePluginInput(TEMP_DIR));
+      },
+    },
+    {
+      label: 'F3 iflow 专属循环',
+      agent: 'iflow-plan-executor',
+      register: async () => {
+        const { createIFlowPluginModule } = await import('../iflow-plugin-factory.js');
+        return createIFlowPluginModule().server(makePluginInput(TEMP_DIR));
+      },
+    },
+    {
+      label: 'F4 iflow 共享循环',
+      agent: 'test-engineer',
+      register: async () => {
+        const { createIFlowPluginModule } = await import('../iflow-plugin-factory.js');
+        return createIFlowPluginModule().server(makePluginInput(TEMP_DIR));
+      },
+    },
+  ];
+
+  for (const testCase of SP18_FACTORY_CASES) {
+    it(`SP-18: 旧配置回归 — ${testCase.label} 新字段 undefined 且键集合无污染`, async () => {
+      useConfig(SP18_OLD_CONFIG);
+
+      const hooks = await testCase.register();
+
+      const cfg: Record<string, unknown> = { agent: {} };
+      await hooks.config?.(cfg as never);
+
+      const agent = (cfg.agent as Record<string, Record<string, unknown>>)[testCase.agent];
+      expect(agent).toBeDefined();
+      // 新字段：旧配置（无 top_p/variant）下不得出现任何默认值
+      expect(agent.top_p).toBeUndefined();
+      expect(agent.variant).toBeUndefined();
+      // 键集合锚：与 F1 同构的 9 键；新字段键存在但值为 undefined，
+      // 且不被新字段之外的键污染（防误加 fallback_models 等）
+      expect(Object.keys(agent).sort()).toEqual([...SP18_EXPECTED_KEYS].sort());
+    });
+  }
 });
