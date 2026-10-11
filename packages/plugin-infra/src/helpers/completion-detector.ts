@@ -209,6 +209,30 @@ const ERROR_TYPE_PATTERN = /"type"\s*:\s*"[^"]*(RateLimit|Quota|PaymentRequired)
 const LINE_PREFIX_CODE_PATTERN = /^(?:\[?error\]?\s*[：:]?\s*)?(401|402|403|404|408|409|429|5\d\d)\s*[：:\-–—]\s*/;
 
 /**
+ * D2: 请求级校验/schema 错误模式（黑名单毒化链修复）。
+ *
+ * 匹配的是「请求形态错误」而非「模型故障」：参数/schema 校验失败（如主编排器把
+ * session_id 传成字符串 "None" 触发的 `Expected a string starting with "ses",
+ * got "None"`）。此类错误与模型健康无关——即使被服务端归一化为 HTTP 500 返回，
+ * 也不得拉黑模型/触发换模（毒化事故正是经此路径：请求从未到达 provider，
+ * 无辜模型却被写入黑名单并因时区误解析获得数小时长冷却）。
+ */
+const REQUEST_VALIDATION_PATTERN =
+  /Expected a string|expected .* starting with|schema|validation|invalid (param|argument|request|body)/i;
+
+/**
+ * D2: 请求级校验错误判定。
+ *
+ * 错误消息命中请求校验/schema 模式，或 status 为 400/422 时返回 true——
+ * 该错误属于请求形态错误，分类器必须返回 null（kind 'none' 语义），
+ * 使上层（send 阶段 / poll 阶段）走 fatal 分支：不 markModelUnavailable、不换模。
+ */
+export function isRequestValidationError(text: string, status?: number): boolean {
+  if (status === 400 || status === 422) return true;
+  return REQUEST_VALIDATION_PATTERN.test(text ?? '');
+}
+
+/**
  * P2-1：poll 产出错误码分类的长度上限（用户批准阈值）。
  *
  * provider 真实错误报文都是短文本；而「讨论错误码的正常产出」（code-reviewer
@@ -263,9 +287,21 @@ export function shouldClassifyOutput(output: string): boolean {
  * 状态码提取顺序：嵌入 code 字段 → HTTP 前缀 → (code: N) → status 字段 →
  * 行首前缀码（401：/402: 等）→ 错误 type 字段（无 code）→ 入参 status（message 无码时兜底）。
  * 仅错误码驱动：全部未命中返回 null（none），无码报错无法分类是可接受的已知限制。
+ *
+ * D2（毒化链修复）：请求级校验错误前置守卫优先于上述全部提取逻辑——
+ * 消息命中 schema/参数校验模式或 status 为 400/422 时直接返回 null。
  */
 export function classifyModelErrorByCode(text: string, status?: number): ModelErrorCodeInfo | null {
   const raw = text ?? '';
+
+  // D2: 请求级校验错误前置守卫（优先于错误码提取）。
+  // "Expected a string starting with 'ses', got 'None'" 等 schema/参数校验失败
+  // 即使被服务端归一化为 500，也不是模型故障：返回 null 使上层走 fatal 分支，
+  // 不拉黑、不换模（修复前按 5xx 判 transient → 拉黑无辜模型 → 毒化链）。
+  if (isRequestValidationError(raw, status)) {
+    return null;
+  }
+
   let code: number | undefined;
 
   const codeMatch = raw.match(EMBEDDED_CODE_PATTERN);

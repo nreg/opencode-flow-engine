@@ -155,6 +155,50 @@ describe('classifyModelErrorByCode: 错误码驱动分类', () => {
   });
 });
 
+// ─── D2: 请求级校验错误不得拉黑模型（黑名单毒化链修复） ─────────────────────
+//
+// 背景（毒化链第二/三环）：session_id 被传成 "None" → 服务端 schema 校验错误
+// （Expected a string starting with "ses", got "None"）经 HTTP 500 返回 →
+// 旧分类器按 5xx 判 transient → markModelUnavailable 拉黑无辜模型 →
+// parseQuotaResetTime 时区误解析把冷却写到几小时后 → 档位候选全黑后解析落
+// unconfigured，报误导性 "No model configured"。provider 日志证实请求从未
+// 到达 provider。
+// 修复：分类前置守卫——请求校验/schema 模式或 status 400/422 判为请求级错误
+// （kind 'none' 语义），走 fatal 分支：不 markModelUnavailable、不换模。
+
+describe('D2: 请求级校验错误分类守卫（classifyModelErrorByCode）', () => {
+  it('毒化事故报文：Expected a string starting with "ses", got "None" + status 500 → null（不拉黑）', () => {
+    const info = classifyModelErrorByCode('Expected a string starting with "ses", got "None"', 500);
+    expect(info).toBeNull();
+  });
+
+  it('status 500 + 消息含 schema/validation 校验模式 → null（即使被归一化为 5xx）', () => {
+    for (const text of [
+      'schema validation failed for request body',
+      'invalid request body: session_id must be a string',
+      'invalid argument: model',
+      'expected a string starting with "agent_"',
+    ]) {
+      expect(classifyModelErrorByCode(text, 500)).toBeNull();
+    }
+  });
+
+  it('status 400 / 422 → null（请求级错误，保持 fatal）', () => {
+    expect(classifyModelErrorByCode('request failed', 400)).toBeNull();
+    expect(classifyModelErrorByCode('request failed', 422)).toBeNull();
+    expect(classifyModelErrorByCode('Unprocessable Entity', 422)).toBeNull();
+  });
+
+  it('回归保护：真实模型错误码分类不受守卫影响', () => {
+    // 402/403 配额与账号级错误、429/5xx 瞬态错误照常分类（守卫只拦请求校验形态）
+    expect(classifyModelErrorByCode('request failed', 402)?.kind).toBe('non-transient');
+    expect(classifyModelErrorByCode('request failed', 429)?.kind).toBe('transient');
+    expect(classifyModelErrorByCode('request failed', 503)?.kind).toBe('transient');
+    expect(classifyModelErrorByCode('HTTP 404: model not found')?.kind).toBe('non-transient');
+    expect(classifyModelErrorByCode(CODED_QUOTA_SAMPLE)?.kind).toBe('non-transient');
+  });
+});
+
 // ─── P2-1: poll 产出错误码分类判定面收窄（shouldClassifyOutput）────────────
 
 describe('P2-1: shouldClassifyOutput 前置守卫（判定面收窄）', () => {
@@ -328,6 +372,24 @@ describe('错误码驱动: send 阶段接线（runWithModelFallback）', () => {
     expect(result.model).toBe('provider/first-model');
     expect(result.fallbacks.length).toBe(0);
     expect(isModelAvailable('provider/first-model')).toBe(true);
+  });
+
+  it('D2 E2E：send 500 + 请求校验报文（毒化路径）→ fatal、黑名单零写入、无 fallback', async () => {
+    // 真实毒化路径：session_id="None" → 服务端 schema 校验错误经 500 返回。
+    // 修复后必须走 fatal：不拉黑无辜模型、不换模。
+    const c = makeClient({
+      outputs: [],
+      sendFailures: [500],
+      sendMessages: ['Expected a string starting with "ses", got "None"'],
+    });
+    const result = await runWithModelFallback({ ...baseParams(c, async () => '[TASK_COMPLETE]\nDone') });
+    expect(result.success).toBe(false);
+    expect(result.failureReason).toBe('fatal');
+    // 黑名单零写入：模型仍然可用（修复前会被 5min 短拉黑）
+    expect(isModelAvailable('provider/first-model')).toBe(true);
+    // 无 fallback：不换模
+    expect(result.fallbacks.length).toBe(0);
+    expect(result.model).toBe('provider/first-model');
   });
 });
 

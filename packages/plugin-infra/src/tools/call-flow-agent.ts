@@ -15,6 +15,7 @@ import {
   performCompletionRetry,
   REMINDER_MESSAGE,
   classifyModelErrorByCode,
+  isRequestValidationError,
   shouldClassifyOutput,
 } from '../helpers/completion-detector.js';
 import {
@@ -421,10 +422,17 @@ export async function runWithModelFallback(params: {
       }
       // D-7：前置校验失败（HTTP 400：SessionBusy / agent 不存在等请求级错误，或无法换模）直接终止，
       // 不拉黑、不换模型。仅在无错误码（kind === 'none'）时到达。
+      // D2: 请求级校验错误（schema/参数形态，含被服务端归一化为 500 的校验失败）
+      // 显式标注在 detail 中——此类错误与模型健康无关，排障方向应指向调用参数
+      // 而非模型故障（毒化链修复：不再误拉黑）。
+      const requestLevelError = isRequestValidationError(send.message ?? '', send.status);
       return {
         success: false,
         failureReason: 'fatal',
-        detail: `HTTP ${send.status ?? 'unknown'}`,
+        detail: requestLevelError
+          ? `request-level validation error (HTTP ${send.status ?? 'unknown'}): ${send.message}; ` +
+            `not a model failure — model not blacklisted, no fallback`
+          : `HTTP ${send.status ?? 'unknown'}`,
         attemptedModels: state.attemptedModels,
         fallbacks,
         model: currentModel,
