@@ -1,6 +1,6 @@
 # 全景对比：sFlow（opencode-flow-engine）vs spec-superflow
 
-> **注**：本文为历史对比/复盘记录，正文未作改写。文中提到的 `generateConfigTemplate()` **已于 2026-09（v1.1.1）从运行时移除**；配置模板现由 `bin/flow-engine.js` 的 `TEMPLATE_PLACEHOLDER_MODELS` 提供 `your-provider/*` 占位符。内置默认模型链（`DEFAULT_MODELS` / `DEFAULT_FALLBACKS` / `DEFAULT_PROFILE_MODELS`）同样已移除。详见 `docs/智能体配置模型体系-v1.1.0.md` §8 v1.1.1 变更记录。
+> **注**：本文为历史对比/复盘记录，正文未作改写。文中提到的 `generateConfigTemplate()` **已于 2026-09（v1.1.1）从运行时移除**；配置模板现由 `bin/flow-engine.js` 的 `TEMPLATE_PLACEHOLDER_MODELS` 提供 `your-provider/*` 占位符。内置默认模型链（`DEFAULT_MODELS` / `DEFAULT_FALLBACKS` / `DEFAULT_PROFILE_MODELS`）同样已移除。详见 `docs/智能体配置模型体系.md` §8 v1.1.1 变更记录。
 
 ---
 

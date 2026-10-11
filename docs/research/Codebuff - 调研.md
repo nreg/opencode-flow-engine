@@ -1,6 +1,6 @@
 # Codebuff 调研 - 简述
 
-> **注**：本文为历史调研记录，正文未作改写。文中提到的 `DEFAULT_MODELS` / `DEFAULT_FALLBACKS` / `DEFAULT_PROFILE_MODELS` 等内置默认模型机制**已于 2026-09（v1.1.1）从运行时移除**，现行模型解析只遵循用户配置，未配置时返回 `provenance: 'unconfigured'`。详见 `docs/智能体配置模型体系-v1.1.0.md` §8 v1.1.1 变更记录。
+> **注**：本文为历史调研记录，正文未作改写。文中提到的 `DEFAULT_MODELS` / `DEFAULT_FALLBACKS` / `DEFAULT_PROFILE_MODELS` 等内置默认模型机制**已于 2026-09（v1.1.1）从运行时移除**，现行模型解析只遵循用户配置，未配置时返回 `provenance: 'unconfigured'`。详见 `docs/智能体配置模型体系.md` §8 v1.1.1 变更记录。
 
 ---
 
