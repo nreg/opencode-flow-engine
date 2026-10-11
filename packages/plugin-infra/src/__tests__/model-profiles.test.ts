@@ -9,6 +9,7 @@ import {
   markModelUnavailable,
   isModelAvailable,
   AGENT_PROFILES,
+  clearConfigCache,
 } from '../agents/agent-builder.js';
 import type { ModelProvenance, AGENT_PROFILES_TYPE } from '../agents/agent-builder.js';
 import { loadCascadedSFlowConfig } from '../agents/config-loader.js';
@@ -471,6 +472,8 @@ describe('Tier-level sampling parameters (Wave 2)', () => {
       // 该用例未写配置文件时忽略
     }
     delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+    // Wave 3 Task 3.7（Gate-2 P2-①）：清配置缓存，防跨用例泄漏
+    clearConfigCache();
   });
 
   it('SP2-R5b: 档位仅新增可选采样字段不影响模型解析（model/provenance 不变）', () => {

@@ -322,6 +322,8 @@ function createIFlowPluginServer(
           const modelName = typeof agentCfg.model === 'string' ? agentCfg.model : undefined;
           const temperature =
             typeof agentCfg.temperature === 'number' ? agentCfg.temperature : undefined;
+          const topP = typeof agentCfg.top_p === 'number' ? agentCfg.top_p : undefined;
+          const variant = typeof agentCfg.variant === 'string' ? agentCfg.variant : undefined;
           const agentTools = agentCfg.tools ?? undefined;
 
           cfg.agent[name] = {
@@ -331,6 +333,8 @@ function createIFlowPluginServer(
             tools: agentTools,
             color: AGENT_COLORS[name],
             temperature: override?.temperature ?? temperature,
+            top_p: override?.top_p ?? topP,
+            variant: override?.variant ?? variant,
             description: appendChainUnavailableNotice(
               typeof agentCfg.id === 'string'
                 ? `${agentCfg.id} agent from iFlow plugin`
@@ -370,6 +374,8 @@ function createIFlowPluginServer(
           const modelName = typeof agentCfg.model === 'string' ? agentCfg.model : undefined;
           const temperature =
             typeof agentCfg.temperature === 'number' ? agentCfg.temperature : undefined;
+          const topP = typeof agentCfg.top_p === 'number' ? agentCfg.top_p : undefined;
+          const variant = typeof agentCfg.variant === 'string' ? agentCfg.variant : undefined;
           const agentTools = agentCfg.tools ?? undefined;
 
           cfg.agent[name] = {
@@ -379,6 +385,8 @@ function createIFlowPluginServer(
             tools: agentTools,
             color: AGENT_COLORS[name],
             temperature: override?.temperature ?? temperature,
+            top_p: override?.top_p ?? topP,
+            variant: override?.variant ?? variant,
             description: appendChainUnavailableNotice(
               `${name} agent from iFlow plugin (shared, cross-workflow)`,
               name as BuiltinAgentName,

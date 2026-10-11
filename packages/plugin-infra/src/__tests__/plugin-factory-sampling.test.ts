@@ -1,0 +1,184 @@
+/**
+ * Wave 3 / Task 3.5 — 工厂层采样参数接线测试（R-5，SP-14..SP-18）
+ *
+ * 覆盖 4 处 cfg.agent[name] 接线点：
+ *   F1 sflow-plugin-factory.ts        → SP-14
+ *   F2 combined-plugin-factory.ts     → SP-15
+ *   F3 iflow-plugin-factory.ts（专属） → SP-16
+ *   F4 iflow-plugin-factory.ts（共享） → SP-17
+ *   SP-18 旧配置回归（零回归锚）
+ *
+ * 隔离要点：server() 首行即 loadCascadedSFlowConfig()，因此必须先写配置文件
+ * → 设 FLOW_ENGINE_USER_CONFIG_FILE → clearConfigCache() → 再调 server()。
+ */
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { writeFileSync, unlinkSync } from 'fs';
+import { join } from 'path';
+import type { PluginInput } from '@opencode-ai/plugin';
+import { clearConfigCache } from '../agents/agent-builder.js';
+
+const TEMP_DIR = process.env.TEMP || '/tmp';
+const CONFIG_FILE = join(TEMP_DIR, 'opencode-flow-engine-plugin-factory-sampling-test.json');
+
+/** 最小 PluginInput：只需 client/directory 被工厂 server() 读取 */
+function makePluginInput(directory: string): PluginInput {
+  return {
+    // provider.list() 抛错 → model-availability 状态机置 'failed' → 静默跳过校验
+    client: {
+      provider: {
+        list: async () => {
+          throw new Error('test: provider.list not available');
+        },
+      },
+    },
+    project: { id: 'test-project' },
+    directory,
+    worktree: directory,
+    experimental_workspace: { register: () => {} },
+    serverUrl: new URL('http://localhost:1'),
+    $: undefined as never,
+  } as unknown as PluginInput;
+}
+
+/** 写入隔离配置并清缓存（server() 会立即读配置） */
+function useConfig(config: Record<string, unknown>): void {
+  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+  process.env.FLOW_ENGINE_USER_CONFIG_FILE = CONFIG_FILE;
+  clearConfigCache();
+}
+
+describe('工厂层采样参数接线（Wave 3 · R-5 · SP-14..SP-18）', () => {
+  beforeEach(() => {
+    useConfig({ agents: {} });
+  });
+
+  afterEach(() => {
+    try {
+      unlinkSync(CONFIG_FILE);
+    } catch {
+      // 未写文件时忽略
+    }
+    delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+    clearConfigCache();
+  });
+
+  // ─── SP-14: sflow 工厂透传 ──────────────────────────────────────────────
+  it('SP-14: sflow 工厂透传 top_p 与 variant', async () => {
+    useConfig({
+      agents: { 'spec-writer': { model: 'test-provider/spec-model', top_p: 0.9, variant: 'thinking' } },
+    });
+
+    const { createSFlowPluginModule } = await import('../sflow-plugin-factory.js');
+    const hooks = await createSFlowPluginModule().server(makePluginInput(TEMP_DIR));
+
+    const cfg: Record<string, unknown> = { agent: {} };
+    await hooks.config?.(cfg as never);
+
+    const agent = (cfg.agent as Record<string, Record<string, unknown>>)['spec-writer'];
+    expect(agent).toBeDefined();
+    expect(agent.top_p).toBe(0.9);
+    expect(agent.variant).toBe('thinking');
+  });
+
+  // ─── SP-15: combined 工厂透传 ───────────────────────────────────────────
+  it('SP-15: combined 工厂透传 top_p 与 variant', async () => {
+    useConfig({
+      agents: { 'spec-writer': { model: 'test-provider/spec-model', top_p: 0.9, variant: 'thinking' } },
+    });
+
+    const { createCombinedPluginModule } = await import('../combined-plugin-factory.js');
+    const hooks = await createCombinedPluginModule().server(makePluginInput(TEMP_DIR));
+
+    const cfg: Record<string, unknown> = { agent: {} };
+    await hooks.config?.(cfg as never);
+
+    const agent = (cfg.agent as Record<string, Record<string, unknown>>)['spec-writer'];
+    expect(agent).toBeDefined();
+    expect(agent.top_p).toBe(0.9);
+    expect(agent.variant).toBe('thinking');
+  });
+
+  // ─── SP-16: iflow 专属智能体透传 ─────────────────────────────────────────
+  it('SP-16: iflow 专属智能体透传 top_p 与 variant', async () => {
+    useConfig({
+      agents: {
+        'iflow-plan-executor': { model: 'test-provider/iflow-model', top_p: 0.7, variant: 'max' },
+      },
+    });
+
+    const { createIFlowPluginModule } = await import('../iflow-plugin-factory.js');
+    const hooks = await createIFlowPluginModule().server(makePluginInput(TEMP_DIR));
+
+    const cfg: Record<string, unknown> = { agent: {} };
+    await hooks.config?.(cfg as never);
+
+    const agent = (cfg.agent as Record<string, Record<string, unknown>>)['iflow-plan-executor'];
+    expect(agent).toBeDefined();
+    expect(agent.top_p).toBe(0.7);
+    expect(agent.variant).toBe('max');
+  });
+
+  // ─── SP-17: iflow 共享智能体透传（第二注册循环，最易遗漏） ────────────────
+  //
+  // 取值来源说明（偏离合约字面写法，已向用户报告）：
+  // 合约 SP-17 字面要求「在 agents.<共享智能体> 上配置 top_p/variant」。
+  // 但 agentOverridesFromConfig（config-loader.ts:216）只遍历 BUILTIN_AGENTS
+  // （config-loader.ts:184-200），该白名单不含任何共享智能体，因此共享智能体的
+  // per-agent 配置（model/temperature/top_p/variant 一律）从来不会进入 override。
+  // 此为 Wave 1/2 之前的既有行为，非本波次引入，且修复需改 config-loader.ts
+  // ——超出 Wave 3 文件白名单（DC-7），故此处不修改，改用可达的档位级取值验证
+  // F4 接线本身：test-engineer 静态绑定 review 档位（AGENT_PROFILES:132）。
+  it('SP-17: iflow 共享智能体（F4 第二注册循环）透传 top_p', async () => {
+    useConfig({
+      modelProfiles: {
+        review: { model: 'test-provider/shared-model', fallback_models: [], top_p: 0.6 },
+      },
+    });
+
+    const { createIFlowPluginModule } = await import('../iflow-plugin-factory.js');
+    const hooks = await createIFlowPluginModule().server(makePluginInput(TEMP_DIR));
+
+    const cfg: Record<string, unknown> = { agent: {} };
+    await hooks.config?.(cfg as never);
+
+    const agent = (cfg.agent as Record<string, Record<string, unknown>>)['test-engineer'];
+    expect(agent).toBeDefined();
+    expect(agent.mode).toBe('subagent'); // 锚定走的是 F4 共享注册路径（非 iFlow 专属循环）
+    expect(agent.top_p).toBe(0.6);
+    // variant 无档位级来源，共享智能体 per-agent variant 不可达 → 未配置即 undefined
+    expect(agent.variant).toBeUndefined();
+  });
+
+  // ─── SP-18: 旧配置回归 ──────────────────────────────────────────────────
+  it('SP-18: 旧配置（无新字段）下两字段为 undefined，既有字段保持原值', async () => {
+    useConfig({
+      agents: {
+        'spec-writer': { model: 'test-provider/spec-model', temperature: 0.4 },
+        'iflow-plan-executor': { model: 'test-provider/iflow-model', temperature: 0.5 },
+        'test-engineer': { model: 'test-provider/shared-model', temperature: 0.6 },
+      },
+    });
+
+    const { createSFlowPluginModule } = await import('../sflow-plugin-factory.js');
+    const hooks = await createSFlowPluginModule().server(makePluginInput(TEMP_DIR));
+
+    const cfg: Record<string, unknown> = { agent: {} };
+    await hooks.config?.(cfg as never);
+
+    const agent = (cfg.agent as Record<string, Record<string, unknown>>)['spec-writer'];
+    expect(agent).toBeDefined();
+    // 新字段：未配置 → undefined（不写入任何等异形值）
+    expect(agent.top_p).toBeUndefined();
+    expect(agent.variant).toBeUndefined();
+    // 既有字段：保持原值
+    expect(agent.model).toBe('test-provider/spec-model');
+    expect(agent.temperature).toBe(0.4);
+    expect(typeof agent.prompt).toBe('string');
+    expect(typeof agent.mode).toBe('string');
+    expect(typeof agent.description).toBe('string');
+    // 既有键集合未被新字段之外的键污染
+    expect(Object.keys(agent).sort()).toEqual(
+      ['color', 'description', 'mode', 'model', 'prompt', 'temperature', 'tools', 'top_p', 'variant'].sort(),
+    );
+  });
+});

@@ -346,6 +346,8 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
         const instructions = (typeof agentCfg.instructions === 'string' ? agentCfg.instructions : '') || (typeof agentCfg.prompt === 'string' ? agentCfg.prompt : '');
         const modelName = typeof agentCfg.model === 'string' ? agentCfg.model : undefined;
         const temperature = typeof agentCfg.temperature === 'number' ? agentCfg.temperature : undefined;
+        const topP = typeof agentCfg.top_p === 'number' ? agentCfg.top_p : undefined;
+        const variant = typeof agentCfg.variant === 'string' ? agentCfg.variant : undefined;
         const agentTools = agentCfg.tools ?? undefined;
 
         cfg.agent[name] = {
@@ -355,6 +357,8 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
           tools: agentTools,
           color: AGENT_COLORS[name],
           temperature: override?.temperature ?? temperature,
+          top_p: override?.top_p ?? topP,
+          variant: override?.variant ?? variant,
           description: appendChainUnavailableNotice(
             (typeof agentCfg.id === 'string')
               ? `${agentCfg.id} agent from sFlow plugin`
