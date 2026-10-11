@@ -7,6 +7,7 @@ import { sharedValidator } from "@opencode-flow-engine/core";
 import { readFile, isContractStale } from "@opencode-flow-engine/shared";
 import { resolveChangeDir } from "../helpers/resolve-change-dir.js";
 import { readArtifactContent } from "../features/state-manager/artifact-paths.js";
+import { probeMisplacedArtifact, describeMissingArtifact } from "../helpers/misplaced-artifact.js";
 
 /**
  * Create the contract validator tool
@@ -28,12 +29,22 @@ export function createContractValidatorTool(): ToolDefinition {
       try {
         const contractContent = await readArtifactContent(changeDir, 'execution-contract.md');
         if (!contractContent) {
+          // 工件目录约定为 <workDir>/.flow-engine/sflow/；not-found 时探测一层常见错位，
+          // 命中即回显子项目目录，避免把「写错位置」误报成「工件未生成」。
+          const misplaced = await probeMisplacedArtifact(changeDir, 'execution-contract.md');
           return {
             title: "Contract Validator",
             output: JSON.stringify({
               validation: { valid: false, issues: [], summary: { errors: 0, warnings: 0, info: 0 } },
               isStale: false,
-              recommendations: ["execution-contract.md not found - run contract-builder to create the contract"],
+              recommendations: [
+                describeMissingArtifact(
+                  "execution-contract.md not found - run contract-builder to create the contract",
+                  changeDir,
+                  misplaced,
+                  'execution-contract.md',
+                ),
+              ],
             }),
           };
         }

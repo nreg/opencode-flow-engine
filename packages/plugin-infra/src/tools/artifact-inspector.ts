@@ -6,6 +6,7 @@ import type { ToolDefinition, ToolContext, ToolResult } from './types.js';
 import { sharedValidator } from '@opencode-flow-engine/core';
 import { resolveChangeDir } from '../helpers/resolve-change-dir.js';
 import { readArtifactContent, listSpecFiles, readSpecContent } from '../features/state-manager/artifact-paths.js';
+import { probeMisplacedArtifact, describeMissingArtifact } from '../helpers/misplaced-artifact.js';
 
 /**
  * Create the artifact inspector tool
@@ -39,10 +40,10 @@ export function createArtifactInspectorTool(): ToolDefinition {
         // Inspect proposal (also validates as change content)
         if (!artifactType || artifactType === 'proposal') {
           const proposalContent = await readArtifactContent(resolvedDir, 'proposal.md');
-          if (proposalContent) {
+if (proposalContent) {
             results.proposal = sharedValidator.validateChangeContent('proposal', proposalContent);
           } else {
-            results.proposal = { valid: false, error: 'File not found', issues: [], summary: { errors: 1, warnings: 0, info: 0 } };
+            results.proposal = await notFoundError(resolvedDir, 'proposal.md');
           }
         }
 
@@ -65,30 +66,34 @@ export function createArtifactInspectorTool(): ToolDefinition {
         // Inspect design
         if (!artifactType || artifactType === 'design') {
           const designContent = await readArtifactContent(resolvedDir, 'design.md');
-          if (designContent) {
+if (designContent) {
             results.design = sharedValidator.validateDesign(designContent);
           } else {
-            results.design = { valid: false, error: 'File not found', issues: [], summary: { errors: 1, warnings: 0, info: 0 } };
+            results.design = await notFoundError(resolvedDir, 'design.md');
           }
         }
 
         // Inspect tasks
         if (!artifactType || artifactType === 'tasks') {
           const tasksContent = await readArtifactContent(resolvedDir, 'tasks.md');
-          if (tasksContent) {
+if (tasksContent) {
             results.tasks = sharedValidator.validateTasks(tasksContent);
           } else {
-            results.tasks = { valid: false, error: 'File not found', issues: [], summary: { errors: 1, warnings: 0, info: 0 } };
+            results.tasks = await notFoundError(resolvedDir, 'tasks.md');
           }
         }
 
         // Inspect ui-design (frontend projects only)
         if (!artifactType || artifactType === 'ui-design') {
           const uiDesignContent = await readArtifactContent(resolvedDir, 'ui-design.md');
-          if (uiDesignContent) {
+if (uiDesignContent) {
             results['ui-design'] = validateUiDesign(uiDesignContent);
           } else {
-            results['ui-design'] = { valid: false, error: 'File not found (frontend projects only)', issues: [], summary: { errors: 1, warnings: 0, info: 0 } };
+            results['ui-design'] = await notFoundError(
+              resolvedDir,
+              'ui-design.md',
+              'File not found (frontend projects only)',
+            );
           }
         }
 
@@ -116,6 +121,32 @@ export function createArtifactInspectorTool(): ToolDefinition {
   };
 }
 
+/**
+ * not-found 校验结果构造器。
+ *
+ * 工件目录约定为 `<workDir>/.flow-engine/sflow/`；not-found 时探测一层常见错位，
+ * 命中即回显子项目目录与迁移指引，未命中则保留原 File not found 语义并附工件目录说明。
+ */
+async function notFoundError(
+  resolvedDir: string,
+  artifactFile: string,
+  baseMessage = 'File not found',
+): Promise<{ valid: boolean; error: string; issues: unknown[]; summary: { errors: number; warnings: number; info: number } }> {
+  const misplaced = await probeMisplacedArtifact(resolvedDir, artifactFile);
+  return {
+    valid: false,
+    error: describeMissingArtifact(baseMessage, resolvedDir, misplaced, artifactFile),
+    issues: [],
+    summary: { errors: 1, warnings: 0, info: 0 },
+  };
+}
+
+/** not-found 判定（兼容错位提示语中的中文表述，避免被误计为内容错误） */
+function isNotFoundError(error: string | undefined): boolean {
+  if (!error) return false;
+  return error.includes('not found') || error.includes('未在工件目录下找到');
+}
+
 function generateInspectionSummary(results: Record<string, unknown>): string {
   const issues: string[] = [];
 
@@ -133,7 +164,7 @@ function generateInspectionSummary(results: Record<string, unknown>): string {
   }
 
   const uiDesign = results['ui-design'] as { valid: boolean; error?: string; summary?: { errors: number } } | undefined;
-  if (uiDesign && !uiDesign.valid && !uiDesign.error?.includes('not found')) {
+  if (uiDesign && !uiDesign.valid && !isNotFoundError(uiDesign.error)) {
     issues.push(`UI-Design: ${uiDesign.summary?.errors || 0} error(s)`);
   }
 
@@ -166,7 +197,7 @@ function generateInspectionRecommendations(results: Record<string, unknown>): st
   }
 
   const uiDesign = results['ui-design'] as { valid: boolean; error?: string } | undefined;
-  if (uiDesign && !uiDesign.valid && !uiDesign.error?.includes('not found')) {
+  if (uiDesign && !uiDesign.valid && !isNotFoundError(uiDesign.error)) {
     recommendations.push('Fix ui-design.md issues before proceeding');
   }
 
