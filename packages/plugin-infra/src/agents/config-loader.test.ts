@@ -260,6 +260,16 @@ describe('Config Loader', () => {
       expect(overrides['build-executor']?.model).toBe('claude-sonnet-4-6');
     });
 
+    it('should map temperature: 0 (falsy but legal) into override (boundary anchor)', () => {
+      const overrides = agentOverridesFromConfig({
+        agents: {
+          sFlow: { temperature: 0 },
+        },
+      });
+      expect(overrides.sFlow?.temperature).toBe(0);
+      expect('temperature' in (overrides.sFlow ?? {})).toBe(true);
+    });
+
     it('should skip agents with no meaningful overrides', () => {
       const overrides = agentOverridesFromConfig({
         agents: { 'some-unknown-agent': {} },
@@ -274,6 +284,16 @@ describe('Config Loader', () => {
         },
       });
       expect(overrides['build-executor']?.top_p).toBe(0.9);
+    });
+
+    it('should map top_p: 0 (falsy but legal) into override (SP1-R1a boundary anchor)', () => {
+      const overrides = agentOverridesFromConfig({
+        agents: {
+          'build-executor': { top_p: 0 },
+        },
+      });
+      expect(overrides['build-executor']?.top_p).toBe(0);
+      expect('top_p' in (overrides['build-executor'] ?? {})).toBe(true);
     });
 
     it('should map variant into override when configured (SP1-R3a mapping half)', () => {
@@ -313,6 +333,8 @@ describe('Config Loader', () => {
       expect(entry?.temperature).toBe(0.3);
       expect(entry?.fallback_models).toEqual(['gpt-4o']);
       // backward compat: new keys must NOT be injected when not configured
+      expect(entry?.top_p).toBeUndefined();
+      expect(entry?.variant).toBeUndefined();
       expect(Object.keys(entry ?? {}).sort()).toEqual(['fallback_models', 'model', 'temperature']);
     });
   });
