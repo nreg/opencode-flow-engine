@@ -69,6 +69,18 @@ async function dispatchWrite(
 }
 
 /**
+ * best-effort 释放插件钩子（停止 MCP / taskTracker / 清缓存）。
+ * 清理异常（如 Windows 瞬时文件锁 EBUSY）不得判定用例失败。
+ */
+async function disposeHooks(hooks: unknown): Promise<void> {
+  try {
+    await (hooks as { dispose?: () => Promise<void> }).dispose?.();
+  } catch {
+    // 忽略：清理为 best-effort
+  }
+}
+
+/**
  * best-effort 目录清理：Windows 下刚创建的目录可能被索引器/杀毒软件
  * 瞬时锁定（EBUSY），重试数次后放弃——清理失败不得判定用例失败
  * （tmpdir 最终由操作系统回收）。
@@ -132,7 +144,7 @@ describe('P0-1：工件根写路径守卫 —— 工厂 hook 真阻断', () => {
         // 关键：文件未落盘
         expect(existsSync(target)).toBe(false);
       } finally {
-        await (hooks as { dispose?: () => Promise<void> }).dispose?.();
+        await disposeHooks(hooks);
       }
     });
 
@@ -145,7 +157,7 @@ describe('P0-1：工件根写路径守卫 —— 工厂 hook 真阻断', () => {
         expect(err).toBeInstanceOf(Error);
         expect(existsSync(target)).toBe(false);
       } finally {
-        await (hooks as { dispose?: () => Promise<void> }).dispose?.();
+        await disposeHooks(hooks);
       }
     });
 
@@ -159,7 +171,7 @@ describe('P0-1：工件根写路径守卫 —— 工厂 hook 真阻断', () => {
         expect(existsSync(target)).toBe(true);
         expect(await readFile(target, 'utf-8')).toBe('# tasks');
       } finally {
-        await (hooks as { dispose?: () => Promise<void> }).dispose?.();
+        await disposeHooks(hooks);
       }
     });
   }
@@ -185,7 +197,7 @@ describe('P0-1：工件根写路径守卫 —— 工厂 hook 真阻断', () => {
         expect(existsSync(target)).toBe(false);
       }
     } finally {
-      await (hooks as { dispose?: () => Promise<void> }).dispose?.();
+      await disposeHooks(hooks);
     }
   });
 
@@ -203,7 +215,7 @@ describe('P0-1：工件根写路径守卫 —— 工厂 hook 真阻断', () => {
       await before({ tool: 'read', sessionID: 's', callID: 'c' }, output);
       expect(output.args).toEqual({ filePath: join(projectDir, '.flow-engine', 'sflow', 'state.json') });
     } finally {
-      await (hooks as { dispose?: () => Promise<void> }).dispose?.();
+      await disposeHooks(hooks);
     }
   });
 
@@ -218,7 +230,7 @@ describe('P0-1：工件根写路径守卫 —— 工厂 hook 真阻断', () => {
       await before({ tool: 'bash', sessionID: 's', callID: 'c' }, output);
       expect(output.args).toEqual({ command: 'echo hi' });
     } finally {
-      await (hooks as { dispose?: () => Promise<void> }).dispose?.();
+      await disposeHooks(hooks);
     }
   });
 
@@ -236,7 +248,7 @@ describe('P0-1：工件根写路径守卫 —— 工厂 hook 真阻断', () => {
       await before({ tool: 'write', sessionID: 's', callID: 'c' }, output);
       expect(Object.keys(output.args)).toEqual(['filePath', 'content']);
     } finally {
-      await (hooks as { dispose?: () => Promise<void> }).dispose?.();
+      await disposeHooks(hooks);
     }
   });
 });

@@ -33,6 +33,15 @@ function createMockClient(): unknown {
 
 type HooksWithDispose = { dispose?: () => Promise<void> };
 
+/** best-effort 释放插件钩子：清理异常（如 Windows EBUSY）不得判定用例失败 */
+async function disposeHooks(hooks: unknown): Promise<void> {
+  try {
+    await (hooks as HooksWithDispose).dispose?.();
+  } catch {
+    // 忽略：清理为 best-effort
+  }
+}
+
 describe('P1-1：plugin.log 生产链路接线', () => {
   let workDir: string;
   let testLogRoot: string;
@@ -90,7 +99,7 @@ describe('P1-1：plugin.log 生产链路接线', () => {
         expect(Logger.getLogFilePath()).toBe(join(testLogRoot, 'plugin.log'));
         expect(Logger.getLogFilePath().startsWith(workDir)).toBe(false);
       } finally {
-        await hooks.dispose?.();
+        await disposeHooks(hooks);
       }
     }
   });
@@ -112,7 +121,7 @@ describe('P1-1：plugin.log 生产链路接线', () => {
       // 关键：workDir 下不得出现 .flow-engine（旧实现会写 workDir/.flow-engine/sflow/plugin.log）
       expect(existsSync(join(workDir, '.flow-engine'))).toBe(false);
     } finally {
-      await hooks.dispose?.();
+      await disposeHooks(hooks);
     }
   });
 });
