@@ -213,17 +213,17 @@ const SUMMARY_GREP_SECTION_HEADER = '## 抽象层 grep 结果';
  *
  * 同时将结果写入 SUMMARY.md 的「抽象层 grep 结果」段。
  *
- * @param changeDir - 项目/变更目录
+ * @param workDir - 项目/变更目录
  * @param category - 抽象类别 ID（如 'http-client'）
  * @param result - grep 命令执行结果
  */
 export async function recordGrepResult(
-  changeDir: string,
+  workDir: string,
   category: string,
   result: string,
 ): Promise<void> {
-  const progressPath = changeDir + '/' + PROGRESS_FILE;
-  const summaryPath = changeDir + '/' + SUMMARY_FILE;
+  const progressPath = workDir + '/' + PROGRESS_FILE;
+  const summaryPath = workDir + '/' + SUMMARY_FILE;
   const catDef = ABSTRACTION_CATEGORIES[category];
   const label = catDef?.label ?? category;
 
@@ -231,7 +231,7 @@ export async function recordGrepResult(
   const categoryLine = '- **' + label + '** (' + category + '): ' + result;
 
   // 确保目录存在
-  await ensureDir(changeDir + '/.flow-engine/sflow');
+  await ensureDir(workDir + '/.flow-engine/sflow');
 
   // ─── 写入 progress.md ─────────────────────────────────────────────────
   const existingProgress = await readFile(progressPath);
@@ -265,15 +265,15 @@ export async function recordGrepResult(
 /**
  * 检查 progress.md 中是否存在对应类别的 grep 记录。
  *
- * @param changeDir - 项目/变更目录
+ * @param workDir - 项目/变更目录
  * @param category - 抽象类别 ID
  * @returns 是否存在记录
  */
 export async function hasGrepRecord(
-  changeDir: string,
+  workDir: string,
   category: string,
 ): Promise<boolean> {
-  const progressPath = changeDir + '/' + PROGRESS_FILE;
+  const progressPath = workDir + '/' + PROGRESS_FILE;
   const content = await readFile(progressPath);
   if (!content) return false;
 

@@ -49,7 +49,7 @@ describe('Artifact preflight cache invalidation (P1-3)', () => {
     }));
 
     const params = {
-      changeDir: dir,
+      workDir: dir,
       targetState: 'bridging',
       fileExists,
       directoryExists,
@@ -81,7 +81,7 @@ describe('Artifact preflight cache invalidation (P1-3)', () => {
     }));
 
     const params = {
-      changeDir: dir,
+      workDir: dir,
       targetState: 'bridging',
       fileExists,
       directoryExists,

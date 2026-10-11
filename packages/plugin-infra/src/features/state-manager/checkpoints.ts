@@ -35,9 +35,9 @@ export const CHECKPOINT_DIR = '.flow-engine/sflow/checkpoints';
  * 保存 checkpoint。
  * T2.8: 支持双写 - 根级兼容镜像 + plan-scoped 权威副本
  */
-export async function saveCheckpoint(changeDir: string, checkpoint: CheckpointFile): Promise<void> {
+export async function saveCheckpoint(workDir: string, checkpoint: CheckpointFile): Promise<void> {
   // 获取当前 execution plan
-  const plan = await readExecutionPlan(changeDir);
+  const plan = await readExecutionPlan(workDir);
 
   // 添加 plan scope 信息
   const checkpointWithPlan: CheckpointFile = {
@@ -48,14 +48,14 @@ export async function saveCheckpoint(changeDir: string, checkpoint: CheckpointFi
 
   await stateFileMutex.runExclusive(async () => {
     // 根级兼容镜像
-    const rootCheckpointsDir = changeDir + '/' + CHECKPOINT_DIR;
+    const rootCheckpointsDir = workDir + '/' + CHECKPOINT_DIR;
     const rootFilePath = rootCheckpointsDir + '/' + checkpoint.taskId + '.json';
     await ensureDir(rootCheckpointsDir);
     await writeJsonFile(rootFilePath, checkpointWithPlan);
 
     // Plan-scoped 权威副本（如果存在 plan）
     if (plan) {
-      const planPaths = getPlanScopedPaths(changeDir, plan);
+      const planPaths = getPlanScopedPaths(workDir, plan);
       const planFilePath = planPaths.checkpoints + '/' + checkpoint.taskId + '.json';
       await ensureReceiptDir(planPaths.checkpoints);
       await writeJsonFile(planFilePath, checkpointWithPlan);
@@ -67,13 +67,13 @@ export async function saveCheckpoint(changeDir: string, checkpoint: CheckpointFi
  * 读取 checkpoint。
  * T2.8: 优先读取 plan-scoped 路径，回退到根级 legacy 路径
  */
-export async function readCheckpoint(changeDir: string, taskId: string, includeStale?: boolean): Promise<CheckpointFile | null> {
+export async function readCheckpoint(workDir: string, taskId: string, includeStale?: boolean): Promise<CheckpointFile | null> {
   // 获取当前 execution plan
-  const plan = await readExecutionPlan(changeDir);
+  const plan = await readExecutionPlan(workDir);
 
   // 优先读取 plan-scoped 路径
   if (plan) {
-    const planPaths = getPlanScopedPaths(changeDir, plan);
+    const planPaths = getPlanScopedPaths(workDir, plan);
     const planFilePath = planPaths.checkpoints + '/' + taskId + '.json';
     const planCheckpoint = await readJsonFile<CheckpointFile>(planFilePath);
     if (planCheckpoint && hasMatchingPlan(planCheckpoint, plan)) {
@@ -84,7 +84,7 @@ export async function readCheckpoint(changeDir: string, taskId: string, includeS
   }
 
   // 回退到根级 legacy 路径
-  const rootFilePath = changeDir + '/' + CHECKPOINT_DIR + '/' + taskId + '.json';
+  const rootFilePath = workDir + '/' + CHECKPOINT_DIR + '/' + taskId + '.json';
   const cp = await readJsonFile<CheckpointFile>(rootFilePath);
   if (!cp) return null;
   // Skip stale checkpoints unless explicitly requested
@@ -92,12 +92,12 @@ export async function readCheckpoint(changeDir: string, taskId: string, includeS
   return cp;
 }
 
-export async function detectStaleCheckpoints(changeDir: string): Promise<string[]> {
-  const contractContent = await readArtifactContent(changeDir, 'execution-contract.md');
+export async function detectStaleCheckpoints(workDir: string): Promise<string[]> {
+  const contractContent = await readArtifactContent(workDir, 'execution-contract.md');
   if (!contractContent) return [];
 
   const currentHash = await simpleHash(contractContent);
-  const checkpointsDir = changeDir + '/' + CHECKPOINT_DIR;
+  const checkpointsDir = workDir + '/' + CHECKPOINT_DIR;
   const dirExists = await directoryExists(checkpointsDir);
   if (!dirExists) return [];
 
@@ -115,8 +115,8 @@ export async function detectStaleCheckpoints(changeDir: string): Promise<string[
   return staleTaskIds;
 }
 
-export async function clearCheckpoint(changeDir: string, taskId: string): Promise<void> {
-  const checkpointsDir = changeDir + '/' + CHECKPOINT_DIR;
+export async function clearCheckpoint(workDir: string, taskId: string): Promise<void> {
+  const checkpointsDir = workDir + '/' + CHECKPOINT_DIR;
   const filePath = checkpointsDir + '/' + taskId + '.json';
 
   // Read existing checkpoint (if any) and mark as stale instead of deleting
@@ -140,9 +140,9 @@ export async function clearCheckpoint(changeDir: string, taskId: string): Promis
   }
 
   // P1-2: Also sync plan-scoped path
-  const plan = await readExecutionPlan(changeDir);
+  const plan = await readExecutionPlan(workDir);
   if (plan) {
-    const planPaths = getPlanScopedPaths(changeDir, plan);
+    const planPaths = getPlanScopedPaths(workDir, plan);
     const planFilePath = planPaths.checkpoints + '/' + taskId + '.json';
     const planExisting = await readJsonFile<CheckpointFile>(planFilePath);
 

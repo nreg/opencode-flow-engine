@@ -71,7 +71,7 @@ export {
   combinedSessionErrorHandlers as combinedSessionErrorHandlersForTest,
 };
 /**
- * P2-3″ 测试观测点：记录 handler 创建时实际收到的 changeDir（语义同 sflow 版本）。
+ * P2-3″ 测试观测点：记录 handler 创建时实际收到的 workDir（语义同 sflow 版本）。
  * 仅作测试观测，不参与任何生产分支。
  */
 const combinedSessionErrorHandlerWorkDir = new Map<string, string>();
@@ -116,16 +116,16 @@ function createCombinedTools(
     agentModelMap: AGENT_MODEL_MAP,
     sessionLabelPrefix: (subagentType, context) => {
       // Determine workflow prefix based on context
-      const changeDir = resolveChangeDir(undefined, context.directory as string);
-      const isIFlowCtx = changeDir ? true : false; // context available from execute
+      const workDir = resolveChangeDir(undefined, context.directory as string);
+      const isIFlowCtx = workDir ? true : false; // context available from execute
       // Use agent name from context to determine prefix
       const callerAgent = (context.agent as string) || '';
       const lower = callerAgent.toLowerCase();
       if (lower === 'iflow' || lower.startsWith('iflow-')) return 'iFlow';
       if (lower === 'sflow' || lower.startsWith('sflow-')) return 'sFlow';
       // Fallback: check directory
-      if (changeDir.includes('.flow-engine/iflow')) return 'iFlow';
-      if (changeDir.includes('.flow-engine/sflow')) return 'sFlow';
+      if (workDir.includes('.flow-engine/iflow')) return 'iFlow';
+      if (workDir.includes('.flow-engine/sflow')) return 'sFlow';
       return 'WF';
     },
     workflowName: 'workflow',
@@ -137,7 +137,7 @@ function createCombinedTools(
       // 背景：项目可能同时存在 .flow-engine/sflow 与 .flow-engine/iflow，或历史
       // 用过 sFlow 后切换到 iFlow——仅凭目录会误判调用方身份，导致 IFlow
       // orchestrator 调 iflow 子 agent 被 SFlow 白名单拒绝。
-      const changeDir = resolveChangeDir(undefined, context.directory as string);
+      const workDir = resolveChangeDir(undefined, context.directory as string);
       const callerAgent = (context.agent as string) || '';
       const lower = callerAgent.toLowerCase();
 
@@ -148,8 +148,8 @@ function createCombinedTools(
         callerWorkflow = 'sflow';
       } else {
         // context.agent 缺失或无法识别 → 用目录兜底判定
-        const isSFlowContext = await directoryExists(`${changeDir}/.flow-engine/sflow`);
-        const isIFlowContext = await directoryExists(`${changeDir}/.flow-engine/iflow`);
+        const isSFlowContext = await directoryExists(`${workDir}/.flow-engine/sflow`);
+        const isIFlowContext = await directoryExists(`${workDir}/.flow-engine/iflow`);
         if (isIFlowContext && !isSFlowContext) {
           callerWorkflow = 'iflow';
         } else if (isSFlowContext && !isIFlowContext) {
@@ -191,8 +191,8 @@ function createCombinedTools(
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
       execute: async (args, context) => {
-        const changeDir = resolveChangeDir(undefined, context.directory);
-        return createWorkflowRouterTool().execute({ ...args, changeDir }, context);
+        const workDir = resolveChangeDir(undefined, context.directory);
+        return createWorkflowRouterTool().execute({ ...args, workDir }, context);
       },
     },
 
@@ -202,8 +202,8 @@ function createCombinedTools(
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
       execute: async (args, context) => {
-        const changeDir = resolveChangeDir(undefined, context.directory);
-        return createIFlowRouterTool().execute({ ...args, changeDir }, context);
+        const workDir = resolveChangeDir(undefined, context.directory);
+        return createIFlowRouterTool().execute({ ...args, workDir }, context);
       },
     },
 
@@ -213,10 +213,10 @@ function createCombinedTools(
         contract_path: z.string().optional().describe('Path to the execution contract file'),
       },
       execute: async (args: { contract_path?: string }, context) => {
-        const changeDir = args.contract_path
+        const workDir = args.contract_path
           ? args.contract_path.replace(/[/\\]execution-contract\.md$/, '')
           : resolveChangeDir(undefined, context.directory);
-        const result = await executeContractValidator(changeDir);
+        const result = await executeContractValidator(workDir);
         return { title: 'Contract Validator', output: JSON.stringify(result, null, 2) };
       },
     },
@@ -227,10 +227,10 @@ function createCombinedTools(
         artifact_path: z.string().optional().describe('Path to the artifact or change directory'),
       },
       execute: async (args: { artifact_path?: string }, context) => {
-        const changeDir = args.artifact_path
+        const workDir = args.artifact_path
           ? args.artifact_path.replace(/[/\\](proposal|design|tasks)\.md$/, '').replace(/[/\\]specs$/, '')
           : resolveChangeDir(undefined, context.directory);
-        const result = await executeArtifactInspector(changeDir);
+        const result = await executeArtifactInspector(workDir);
         return { title: 'Artifact Inspector', output: JSON.stringify(result, null, 2) };
       },
     },
@@ -296,7 +296,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
         const sessionStartHook = hookComposer.getHook('session_start');
         if (sessionStartHook) {
           await sessionStartHook.execute({
-            changeDir: workDir,
+            workDir: workDir,
             stateFile: `${workDir}/${getStateFilePath('sflow')}`,
             pluginRoot: '',
             action: 'session.created',
@@ -306,7 +306,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
         const sessionEndHook = hookComposer.getHook('session_end');
         if (sessionEndHook) {
           await sessionEndHook.execute({
-            changeDir: workDir,
+            workDir: workDir,
             stateFile: `${workDir}/${getStateFilePath('sflow')}`,
             pluginRoot: '',
             action: 'session.deleted',
@@ -483,7 +483,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
       const guardHook = hookComposer.getHook('guard');
       if (guardHook) {
         const guardResult = await guardHook.execute({
-          changeDir: workDir,
+          workDir: workDir,
           stateFile: `${workDir}/${getStateFilePath('sflow')}`,
           pluginRoot: '',
           action: `tool:${toolName}`,
@@ -525,7 +525,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
       if (validationHook) {
         const currentState = await getCurrentWorkflowState(workDir);
         const validationCtx: HookContext = {
-          changeDir: workDir,
+          workDir: workDir,
           stateFile: `${workDir}/${getStateFilePath('sflow')}`,
           pluginRoot: '',
           action: `tool:${toolName}:after`,
@@ -548,7 +548,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
           const iflowTransitionHook = hookComposer.getHook('iflow_state_transition');
           if (iflowTransitionHook) {
             const result = await iflowTransitionHook.execute({
-              changeDir: workDir,
+              workDir: workDir,
               stateFile: `${workDir}/${getStateFilePath('iflow')}`,
               pluginRoot: '',
               action: 'state-transition',
@@ -570,7 +570,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
         const transitionHook = hookComposer.getHook('state_transition');
         if (transitionHook) {
           await transitionHook.execute({
-            changeDir: workDir,
+            workDir: workDir,
             stateFile: `${workDir}/${getStateFilePath('sflow')}`,
             pluginRoot: '',
             action: 'state-transition',
@@ -582,7 +582,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
       const postProcessHook = hookComposer.getHook('post_process');
       if (postProcessHook) {
         const ppResult = await postProcessHook.execute({
-          changeDir: workDir,
+          workDir: workDir,
           stateFile: `${workDir}/${getStateFilePath('sflow')}`,
           pluginRoot: '',
           action: `tool:${toolName}:after`,
@@ -594,7 +594,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
             const transitionHook = hookComposer.getHook('state_transition');
             if (transitionHook) {
               await transitionHook.execute({
-                changeDir: workDir,
+                workDir: workDir,
                 stateFile: `${workDir}/${getStateFilePath('sflow')}`,
                 pluginRoot: '',
                 action: 'state-transition',
@@ -610,7 +610,7 @@ async function combinedPlugin(input: PluginInput, _options?: PluginOptions): Pro
       const continuationHook = hookComposer.getHook('continuation');
       if (!continuationHook) return;
       const result = await continuationHook.execute({
-        changeDir: workDir,
+        workDir: workDir,
         stateFile: `${workDir}/${getStateFilePath('sflow')}`,
         pluginRoot: '',
         action: 'autocontinue',

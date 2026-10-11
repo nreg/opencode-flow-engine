@@ -18,9 +18,9 @@ export function createContinuationHook(): HookHandler {
     name: 'continuation',
     description: 'Check if workflow should auto-continue to next state and report routing info',
     execute: async (context: HookContext): Promise<HookResult> => {
-      const { changeDir } = context;
+      const { workDir } = context;
 
-      const stateData = await readJsonFile<{ state?: string; mode?: string; build_pause?: string | null; isolation?: string; build_mode?: string }>(`${changeDir}/.flow-engine/sflow/state.json`);
+      const stateData = await readJsonFile<{ state?: string; mode?: string; build_pause?: string | null; isolation?: string; build_mode?: string }>(`${workDir}/.flow-engine/sflow/state.json`);
 
       if (!stateData?.state) {
         return {
@@ -61,7 +61,7 @@ export function createContinuationHook(): HookHandler {
       if (currentState === 'executing' && buildPause && buildPause !== null) {
         const isolation = stateData.isolation;
         const buildMode = stateData.build_mode;
-        const contractExists = await artifactExists(changeDir, 'execution-contract.md');
+        const contractExists = await artifactExists(workDir, 'execution-contract.md');
 
         // Sub-state 1: Corrupted pause — build_pause set but contract file missing
         if (!contractExists) {
@@ -138,7 +138,7 @@ export function createContinuationHook(): HookHandler {
 
       // Read auto_transition config from .flow-engine/sflow/config.json (change-level) or default to true
       let autoTransition = true;
-      const configPath = `${changeDir}/.flow-engine/sflow/config.json`;
+      const configPath = `${workDir}/.flow-engine/sflow/config.json`;
       const configExists = await fileExists(configPath);
       if (configExists) {
         const config = await readJsonFile<{ auto_transition?: boolean }>(configPath);

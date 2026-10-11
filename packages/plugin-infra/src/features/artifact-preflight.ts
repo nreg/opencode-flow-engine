@@ -15,7 +15,7 @@ import { artifactExists, directoryArtifactExists } from './state-manager/artifac
 import { Logger } from '../utils/logger.js';
 
 export interface PreflightCheckParams {
-  changeDir: string;
+  workDir: string;
   targetState: string;
   fileExists: (path: string) => Promise<boolean>;
   directoryExists: (path: string) => Promise<boolean>;
@@ -33,7 +33,7 @@ export interface PreflightCheckResult {
 export async function checkArtifactPreflight(
   params: PreflightCheckParams,
 ): Promise<PreflightCheckResult> {
-  const { changeDir, targetState, fileExists, directoryExists, readJson } = params;
+  const { workDir, targetState, fileExists, directoryExists, readJson } = params;
 
   // P1-3: Cache removed — preflight checks are lightweight operations (file existence checks),
   // and the 5s TTL cache provides minimal benefit while risking stale results when artifacts change.
@@ -47,9 +47,9 @@ export async function checkArtifactPreflight(
   for (const artifact of gate.required) {
     let exists: boolean;
     if (isDirectoryArtifact(artifact)) {
-      exists = await directoryArtifactExists(changeDir, artifact);
+      exists = await directoryArtifactExists(workDir, artifact);
     } else {
-      exists = await artifactExists(changeDir, artifact);
+      exists = await artifactExists(workDir, artifact);
     }
     existence[artifact] = exists;
     if (!exists) missing.push(artifact);
@@ -66,9 +66,9 @@ export async function checkArtifactPreflight(
   const frontendCheckStates = ['specifying', 'ui-design', 'bridging', 'approved-for-build', 'executing', 'debugging'];
   if (frontendCheckStates.includes(targetState)) {
     try {
-      const isFrontend = await detectFrontend(changeDir);
+      const isFrontend = await detectFrontend(workDir);
       if (isFrontend) {
-        const uiOk = await artifactExists(changeDir, 'ui-design.md');
+        const uiOk = await artifactExists(workDir, 'ui-design.md');
         existence['ui-design.md'] = uiOk;
         if (!uiOk && targetState !== 'specifying') {
           const result: PreflightCheckResult = {

@@ -15,14 +15,14 @@ export function createSessionStartHook(): HookHandler {
     name: 'session_start',
     description: 'Recover workflow state from boulder state on session start (with auto-repair)',
     execute: async (context: HookContext): Promise<HookResult> => {
-      const { changeDir } = context;
+      const { workDir } = context;
 
       try {
         let recoveredState: string | null = null;
         let restoredFrom = 'fresh';
 
         // Step 1: Recover from boulder state (cross-session persistence)
-        const boulderPath = `${changeDir}/.flow-engine/sflow/boulder-state.json`;
+        const boulderPath = `${workDir}/.flow-engine/sflow/boulder-state.json`;
         const boulderExists = await fileExists(boulderPath);
 
         if (boulderExists) {
@@ -35,7 +35,7 @@ export function createSessionStartHook(): HookHandler {
 
         // Step 2: Fall back to regular state file
         if (!recoveredState) {
-          const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
+          const statePath = `${workDir}/.flow-engine/sflow/state.json`;
           const stateExists = await fileExists(statePath);
           if (stateExists) {
             const state = await readJsonFile<{ state?: string }>(statePath);
@@ -58,12 +58,12 @@ export function createSessionStartHook(): HookHandler {
         }
 
         // Step 3: C14 — Run detectStateMismatch to auto-repair state vs artifacts
-        const repairedState = await detectStateMismatch(changeDir, recoveredState);
+        const repairedState = await detectStateMismatch(workDir, recoveredState);
         const wasRepaired = repairedState !== recoveredState;
 
         // Step 4: Write the (possibly repaired) state
-        const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
-        await ensureDir(`${changeDir}/.flow-engine/sflow`);
+        const statePath = `${workDir}/.flow-engine/sflow/state.json`;
+        await ensureDir(`${workDir}/.flow-engine/sflow`);
         await writeJsonFile(statePath, {
           state: repairedState,
           restoredAt: new Date().toISOString(),
@@ -108,10 +108,10 @@ export function createSessionEndHook(): HookHandler {
     name: 'session_end',
     description: 'Persist workflow state to boulder state on session end',
     execute: async (context: HookContext): Promise<HookResult> => {
-      const { changeDir } = context;
+      const { workDir } = context;
 
       try {
-        const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
+        const statePath = `${workDir}/.flow-engine/sflow/state.json`;
         const stateExists = await fileExists(statePath);
 
         if (!stateExists) {
@@ -125,7 +125,7 @@ export function createSessionEndHook(): HookHandler {
 
         // Write boulder state for cross-session recovery
         const { writeJsonFile } = await import('@opencode-flow-engine/shared');
-        await writeJsonFile(`${changeDir}/.flow-engine/sflow/boulder-state.json`, {
+        await writeJsonFile(`${workDir}/.flow-engine/sflow/boulder-state.json`, {
           ...state,
           persistedAt: new Date().toISOString(),
           lastSessionEnd: new Date().toISOString(),

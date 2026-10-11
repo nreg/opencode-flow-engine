@@ -3147,7 +3147,7 @@ describe('Batch 3: directory parameter passing (TO-4/TO-5/TO-6/TO-7)', () => {
       await new Promise(resolve => setTimeout(resolve, 500));
 
       // Assert: Event bus register was called (by watcher)
-      // Note: watcher uses task.changeDir from BackgroundTaskEntry
+      // Note: watcher uses task.workDir from BackgroundTaskEntry
       expect(registerCalls.length).toBeGreaterThan(0);
     });
   });
@@ -4182,7 +4182,7 @@ describe('FIX-P3-2: no-valid-output 路径补写降级通知', () => {
         subagentType: 'build-executor',
         status: 'running',
         createdAt: Date.now(),
-        changeDir: tmp,
+        workDir: tmp,
         workDir: tmp,
         resolvedModel: 'provider/no-signal-primary',
         attemptedModels: ['provider/no-signal-primary'],
@@ -4328,7 +4328,7 @@ describe('FIX-P3-2: no-valid-output 路径补写降级通知', () => {
         subagentType: 'build-executor',
         status: 'running',
         createdAt: Date.now(),
-        changeDir: tmpError,
+        workDir: tmpError,
         workDir: tmpError,
         resolvedModel: 'provider/error-primary',
         attemptedModels: ['provider/error-primary'],

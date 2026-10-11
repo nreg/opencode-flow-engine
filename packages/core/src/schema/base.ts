@@ -128,7 +128,7 @@ export interface DecisionPoint {
 export interface WorkflowStateFile {
   state: WorkflowState;
   mode: WorkflowMode;
-  changeDir: string;
+  workDir: string;
   dp0Confirmed: boolean;
   decisionPoints: DecisionPoint[];
   contractApproved: boolean;
@@ -147,7 +147,7 @@ export interface WorkflowStateFile {
 export interface WorkflowStateRecord {
   state?: string;
   mode?: string;
-  changeDir?: string;
+  workDir?: string;
   dp0Confirmed?: boolean;
   decisionPoints?: DecisionPoint[];
   contractApproved?: boolean;

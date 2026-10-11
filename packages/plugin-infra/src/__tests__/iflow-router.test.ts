@@ -61,7 +61,7 @@ describe('IFlow Router — EXECUTING marker fallback detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -82,7 +82,7 @@ describe('IFlow Router — EXECUTING marker fallback detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -105,7 +105,7 @@ describe('IFlow Router — EXECUTING marker fallback detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -124,7 +124,7 @@ describe('IFlow Router — EXECUTING marker fallback detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -144,7 +144,7 @@ describe('IFlow Router — EXECUTING marker fallback detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -163,7 +163,7 @@ describe('IFlow Router — EXECUTING marker fallback detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -193,7 +193,7 @@ describe('IFlow Router — determineArtifactState', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -209,7 +209,7 @@ describe('IFlow Router — determineArtifactState', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -225,7 +225,7 @@ describe('IFlow Router — determineArtifactState', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -246,7 +246,7 @@ describe('IFlow Router — determineArtifactState', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -263,7 +263,7 @@ describe('IFlow Router — determineArtifactState', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -281,7 +281,7 @@ describe('IFlow Router — determineArtifactState', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -300,7 +300,7 @@ describe('IFlow Router — determineArtifactState', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -329,7 +329,7 @@ describe('IFlow Router — matchIFlowIntent', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: '讨论需求' },
+      { workDir: dir, intent: '讨论需求' },
       { directory: dir } as any,
     );
 
@@ -343,7 +343,7 @@ describe('IFlow Router — matchIFlowIntent', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: 'research technical options' },
+      { workDir: dir, intent: 'research technical options' },
       { directory: dir } as any,
     );
 
@@ -357,7 +357,7 @@ describe('IFlow Router — matchIFlowIntent', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: 'plan the tasks' },
+      { workDir: dir, intent: 'plan the tasks' },
       { directory: dir } as any,
     );
 
@@ -371,7 +371,7 @@ describe('IFlow Router — matchIFlowIntent', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: 'implement the feature' },
+      { workDir: dir, intent: 'implement the feature' },
       { directory: dir } as any,
     );
 
@@ -385,7 +385,7 @@ describe('IFlow Router — matchIFlowIntent', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: 'verify the results' },
+      { workDir: dir, intent: 'verify the results' },
       { directory: dir } as any,
     );
 
@@ -399,7 +399,7 @@ describe('IFlow Router — matchIFlowIntent', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: 'ship to production' },
+      { workDir: dir, intent: 'ship to production' },
       { directory: dir } as any,
     );
 
@@ -413,7 +413,7 @@ describe('IFlow Router — matchIFlowIntent', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: '继续' },
+      { workDir: dir, intent: '继续' },
       { directory: dir } as any,
     );
 
@@ -427,7 +427,7 @@ describe('IFlow Router — matchIFlowIntent', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: '下一轮' },
+      { workDir: dir, intent: '下一轮' },
       { directory: dir } as any,
     );
 
@@ -443,7 +443,7 @@ describe('IFlow Router — matchIFlowIntent', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: 'unrecognized gibberish xyz' },
+      { workDir: dir, intent: 'unrecognized gibberish xyz' },
       { directory: dir } as any,
     );
 
@@ -480,7 +480,7 @@ describe('IFlow Router — EXECUTING file lifecycle', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -504,7 +504,7 @@ describe('IFlow Router — EXECUTING file lifecycle', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -531,7 +531,7 @@ describe('IFlow Router — fresh start', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -547,7 +547,7 @@ describe('IFlow Router — fresh start', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -579,7 +579,7 @@ describe('IFlow Router — rollback detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -597,7 +597,7 @@ describe('IFlow Router — rollback detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -615,7 +615,7 @@ describe('IFlow Router — rollback detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -645,7 +645,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: '全面test' },
+      { workDir: dir, intent: '全面test' },
       { directory: dir } as any,
     );
 
@@ -661,7 +661,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: '/flow-review' },
+      { workDir: dir, intent: '/flow-review' },
       { directory: dir } as any,
     );
 
@@ -678,7 +678,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: '全面review' },
+      { workDir: dir, intent: '全面review' },
       { directory: dir } as any,
     );
 
@@ -692,7 +692,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: 'comprehensive test' },
+      { workDir: dir, intent: 'comprehensive test' },
       { directory: dir } as any,
     );
 
@@ -706,7 +706,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: '只测性能' },
+      { workDir: dir, intent: '只测性能' },
       { directory: dir } as any,
     );
 
@@ -721,7 +721,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: '/flow-review scope=代码质量' },
+      { workDir: dir, intent: '/flow-review scope=代码质量' },
       { directory: dir } as any,
     );
 
@@ -739,7 +739,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: '全面test' },
+      { workDir: dir, intent: '全面test' },
       { directory: dir } as any,
     );
 
@@ -755,7 +755,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir, intent: '开始一个新功能' },
+      { workDir: dir, intent: '开始一个新功能' },
       { directory: dir } as any,
     );
 
@@ -773,7 +773,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -794,7 +794,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -811,7 +811,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -826,7 +826,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     const result = await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -841,7 +841,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 
@@ -854,7 +854,7 @@ describe('IFlow Router — Phase 0 Horizontal Command Detection', () => {
     const { createIFlowRouterTool } = await import('../tools/iflow-router.js');
     const tool = createIFlowRouterTool();
     await tool.execute(
-      { changeDir: dir },
+      { workDir: dir },
       { directory: dir } as any,
     );
 

@@ -18,11 +18,11 @@ export const ARTIFACT_NAMES = new Set([
 
 /**
  * Resolve artifact path with dual-path compatibility.
- * Priority: .flow-engine/sflow/<artifact> (new) → <changeDir>/<artifact> (legacy)
+ * Priority: .flow-engine/sflow/<artifact> (new) → <workDir>/<artifact> (legacy)
  */
-export async function resolveArtifactPath(changeDir: string, artifactName: string): Promise<string> {
-  const newPath = `${changeDir}/.flow-engine/sflow/${artifactName}`;
-  const legacyPath = `${changeDir}/${artifactName}`;
+export async function resolveArtifactPath(workDir: string, artifactName: string): Promise<string> {
+  const newPath = `${workDir}/.flow-engine/sflow/${artifactName}`;
+  const legacyPath = `${workDir}/${artifactName}`;
   
   if (await fileExists(newPath)) {
     return newPath;
@@ -35,9 +35,9 @@ export async function resolveArtifactPath(changeDir: string, artifactName: strin
  * Read artifact content with dual-path compatibility.
  * Tries new path first, falls back to legacy path.
  */
-export async function readArtifactContent(changeDir: string, artifactName: string): Promise<string | null> {
-  const newPath = `${changeDir}/.flow-engine/sflow/${artifactName}`;
-  const legacyPath = `${changeDir}/${artifactName}`;
+export async function readArtifactContent(workDir: string, artifactName: string): Promise<string | null> {
+  const newPath = `${workDir}/.flow-engine/sflow/${artifactName}`;
+  const legacyPath = `${workDir}/${artifactName}`;
   
   const newContent = await readFile(newPath).catch(() => null);
   if (newContent) return newContent;
@@ -48,17 +48,17 @@ export async function readArtifactContent(changeDir: string, artifactName: strin
 /**
  * Check if artifact exists in new path (.flow-engine/sflow/).
  */
-export async function isArtifactNewPath(changeDir: string, artifactName: string): Promise<boolean> {
-  const newPath = `${changeDir}/.flow-engine/sflow/${artifactName}`;
+export async function isArtifactNewPath(workDir: string, artifactName: string): Promise<boolean> {
+  const newPath = `${workDir}/.flow-engine/sflow/${artifactName}`;
   return fileExists(newPath);
 }
 
 /**
  * Check if artifact exists in either new or legacy path.
  */
-export async function artifactExists(changeDir: string, artifactName: string): Promise<boolean> {
-  const newPath = `${changeDir}/.flow-engine/sflow/${artifactName}`;
-  const legacyPath = `${changeDir}/${artifactName}`;
+export async function artifactExists(workDir: string, artifactName: string): Promise<boolean> {
+  const newPath = `${workDir}/.flow-engine/sflow/${artifactName}`;
+  const legacyPath = `${workDir}/${artifactName}`;
   
   return (await fileExists(newPath)) || (await fileExists(legacyPath));
 }
@@ -68,8 +68,8 @@ export async function artifactExists(changeDir: string, artifactName: string): P
  * Only returns new path: .flow-engine/sflow/specs (change-specific delta specs).
  * Does NOT fallback to project root specs/ (which is the main spec library).
  */
-export async function resolveSpecsDir(changeDir: string): Promise<string> {
-  const newPath = `${changeDir}/.flow-engine/sflow/specs`;
+export async function resolveSpecsDir(workDir: string): Promise<string> {
+  const newPath = `${workDir}/.flow-engine/sflow/specs`;
   return newPath;
 }
 
@@ -79,8 +79,8 @@ export async function resolveSpecsDir(changeDir: string): Promise<string> {
  * Does NOT fallback to project root specs/ (which is the main spec library).
  * Returns empty array if directory does not exist or read fails.
  */
-export async function listSpecFiles(changeDir: string): Promise<string[]> {
-  const newPath = `${changeDir}/.flow-engine/sflow/specs`;
+export async function listSpecFiles(workDir: string): Promise<string[]> {
+  const newPath = `${workDir}/.flow-engine/sflow/specs`;
   
   return listFiles(newPath, '.md').catch(() => []);
 }
@@ -91,8 +91,8 @@ export async function listSpecFiles(changeDir: string): Promise<string[]> {
  * Does NOT fallback to project root specs/ (which is the main spec library).
  * Returns null if file does not exist.
  */
-export async function readSpecContent(changeDir: string, specName: string): Promise<string | null> {
-  const newPath = `${changeDir}/.flow-engine/sflow/specs/${specName}`;
+export async function readSpecContent(workDir: string, specName: string): Promise<string | null> {
+  const newPath = `${workDir}/.flow-engine/sflow/specs/${specName}`;
   return readFile(newPath).catch(() => null);
 }
 
@@ -101,18 +101,18 @@ export async function readSpecContent(changeDir: string, specName: string): Prom
  * For specs/ directory, checks if it exists and contains .md files.
  * Priority: .flow-engine/sflow/specs (new) → specs (legacy)
  */
-export async function directoryArtifactExists(changeDir: string, artifactName: string): Promise<boolean> {
+export async function directoryArtifactExists(workDir: string, artifactName: string): Promise<boolean> {
   // Normalize artifact name (remove trailing slash)
   const normalizedArtifact = artifactName.replace(/\/$/, '');
   
   if (normalizedArtifact === 'specs') {
-    const files = await listSpecFiles(changeDir);
+    const files = await listSpecFiles(workDir);
     return files.length > 0;
   }
   
   // For other directory artifacts, check both paths
-  const newPath = `${changeDir}/.flow-engine/sflow/${normalizedArtifact}`;
-  const legacyPath = `${changeDir}/${normalizedArtifact}`;
+  const newPath = `${workDir}/.flow-engine/sflow/${normalizedArtifact}`;
+  const legacyPath = `${workDir}/${normalizedArtifact}`;
   
   const newExists = await directoryExists(newPath);
   if (newExists) return true;

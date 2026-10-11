@@ -43,7 +43,7 @@ export const HANDOFF_TYPES = new Set(['prototype', 'research', 'experiment', 'ta
  * T2.8: 支持双写 - 根级兼容镜像 + plan-scoped 权威副本
  */
 export async function createHandoff(
-  changeDir: string,
+  workDir: string,
   params: Omit<HandoffFile, 'id' | 'status' | 'createdAt'>,
 ): Promise<HandoffFile> {
   if (!HANDOFF_TYPES.has(params.type)) {
@@ -53,7 +53,7 @@ export async function createHandoff(
   const now = new Date().toISOString();
 
   // 获取当前 execution plan
-  const plan = await readExecutionPlan(changeDir);
+  const plan = await readExecutionPlan(workDir);
 
   const handoff: HandoffFile = {
     id,
@@ -75,14 +75,14 @@ export async function createHandoff(
 
   await stateFileMutex.runExclusive(async () => {
     // 根级兼容镜像
-    const rootHandoffsDir = changeDir + '/' + HANDOFF_DIR;
+    const rootHandoffsDir = workDir + '/' + HANDOFF_DIR;
     const rootFilePath = rootHandoffsDir + '/' + id + '.json';
     await ensureDir(rootHandoffsDir);
     await writeJsonFile(rootFilePath, handoff);
 
     // Plan-scoped 权威副本（如果存在 plan）
     if (plan) {
-      const planPaths = getPlanScopedPaths(changeDir, plan);
+      const planPaths = getPlanScopedPaths(workDir, plan);
       const planFilePath = planPaths.handoffs + '/' + id + '.json';
       await ensureReceiptDir(planPaths.handoffs);
       await writeJsonFile(planFilePath, handoff);
@@ -96,13 +96,13 @@ export async function createHandoff(
  * 读取 handoff。
  * T2.8: 优先读取 plan-scoped 路径，回退到根级 legacy 路径
  */
-export async function readHandoff(changeDir: string, id: string): Promise<HandoffFile | null> {
+export async function readHandoff(workDir: string, id: string): Promise<HandoffFile | null> {
   // 获取当前 execution plan
-  const plan = await readExecutionPlan(changeDir);
+  const plan = await readExecutionPlan(workDir);
 
   // 优先读取 plan-scoped 路径
   if (plan) {
-    const planPaths = getPlanScopedPaths(changeDir, plan);
+    const planPaths = getPlanScopedPaths(workDir, plan);
     const planFilePath = planPaths.handoffs + '/' + id + '.json';
     const planHandoff = await readJsonFile<HandoffFile>(planFilePath);
     if (planHandoff && hasMatchingPlan(planHandoff, plan)) {
@@ -111,7 +111,7 @@ export async function readHandoff(changeDir: string, id: string): Promise<Handof
   }
 
   // 回退到根级 legacy 路径
-  const rootFilePath = changeDir + '/' + HANDOFF_DIR + '/' + id + '.json';
+  const rootFilePath = workDir + '/' + HANDOFF_DIR + '/' + id + '.json';
   return readJsonFile<HandoffFile>(rootFilePath);
 }
 
@@ -119,9 +119,9 @@ export async function readHandoff(changeDir: string, id: string): Promise<Handof
  * 完成 handoff。
  * T2.8: 同时更新根级和 plan-scoped 路径
  */
-export async function finishHandoff(changeDir: string, id: string, output: string): Promise<HandoffFile> {
+export async function finishHandoff(workDir: string, id: string, output: string): Promise<HandoffFile> {
   return stateFileMutex.runExclusive(async () => {
-    const existing = await readHandoff(changeDir, id);
+    const existing = await readHandoff(workDir, id);
     if (!existing) {
       throw new Error('Handoff not found: ' + id);
     }
@@ -133,15 +133,15 @@ export async function finishHandoff(changeDir: string, id: string, output: strin
     existing.finishedAt = new Date().toISOString();
 
     // 更新根级路径
-    const rootFilePath = changeDir + '/' + HANDOFF_DIR + '/' + id + '.json';
+    const rootFilePath = workDir + '/' + HANDOFF_DIR + '/' + id + '.json';
     await writeJsonFile(rootFilePath, existing);
 
     // 更新 plan-scoped 路径（如果存在 plan）
     if (existing.plan_hash && existing.plan_revision) {
       // 重建 plan 对象以获取路径
-      const plan = await readExecutionPlan(changeDir);
+      const plan = await readExecutionPlan(workDir);
       if (plan && plan.hash === existing.plan_hash && plan.revision === existing.plan_revision) {
-        const planPaths = getPlanScopedPaths(changeDir, plan);
+        const planPaths = getPlanScopedPaths(workDir, plan);
         const planFilePath = planPaths.handoffs + '/' + id + '.json';
         await writeJsonFile(planFilePath, existing);
       }
@@ -156,13 +156,13 @@ export async function finishHandoff(changeDir: string, id: string, output: strin
  * T2.8: 同时更新根级和 plan-scoped 路径
  */
 export async function resolveHandoff(
-  changeDir: string,
+  workDir: string,
   id: string,
   decision: HandoffDecision,
   reason?: string,
 ): Promise<HandoffFile> {
   return stateFileMutex.runExclusive(async () => {
-    const existing = await readHandoff(changeDir, id);
+    const existing = await readHandoff(workDir, id);
     if (!existing) {
       throw new Error('Handoff not found: ' + id);
     }
@@ -177,14 +177,14 @@ export async function resolveHandoff(
     existing.resolvedAt = new Date().toISOString();
 
     // 更新根级路径
-    const rootFilePath = changeDir + '/' + HANDOFF_DIR + '/' + id + '.json';
+    const rootFilePath = workDir + '/' + HANDOFF_DIR + '/' + id + '.json';
     await writeJsonFile(rootFilePath, existing);
 
     // 更新 plan-scoped 路径（如果存在 plan）
     if (existing.plan_hash && existing.plan_revision) {
-      const plan = await readExecutionPlan(changeDir);
+      const plan = await readExecutionPlan(workDir);
       if (plan && plan.hash === existing.plan_hash && plan.revision === existing.plan_revision) {
-        const planPaths = getPlanScopedPaths(changeDir, plan);
+        const planPaths = getPlanScopedPaths(workDir, plan);
         const planFilePath = planPaths.handoffs + '/' + id + '.json';
         await writeJsonFile(planFilePath, existing);
       }
@@ -194,8 +194,8 @@ export async function resolveHandoff(
   });
 }
 
-export async function listHandoffs(changeDir: string): Promise<HandoffFile[]> {
-  const handoffsDir = changeDir + '/' + HANDOFF_DIR;
+export async function listHandoffs(workDir: string): Promise<HandoffFile[]> {
+  const handoffsDir = workDir + '/' + HANDOFF_DIR;
   const dirExists = await directoryExists(handoffsDir);
   if (!dirExists) return [];
 

@@ -1369,7 +1369,7 @@ export function createCallFlowAgentTools(
         ),
     } as Record<string, unknown>,
     execute: async (args, context) => {
-      const changeDir = resolveChangeDir(undefined, context.directory);
+      const workDir = resolveChangeDir(undefined, context.directory);
       const {
         subagent_type,
         prompt,
@@ -1582,7 +1582,7 @@ export function createCallFlowAgentTools(
               title: sessionLabel,
               agent: subagent_type as string,
             },
-            query: { directory: changeDir },
+            query: { directory: workDir },
           });
           const id = createResult.data?.id;
           if (!id) {
@@ -1594,7 +1594,7 @@ export function createCallFlowAgentTools(
 
         // Wave 1: 注入 workDir 标记；projectDir 仅在调用方显式传入时注入
         // （工具无法自行推断任务针对的项目目录，自动填充父目录值是错的）
-        const workDirTag = `<workDir>${normalizeToPosix(changeDir)}</workDir>`;
+        const workDirTag = `<workDir>${normalizeToPosix(workDir)}</workDir>`;
         const hasProjectDir = typeof projectDirParam === 'string' && projectDirParam.trim() !== '';
         const projectDirTag = hasProjectDir
           ? `\n<projectDir>${normalizeToPosix(projectDirParam)}</projectDir>`
@@ -1606,7 +1606,7 @@ export function createCallFlowAgentTools(
         // spec-writer / contract-builder 等产出型子代理必须只往工件根写。
         const artifactRootBlock = [
           '<artifact-root-rules>',
-          `- 工件根目录（唯一允许的工件写入位置）：<workDir>/.flow-engine/sflow/（即 ${normalizeToPosix(join(changeDir, '.flow-engine', 'sflow'))}/）`,
+          `- 工件根目录（唯一允许的工件写入位置）：<workDir>/.flow-engine/sflow/（即 ${normalizeToPosix(join(workDir, '.flow-engine', 'sflow'))}/）`,
           hasProjectDir
             ? `- <projectDir>（${normalizeToPosix(projectDirParam as string)}）是子项目目录：严禁在其下创建 .flow-engine/ 或写入任何工件`
             : '- 任何子项目目录下都不允许创建 .flow-engine/',
@@ -1688,7 +1688,7 @@ export function createCallFlowAgentTools(
             status: 'running',
             createdAt: Date.now(),
             output_mode: output_mode as 'last_message' | 'structured' | undefined,
-            workDir: changeDir,
+            workDir: workDir,
             resolvedModel: subagentModel,
             modelType: model_type as string | undefined,
             prompt: finalPrompt,
@@ -1742,7 +1742,7 @@ export function createCallFlowAgentTools(
           basePrompt: finalPrompt,
           initialModel: subagentModel,
           maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS,
-          directory: changeDir,
+          directory: workDir,
           poll: async () => {
             // R3-fix P1-1: 传入 echoBaseline（所发 prompt 文本）——polling 层在窗口超时
             // 且会话仍在 busy/retry 时返回 PROBE_PENDING 而非回显，避免「慢而健康」的
@@ -1752,7 +1752,7 @@ export function createCallFlowAgentTools(
               sessionID,
               {
                 maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS,
-                directory: changeDir,
+                directory: workDir,
                 echoBaseline: finalPrompt,
               },
             );
@@ -1921,7 +1921,7 @@ export function createCallFlowAgentTools(
             const result = await pollSessionCompletion(
               client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
               sessionID,
-              { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS, directory: changeDir },
+              { maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS, directory: workDir },
             );
             // Type guard: in sync mode (no probeMode), result is string | null
             return result as string | null;
@@ -2072,7 +2072,7 @@ export function createCallFlowAgentTools(
       const { task_id, block } = args as { task_id: string; block?: boolean | null };
       // nullish 归一化：仅当显式 block === true 时才等待，其余（undefined/null/false）按默认 false 处理
       const shouldBlock = block === true;
-      const changeDir = resolveChangeDir(undefined, _context.directory);
+      const workDir = resolveChangeDir(undefined, _context.directory);
 
       const pollAndComplete = async (task: BackgroundTaskEntry): Promise<BackgroundTaskEntry> => {
         const currentTask = backgroundTaskRegistry.get(task_id);
@@ -2102,7 +2102,7 @@ export function createCallFlowAgentTools(
           let output = await pollSessionCompletion(
             client as unknown as { session: import('../helpers/polling.js').SFlowClientSession },
             task.sessionID,
-            { maxWaitMs: DEFAULT_MAX_WAIT_MS, directory: changeDir },
+            { maxWaitMs: DEFAULT_MAX_WAIT_MS, directory: workDir },
           );
 
           const now = Date.now();
@@ -2153,7 +2153,7 @@ export function createCallFlowAgentTools(
                 client,
                 registry: backgroundTaskRegistry,
                 taskId: task_id,
-                workDir: changeDir,
+                workDir: workDir,
                 extraFallbacks: buildAgentFallbackChain(
                   task.subagentType as BuiltinAgentName,
                   configOverrides,
@@ -2225,7 +2225,7 @@ export function createCallFlowAgentTools(
               client,
               registry: backgroundTaskRegistry,
               taskId: task_id,
-              workDir: changeDir,
+              workDir: workDir,
               extraFallbacks: buildAgentFallbackChain(
                 task.subagentType as BuiltinAgentName,
                 configOverrides,
@@ -2244,7 +2244,7 @@ export function createCallFlowAgentTools(
               task.sessionID,
               {
                 maxWaitMs: DEFAULT_SYNC_MAX_WAIT_MS,
-                directory: changeDir,
+                directory: workDir,
                 probeMode: true,
                 eventDriven: false,
                 pollIntervalMs: 50,
@@ -2291,7 +2291,7 @@ export function createCallFlowAgentTools(
               client,
               registry: backgroundTaskRegistry,
               taskId: task_id,
-              workDir: changeDir,
+              workDir: workDir,
               extraFallbacks: buildAgentFallbackChain(
                 task.subagentType as BuiltinAgentName,
                 configOverrides,

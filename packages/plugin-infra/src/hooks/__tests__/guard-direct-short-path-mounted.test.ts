@@ -55,11 +55,11 @@ async function seedQuickDirectReceipt(dir: string): Promise<void> {
   await acceptWorkflowRecommendation(dir, { source: 'direct-request', verificationStrategy: 'tdd' });
 }
 
-function guardContext(changeDir: string, newState: string): HookContext {
+function guardContext(workDir: string, newState: string): HookContext {
   return {
-    changeDir,
-    stateFile: join(changeDir, '.flow-engine', 'sflow', 'state.json'),
-    pluginRoot: join(changeDir),
+    workDir,
+    stateFile: join(workDir, '.flow-engine', 'sflow', 'state.json'),
+    pluginRoot: join(workDir),
     action: 'state_transition',
     data: { newState },
   };

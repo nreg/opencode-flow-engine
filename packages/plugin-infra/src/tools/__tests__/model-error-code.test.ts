@@ -376,7 +376,7 @@ describe('错误码驱动: async watcher 路径接线', () => {
       subagentType: 'build-executor',
       status: 'running',
       createdAt: Date.now(),
-      changeDir: '',
+      workDir: '',
       resolvedModel: 'provider/code-primary',
     });
     const watcher = createBackgroundTaskWatcher({
@@ -410,7 +410,7 @@ describe('错误码驱动: async watcher 路径接线', () => {
       subagentType: 'build-executor',
       status: 'running',
       createdAt: Date.now(),
-      changeDir: '',
+      workDir: '',
       resolvedModel: 'provider/code402-primary',
     });
     const watcher = createBackgroundTaskWatcher({

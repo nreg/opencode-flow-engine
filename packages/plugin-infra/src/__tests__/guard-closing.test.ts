@@ -102,7 +102,7 @@ describe('checkClosingGate', () => {
     await writeReceipt(dir, 'W1', passReceipt);
     await writeReceipt(dir, 'W2', passReceipt);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
     // Should not be blocked by closing gate
     expect(result.blockReason || '').not.toMatch(/closing gate|receipt.*fail|receipt.*missing/i);
@@ -114,7 +114,7 @@ describe('checkClosingGate', () => {
     await writeReceipt(dir, 'W1', passReceipt);
     await writeReceipt(dir, 'W2', failReceipt);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason || '').toMatch(/closing|fail|receipt/i);
   });
@@ -125,7 +125,7 @@ describe('checkClosingGate', () => {
     await writeReceipt(dir, 'W1', passReceipt);
     // W2 receipt is missing
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason || '').toMatch(/closing|missing|receipt/i);
   });
@@ -135,7 +135,7 @@ describe('checkClosingGate', () => {
     // No execution plan
     await writeTasksMd(dir, '- [x] Task 1\n- [x] Task 2\n');
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     // Should not be blocked by closing gate (no plan → skip)
     expect(result.blockReason || '').not.toMatch(/closing gate/i);
   });
@@ -143,7 +143,7 @@ describe('checkClosingGate', () => {
   it('should skip for non-sflow workflow', async () => {
     await ensureDir(dir + '/.flow-engine/iflow');
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 });
@@ -171,7 +171,7 @@ describe('Extended checkTaskCompletion — wave completion', () => {
     await writeTasksMd(dir, '- [x] Task 1\n- [x] Task 2\n');
     // No receipts for any wave
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason || '').toMatch(/wave|receipt|completion/i);
   });
@@ -183,7 +183,7 @@ describe('Extended checkTaskCompletion — wave completion', () => {
     await writeReceipt(dir, 'W1', passReceipt);
     await writeReceipt(dir, 'W2', passReceipt);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 
@@ -194,7 +194,7 @@ describe('Extended checkTaskCompletion — wave completion', () => {
     await writeReceipt(dir, 'W1', passReceipt);
     await writeReceipt(dir, 'W2', passReceipt);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason || '').toMatch(/incomplete|task/i);
   });
@@ -262,7 +262,7 @@ describe('checkSpecsMerged', () => {
     await writeReceipt(dir, 'W2', passReceipt);
     await writeTasksMd(dir, '- [x] Task 1\n');
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason || '').toMatch(/spec.*merged|delta/i);
   });
@@ -276,7 +276,7 @@ describe('checkSpecsMerged', () => {
     await writeReceipt(dir, 'W2', passReceipt);
     await writeTasksMd(dir, '- [x] Task 1\n');
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 
@@ -288,7 +288,7 @@ describe('checkSpecsMerged', () => {
     await writeReceipt(dir, 'W2', passReceipt);
     await writeTasksMd(dir, '- [x] Task 1\n');
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 
@@ -302,7 +302,7 @@ describe('checkSpecsMerged', () => {
     await writeReceipt(dir, 'W2', passReceipt);
     await writeTasksMd(dir, '- [x] Task 1\n');
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason || '').toMatch(/spec.*merged|delta/i);
   });
@@ -310,7 +310,7 @@ describe('checkSpecsMerged', () => {
   it('should skip for non-sflow workflow', async () => {
     await ensureDir(dir + '/.flow-engine/iflow');
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 });
@@ -338,7 +338,7 @@ describe('Integration: full closing gate flow', () => {
     await writeReceipt(dir, 'W2', passReceipt);
     await writeTasksMd(dir, '- [x] Task 1\n- [x] Task 2\n');
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 
@@ -351,7 +351,7 @@ describe('Integration: full closing gate flow', () => {
     await ensureDir(dir + '/specs/delta');
     await writeFile(dir + '/specs/delta/feature-a.md', '# Delta Spec\n');
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason || '').toMatch(/spec.*merged|delta/i);
   });

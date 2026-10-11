@@ -26,8 +26,8 @@ export interface GuardCheckResult {
 /**
  * 读取工作流状态
  */
-async function readWorkflowState(changeDir: string): Promise<WorkflowPolicyState | null> {
-  const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
+async function readWorkflowState(workDir: string): Promise<WorkflowPolicyState | null> {
+  const statePath = `${workDir}/.flow-engine/sflow/state.json`;
   return await readJsonFile<WorkflowPolicyState>(statePath);
 }
 
@@ -37,17 +37,17 @@ async function readWorkflowState(changeDir: string): Promise<WorkflowPolicyState
  * 用于验证快路径转换（exploring→approved-for-build、approved-for-build→executing 等）
  * 是否有有效的 direct workflow receipt。
  * 
- * @param changeDir 项目根目录
+ * @param workDir 项目根目录
  * @param workflow 当前工作流模式
  * @returns Guard 检查结果
  */
 export async function checkDirectShortPath(
-  changeDir: string,
+  workDir: string,
   workflow: string
 ): Promise<GuardCheckResult> {
   // 读取当前 state；证据裁决统一交给 workflowPolicy（spec: workflow-policy / 单点裁决）
-  const state = (await readWorkflowState(changeDir)) || {};
-  const policy = await workflowPolicy(changeDir, { ...state, workflow: state.workflow ?? workflow });
+  const state = (await readWorkflowState(workDir)) || {};
+  const policy = await workflowPolicy(workDir, { ...state, workflow: state.workflow ?? workflow });
 
   if (DIRECT_RECEIPT_WORKFLOWS.includes(workflow)) {
     // quick / hotfix 必须由 direct 收据授权
@@ -93,11 +93,11 @@ export async function checkDirectShortPath(
  * 
  * Quick/Tweak 模式的 closing 需要验证 test_result 为 pass
  * 
- * @param changeDir 项目根目录
+ * @param workDir 项目根目录
  * @returns Guard 检查结果
  */
-export async function checkDirectTestResult(changeDir: string): Promise<GuardCheckResult> {
-  const state = await readWorkflowState(changeDir);
+export async function checkDirectTestResult(workDir: string): Promise<GuardCheckResult> {
+  const state = await readWorkflowState(workDir);
   
   if (!state) {
     return {

@@ -19,23 +19,23 @@ import { appendGuardFixHint } from "../../../features/guard-fix-hint.js";
  * Merges checkArtifactExistence (C6 dedup) and checkPhaseConsistency into one pass.
  * Covers both: "does the artifact exist at this state" and "full mode consistency".
  */
-export async function checkArtifactAndPhaseConsistency(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
-  if (!changeDir) return { success: true };
+export async function checkArtifactAndPhaseConsistency(workDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!workDir) return { success: true };
 
   // IFlow: use dedicated iFlow artifact consistency guard
   if (activeWorkflow === 'iflow') {
-    return checkIFlowArtifactAndPhaseConsistency(changeDir);
+    return checkIFlowArtifactAndPhaseConsistency(workDir);
   }
 
-  const dirExists = await fileExists(changeDir);
+  const dirExists = await fileExists(workDir);
   if (!dirExists) return { success: true };
 
-  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
+  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${workDir}/${getStateFilePath('sflow')}`);
   const currentState = stateData?.state || "exploring";
   const mode = stateData?.mode;
 
   // Phase 1: Use shared checkArtifactPreflight — returns existence map to avoid redundant I/O
-  const pf = await checkArtifactPreflight({ changeDir, targetState: currentState, fileExists, directoryExists, readJson: readJsonFile });
+  const pf = await checkArtifactPreflight({ workDir, targetState: currentState, fileExists, directoryExists, readJson: readJsonFile });
   if (!pf.passed) {
     // P3: pf.reason already includes the enhanced action hint from artifact-preflight.ts
     return { success: false, block: true, blockReason: pf.reason || '[SFLOW] Preflight gate: missing ' + pf.missing.join(', ') + '. Route to "' + findPreflightState(pf.missing) + '" first.' };
@@ -47,10 +47,10 @@ export async function checkArtifactAndPhaseConsistency(changeDir: string, active
     const inconsistencies: string[] = [];
 
     const checkFile = async (name: string): Promise<boolean> =>
-      name in ex ? (ex[name] as boolean) : await fileExists(`${changeDir}/${name}`);
+      name in ex ? (ex[name] as boolean) : await fileExists(`${workDir}/${name}`);
 
     const checkDir = async (name: string): Promise<boolean> =>
-      name in ex ? (ex[name] as boolean) : await directoryExists(`${changeDir}/${name}`);
+      name in ex ? (ex[name] as boolean) : await directoryExists(`${workDir}/${name}`);
 
     const statesAfterSpec = ["bridging", "approved-for-build", "executing", "debugging", "closing"];
     const statesAfterExec = ["approved-for-build", "executing", "debugging", "closing"];
@@ -90,20 +90,20 @@ export async function checkArtifactAndPhaseConsistency(changeDir: string, active
  * Does NOT write state. Returns block reason and upgrade signal;
  * the caller (state-manager or index.ts) is responsible for applying the upgrade.
  */
-export async function checkPresetUpgrade(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
-  if (!changeDir) return { success: true };
+export async function checkPresetUpgrade(workDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!workDir) return { success: true };
 
   // IFlow has no hotfix/tweak mode — uses full-cycle only
   if (activeWorkflow === 'iflow') return { success: true };
 
-  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
+  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${workDir}/${getStateFilePath('sflow')}`);
   const mode = stateData?.mode;
 
   if (mode !== "hotfix" && mode !== "tweak") {
     return { success: true };
   }
 
-  const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
+  const tasksContent = await readArtifactContent(workDir, 'tasks.md');
   if (!tasksContent) {
     return { success: true };
   }
@@ -168,13 +168,13 @@ export async function checkPresetUpgrade(changeDir: string, activeWorkflow: 'ifl
   return { success: true };
 }
 
-export async function checkContractStalenessGuard(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
-  if (!changeDir) return { success: true };
+export async function checkContractStalenessGuard(workDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!workDir) return { success: true };
 
-  const hasContract = await artifactExists(changeDir, 'execution-contract.md');
+  const hasContract = await artifactExists(workDir, 'execution-contract.md');
   if (!hasContract) return { success: true };
 
-  const stale = await isContractStale(changeDir);
+  const stale = await isContractStale(workDir);
   if (stale) {
     return {
       success: false,
@@ -183,7 +183,7 @@ export async function checkContractStalenessGuard(changeDir: string, activeWorkf
     };
   }
 
-  const report = await getContractStalenessReport(changeDir);
+  const report = await getContractStalenessReport(workDir);
   if (report.stale && report.reason) {
     return {
       success: false,

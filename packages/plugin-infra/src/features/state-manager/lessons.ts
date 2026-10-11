@@ -139,15 +139,15 @@ const LESSONS_MIN_MATCH_RATIO = 0.55; // P3: Increased from 0.4 to reduce false 
  * A change dir is typically under .flow-engine/sflow/changes/<change-id>.
  * The project root is the first ancestor that does NOT end with a change-like path.
  */
-export function findProjectRoot(changeDir: string): string {
-  const normalized = changeDir.replace(/\\/g, '/');
+export function findProjectRoot(workDir: string): string {
+  const normalized = workDir.replace(/\\/g, '/');
   // If under .flow-engine/sflow/changes/, the project root is 3 levels up from the change
   const changesMarker = '/.flow-engine/sflow/changes/';
   const idx = normalized.lastIndexOf(changesMarker);
   if (idx !== -1) {
     return normalized.slice(0, idx);
   }
-  // If changeDir itself contains .flow-engine/sflow/, it might be a project root
+  // If workDir itself contains .flow-engine/sflow/, it might be a project root
   if (normalized.includes('/.flow-engine/sflow/')) {
     // Walk up until we find the directory that contains .flow-engine/sflow
     const parts = normalized.split('/');
@@ -156,7 +156,7 @@ export function findProjectRoot(changeDir: string): string {
       if (candidate.endsWith('/.flow-engine/sflow')) return parts.slice(0, i - 1).join('/');
     }
   }
-  return changeDir;
+  return workDir;
 }
 
 /**
@@ -225,12 +225,12 @@ async function searchLessonsInSingleFile(lessonsPath: string, keywords: string[]
  * 2. Also searches project-level .flow-engine/sflow/lessons.md (for cross-change shared knowledge)
  * Results from both levels are merged, deduplicated by entry ID.
  */
-export async function searchLessonsInFile(changeDir: string, keywords: string[]): Promise<LessonHit[]> {
+export async function searchLessonsInFile(workDir: string, keywords: string[]): Promise<LessonHit[]> {
   const hits: LessonHit[] = [];
   const seenIds = new Set<string>();
 
   // Level 1: change-level lessons
-  const changeHits = await searchLessonsInSingleFile(changeDir + '/.flow-engine/sflow/lessons.md', keywords);
+  const changeHits = await searchLessonsInSingleFile(workDir + '/.flow-engine/sflow/lessons.md', keywords);
   for (const hit of changeHits) {
     if (hit.entry.id && !seenIds.has(hit.entry.id)) {
       seenIds.add(hit.entry.id);
@@ -239,8 +239,8 @@ export async function searchLessonsInFile(changeDir: string, keywords: string[])
   }
 
   // Level 2: project-level lessons (cross-change shared)
-  const projectRoot = findProjectRoot(changeDir);
-  if (projectRoot !== changeDir) {
+  const projectRoot = findProjectRoot(workDir);
+  if (projectRoot !== workDir) {
     const projectHits = await searchLessonsInSingleFile(projectRoot + '/.flow-engine/sflow/lessons.md', keywords);
     for (const hit of projectHits) {
       if (hit.entry.id && !seenIds.has(hit.entry.id)) {

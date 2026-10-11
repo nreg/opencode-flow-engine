@@ -39,20 +39,20 @@ const REQUIRED_ARTIFACTS: Record<IFlowState, string[]> = {
 /**
  * Check if .flow-engine/iflow/ directory exists
  */
-export async function iflowDirectoryExists(changeDir: string): Promise<boolean> {
-  return directoryExists(`${changeDir}/.flow-engine/iflow`);
+export async function iflowDirectoryExists(workDir: string): Promise<boolean> {
+  return directoryExists(`${workDir}/.flow-engine/iflow`);
 }
 
 /**
  * Check all IFlow guards
  */
-export async function checkIFlowGuards(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+export async function checkIFlowGuards(workDir: string, data?: Record<string, unknown>): Promise<HookResult> {
   const guards = [
-    await checkScopeReductionGuard(changeDir, data),
-    await checkNyquistRuleGuard(changeDir, data),
-    await checkArtifactCompletenessGuard(changeDir, data),
-    await checkCyclicTransitionGuard(changeDir, data),
-    await checkDeviationComplianceGuard(changeDir, data),
+    await checkScopeReductionGuard(workDir, data),
+    await checkNyquistRuleGuard(workDir, data),
+    await checkArtifactCompletenessGuard(workDir, data),
+    await checkCyclicTransitionGuard(workDir, data),
+    await checkDeviationComplianceGuard(workDir, data),
   ];
 
   const allWarnings: string[] = [];
@@ -83,7 +83,7 @@ export async function checkIFlowGuards(changeDir: string, data?: Record<string, 
  * Scope Reduction Prohibition Guard
  * Blocks removal of stated requirements from PLAN.md without user approval
  */
-async function checkScopeReductionGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+async function checkScopeReductionGuard(workDir: string, data?: Record<string, unknown>): Promise<HookResult> {
   if (!data) return { success: true };
 
   const toolName = (data.toolName as string) || '';
@@ -101,11 +101,11 @@ async function checkScopeReductionGuard(changeDir: string, data?: Record<string,
   if (!filePath.includes('PLAN.md')) return { success: true };
 
   // Read current PLAN.md if it exists
-  const planContent = await readFile(`${changeDir}/.flow-engine/iflow/PLAN.md`);
+  const planContent = await readFile(`${workDir}/.flow-engine/iflow/PLAN.md`);
   if (!planContent) return { success: true };
 
   // Read CONTEXT.md for original requirements
-  const contextContent = await readFile(`${changeDir}/.flow-engine/iflow/CONTEXT.md`);
+  const contextContent = await readFile(`${workDir}/.flow-engine/iflow/CONTEXT.md`);
   if (!contextContent) return { success: true };
 
   // Check for scope reduction language patterns
@@ -185,12 +185,12 @@ async function checkScopeReductionGuard(changeDir: string, data?: Record<string,
  * Blocks state transitions when required .flow-engine/iflow/ artifacts are missing.
  * When targetState is not provided, auto-detects from .flow-engine/iflow/state.json (for tool-level guard calls).
  */
-async function checkArtifactCompletenessGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+async function checkArtifactCompletenessGuard(workDir: string, data?: Record<string, unknown>): Promise<HookResult> {
   let targetState = data?.targetState as string | undefined;
 
   // Auto-detect state from state.json when no targetState provided
   if (!targetState) {
-    const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/.flow-engine/iflow/state.json`);
+    const stateData = await readJsonFile<{ state?: string }>(`${workDir}/.flow-engine/iflow/state.json`);
     targetState = stateData?.state;
   }
 
@@ -202,7 +202,7 @@ async function checkArtifactCompletenessGuard(changeDir: string, data?: Record<s
 
   const missing: string[] = [];
   for (const artifact of required) {
-    const exists = await fileExists(`${changeDir}/.flow-engine/iflow/${artifact}`);
+    const exists = await fileExists(`${workDir}/.flow-engine/iflow/${artifact}`);
     if (!exists) missing.push(artifact);
   }
 
@@ -222,7 +222,7 @@ async function checkArtifactCompletenessGuard(changeDir: string, data?: Record<s
  * Blocks invalid state jumps (e.g., executing → shipping without verifying).
  * Silently skips when no currentState/targetState provided (called from tool.execute.before context).
  */
-async function checkCyclicTransitionGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+async function checkCyclicTransitionGuard(workDir: string, data?: Record<string, unknown>): Promise<HookResult> {
   const currentState = data?.currentState as string | undefined;
   const targetState = data?.targetState as string | undefined;
 
@@ -327,8 +327,8 @@ function extractTaskDescriptions(planContent: string): string[] {
  * Nyquist Rule Guard — 每个 PLAN.md 中的任务必须有 `<automated>` 验证命令。
  * 读取 .flow-engine/iflow/PLAN.md，检查每个任务的 Verification 字段是否包含自动化验证命令。
  */
-async function checkNyquistRuleGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
-  const planContent = await readFile(`${changeDir}/.flow-engine/iflow/PLAN.md`);
+async function checkNyquistRuleGuard(workDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+  const planContent = await readFile(`${workDir}/.flow-engine/iflow/PLAN.md`);
   if (!planContent) return { success: true };
 
   const warnings: string[] = [];
@@ -392,8 +392,8 @@ async function checkNyquistRuleGuard(changeDir: string, data?: Record<string, un
  * Deviation Compliance Guard — 检查 executor 的 SUMMARY.md 是否记录了偏差处理。
  * 读取 .flow-engine/iflow/SUMMARY.md，检查是否有 `## Deviations` 段落且标注了 Rule 编号。
  */
-async function checkDeviationComplianceGuard(changeDir: string, data?: Record<string, unknown>): Promise<HookResult> {
-  const summaryContent = await readFile(`${changeDir}/.flow-engine/iflow/SUMMARY.md`);
+async function checkDeviationComplianceGuard(workDir: string, data?: Record<string, unknown>): Promise<HookResult> {
+  const summaryContent = await readFile(`${workDir}/.flow-engine/iflow/SUMMARY.md`);
   if (!summaryContent) return { success: true };
 
   const hasDeviationsSection = /^##\s+Deviations/m.test(summaryContent);

@@ -19,10 +19,10 @@ export function createStateTransitionHook(): HookHandler {
     name: 'state_transition',
     description: 'Manage workflow state transitions and validate transitions',
     execute: async (context) => {
-      const { changeDir, data } = context;
+      const { workDir, data } = context;
 
       try {
-        const currentState = await getCurrentState(changeDir);
+        const currentState = await getCurrentState(workDir);
         const newState = data?.newState as string;
 
         if (!newState) {
@@ -30,7 +30,7 @@ export function createStateTransitionHook(): HookHandler {
         }
 
         if (!currentState) {
-          await updateState(changeDir, newState);
+          await updateState(workDir, newState);
           return {
             success: true,
             data: { from: null, to: newState, timestamp: new Date().toISOString() },
@@ -65,7 +65,7 @@ export function createStateTransitionHook(): HookHandler {
 
         // P1 fix: Preflight gate — check target state's required artifacts BEFORE transitioning
         const pf = await checkArtifactPreflight({
-          changeDir,
+          workDir,
           targetState: newState,
           fileExists,
           directoryExists,
@@ -85,7 +85,7 @@ export function createStateTransitionHook(): HookHandler {
         const dp4extra: Record<string, unknown> = extra.extra || {};
         if (currentState === 'bridging' && newState === 'approved-for-build') {
           try {
-            const tasksMdContent = await readArtifactContent(changeDir, 'tasks.md');
+            const tasksMdContent = await readArtifactContent(workDir, 'tasks.md');
             if (tasksMdContent) {
               const dp4Result = recommendExecutionMode(tasksMdContent);
               dp4extra.dp_4_result = dp4Result;
@@ -98,7 +98,7 @@ export function createStateTransitionHook(): HookHandler {
         // DP-0 确认后持久化到 state.json 的 artifact_language 字段，之后不再变更
         if (currentState === 'exploring' && newState === 'specifying') {
           try {
-            const artifactLanguage = await resolveArtifactLanguage({ projectRoot: changeDir });
+            const artifactLanguage = await resolveArtifactLanguage({ projectRoot: workDir });
             dp4extra.artifact_language = artifactLanguage;
           } catch (error) {
             // 检测失败不影响状态转换，使用默认值 'en'
@@ -111,9 +111,9 @@ export function createStateTransitionHook(): HookHandler {
         // 如果 DP-0 已确认（从其他状态转换到 specifying）但 artifact_language 缺失，则补检测
         if (currentState !== 'exploring' && newState === 'specifying') {
           try {
-            const stateData = await readStateFile(changeDir);
+            const stateData = await readStateFile(workDir);
             const currentLanguage = stateData?.artifact_language as 'zh' | 'en' | undefined;
-            const detectedLanguage = await checkAndDetectLanguage(changeDir, currentLanguage);
+            const detectedLanguage = await checkAndDetectLanguage(workDir, currentLanguage);
             if (detectedLanguage) {
               dp4extra.artifact_language = detectedLanguage;
             }
@@ -124,7 +124,7 @@ export function createStateTransitionHook(): HookHandler {
         }
 
         // P1-5: Record review_base when entering executing (WRITE_ONCE)
-        const rb = await checkReviewBaseRecording({ changeDir, currentState, newState, data });
+        const rb = await checkReviewBaseRecording({ workDir, currentState, newState, data });
         if (rb.blocked) {
           return {
             success: false,
@@ -135,7 +135,7 @@ export function createStateTransitionHook(): HookHandler {
         }
         Object.assign(dp4extra, rb.extra);
 
-        await updateState(changeDir, newState, Object.keys(dp4extra).length > 0 ? dp4extra : undefined);
+        await updateState(workDir, newState, Object.keys(dp4extra).length > 0 ? dp4extra : undefined);
 
         return {
           success: true,
@@ -155,21 +155,21 @@ export function createStateTransitionHook(): HookHandler {
   };
 }
 
-async function getCurrentState(changeDir: string): Promise<string | null> {
-  const state = await readStateFile(changeDir);
+async function getCurrentState(workDir: string): Promise<string | null> {
+  const state = await readStateFile(workDir);
   if (state) {
     return (state.state as string) || (state.currentState as string) || 'exploring';
   }
   return null;
 }
 
-async function readStateFile(changeDir: string): Promise<Record<string, unknown> | null> {
-  if (!changeDir) return null;
-  return await readJsonFile(`${changeDir}/${STATE_FILE_PATH}`);
+async function readStateFile(workDir: string): Promise<Record<string, unknown> | null> {
+  if (!workDir) return null;
+  return await readJsonFile(`${workDir}/${STATE_FILE_PATH}`);
 }
 
-async function updateState(changeDir: string, newState: string, extra?: Record<string, unknown>): Promise<void> {
-  await writeStateFile(changeDir, newState, extra);
+async function updateState(workDir: string, newState: string, extra?: Record<string, unknown>): Promise<void> {
+  await writeStateFile(workDir, newState, extra);
 }
 
 /**
@@ -216,10 +216,10 @@ export function checkDebuggingRollbackReason(input: {
  * P1-5: Resolve the current HEAD commit SHA in a git environment.
  * Returns undefined when git is unavailable (non-git environment).
  */
-async function resolveHeadSha(changeDir: string): Promise<string | undefined> {
+async function resolveHeadSha(workDir: string): Promise<string | undefined> {
   // P3: 异步 execGitAsync 替代 execFileSync，避免阻塞事件循环
   const { execGitAsync } = await import('../helpers/git-async.js');
-  const stdout = await execGitAsync(['rev-parse', 'HEAD'], changeDir);
+  const stdout = await execGitAsync(['rev-parse', 'HEAD'], workDir);
   return stdout?.trim();
 }
 
@@ -232,12 +232,12 @@ async function resolveHeadSha(changeDir: string): Promise<string | undefined> {
  * - data.reviewBase 无效时阻断（显式提供的 SHA 无法解析是调用方错误）
  */
 export async function checkReviewBaseRecording(input: {
-  changeDir: string;
+  workDir: string;
   currentState: string;
   newState: string;
   data?: { reviewBase?: unknown } & Record<string, unknown>;
 }): Promise<{ blocked: boolean; blockReason?: string; extra: Record<string, unknown> }> {
-  const { changeDir, currentState, newState, data } = input;
+  const { workDir, currentState, newState, data } = input;
 
   // Only wire on approved-for-build → executing
   if (!(currentState === 'approved-for-build' && newState === 'executing')) {
@@ -248,10 +248,10 @@ export async function checkReviewBaseRecording(input: {
   const explicitSha = typeof data?.reviewBase === 'string' && data.reviewBase.trim()
     ? data.reviewBase.trim()
     : undefined;
-  const sha = explicitSha ?? await resolveHeadSha(changeDir);
+  const sha = explicitSha ?? await resolveHeadSha(workDir);
 
   try {
-    const reviewBase = await recordReviewBase(changeDir, sha);
+    const reviewBase = await recordReviewBase(workDir, sha);
     return {
       blocked: false,
       extra: reviewBase ? { review_base: reviewBase } : {},

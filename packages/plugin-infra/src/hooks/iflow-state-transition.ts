@@ -38,10 +38,10 @@ export function createIFlowStateTransitionHook(): HookHandler {
     name: 'iflow_state_transition',
     description: 'Manage IFlow state transitions with cyclic validation',
     execute: async (context: HookContext): Promise<HookResult> => {
-      const { changeDir, data } = context;
+      const { workDir, data } = context;
 
       try {
-        const currentState = await getCurrentIFlowState(changeDir);
+        const currentState = await getCurrentIFlowState(workDir);
         const newState = data?.newState as string | undefined;
 
         // If no new state requested, just return current state
@@ -72,8 +72,8 @@ export function createIFlowStateTransitionHook(): HookHandler {
         }
 
         // Write the state
-        await ensureDir(`${changeDir}/.flow-engine/iflow`);
-        await writeJsonFile(`${changeDir}/.flow-engine/iflow/state.json`, {
+        await ensureDir(`${workDir}/.flow-engine/iflow`);
+        await writeJsonFile(`${workDir}/.flow-engine/iflow/state.json`, {
           state: newState,
           previousState: currentState || undefined,
           updatedAt: new Date().toISOString(),
@@ -96,9 +96,9 @@ export function createIFlowStateTransitionHook(): HookHandler {
 /**
  * Read the current IFlow state from .flow-engine/iflow/state.json
  */
-async function getCurrentIFlowState(changeDir: string): Promise<string | null> {
+async function getCurrentIFlowState(workDir: string): Promise<string | null> {
   try {
-    const state = await readJsonFile<{ state?: string }>(`${changeDir}/.flow-engine/iflow/state.json`);
+    const state = await readJsonFile<{ state?: string }>(`${workDir}/.flow-engine/iflow/state.json`);
     return state?.state || null;
   } catch {
     return null;

@@ -17,13 +17,13 @@ const ARCHIVE_DIR = `${SFLOW_DIR}/archive`;
  * P21: detectFrontend 先读 state.json 缓存，若不存在则走 package.json 启发式检测。
  * 前后端混放的项目，AI 根据本次 CHANGE 范围判断，不需要全局启发式检测。
  */
-export async function detectFrontend(changeDir: string): Promise<boolean> {
+export async function detectFrontend(workDir: string): Promise<boolean> {
   // 1. Check state.json cache first
-  const state = await readJsonFile<{ isFrontend?: boolean }>(`${changeDir}/.flow-engine/sflow/state.json`).catch(() => null);
+  const state = await readJsonFile<{ isFrontend?: boolean }>(`${workDir}/.flow-engine/sflow/state.json`).catch(() => null);
   if (state?.isFrontend !== undefined) return state.isFrontend;
 
   // 2. Fallback: heuristic detection from package.json (works even before state.json is initialized)
-  const pkgContent = await readFile(`${changeDir}/package.json`).catch(() => null);
+  const pkgContent = await readFile(`${workDir}/package.json`).catch(() => null);
   if (pkgContent) {
     try {
       const pkg = JSON.parse(pkgContent);
@@ -41,11 +41,11 @@ export async function detectFrontend(changeDir: string): Promise<boolean> {
  * @deprecated P24: isFrontend cached value is informational only;
  * actual decisions must use real-time detectFrontend() to avoid stale cache.
  */
-export async function autoDetectFrontendAndUpdateState(changeDir: string): Promise<void> {
-  const statePath = changeDir + '/' + STATE_FILE;
+export async function autoDetectFrontendAndUpdateState(workDir: string): Promise<void> {
+  const statePath = workDir + '/' + STATE_FILE;
   const existing = await readJsonFile<Record<string, unknown>>(statePath);
   if (!existing) return;
-  const isFrontend = await detectFrontend(changeDir);
+  const isFrontend = await detectFrontend(workDir);
   if (existing.isFrontend !== isFrontend) {
     existing.isFrontend = isFrontend;
     existing.frontendDetectedAt = new Date().toISOString();
@@ -68,14 +68,14 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       return { success: true };
     },
 
-    async startWorkflow(changeDir: string): Promise<FeatureResult> {
+    async startWorkflow(workDir: string): Promise<FeatureResult> {
       try {
-        await initializeState(changeDir);
+        await initializeState(workDir);
 
         return {
           success: true,
           data: {
-            changeDir,
+            workDir,
             state: 'exploring',
             message: 'Workflow started',
           },
@@ -88,9 +88,9 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       }
     },
 
-    async getState(changeDir: string): Promise<FeatureResult> {
+    async getState(workDir: string): Promise<FeatureResult> {
       try {
-        const state = await readStateFile(changeDir);
+        const state = await readStateFile(workDir);
         return {
           success: true,
           data: state,
@@ -103,10 +103,10 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       }
     },
 
-    async transitionState(changeDir: string, newState: string): Promise<FeatureResult> {
+    async transitionState(workDir: string, newState: string): Promise<FeatureResult> {
       try {
         return await stateFileMutex.runExclusive(async () => {
-          const currentState = await readStateFile(changeDir);
+          const currentState = await readStateFile(workDir);
 
           // 先检查状态转换是否有效
           if (!isValidTransition(currentState.state, newState)) {
@@ -135,7 +135,7 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
 
           // P22: Block transition to closing when tasks are still incomplete
           if (newState === 'closing' || newState === 'abandoned') {
-            const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
+            const tasksContent = await readArtifactContent(workDir, 'tasks.md');
             if (tasksContent) {
               const taskLines = tasksContent.split('\n').filter((line: string) => line.match(/^-\s*\[.\]\s+/));
               const incompleteTasks = taskLines.filter((line: string) => line.match(/^-\s*\[\s\]/));
@@ -152,14 +152,14 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
           // 当首次进入 bridging 状态时，如果检测到旧的 spec_merged=true 但没有 publication receipt，
           // 自动生成初始 receipt，确保向后兼容
           if (newState === 'bridging' && currentState.state !== 'bridging') {
-            await migrateSpecMergedToReceipt(changeDir, currentState).catch(err => {
+            await migrateSpecMergedToReceipt(workDir, currentState).catch(err => {
               // 迁移失败不影响状态转换，仅记录警告
               Logger.warn(`[P1-1] Migration from spec_merged to publication receipt failed: ${err instanceof Error ? err.message : String(err)}`);
             });
           }
 
           const now = new Date().toISOString();
-          await writeJsonFile(`${changeDir}/${STATE_FILE}`, {
+          await writeJsonFile(`${workDir}/${STATE_FILE}`, {
             ...currentState,
             state: newState,
             updatedAt: now,
@@ -182,14 +182,14 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       }
     },
 
-    async completeWorkflow(changeDir: string): Promise<FeatureResult> {
+    async completeWorkflow(workDir: string): Promise<FeatureResult> {
       try {
-        await archiveWorkflow(changeDir);
+        await archiveWorkflow(workDir);
 
         return {
           success: true,
           data: {
-            changeDir,
+            workDir,
             message: 'Workflow completed and archived',
           },
         };
@@ -201,18 +201,18 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
       }
     },
 
-        async inferStateFromArtifacts(changeDir: string): Promise<{ state: string; mode: string }> {
-      const state = await detectStateMismatch(changeDir, 'exploring');
-      const hasProposal = await artifactExists(changeDir, 'proposal.md');
-      const hasContract = await artifactExists(changeDir, 'execution-contract.md');
-      const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
+        async inferStateFromArtifacts(workDir: string): Promise<{ state: string; mode: string }> {
+      const state = await detectStateMismatch(workDir, 'exploring');
+      const hasProposal = await artifactExists(workDir, 'proposal.md');
+      const hasContract = await artifactExists(workDir, 'execution-contract.md');
+      const tasksContent = await readArtifactContent(workDir, 'tasks.md');
         const taskLines = tasksContent ? tasksContent.split('\n').filter((line: string) => line.match(/^-\s*\[.\]\s+/)) : [];
-      const changedFileCount = await countChangedFiles(changeDir);
+      const changedFileCount = await countChangedFiles(workDir);
       const mode = inferModeFromArtifacts(hasProposal, hasContract, changedFileCount, taskLines.length);
 
       // P25: Always run frontend pre-detection even in exploring state,
       // so downstream artifact-preflight can check ui-design.md requirements early.
-      await autoDetectFrontendAndUpdateState(changeDir).catch(() => {});
+      await autoDetectFrontendAndUpdateState(workDir).catch(() => {});
 
       return { state, mode };
     },
@@ -222,8 +222,8 @@ export function createWorkflowManager(config: FeatureConfig = { enabled: true })
      * P27: State.json cached value is informational only; actual decisions
      * must use real-time detectFrontend() to avoid stale cache issues.
      */
-    async isFrontend(changeDir: string): Promise<boolean> {
-      return detectFrontend(changeDir);
+    async isFrontend(workDir: string): Promise<boolean> {
+      return detectFrontend(workDir);
     },
   };
 }
@@ -263,10 +263,10 @@ function inferModeFromArtifacts(hasProposal: boolean, hasContract: boolean, chan
   return 'full';
 }
 
-async function countChangedFiles(changeDir: string): Promise<number> {
+async function countChangedFiles(workDir: string): Promise<number> {
   try {
     const { execSync } = await import("child_process");
-    const output = execSync("git diff --name-only HEAD", { cwd: changeDir, encoding: "utf8" }).trim();
+    const output = execSync("git diff --name-only HEAD", { cwd: workDir, encoding: "utf8" }).trim();
     if (!output) return 0;
     return output.split("\n").filter((line) => line.trim().length > 0).length;
   } catch {
@@ -274,16 +274,16 @@ async function countChangedFiles(changeDir: string): Promise<number> {
   }
 }
 
-async function initializeState(changeDir: string): Promise<void> {
-  const stateFile = `${changeDir}/${STATE_FILE}`;
+async function initializeState(workDir: string): Promise<void> {
+  const stateFile = `${workDir}/${STATE_FILE}`;
   const existing = await readJsonFile(stateFile).catch(() => null);
   if (existing) {
     return;
   }
 
-  const inferred = await createWorkflowManager().inferStateFromArtifacts(changeDir);
-  const isFrontend = await detectFrontend(changeDir);
-  await ensureDir(`${changeDir}/${SFLOW_DIR}`);
+  const inferred = await createWorkflowManager().inferStateFromArtifacts(workDir);
+  const isFrontend = await detectFrontend(workDir);
+  await ensureDir(`${workDir}/${SFLOW_DIR}`);
   await writeJsonFile(stateFile, {
     state: inferred.state,
     mode: inferred.mode,
@@ -299,7 +299,7 @@ async function initializeState(changeDir: string): Promise<void> {
   });
 }
 
-async function readStateFile(changeDir: string): Promise<{
+async function readStateFile(workDir: string): Promise<{
   state: string;
   mode: string;
   updatedAt: string;
@@ -313,7 +313,7 @@ async function readStateFile(changeDir: string): Promise<{
   artifact_language?: 'zh' | 'en';
   [key: string]: unknown;
 }> {
-  const statePath = `${changeDir}/${STATE_FILE}`;
+  const statePath = `${workDir}/${STATE_FILE}`;
   const state = await readJsonFile<{
     state: string;
     mode: string;
@@ -336,7 +336,7 @@ async function readStateFile(changeDir: string): Promise<{
   // BUG-B fix (GS-1): When state.json does not exist AND .flow-engine/sflow/ directory exists
   // (indicating an active workflow), throw an error instead of returning silent defaults.
   // If .flow-engine/sflow/ doesn't exist (no workflow started), still return defaults for backward compat.
-  const sflowDirExists = await directoryExists(`${changeDir}/${SFLOW_DIR}`);
+  const sflowDirExists = await directoryExists(`${workDir}/${SFLOW_DIR}`);
   if (sflowDirExists) {
     throw new Error(`[SFLOW] state.json not found at ${statePath}, but .flow-engine/sflow/ directory exists. This indicates an active workflow with a missing state file. Use startWorkflow() to initialize or restore from boulder-state.json.`);
   }
@@ -356,9 +356,9 @@ async function readStateFile(changeDir: string): Promise<{
   };
 }
 
-async function archiveWorkflow(changeDir: string): Promise<void> {
-  await ensureDir(`${changeDir}/${ARCHIVE_DIR}`);
-  const statePath = `${changeDir}/${STATE_FILE}`;
+async function archiveWorkflow(workDir: string): Promise<void> {
+  await ensureDir(`${workDir}/${ARCHIVE_DIR}`);
+  const statePath = `${workDir}/${STATE_FILE}`;
   let stateSnapshot = null;
   try {
     stateSnapshot = await readJsonFile<Record<string, unknown>>(statePath);
@@ -370,7 +370,7 @@ async function archiveWorkflow(changeDir: string): Promise<void> {
     contract_hash: stateSnapshot?.contract_hash,
     batches_completed: stateSnapshot?.batches_completed,
   };
-  await writeJsonFile(`${changeDir}/${ARCHIVE_DIR}/archive.json`, archiveData);
+  await writeJsonFile(`${workDir}/${ARCHIVE_DIR}/archive.json`, archiveData);
 }
 
 /**
@@ -392,7 +392,7 @@ async function archiveWorkflow(changeDir: string): Promise<void> {
  * - 代码注释必须清晰说明迁移来源和兼容策略
  */
 async function migrateSpecMergedToReceipt(
-  changeDir: string,
+  workDir: string,
   currentState: Record<string, unknown>
 ): Promise<void> {
   // 检查是否需要迁移：spec_merged=true 但无 publication receipt
@@ -409,7 +409,7 @@ async function migrateSpecMergedToReceipt(
   } = await import('./spec-publication.js');
 
   // 检查是否已存在 receipt
-  const hasReceipts = await hasPublicationReceipts(changeDir);
+  const hasReceipts = await hasPublicationReceipts(workDir);
   if (hasReceipts) {
     return; // 已存在 receipt，无需迁移
   }
@@ -417,7 +417,7 @@ async function migrateSpecMergedToReceipt(
   // 迁移逻辑：为当前所有 specs 生成初始 receipt
   Logger.log('[P1-1] Migrating legacy spec_merged=true to publication receipts...');
 
-  const context = resolvePublicationContext(changeDir);
+  const context = resolvePublicationContext(workDir);
   const { readdir } = await import('node:fs/promises');
   const { join } = await import('node:path');
 
@@ -448,7 +448,7 @@ async function migrateSpecMergedToReceipt(
       
       // 生成 receipt（使用当前 baseline 哈希）
       const receipt = await createPublicationReceipt(
-        changeDir,
+        workDir,
         context.projectRoot,
         specFiles,
         'migrated-from-spec-merged', // 标记为迁移来源

@@ -25,8 +25,8 @@ export interface ProgressData {
 
 // ─── PROGRESS.md Operations ────────────────────────────────────────────────
 
-export async function writeProgressFile(changeDir: string, data: ProgressData): Promise<void> {
-  const path = changeDir + '/.flow-engine/sflow/progress.md';
+export async function writeProgressFile(workDir: string, data: ProgressData): Promise<void> {
+  const path = workDir + '/.flow-engine/sflow/progress.md';
   const lines: string[] = [];
   lines.push('# PROGRESS: ' + (data.taskId || 'Unknown'), '');
   if (data.changeId) lines.push('- **Change ID**: ' + data.changeId);
@@ -63,12 +63,12 @@ export async function writeProgressFile(changeDir: string, data: ProgressData): 
   lines.push('3. 如果不撞车，从「当前正在做」的下一步起步');
   lines.push('4. 完成本任务后，删除本 PROGRESS.md（产出迁移到 SUMMARY.md）');
   lines.push('', '> PROGRESS.md 是**临时**文件，任务完成后必须清理。');
-  await ensureDir(changeDir + '/.flow-engine/sflow');
+  await ensureDir(workDir + '/.flow-engine/sflow');
   await writeFile(path, lines.join('\n'));
 }
 
-export async function readProgressFile(changeDir: string): Promise<ProgressData | null> {
-  const path = changeDir + '/.flow-engine/sflow/progress.md';
+export async function readProgressFile(workDir: string): Promise<ProgressData | null> {
+  const path = workDir + '/.flow-engine/sflow/progress.md';
   const content = await readFile(path);
   if (!content) return null;
   const data: ProgressData = {
@@ -191,8 +191,8 @@ function extractKeywords(text: string): Set<string> {
   }
 }
 
-export async function detectProgressAntiRepeat(changeDir: string, plannedApproach: string): Promise<{ blocked: boolean; matched: ExcludedApproach | null; reason?: string }> {
-  const progress = await readProgressFile(changeDir);
+export async function detectProgressAntiRepeat(workDir: string, plannedApproach: string): Promise<{ blocked: boolean; matched: ExcludedApproach | null; reason?: string }> {
+  const progress = await readProgressFile(workDir);
   if (!progress || progress.excludedApproaches.length === 0) {
     return { blocked: false, matched: null };
   }
@@ -223,8 +223,8 @@ export async function detectProgressAntiRepeat(changeDir: string, plannedApproac
  * P33: Clear PROGRESS.md after task completion.
  * Deletes the progress file and optionally moves task summary to SUMMARY.md.
  */
-export async function clearProgressFile(changeDir: string): Promise<void> {
-  const progressPath = changeDir + '/.flow-engine/sflow/progress.md';
+export async function clearProgressFile(workDir: string): Promise<void> {
+  const progressPath = workDir + '/.flow-engine/sflow/progress.md';
   try {
     const { unlink } = await import('node:fs/promises');
     await unlink(progressPath);
@@ -232,7 +232,7 @@ export async function clearProgressFile(changeDir: string): Promise<void> {
     // File doesn't exist, ignore
   }
   // Also clear subagent-progress.md to avoid stale state
-  const subagentProgressPath = changeDir + '/.flow-engine/sflow/subagent-progress.md';
+  const subagentProgressPath = workDir + '/.flow-engine/sflow/subagent-progress.md';
   try {
     const { unlink } = await import('node:fs/promises');
     await unlink(subagentProgressPath);

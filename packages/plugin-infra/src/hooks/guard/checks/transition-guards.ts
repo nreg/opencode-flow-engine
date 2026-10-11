@@ -67,8 +67,8 @@ function properPathFor(mode: string): string {
  * 命中限制表但 mode 不匹配时 MUST 明确报错（success:false + block:true），
  * MUST NOT 静默回落 full 主表；报错含当前 mode、允许集合、正确路径与 `Fix:` 入口。
  */
-export async function checkWorkflowModeTransition(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
-  if (!changeDir || !data) return { success: true };
+export async function checkWorkflowModeTransition(workDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!workDir || !data) return { success: true };
 
   if (activeWorkflow !== 'sflow') return { success: true };
 
@@ -76,12 +76,12 @@ export async function checkWorkflowModeTransition(changeDir: string, data?: Reco
   const newState = data?.newState as string | undefined;
   if (!newState) return { success: true };
 
-  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
+  const stateData = await readJsonFile<{ state?: string; mode?: string }>(`${workDir}/${getStateFilePath('sflow')}`);
   const currentState = stateData?.state || 'exploring';
   const mode = resolveMode(stateData?.mode);
 
   // 工作流证据（direct 收据 / debug 收据）由 workflowPolicy 单点裁决，门禁不再各自解读
-  const policy = await workflowPolicy(changeDir, stateData);
+  const policy = await workflowPolicy(workDir, stateData);
 
   const { allowed, allowedModes } = isFastPathAllowed(currentState, newState, mode);
 
@@ -111,13 +111,13 @@ export async function checkWorkflowModeTransition(changeDir: string, data?: Reco
  * Debugging state check — blocks non-debugging operations from non-debugging agents.
  * Uses both action string (from tool.execute.before) and agent name (from context.data).
  */
-export async function checkDebuggingState(changeDir: string, action?: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
-  if (!changeDir) return { success: true };
+export async function checkDebuggingState(workDir: string, action?: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!workDir) return { success: true };
 
-  const hasSflowState = await fileExists(`${changeDir}/${getStateFilePath('sflow')}`);
+  const hasSflowState = await fileExists(`${workDir}/${getStateFilePath('sflow')}`);
   if (!hasSflowState) return { success: true };
 
-  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
+  const stateData = await readJsonFile<{ state?: string }>(`${workDir}/${getStateFilePath('sflow')}`);
   if (stateData?.state !== "debugging") return { success: true };
 
   const agent = (data?.agent as string) || '';
@@ -137,13 +137,13 @@ export async function checkDebuggingState(changeDir: string, action?: string, da
   return { success: true };
 }
 
-export async function checkTaskCompletion(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
-  if (!changeDir) return { success: true };
+export async function checkTaskCompletion(workDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!workDir) return { success: true };
 
   // IFlow uses PLAN.md (GSD-style) rather than SFlow's tasks.md
   if (activeWorkflow === 'iflow') return { success: true };
 
-  const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
+  const tasksContent = await readArtifactContent(workDir, 'tasks.md');
   if (!tasksContent) return { success: true };
 
   // D7: 复选框解析统一走 parseTasks（与 plan-crud / artifact-guards / boundary 同一入口）
@@ -163,11 +163,11 @@ export async function checkTaskCompletion(changeDir: string, activeWorkflow: 'if
   }
 
   // CG-3: Also check wave completion when execution-plan.json exists
-  const plan = await readExecutionPlanFeature(changeDir);
+  const plan = await readExecutionPlanFeature(workDir);
   if (plan && plan.waves && plan.waves.length > 0) {
     const wavesMissingReceipts: string[] = [];
     for (const wave of plan.waves) {
-      const receiptPath = `${changeDir}/.flow-engine/sflow/reviews/${wave.id}.json`;
+      const receiptPath = `${workDir}/.flow-engine/sflow/reviews/${wave.id}.json`;
       const receiptExists = await fileExists(receiptPath);
       if (!receiptExists) {
         wavesMissingReceipts.push(wave.id);

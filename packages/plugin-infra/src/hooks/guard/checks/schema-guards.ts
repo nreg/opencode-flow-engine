@@ -33,10 +33,10 @@ export interface SchemaMigrationGuardOptions {
  * READ-ONLY (C4): never writes state.
  */
 export async function checkSchemaMigrationGuard(
-  changeDir: string,
+  workDir: string,
   options?: SchemaMigrationGuardOptions,
 ): Promise<HookResult> {
-  if (!changeDir) return { success: true };
+  if (!workDir) return { success: true };
 
   // Step 1: Get staged file list from git diff --cached
   let stagedOutput: string;
@@ -44,7 +44,7 @@ export async function checkSchemaMigrationGuard(
     const { execSync: realExecSync } = await import('child_process');
     const execFn = options?.execSync ?? realExecSync;
     const result = execFn('git diff --cached --name-only', {
-      cwd: changeDir,
+      cwd: workDir,
       encoding: 'utf8',
       stdio: 'pipe',
     });
@@ -71,7 +71,7 @@ export async function checkSchemaMigrationGuard(
   // Step 4: Check each schema change for corresponding migration file
   const missingMigrations: string[] = [];
   for (const change of schemaOnlyChanges) {
-    const hasMigration = await checkMigrationFileExists(changeDir, change);
+    const hasMigration = await checkMigrationFileExists(workDir, change);
     if (!hasMigration) {
       missingMigrations.push(change.filePath + ' (table: ' + change.tableName + ', framework: ' + change.framework + ')');
     }
@@ -107,10 +107,10 @@ export async function checkSchemaMigrationGuard(
  * READ-ONLY (C4): never writes state.
  */
 export async function checkAbstractionGrepGuard(
-  changeDir: string,
+  workDir: string,
   data?: Record<string, unknown>,
 ): Promise<HookResult> {
-  if (!changeDir || !data) return { success: true };
+  if (!workDir || !data) return { success: true };
 
   const toolName = (data.toolName as string) || '';
   // Only check for write/edit operations
@@ -121,7 +121,7 @@ export async function checkAbstractionGrepGuard(
 
   // Only check during executing/debugging states
   const stateData = await readJsonFile<{ state?: string }>(
-    `${changeDir}/${getStateFilePath('sflow')}`,
+    `${workDir}/${getStateFilePath('sflow')}`,
   );
   const currentState = stateData?.state || '';
   if (currentState !== 'executing' && currentState !== 'debugging') {
@@ -136,12 +136,12 @@ export async function checkAbstractionGrepGuard(
   const fullPath = filePath.replace(/\\/g, '/');
   const absolutePath = fullPath.startsWith('/') || fullPath.includes(':')
     ? fullPath
-    : `${changeDir}/${fullPath}`;
+    : `${workDir}/${fullPath}`;
   const alreadyExists = await fileExists(absolutePath);
   if (alreadyExists) return { success: true };
 
   // Check if grep self-check has been recorded for this category
-  const hasRecord = await hasGrepRecord(changeDir, abstraction.category);
+  const hasRecord = await hasGrepRecord(workDir, abstraction.category);
   if (!hasRecord) {
     return {
       success: false,

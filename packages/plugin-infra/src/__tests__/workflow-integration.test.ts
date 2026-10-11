@@ -14,15 +14,15 @@ function tempDir(name: string): string {
   return join(import.meta.dir, '..', '__test_workdir__', name);
 }
 
-async function readStateFile(changeDir: string): Promise<Record<string, unknown> | null> {
-  const file = Bun.file(`${changeDir}/.flow-engine/sflow/state.json`);
+async function readStateFile(workDir: string): Promise<Record<string, unknown> | null> {
+  const file = Bun.file(`${workDir}/.flow-engine/sflow/state.json`);
   if (!(await file.exists())) return null;
   const content = await file.text();
   return JSON.parse(content);
 }
 
-async function writeStateFile(changeDir: string, state: Record<string, unknown>): Promise<void> {
-  const dir = `${changeDir}/.flow-engine/sflow`;
+async function writeStateFile(workDir: string, state: Record<string, unknown>): Promise<void> {
+  const dir = `${workDir}/.flow-engine/sflow`;
   await Bun.write(`${dir}/state.json`, JSON.stringify(state, null, 2));
 }
 
@@ -349,7 +349,7 @@ describe('Workflow State Machine — Hook Integration', () => {
     await Bun.write(dir + '/proposal.md', '# Proposal\n\n## Why\nThis is a test proposal.\n\n## What Changes\nTest changes.');
     const hook = createStateTransitionHook();
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'transition',
@@ -365,7 +365,7 @@ describe('Workflow State Machine — Hook Integration', () => {
     await writeStateFile(dir, { state: 'exploring', mode: 'full' });
     const hook = createStateTransitionHook();
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'transition',
@@ -382,7 +382,7 @@ describe('Workflow State Machine — Hook Integration', () => {
 
     const hook = createStateTransitionHook();
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'transition',
@@ -396,7 +396,7 @@ describe('Workflow State Machine — Hook Integration', () => {
     await writeStateFile(dir, { state: 'bridging', mode: 'full' });
     const hook = createStateTransitionHook();
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'transition',

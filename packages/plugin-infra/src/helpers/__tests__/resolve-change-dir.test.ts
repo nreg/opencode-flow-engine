@@ -1,7 +1,7 @@
 /**
  * Test for resolveChangeDir utility function
  * 
- * Validates the unified changeDir resolution logic:
+ * Validates the unified workDir resolution logic:
  * Priority: explicitChangeDir > contextDirectory > cwd > throw error
  */
 
@@ -22,7 +22,7 @@ describe('resolveChangeDir', () => {
     process.cwd = () => originalCwd;
   });
 
-  describe('优先级 1: 显式 changeDir 参数', () => {
+  describe('优先级 1: 显式 workDir 参数', () => {
     it('当 explicitChangeDir 提供时，应优先使用该值', () => {
       const explicit = '/explicit/path';
       const contextDir = '/context/path';
@@ -32,7 +32,7 @@ describe('resolveChangeDir', () => {
       expect(result).toBe(explicit);
     });
 
-    it('显式 changeDir 应覆盖 context.directory', () => {
+    it('显式 workDir 应覆盖 context.directory', () => {
       const explicit = '/explicit/path';
       const contextDir = '/context/path';
       
@@ -42,7 +42,7 @@ describe('resolveChangeDir', () => {
       expect(result).not.toBe(contextDir);
     });
 
-    it('显式 changeDir 应覆盖 cwd', () => {
+    it('显式 workDir 应覆盖 cwd', () => {
       const explicit = '/explicit/path';
       
       const result = resolveChangeDir(explicit, undefined);
@@ -103,7 +103,7 @@ describe('resolveChangeDir', () => {
 
       expect(() => {
         resolveChangeDir('', '');
-      }).toThrow('Unable to resolve changeDir: no explicit path, no context directory, and cwd unavailable');
+      }).toThrow('Unable to resolve workDir: no explicit path, no context directory, and cwd unavailable');
 
       // 恢复
       process.cwd = originalCwdFn;

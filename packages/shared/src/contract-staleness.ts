@@ -15,9 +15,9 @@ import { fileExists } from "./file-utils.js";
  * This is the single source of truth for staleness detection.
  * All consumers (workflow-router, state-manager, guard hook) must use this function.
  */
-export async function isContractStale(changeDir: string): Promise<boolean> {
-  const contractPath = `${changeDir}/execution-contract.md`;
-  const proposalPath = `${changeDir}/proposal.md`;
+export async function isContractStale(workDir: string): Promise<boolean> {
+  const contractPath = `${workDir}/execution-contract.md`;
+  const proposalPath = `${workDir}/proposal.md`;
 
   const contractExists = await fileExists(contractPath);
   const proposalExists = await fileExists(proposalPath);
@@ -44,10 +44,10 @@ export interface StalenessReport {
 }
 
 export async function getContractStalenessReport(
-  changeDir: string,
+  workDir: string,
 ): Promise<StalenessReport> {
-  const contractPath = `${changeDir}/execution-contract.md`;
-  const proposalPath = `${changeDir}/proposal.md`;
+  const contractPath = `${workDir}/execution-contract.md`;
+  const proposalPath = `${workDir}/proposal.md`;
 
   const contractExists = await fileExists(contractPath);
   if (!contractExists) {

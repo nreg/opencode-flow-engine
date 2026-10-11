@@ -17,10 +17,10 @@ export function createPreProcessHook(): HookHandler {
     name: "pre_process",
     description: "Transform user messages before agent processing",
     execute: async (context: HookContext): Promise<HookResult> => {
-      const { changeDir, data } = context;
+      const { workDir, data } = context;
 
       const currentState = (data?.currentState as string) ??
-        (await readJsonFile<{ state?: string }>(`${changeDir}/.flow-engine/sflow/state.json`))?.state;
+        (await readJsonFile<{ state?: string }>(`${workDir}/.flow-engine/sflow/state.json`))?.state;
 
       if (!currentState) {
         return { success: true, data: { transformed: false } };
@@ -56,7 +56,7 @@ export function createPostProcessHook(): HookHandler {
     name: "post_process",
     description: "Detect state transitions from agent responses and return signal",
     execute: async (context: HookContext): Promise<HookResult> => {
-      const { changeDir, data } = context;
+      const { workDir, data } = context;
 
       const outputText = data?.output as string | undefined;
       if (!outputText) {
@@ -70,7 +70,7 @@ export function createPostProcessHook(): HookHandler {
 
       const detectedState = stateMatch[1];
       const currentState =
-        (await readJsonFile<{ state?: string }>(`${changeDir}/.flow-engine/sflow/state.json`))?.state;
+        (await readJsonFile<{ state?: string }>(`${workDir}/.flow-engine/sflow/state.json`))?.state;
 
       if (detectedState !== currentState) {
         // Return signal only — let the caller handle the actual transition

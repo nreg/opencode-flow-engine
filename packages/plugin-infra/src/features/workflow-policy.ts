@@ -62,24 +62,24 @@ export function resolveWorkflowMode(state?: WorkflowPolicyState | null): string 
 }
 
 /** 读取工作流 state（供未显式传入 state 的调用方使用）。 */
-export async function readWorkflowPolicyState(changeDir: string): Promise<WorkflowPolicyState | null> {
-  return await readJsonFile<WorkflowPolicyState>(`${changeDir}/${STATE_FILE}`);
+export async function readWorkflowPolicyState(workDir: string): Promise<WorkflowPolicyState | null> {
+  return await readJsonFile<WorkflowPolicyState>(`${workDir}/${STATE_FILE}`);
 }
 
 /**
  * 单点裁决：回答「当前工作流证据到底说明了什么」。
  *
- * @param changeDir 项目根目录
+ * @param workDir 项目根目录
  * @param state     可选 state 片段；缺省时从 state.json 读取
  */
 export async function workflowPolicy(
-  changeDir: string,
+  workDir: string,
   state?: WorkflowPolicyState | null,
 ): Promise<WorkflowPolicyVerdict> {
-  const resolvedState: WorkflowPolicyState = state ?? (await readWorkflowPolicyState(changeDir)) ?? {};
+  const resolvedState: WorkflowPolicyState = state ?? (await readWorkflowPolicyState(workDir)) ?? {};
   const workflow = resolveWorkflowMode(resolvedState);
 
-  const receipt = await readWorkflowSelection(changeDir);
+  const receipt = await readWorkflowSelection(workDir);
   const directShortPath = receipt.valid && isDirectWorkflowReceipt(receipt.record, { workflow });
 
   // 声明走 direct hotfix 但收据已失效 —— 不能静默降级成「无收据的普通 hotfix」
@@ -88,7 +88,7 @@ export async function workflowPolicy(
   const missingDebugReceipt =
     resolvedState.state === 'debugging' &&
     DEBUG_RECEIPT_WORKFLOWS.includes(workflow) &&
-    !(await readPlanlessDebugReceipt(changeDir, resolvedState));
+    !(await readPlanlessDebugReceipt(workDir, resolvedState));
 
   return {
     directShortPath,
@@ -104,11 +104,11 @@ export async function workflowPolicy(
  * 其次是 tweak 的人工确认收据（非自动接受、跟随推荐、有 confirmed_at）。
  */
 export async function readPlanlessDebugReceipt(
-  changeDir: string,
+  workDir: string,
   state: WorkflowPolicyState,
 ): Promise<WorkflowSelectionRecord | null> {
   const workflow = resolveWorkflowMode(state);
-  const loaded = await readWorkflowSelection(changeDir);
+  const loaded = await readWorkflowSelection(workDir);
   if (!loaded.valid) return null;
   if (isDirectWorkflowReceipt(loaded.record, { workflow })) return loaded.record;
 

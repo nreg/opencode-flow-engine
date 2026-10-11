@@ -90,7 +90,7 @@ describe('P1 fix: checkReviewBaseRecording（executing 时记录 review_base）'
     });
 
     const result = await checkReviewBaseRecording({
-      changeDir: dir,
+      workDir: dir,
       currentState: 'approved-for-build',
       newState: 'executing',
     });
@@ -113,7 +113,7 @@ describe('P1 fix: checkReviewBaseRecording（executing 时记录 review_base）'
     });
 
     await checkReviewBaseRecording({
-      changeDir: dir,
+      workDir: dir,
       currentState: 'approved-for-build',
       newState: 'executing',
     });
@@ -123,7 +123,7 @@ describe('P1 fix: checkReviewBaseRecording（executing 时记录 review_base）'
     const headSha2 = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8', stdio: 'pipe' }).trim();
 
     await checkReviewBaseRecording({
-      changeDir: dir,
+      workDir: dir,
       currentState: 'executing',
       newState: 'debugging',
     }).catch(() => undefined);
@@ -145,7 +145,7 @@ describe('P1 fix: checkReviewBaseRecording（executing 时记录 review_base）'
     });
 
     const result = await checkReviewBaseRecording({
-      changeDir: dir,
+      workDir: dir,
       currentState: 'specifying',
       newState: 'bridging',
     });
@@ -170,7 +170,7 @@ describe('P1 fix: checkReviewBaseRecording（executing 时记录 review_base）'
       });
 
       const result = await checkReviewBaseRecording({
-        changeDir: nonGitDir,
+        workDir: nonGitDir,
         currentState: 'approved-for-build',
         newState: 'executing',
       });
@@ -211,7 +211,7 @@ describe('P1 fix: state_transition hook 端到端（executing 时记录 review_b
 
     const hook = createStateTransitionHook();
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       data: { newState: 'executing' },
     } as any);
 
@@ -255,7 +255,7 @@ describe('P2-2/P2-3：execution_plan_hash 派生键同步', () => {
     expect(state0.execution_plan_hash).toBe(plan.hash);
 
     await checkReviewBaseRecording({
-      changeDir: dir,
+      workDir: dir,
       currentState: 'approved-for-build',
       newState: 'executing',
     });

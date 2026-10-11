@@ -2,7 +2,7 @@
  * IFlow context routing tests — Tasks 1.1, 1.2, 1.3, 1.4
  *
  * Tests:
- * - IFlow context detection via directoryExists(`${changeDir}/.flow-engine/iflow`)
+ * - IFlow context detection via directoryExists(`${workDir}/.flow-engine/iflow`)
  * - IFlow agent name validation (IFLOW_AGENT_NAMES)
  * - Session label dynamic generation (iFlow → / sFlow →)
  * - Guard data passthrough completeness (context.data → getIFlowGuards)
@@ -82,7 +82,7 @@ describe('Guard Hook — IFlow data passthrough completeness', () => {
 
     // Call guard with complete data — should not crash
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'tool:write',
@@ -106,7 +106,7 @@ describe('Guard Hook — IFlow data passthrough completeness', () => {
 
     // Call guard with toolName=write and filePath pointing to PLAN.md
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'tool:write',
@@ -128,7 +128,7 @@ describe('Guard Hook — IFlow data passthrough completeness', () => {
     await writeStateFile(dir, { state: 'exploring', mode: 'full' });
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'tool:read',
@@ -148,7 +148,7 @@ describe('Guard Hook — IFlow data passthrough completeness', () => {
     await writeIFlowState(dir, 'discussing');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'tool:unknown',
@@ -182,7 +182,7 @@ describe('Guard Hook — backward compatibility without .flow-engine/iflow/', ()
     await writeStateFile(dir, { state: 'exploring', mode: 'full' });
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'tool:read',
@@ -196,7 +196,7 @@ describe('Guard Hook — backward compatibility without .flow-engine/iflow/', ()
     await writeStateFile(dir, { state: 'exploring', mode: 'full' });
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'tool:read',

@@ -72,14 +72,14 @@ function topologicalSort(waves: Wave[]): string[] {
  * Only applies for sflow workflow.
  * READ-ONLY (C4): never writes state.
  */
-export async function checkWaveDependencies(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
-  if (!changeDir) return { success: true };
+export async function checkWaveDependencies(workDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!workDir) return { success: true };
 
   // C7: Only apply for sflow workflow
   if (activeWorkflow !== 'sflow') return { success: true };
 
   // Read execution plan — skip if none exists (backward compatible)
-  const plan = await readExecutionPlanFeature(changeDir);
+  const plan = await readExecutionPlanFeature(workDir);
   if (!plan) return { success: true };
 
   // P1 fix: iterate reviewTargets (supports review_policy='final' — single 'final' range)
@@ -150,14 +150,14 @@ export async function checkWaveDependencies(changeDir: string, activeWorkflow: '
  * Only applies for sflow workflow.
  * READ-ONLY (C4): never writes state.
  */
-export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
-  if (!changeDir) return { success: true };
+export async function checkReceiptIntegrity(workDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!workDir) return { success: true };
 
   // C7: Only apply for sflow workflow
   if (activeWorkflow !== 'sflow') return { success: true };
 
   // Read execution plan — skip if none exists (backward compatible)
-  const plan = await readExecutionPlanFeature(changeDir);
+  const plan = await readExecutionPlanFeature(workDir);
   if (!plan) return { success: true };
 
   // P1 fix: iterate reviewTargets (supports review_policy='final' — single 'final' range)
@@ -177,7 +177,7 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
   const REQUIRED_RECEIPT_FIELDS = ['status', 'base', 'head', 'report'] as const;
 
   for (const wave of waves) {
-    const receiptPath = `${changeDir}/.flow-engine/sflow/reviews/${wave.id}.json`;
+    const receiptPath = `${workDir}/.flow-engine/sflow/reviews/${wave.id}.json`;
     const receiptExists = await fileExists(receiptPath);
 
     if (!receiptExists) {
@@ -255,7 +255,7 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
     // RR-4: Commit hash revalidation via GitRangeValidator (cached)
     try {
       // Create validator for this repo
-      const validator = new GitRangeValidator(changeDir);
+      const validator = new GitRangeValidator(workDir);
 
       // First check if this is a git repo
       const gitDirResult = await validator.verify('--git-dir');
@@ -328,14 +328,14 @@ export async function checkReceiptIntegrity(changeDir: string, activeWorkflow: '
  * Only applies for sflow workflow.
  * READ-ONLY (C4): never writes state.
  */
-export async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
-  if (!changeDir) return { success: true };
+export async function checkClosingGate(workDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!workDir) return { success: true };
 
   // C7: Only apply for sflow workflow
   if (activeWorkflow !== 'sflow') return { success: true };
 
   // Read execution plan — skip if none exists (backward compatible, CG-4)
-  const plan = await readExecutionPlanFeature(changeDir);
+  const plan = await readExecutionPlanFeature(workDir);
   if (!plan) return { success: true };
 
   // P1 fix: iterate reviewTargets (supports review_policy='final' — single 'final' range)
@@ -350,7 +350,7 @@ export async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow
   }
 
   for (const wave of waves) {
-    const receiptPath = `${changeDir}/.flow-engine/sflow/reviews/${wave.id}.json`;
+    const receiptPath = `${workDir}/.flow-engine/sflow/reviews/${wave.id}.json`;
     const receiptExists = await fileExists(receiptPath);
 
     if (!receiptExists) {
@@ -380,7 +380,7 @@ export async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow
   }
 
   // CG-7: Check verification-report.md for test results if it exists
-  const verificationReportPath = `${changeDir}/.flow-engine/sflow/archive/*/verification-report.md`;
+  const verificationReportPath = `${workDir}/.flow-engine/sflow/archive/*/verification-report.md`;
   // Also check the change archive directory for verification reports
   let testPassed = true;
   let testEvidenceFound = false;
@@ -388,12 +388,12 @@ export async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow
   try {
     const { readFile: fsReadFile } = await import('node:fs/promises');
     const verificationPaths = [
-      `${changeDir}/verification-report.md`,
-      `${changeDir}/archive/verification-report.md`,
+      `${workDir}/verification-report.md`,
+      `${workDir}/archive/verification-report.md`,
     ];
     // Also check change-level archive directories
     const { readdir } = await import('node:fs/promises');
-    const archiveDir = `${changeDir}/archive`;
+    const archiveDir = `${workDir}/archive`;
     const archiveExists = await fileExists(archiveDir);
     if (archiveExists) {
       try {
@@ -475,14 +475,14 @@ export async function checkClosingGate(changeDir: string, activeWorkflow: 'iflow
  * Only applies for sflow workflow.
  * READ-ONLY (C4): never writes state.
  */
-export async function checkSpecsMerged(changeDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
-  if (!changeDir) return { success: true };
+export async function checkSpecsMerged(workDir: string, activeWorkflow: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!workDir) return { success: true };
 
   // C7: Only apply for sflow workflow
   if (activeWorkflow !== 'sflow') return { success: true };
 
   // Check if delta-specs directory exists
-  const deltaSpecsPath = `${changeDir}/specs/delta`;
+  const deltaSpecsPath = `${workDir}/specs/delta`;
   const deltaSpecsExists = await directoryExists(deltaSpecsPath);
   if (!deltaSpecsExists) return { success: true };
 
@@ -500,14 +500,14 @@ export async function checkSpecsMerged(changeDir: string, activeWorkflow: 'iflow
   // P1-1: 优先检查 Publication Receipt
   const { hasPublicationReceipts, listPublicationReceipts, readPublicationReceipt, validatePublicationReceipt } = await import('../../../features/spec-publication.js');
   
-  const hasReceipts = await hasPublicationReceipts(changeDir);
+  const hasReceipts = await hasPublicationReceipts(workDir);
   if (hasReceipts) {
     // 存在收据目录，验证收据完整性
-    const receiptCapabilities = await listPublicationReceipts(changeDir);
+    const receiptCapabilities = await listPublicationReceipts(workDir);
     
     // 读取所有收据并验证
     for (const capability of receiptCapabilities) {
-      const receipt = await readPublicationReceipt(changeDir, capability);
+      const receipt = await readPublicationReceipt(workDir, capability);
       if (!receipt) {
         Logger.warn(`[P1-1] Publication receipt damaged for capability: ${capability}`);
         continue;
@@ -517,7 +517,7 @@ export async function checkSpecsMerged(changeDir: string, activeWorkflow: 'iflow
       const specFiles = mdFiles.map(f => `${deltaSpecsPath}/${f}`);
       
       // 验证收据
-      const validation = await validatePublicationReceipt(changeDir, changeDir, receipt, specFiles);
+      const validation = await validatePublicationReceipt(workDir, workDir, receipt, specFiles);
       if (!validation.pass) {
         return {
           success: false,
@@ -532,7 +532,7 @@ export async function checkSpecsMerged(changeDir: string, activeWorkflow: 'iflow
   }
 
   // P1-1: 降级兼容 - 检查旧的 spec_merged flag
-  const stateData = await readJsonFile<{ spec_merged?: boolean }>(`${changeDir}/${getStateFilePath('sflow')}`);
+  const stateData = await readJsonFile<{ spec_merged?: boolean }>(`${workDir}/${getStateFilePath('sflow')}`);
   if (stateData?.spec_merged === true) {
     // 旧项目过渡期：仅有 spec_merged=true，无 publication receipt
     // 发出 WARNING 但放行

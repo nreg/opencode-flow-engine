@@ -15,11 +15,11 @@ import { checkIFlowLessonsGuard, checkIFlowProgressAntiRepeatGuard } from "../if
  * Inspired by flow-kit R1.8: "每个 DEV 任务进入实现前必扫 LESSONS.md"
  * Only warns (does not block) — the AI must declare differences in the execution plan.
  */
-export async function checkLessonsGuard(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
-  if (!changeDir || !data) return { success: true };
+export async function checkLessonsGuard(workDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!workDir || !data) return { success: true };
 
   if (activeWorkflow === 'iflow') {
-    return checkIFlowLessonsGuard(changeDir, data);
+    return checkIFlowLessonsGuard(workDir, data);
   }
 
   const agent = (data.agent as string) || '';
@@ -31,13 +31,13 @@ export async function checkLessonsGuard(changeDir: string, data?: Record<string,
   // Read state to determine if we're in debugging
   let currentState = '';
   try {
-    const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
+    const stateData = await readJsonFile<{ state?: string }>(`${workDir}/${getStateFilePath('sflow')}`);
     currentState = stateData?.state || '';
   } catch { /* ignore */ }
   const isDebuggingState = currentState === 'debugging';
 
   // Read subagent-progress.md once for keyword extraction
-  const sp = await readFile(changeDir + '/.flow-engine/sflow/subagent-progress.md').catch(() => null);
+  const sp = await readFile(workDir + '/.flow-engine/sflow/subagent-progress.md').catch(() => null);
 
   // For build-executor: check stage in subagent-progress.md
   // For bug-investigator in debugging: skip stage check, just extract keywords
@@ -66,7 +66,7 @@ export async function checkLessonsGuard(changeDir: string, data?: Record<string,
   if (keywords.length === 0) return { success: true };
 
   // Grep LESSONS.md
-  const hits = await searchLessonsInFile(changeDir, keywords);
+  const hits = await searchLessonsInFile(workDir, keywords);
 
   if (hits.length > 0) {
     const hitList = hits.map(h => 'L-' + (h.entry.id || '???') + ': "' + h.entry.title + '" (matched: ' + h.matchedKeywords.join(', ') + ')').join('; ');
@@ -84,14 +84,14 @@ export async function checkLessonsGuard(changeDir: string, data?: Record<string,
  * Reads .flow-engine/sflow/progress.md and checks if the current operation (inferred from tool/agent/filePath)
  * matches any previously excluded approach.
  */
-export async function checkProgressAntiRepeatGuard(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
-  if (!changeDir || !data) return { success: true };
+export async function checkProgressAntiRepeatGuard(workDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult> {
+  if (!workDir || !data) return { success: true };
 
   if (activeWorkflow === 'iflow') {
-    return checkIFlowProgressAntiRepeatGuard(changeDir, data);
+    return checkIFlowProgressAntiRepeatGuard(workDir, data);
   }
 
-  const progress = await readProgressFile(changeDir);
+  const progress = await readProgressFile(workDir);
   if (!progress || progress.excludedApproaches.length === 0) {
     return { success: true };
   }
@@ -107,7 +107,7 @@ export async function checkProgressAntiRepeatGuard(changeDir: string, data?: Rec
 
   // P34: Also read current task description from subagent-progress.md for better keyword inference
   let taskKeywords: string[] = [];
-  const sp = await readFile(changeDir + '/.flow-engine/sflow/subagent-progress.md').catch(() => null);
+  const sp = await readFile(workDir + '/.flow-engine/sflow/subagent-progress.md').catch(() => null);
   if (sp) {
     const planMatch = sp.match(/\*\*Plan task\*\*:\s*(.+)/i);
     if (planMatch?.[1]) {
@@ -127,7 +127,7 @@ export async function checkProgressAntiRepeatGuard(changeDir: string, data?: Rec
   if (combinedKeywords.length === 0) return { success: true };
 
   const { detectProgressAntiRepeat } = await import('../../../features/state-manager.js');
-  const result = await detectProgressAntiRepeat(changeDir, combinedKeywords.join(' '));
+  const result = await detectProgressAntiRepeat(workDir, combinedKeywords.join(' '));
 
   if (result.blocked && result.matched) {
     return {

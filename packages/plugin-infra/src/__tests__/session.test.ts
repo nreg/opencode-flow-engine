@@ -54,7 +54,7 @@ describe('Session Start Hook — Boulder State Recovery', () => {
     await writeBoulderFile(dir, { state: 'executing', mode: 'full' });
     // The hook expects contract.md to exist for executing state (detectStateMismatch checks this)
     await writeFileContent(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nTest contract.');
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'session.created' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'session.created' });
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
     expect(data?.recovered).toBe(true);
@@ -69,14 +69,14 @@ describe('Session Start Hook — Boulder State Recovery', () => {
     await writeFileContent(dir + '/design.md', '# Design\n\n## Architecture\nTest arch.');
     await writeFileContent(dir + '/tasks.md', '- [ ] task one');
     await ensureDir(dir + '/specs');
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'session.created' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'session.created' });
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
     expect(data?.recovered).toBe(true);
   });
 
   it('should return recovered=false when no state files exist', async () => {
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'session.created' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'session.created' });
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
     expect(data?.recovered).toBe(false);
@@ -102,7 +102,7 @@ describe('Session Start Hook — Auto-Repair via detectStateMismatch', () => {
     // Create artifacts except contract
     await ensureDir(dir + '/specs');
     await writeFile(dir + '/proposal.md', '# Test\n\n## Why\nMotivation text here that is long enough to pass the check.');
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'session.created' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'session.created' });
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
     expect(data?.repaired).toBe(true);
@@ -113,7 +113,7 @@ describe('Session Start Hook — Auto-Repair via detectStateMismatch', () => {
   it('should auto-repair: exploring -> specifying when proposal exists', async () => {
     await writeBoulderFile(dir, { state: 'exploring', mode: 'full' });
     await writeFile(dir + '/proposal.md', '# Test Proposal\n\n## Why\nThis is a sufficiently long motivation text for the change we want to make. It describes why this change is needed and what problem it solves.');
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'session.created' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'session.created' });
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
     if (data?.repaired) {
@@ -138,7 +138,7 @@ describe('Session End Hook — Boulder State Persistence', () => {
 
   it('should persist state to boulder file', async () => {
     await writeStateFile(dir, { state: 'closing', mode: 'full' });
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'session.deleted' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'session.deleted' });
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
     expect(data?.persisted).toBe(true);
@@ -146,7 +146,7 @@ describe('Session End Hook — Boulder State Persistence', () => {
   });
 
   it('should not persist when no state file exists', async () => {
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'session.deleted' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'session.deleted' });
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
     expect(data?.persisted).toBe(false);

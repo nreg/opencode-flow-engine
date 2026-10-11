@@ -143,12 +143,12 @@ const IN_PROGRESS_TIMEOUT_MS = 30000; // 30 seconds
  * 1. Copy to archive/ → verify files exist
  * 2. Remove originals → reset state.json
  * 
- * @param changeDir - Project root directory (absolute path)
+ * @param workDir - Project root directory (absolute path)
  * @param changeNameOverride - Optional change name override (uses state.json or timestamp if not provided)
  * @returns Archive cleanup result with archived files, preserved assets, and status
  */
 export async function archiveCleanup(
-  changeDir: string,
+  workDir: string,
   changeNameOverride?: string
 ): Promise<ArchiveCleanupResult> {
   // P0-3: Concurrent execution guard with timeout protection
@@ -166,7 +166,7 @@ export async function archiveCleanup(
       return {
         archivedFiles: [],
         preservedAssets: [],
-        archiveDir: join(changeDir, '.flow-engine', 'sflow', 'archive', fallbackChangeName),
+        archiveDir: join(workDir, '.flow-engine', 'sflow', 'archive', fallbackChangeName),
         changeName: fallbackChangeName,
         error: 'Archive cleanup already in progress',
         success: false
@@ -176,7 +176,7 @@ export async function archiveCleanup(
   
   inProgress = true;
   inProgressSince = Date.now(); // P1-2: Record timestamp when setting lock
-  const sflowDir = join(changeDir, '.flow-engine', 'sflow');
+  const sflowDir = join(workDir, '.flow-engine', 'sflow');
   const archiveBaseDir = join(sflowDir, 'archive');
   
   const archivedFiles: string[] = [];
@@ -457,8 +457,8 @@ export async function archiveCleanup(
 /**
  * List archive directories
  */
-export async function listArchives(changeDir: string): Promise<string[]> {
-  const archiveDir = join(changeDir, '.flow-engine', 'sflow', 'archive');
+export async function listArchives(workDir: string): Promise<string[]> {
+  const archiveDir = join(workDir, '.flow-engine', 'sflow', 'archive');
   
   if (!await exists(archiveDir)) {
     return [];

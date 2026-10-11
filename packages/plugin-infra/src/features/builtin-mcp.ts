@@ -48,7 +48,7 @@ export function createValidatorTools(): Record<string, LocalToolDefinition> {
       description: 'Validate a spec file. Reads from <dir>/.flow-engine/sflow/specs/<name>.md by default. Pass spec_path to use a different location.',
       args: {
         name: z.string().describe('Spec name (e.g. "auth-service")'),
-        spec_path: z.string().optional().describe('Path to the spec markdown file. Defaults to <changeDir>/.flow-engine/sflow/specs/<name>.md'),
+        spec_path: z.string().optional().describe('Path to the spec markdown file. Defaults to <workDir>/.flow-engine/sflow/specs/<name>.md'),
       },
       execute: async (args: { name: string; spec_path?: string }, context: ToolContext) => {
         const filePath = resolvePath(context, args.spec_path, `.flow-engine/sflow/specs/${args.name}.md`);
@@ -64,7 +64,7 @@ export function createValidatorTools(): Record<string, LocalToolDefinition> {
     validate_proposal: {
       description: 'Validate a proposal file (Why section and What Changes section). Reads from <dir>/.flow-engine/sflow/proposal.md by default.',
       args: {
-        proposal_path: z.string().optional().describe('Path to the proposal markdown file. Defaults to <changeDir>/.flow-engine/sflow/proposal.md'),
+        proposal_path: z.string().optional().describe('Path to the proposal markdown file. Defaults to <workDir>/.flow-engine/sflow/proposal.md'),
       },
       execute: async (args: { proposal_path?: string }, context: ToolContext) => {
         const filePath = resolvePath(context, args.proposal_path, '.flow-engine/sflow/proposal.md');
@@ -80,7 +80,7 @@ export function createValidatorTools(): Record<string, LocalToolDefinition> {
     validate_delta_spec: {
       description: 'Validate a delta spec file (ADDED/MODIFIED/REMOVED/RENAMED operations with cross-section conflict detection). Pass delta_spec_path or changeName (reads from <dir>/.flow-engine/sflow/delta-specs/<changeName>.md).',
       args: {
-        delta_spec_path: z.string().optional().describe('Path to the delta spec markdown file. Defaults to <changeDir>/.flow-engine/sflow/delta-specs/<changeName>.md'),
+        delta_spec_path: z.string().optional().describe('Path to the delta spec markdown file. Defaults to <workDir>/.flow-engine/sflow/delta-specs/<changeName>.md'),
         changeName: z.string().optional().describe('Change name (used to resolve default path). Required if delta_spec_path not provided.'),
       },
       execute: async (args: { delta_spec_path?: string; changeName?: string }, context: ToolContext) => {
@@ -98,7 +98,7 @@ export function createValidatorTools(): Record<string, LocalToolDefinition> {
     validate_tasks: {
       description: 'Validate a tasks.md file for completeness and task definitions. Reads from <dir>/.flow-engine/sflow/tasks.md by default.',
       args: {
-        tasks_path: z.string().optional().describe('Path to the tasks markdown file. Defaults to <changeDir>/.flow-engine/sflow/tasks.md'),
+        tasks_path: z.string().optional().describe('Path to the tasks markdown file. Defaults to <workDir>/.flow-engine/sflow/tasks.md'),
       },
       execute: async (args: { tasks_path?: string }, context: ToolContext) => {
         const filePath = resolvePath(context, args.tasks_path, '.flow-engine/sflow/tasks.md');
@@ -114,7 +114,7 @@ export function createValidatorTools(): Record<string, LocalToolDefinition> {
     validate_contract: {
       description: 'Validate an execution contract file. Reads from <dir>/.flow-engine/sflow/execution-contract.md by default.',
       args: {
-        contract_path: z.string().optional().describe('Path to the execution contract file. Defaults to <changeDir>/.flow-engine/sflow/execution-contract.md'),
+        contract_path: z.string().optional().describe('Path to the execution contract file. Defaults to <workDir>/.flow-engine/sflow/execution-contract.md'),
       },
       execute: async (args: { contract_path?: string }, context: ToolContext) => {
         const filePath = resolvePath(context, args.contract_path, '.flow-engine/sflow/execution-contract.md');
@@ -130,7 +130,7 @@ export function createValidatorTools(): Record<string, LocalToolDefinition> {
     validate_design: {
       description: 'Validate a design.md file for required sections (Architecture Decision, Design Constraints, Implementation Approach). Reads from <dir>/.flow-engine/sflow/design.md by default.',
       args: {
-        design_path: z.string().optional().describe('Path to the design markdown file. Defaults to <changeDir>/.flow-engine/sflow/design.md'),
+        design_path: z.string().optional().describe('Path to the design markdown file. Defaults to <workDir>/.flow-engine/sflow/design.md'),
       },
       execute: async (args: { design_path?: string }, context: ToolContext) => {
         const filePath = resolvePath(context, args.design_path, '.flow-engine/sflow/design.md');
@@ -147,9 +147,9 @@ export function createValidatorTools(): Record<string, LocalToolDefinition> {
       description: 'Validate implementation against spec and design (Completeness, Correctness, Coherence dimensions). Reads spec and design from file paths.',
       args: {
         diffSummary: z.string().describe('Git diff or change summary of the implementation'),
-        spec_path: z.string().optional().describe('Path to the spec file. Defaults to <changeDir>/.flow-engine/sflow/specs/<spec_name>.md.'),
+        spec_path: z.string().optional().describe('Path to the spec file. Defaults to <workDir>/.flow-engine/sflow/specs/<spec_name>.md.'),
         spec_name: z.string().optional().describe('Spec name used to resolve default spec path. Required if spec_path not provided.'),
-        design_path: z.string().optional().describe('Path to the design file. Defaults to <changeDir>/.flow-engine/sflow/design.md'),
+        design_path: z.string().optional().describe('Path to the design file. Defaults to <workDir>/.flow-engine/sflow/design.md'),
       },
       execute: async (args: { diffSummary: string; spec_path?: string; spec_name?: string; design_path?: string }, context: ToolContext) => {
         const specDefault = args.spec_name ? `.flow-engine/sflow/specs/${args.spec_name}.md` : undefined;
@@ -165,9 +165,9 @@ export function createValidatorTools(): Record<string, LocalToolDefinition> {
     },
 
     validate_ui_design: {
-      description: 'Validate ui-design.md content. Checks V1-V7: color format, font compliance, tone declaration, component coverage, placeholder strategy, anti-AI-slop coverage, WCAG AA. Reads from <changeDir>/.flow-engine/sflow/ui-design.md by default.',
+      description: 'Validate ui-design.md content. Checks V1-V7: color format, font compliance, tone declaration, component coverage, placeholder strategy, anti-AI-slop coverage, WCAG AA. Reads from <workDir>/.flow-engine/sflow/ui-design.md by default.',
       args: {
-        ui_design_path: z.string().optional().describe('Path to the ui-design.md file. Defaults to <changeDir>/.flow-engine/sflow/ui-design.md'),
+        ui_design_path: z.string().optional().describe('Path to the ui-design.md file. Defaults to <workDir>/.flow-engine/sflow/ui-design.md'),
       },
       execute: async (args: { ui_design_path?: string }, context: ToolContext) => {
         const filePath = resolvePath(context, args.ui_design_path, '.flow-engine/sflow/ui-design.md');
@@ -265,11 +265,11 @@ export function createWorkflowTools(): Record<string, LocalToolDefinition> {
       },
       execute: async (args: { dp_id: string; state: string; target_state: string; metadata?: string; change_dir?: string }, context) => {
 
-        const changeDir = resolveChangeDir(args.change_dir, context.directory);
+        const workDir = resolveChangeDir(args.change_dir, context.directory);
         const { readJsonFile, ensureDir } = await import('@opencode-flow-engine/shared');
 
-        const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
-        await ensureDir(`${changeDir}/.flow-engine/sflow`);
+        const statePath = `${workDir}/.flow-engine/sflow/state.json`;
+        await ensureDir(`${workDir}/.flow-engine/sflow`);
 
         try {
           const currentStateData = await readJsonFile<Record<string, unknown>>(statePath);
@@ -290,7 +290,7 @@ export function createWorkflowTools(): Record<string, LocalToolDefinition> {
           // P0 fix: Atomic state update with transition validation
           // Guard check is now inside writeStateFile's mutex for TOCTOU safety
           const result = await writeStateFile(
-            changeDir,
+            workDir,
             args.target_state,
             { decisionPoint: record },
             { validateTransitionFrom: currentState }

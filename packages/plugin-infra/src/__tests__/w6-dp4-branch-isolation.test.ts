@@ -76,7 +76,7 @@ describe('Task 7.1: DP-4 Recommendation in state-transition', () => {
     await writeFile(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nTest contract.');
 
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'transition',
@@ -106,7 +106,7 @@ describe('Task 7.1: DP-4 Recommendation in state-transition', () => {
     await writeFile(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nTest contract.');
 
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'transition',
@@ -126,7 +126,7 @@ describe('Task 7.1: DP-4 Recommendation in state-transition', () => {
     await writeFile(dir + '/tasks.md', '- [ ] task one');
 
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'transition',
@@ -148,7 +148,7 @@ describe('Task 7.1: DP-4 Recommendation in state-transition', () => {
     // No tasks.md — preflight gate should block transition
 
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'transition',
@@ -276,7 +276,7 @@ describe('Task 8.1: checkGitBranchIsolation guard', () => {
     await writeStateJson(dir, { state: 'executing', mode: 'full' });
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -293,7 +293,7 @@ describe('Task 8.1: checkGitBranchIsolation guard', () => {
     await writeStateJson(dir, { state: 'debugging', mode: 'full' });
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -307,7 +307,7 @@ describe('Task 8.1: checkGitBranchIsolation guard', () => {
     await writeStateJson(dir, { state: 'executing', mode: 'full' });
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -321,7 +321,7 @@ describe('Task 8.1: checkGitBranchIsolation guard', () => {
     await writeStateJson(dir, { state: 'executing', mode: 'full' });
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -340,7 +340,7 @@ describe('Task 8.1: checkGitBranchIsolation guard', () => {
     await writeStateJson(dir, { state: 'exploring', mode: 'full' });
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -365,7 +365,7 @@ describe('Task 8.1: checkGitBranchIsolation guard', () => {
     await writeFile(nonGitDir + '/.flow-engine/sflow/state.json', JSON.stringify({ state: 'executing', mode: 'full' }));
 
     const result = await guard.execute({
-      changeDir: nonGitDir,
+      workDir: nonGitDir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -387,7 +387,7 @@ describe('Task 8.1: checkGitBranchIsolation guard', () => {
     await ensureDir(dir + '/.flow-engine/iflow');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -432,7 +432,7 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
     await initGitRepo('main');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -449,7 +449,7 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
     await initGitRepo('master');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -466,7 +466,7 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
     await initGitRepo('feature/w6-test');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -485,7 +485,7 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
     await initGitRepo('main');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -504,7 +504,7 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
     await initGitRepo('main');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -528,7 +528,7 @@ describe('Task 8.1: checkGitBranchIsolation — targeted branch detection', () =
     await writeFile(nonGitDir + '/.flow-engine/sflow/state.json', JSON.stringify({ state: 'executing', mode: 'full' }));
 
     const result = await guard.execute({
-      changeDir: nonGitDir,
+      workDir: nonGitDir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -582,7 +582,7 @@ describe('Integration: bridging→approved-for-build with DP-4 recommendation', 
     await writeFile(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nExecution control plane.');
 
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'transition',

@@ -76,7 +76,7 @@ export async function detectFileLanguage(filePath: string): Promise<ArtifactLang
  * 5 级优先级解析上下文
  */
 export interface LanguageResolutionContext {
-  /** 项目根目录（changeDir） */
+  /** 项目根目录（workDir） */
   projectRoot: string;
   /** 用户显式声明的语言（如果对话中明确指定） */
   userDeclaredLanguage?: ArtifactLanguage;

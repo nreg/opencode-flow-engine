@@ -276,7 +276,7 @@ describe('T2.1: checkBreakingChangeGuard', () => {
 
   // ─── Edge cases ──────────────────────────────────────────────────────
 
-  it('should pass through when no changeDir provided', async () => {
+  it('should pass through when no workDir provided', async () => {
     const result = await checkBreakingChangeGuard('', {
       agent: 'build-executor',
       toolName: 'edit',
@@ -772,7 +772,7 @@ describe('T2.3: checkAbstractionGrepGuard', () => {
 
   // ─── Edge cases ──────────────────────────────────────────────────────
 
-  it('should pass through when no changeDir provided', async () => {
+  it('should pass through when no workDir provided', async () => {
     const result = await checkAbstractionGrepGuard('', {
       agent: 'build-executor',
       toolName: 'write',

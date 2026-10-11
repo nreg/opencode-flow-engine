@@ -86,7 +86,7 @@ describe('checkReceiptIntegrity', () => {
     await writeReceipt(dir, 'W1', validReceipt);
     await writeReceipt(dir, 'W2', { ...validReceipt, status: 'pass' });
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
     expect(result.block).toBeUndefined();
   });
@@ -97,7 +97,7 @@ describe('checkReceiptIntegrity', () => {
     await writeReceipt(dir, 'W1', validReceipt);
     // W2 receipt missing
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/missing|receipt/i);
   });
@@ -122,7 +122,7 @@ describe('checkReceiptIntegrity', () => {
     }
     await writeReceipt(dir, 'W2', validReceipt);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/symlink/i);
   });
@@ -141,7 +141,7 @@ describe('checkReceiptIntegrity', () => {
     await writeReceipt(dir, 'W1', incompleteReceipt);
     await writeReceipt(dir, 'W2', validReceipt);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/field|missing|base/i);
   });
@@ -160,7 +160,7 @@ describe('checkReceiptIntegrity', () => {
     await writeReceipt(dir, 'W1', incompleteReceipt);
     await writeReceipt(dir, 'W2', validReceipt);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/field|missing|head/i);
   });
@@ -179,7 +179,7 @@ describe('checkReceiptIntegrity', () => {
     await writeReceipt(dir, 'W1', incompleteReceipt);
     await writeReceipt(dir, 'W2', validReceipt);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/field|missing|report/i);
   });
@@ -198,7 +198,7 @@ describe('checkReceiptIntegrity', () => {
     await writeReceipt(dir, 'W1', incompleteReceipt);
     await writeReceipt(dir, 'W2', validReceipt);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/field|missing|status/i);
   });
@@ -207,14 +207,14 @@ describe('checkReceiptIntegrity', () => {
     await writeStateFile(dir, { state: 'executing', mode: 'full' });
     // No execution plan
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBeUndefined();
   });
 
   it('should skip for non-sflow workflow', async () => {
     await ensureDir(dir + '/.flow-engine/iflow');
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 
@@ -232,7 +232,7 @@ describe('checkReceiptIntegrity', () => {
     await writeReceipt(dir, 'W1', emptyBaseReceipt);
     await writeReceipt(dir, 'W2', validReceipt);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/base|hash|empty/i);
   });
@@ -251,7 +251,7 @@ describe('checkReceiptIntegrity', () => {
     await writeReceipt(dir, 'W1', emptyHeadReceipt);
     await writeReceipt(dir, 'W2', validReceipt);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/head|hash|empty/i);
   });
@@ -280,7 +280,7 @@ describe('checkReceiptIntegrity — commit revalidation', () => {
     await writeReceipt(dir, 'W2', validReceipt);
 
     // This test dir is not a git repo — should skip commit validation gracefully
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 });
@@ -307,7 +307,7 @@ describe('Integration: execution plan + receipt integrity', () => {
     await writeReceipt(dir, 'W1', validReceipt);
     await writeReceipt(dir, 'W2', { ...validReceipt, status: 'pass' });
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 });

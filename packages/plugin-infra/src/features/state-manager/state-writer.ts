@@ -139,7 +139,7 @@ function appendDecisionPoint(
  * 
  * P0 fix: TOCTOU race condition — atomic state transition validation.
  * 
- * @param changeDir - Project directory path
+ * @param workDir - Project directory path
  * @param newState - Target state to transition to
  * @param extra - Additional fields to merge into state
  * @param options - Optional validation options
@@ -147,14 +147,14 @@ function appendDecisionPoint(
  * @returns { success: boolean, error?: string } - Result of the write operation
  */
 export async function writeStateFile(
-  changeDir: string,
+  workDir: string,
   newState: string,
   extra?: Record<string, unknown>,
   options?: { validateTransitionFrom?: string }
 ): Promise<{ success: boolean; error?: string }> {
   const now = new Date().toISOString();
-  const statePath = changeDir + '/.flow-engine/sflow/state.json';
-  await ensureDir(changeDir + '/.flow-engine/sflow');
+  const statePath = workDir + '/.flow-engine/sflow/state.json';
+  await ensureDir(workDir + '/.flow-engine/sflow');
   
   return stateFileMutex.runExclusive(async () => {
     const existing = await readJsonFile<Record<string, unknown>>(statePath);

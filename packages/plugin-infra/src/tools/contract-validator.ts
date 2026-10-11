@@ -17,21 +17,21 @@ export function createContractValidatorTool(): ToolDefinition {
     name: "contract_validator",
     description: "Validate execution contracts against planning artifacts",
     parameters: {
-      changeDir: {
+      workDir: {
         type: "string",
         description: "Path to the change directory",
         required: true,
       },
     },
     execute: async (params, context) => {
-      const changeDir = resolveChangeDir((params as { changeDir?: string }).changeDir, context.directory);
+      const workDir = resolveChangeDir((params as { workDir?: string }).workDir, context.directory);
 
       try {
-        const contractContent = await readArtifactContent(changeDir, 'execution-contract.md');
+        const contractContent = await readArtifactContent(workDir, 'execution-contract.md');
         if (!contractContent) {
           // 工件目录约定为 <workDir>/.flow-engine/sflow/；not-found 时探测一层常见错位，
           // 命中即回显子项目目录，避免把「写错位置」误报成「工件未生成」。
-          const misplaced = await probeMisplacedArtifact(changeDir, 'execution-contract.md');
+          const misplaced = await probeMisplacedArtifact(workDir, 'execution-contract.md');
           return {
             title: "Contract Validator",
             output: JSON.stringify({
@@ -40,7 +40,7 @@ export function createContractValidatorTool(): ToolDefinition {
               recommendations: [
                 describeMissingArtifact(
                   "execution-contract.md not found - run contract-builder to create the contract",
-                  changeDir,
+                  workDir,
                   misplaced,
                   'execution-contract.md',
                 ),
@@ -50,7 +50,7 @@ export function createContractValidatorTool(): ToolDefinition {
         }
 
         const report = sharedValidator.validateExecutionContract(contractContent);
-        const isStale = await isContractStale(changeDir);
+        const isStale = await isContractStale(workDir);
 
         const recommendations: string[] = generateRecommendations(report, isStale);
 

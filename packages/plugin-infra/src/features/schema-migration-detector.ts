@@ -49,7 +49,7 @@ export interface FrameworkDetector {
    * Detect whether this framework is used in the given directory.
    * Returns null if not detected, or a result with config path if detected.
    */
-  detect: (changeDir: string) => Promise<FrameworkDetectionResult | null>;
+  detect: (workDir: string) => Promise<FrameworkDetectionResult | null>;
 }
 
 // ─── SCHEMA_FILE_PATTERNS ──────────────────────────────────────────────────────
@@ -125,8 +125,8 @@ async function findFileByPattern(dir: string, patterns: string[]): Promise<strin
 export const FRAMEWORK_DETECTORS: FrameworkDetector[] = [
   {
     name: 'prisma',
-    detect: async (changeDir: string) => {
-      const configPath = await findFileByPattern(changeDir, ['prisma/schema.prisma']);
+    detect: async (workDir: string) => {
+      const configPath = await findFileByPattern(workDir, ['prisma/schema.prisma']);
       if (configPath) {
         return { name: 'prisma', configPath };
       }
@@ -135,8 +135,8 @@ export const FRAMEWORK_DETECTORS: FrameworkDetector[] = [
   },
   {
     name: 'alembic',
-    detect: async (changeDir: string) => {
-      const configPath = await findFileByPattern(changeDir, ['alembic.ini']);
+    detect: async (workDir: string) => {
+      const configPath = await findFileByPattern(workDir, ['alembic.ini']);
       if (configPath) {
         return { name: 'alembic', configPath };
       }
@@ -145,8 +145,8 @@ export const FRAMEWORK_DETECTORS: FrameworkDetector[] = [
   },
   {
     name: 'knex',
-    detect: async (changeDir: string) => {
-      const configPath = await findFileByPattern(changeDir, ['knexfile.*']);
+    detect: async (workDir: string) => {
+      const configPath = await findFileByPattern(workDir, ['knexfile.*']);
       if (configPath) {
         return { name: 'knex', configPath };
       }
@@ -155,8 +155,8 @@ export const FRAMEWORK_DETECTORS: FrameworkDetector[] = [
   },
   {
     name: 'flyway',
-    detect: async (changeDir: string) => {
-      const configPath = await findFileByPattern(changeDir, ['flyway.conf']);
+    detect: async (workDir: string) => {
+      const configPath = await findFileByPattern(workDir, ['flyway.conf']);
       if (configPath) {
         return { name: 'flyway', configPath };
       }
@@ -165,10 +165,10 @@ export const FRAMEWORK_DETECTORS: FrameworkDetector[] = [
   },
   {
     name: 'raw-sql',
-    detect: async (changeDir: string) => {
+    detect: async (workDir: string) => {
       // Raw SQL is always "detected" as a fallback — any project can have SQL files
-      const migrationsDir = path.join(changeDir, 'migrations');
-      const dbMigrationsDir = path.join(changeDir, 'db/migrations');
+      const migrationsDir = path.join(workDir, 'migrations');
+      const dbMigrationsDir = path.join(workDir, 'db/migrations');
       if (await directoryExists(migrationsDir) || await directoryExists(dbMigrationsDir)) {
         return { name: 'raw-sql', configPath: await directoryExists(migrationsDir) ? migrationsDir : dbMigrationsDir };
       }
@@ -444,12 +444,12 @@ export function generateMigrationFile(change: SchemaChange, framework: string): 
  * Searches framework-specific migration directories for files that match
  * the table name pattern.
  *
- * @param changeDir - The project root directory
+ * @param workDir - The project root directory
  * @param change - The schema change to check for
  * @returns true if a matching migration file exists, false otherwise
  */
 export async function checkMigrationFileExists(
-  changeDir: string,
+  workDir: string,
   change: SchemaChange,
 ): Promise<boolean> {
   const tableName = change.tableName;
@@ -461,32 +461,32 @@ export async function checkMigrationFileExists(
   switch (framework) {
     case 'prisma':
       searchDirs.push(
-        path.join(changeDir, 'prisma/migrations'),
+        path.join(workDir, 'prisma/migrations'),
       );
       break;
     case 'alembic':
       searchDirs.push(
-        path.join(changeDir, 'alembic/versions'),
+        path.join(workDir, 'alembic/versions'),
       );
       break;
     case 'knex':
       searchDirs.push(
-        path.join(changeDir, 'migrations'),
-        path.join(changeDir, 'db/migrations'),
+        path.join(workDir, 'migrations'),
+        path.join(workDir, 'db/migrations'),
       );
       break;
     case 'flyway':
       searchDirs.push(
-        path.join(changeDir, 'db/migration'),
-        path.join(changeDir, 'migrations'),
+        path.join(workDir, 'db/migration'),
+        path.join(workDir, 'migrations'),
       );
       break;
     case 'raw-sql':
     default:
       searchDirs.push(
-        path.join(changeDir, 'migrations'),
-        path.join(changeDir, 'db/migrations'),
-        path.join(changeDir, 'db/migration'),
+        path.join(workDir, 'migrations'),
+        path.join(workDir, 'db/migrations'),
+        path.join(workDir, 'db/migration'),
       );
       break;
   }

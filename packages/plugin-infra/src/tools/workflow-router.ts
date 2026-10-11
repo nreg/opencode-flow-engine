@@ -241,8 +241,8 @@ function matchIntent(input: string): { agent: string; action: string; descriptio
 /**
  * Read the current workflow state from .flow-engine/sflow/state.json
  */
-async function readWorkflowState(changeDir: string): Promise<{ state: string; mode: string } | null> {
-  const sd = await readJsonFile<{ state?: string; mode?: string }>(`${changeDir}/.flow-engine/sflow/state.json`);
+async function readWorkflowState(workDir: string): Promise<{ state: string; mode: string } | null> {
+  const sd = await readJsonFile<{ state?: string; mode?: string }>(`${workDir}/.flow-engine/sflow/state.json`);
   if (!sd?.state) return null;
   return { state: sd.state, mode: sd.mode || 'full' };
 }
@@ -251,9 +251,9 @@ async function readWorkflowState(changeDir: string): Promise<{ state: string; mo
  * Auto-discover the active change directory by scanning .flow-engine/sflow/changes/.
  * Returns the first change directory found, or the given directory if nothing found.
  */
-async function findActiveChangeDir(changeDir: string, fsDirectory: string): Promise<string> {
-  // If an explicit changeDir was provided, use it directly
-  if (changeDir) return changeDir;
+async function findActiveChangeDir(workDir: string, fsDirectory: string): Promise<string> {
+  // If an explicit workDir was provided, use it directly
+  if (workDir) return workDir;
 
   // Scan .flow-engine/sflow/changes/ for active change directories
   const changesRoot = fsDirectory + '/.flow-engine/sflow/changes';
@@ -276,7 +276,7 @@ async function findActiveChangeDir(changeDir: string, fsDirectory: string): Prom
   const selfHasState = await fileExists(fsDirectory + '/.flow-engine/sflow/state.json').catch(() => false);
   if (selfHasState) return fsDirectory;
 
-  return changeDir || fsDirectory;
+  return workDir || fsDirectory;
 }
 
 /**
@@ -287,7 +287,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
     name: "workflow_router",
     description: "Detect current workflow state and route to appropriate agent. Supports natural language intent detection.",
     parameters: {
-      changeDir: {
+      workDir: {
         type: "string",
         description: "Path to the change directory",
         required: true,
@@ -299,9 +299,9 @@ export function createWorkflowRouterTool(): ToolDefinition {
       },
     },
     execute: async (params, context) => {
-      const p = params as { changeDir?: string; intent?: string };
+      const p = params as { workDir?: string; intent?: string };
       const fallbackDir = resolveChangeDir(undefined, context.directory);
-      const changeDir = await findActiveChangeDir(p.changeDir || fallbackDir || context.directory, fallbackDir || context.directory);
+      const workDir = await findActiveChangeDir(p.workDir || fallbackDir || context.directory, fallbackDir || context.directory);
       const userIntent = p.intent || '';
 
       // Phase 0: Horizontal command detection
@@ -316,8 +316,8 @@ export function createWorkflowRouterTool(): ToolDefinition {
             const afkTier = tierMatch?.[1] ? parseInt(tierMatch[1], 10) : 1;
 
             // Read current state to preserve existing fields
-            const currentState = await readWorkflowState(changeDir);
-            await writeStateFile(changeDir, currentState?.state || 'exploring', {
+            const currentState = await readWorkflowState(workDir);
+            await writeStateFile(workDir, currentState?.state || 'exploring', {
               afk: true,
               afkTier,
             });
@@ -370,7 +370,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
 
       // T3.2: 终端状态阻断 - closing/abandoned 状态下阻断非横向命令路由
       // 在横向命令检测之后、intent 匹配之前执行
-      const wfStateForTerminalCheck = await readWorkflowState(changeDir);
+      const wfStateForTerminalCheck = await readWorkflowState(workDir);
       if (wfStateForTerminalCheck?.state === 'closing' || wfStateForTerminalCheck?.state === 'abandoned') {
         const terminalState = wfStateForTerminalCheck.state;
         return {
@@ -398,7 +398,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
         // P4: Try intent matching FIRST. Only fall back to "new thing detection"
         // when no intent matches (to avoid "做代码审查" being treated as new thing).
         const matched = matchIntent(userIntent);
-        const wfStateForNewThing = await readWorkflowState(changeDir);
+        const wfStateForNewThing = await readWorkflowState(workDir);
         const hasActiveChange = !!(wfStateForNewThing?.state);
         const isNewThing = isNewThingDescription(userIntent, hasActiveChange);
 
@@ -430,7 +430,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
 
         // If matched or both, proceed to matched intent routing
         if (matched) {
-          const wfState = await readWorkflowState(changeDir);
+          const wfState = await readWorkflowState(workDir);
           const currentState = wfState?.state || 'exploring';
           const allowedAgents = STATE_ALLOWED_AGENTS[currentState] || [];
           const taskId = extractTaskId(userIntent);
@@ -478,7 +478,7 @@ export function createWorkflowRouterTool(): ToolDefinition {
 
       // Phase 2: Artifact-based state detection (fallback) — delegates to canonical detectWorkflowState()
       try {
-        const detection = await detectWorkflowState(changeDir);
+        const detection = await detectWorkflowState(workDir);
         const routingDeclaration = {
           loaded: [] as string[],
           notLoaded: [] as string[],

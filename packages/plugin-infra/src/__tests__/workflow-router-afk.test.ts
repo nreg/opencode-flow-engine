@@ -65,7 +65,7 @@ describe('Workflow Router — AFK Phase 0 Handling', () => {
 
   it('should detect set-afk-on action and write state.json with afk=true, afkTier=1 (default)', async () => {
     const result = await tool.execute(
-      { changeDir: dir, intent: '开启afk模式' },
+      { workDir: dir, intent: '开启afk模式' },
       makeContext(dir),
     );
 
@@ -86,7 +86,7 @@ describe('Workflow Router — AFK Phase 0 Handling', () => {
 
   it('should detect set-afk-on with tier2 and write afkTier=2', async () => {
     const result = await tool.execute(
-      { changeDir: dir, intent: 'afk tier2' },
+      { workDir: dir, intent: 'afk tier2' },
       makeContext(dir),
     );
 
@@ -102,7 +102,7 @@ describe('Workflow Router — AFK Phase 0 Handling', () => {
 
   it('should detect set-afk-on with tier3 and write afkTier=3', async () => {
     const result = await tool.execute(
-      { changeDir: dir, intent: 'afk tier3' },
+      { workDir: dir, intent: 'afk tier3' },
       makeContext(dir),
     );
 
@@ -118,7 +118,7 @@ describe('Workflow Router — AFK Phase 0 Handling', () => {
 
   it('should return confirmation message with Tier description', async () => {
     const result = await tool.execute(
-      { changeDir: dir, intent: '进入无人值守模式' },
+      { workDir: dir, intent: '进入无人值守模式' },
       makeContext(dir),
     );
 
@@ -139,7 +139,7 @@ describe('Workflow Router — AFK Phase 0 Handling', () => {
     }));
 
     await tool.execute(
-      { changeDir: dir, intent: '开启afk模式' },
+      { workDir: dir, intent: '开启afk模式' },
       makeContext(dir),
     );
 
@@ -154,7 +154,7 @@ describe('Workflow Router — AFK Phase 0 Handling', () => {
 
   it('should not interfere with non-AFK horizontal commands', async () => {
     const result = await tool.execute(
-      { changeDir: dir, intent: '全面测试' },
+      { workDir: dir, intent: '全面测试' },
       makeContext(dir),
     );
 
@@ -176,7 +176,7 @@ describe('Workflow Router — AFK Phase 0 Handling', () => {
     await ensureDir(dir);
 
     const result = await tool.execute(
-      { changeDir: dir, intent: 'AFK' },
+      { workDir: dir, intent: 'AFK' },
       makeContext(dir),
     );
 

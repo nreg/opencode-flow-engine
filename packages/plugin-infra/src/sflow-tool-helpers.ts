@@ -4,13 +4,13 @@ import { readJsonFile } from '@opencode-flow-engine/shared';
 import { getStateFilePath } from './features/state-manager.js';
 import { readArtifactContent, listSpecFiles, readSpecContent } from './features/state-manager/artifact-paths.js';
 
-export async function getCurrentWorkflowState(changeDir: string): Promise<string | null> {
-  const state = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
+export async function getCurrentWorkflowState(workDir: string): Promise<string | null> {
+  const state = await readJsonFile<{ state?: string }>(`${workDir}/${getStateFilePath('sflow')}`);
   return state?.state ?? null;
 }
 
-export async function executeContractValidator(changeDir: string) {
-  const contractContent = await readArtifactContent(changeDir, 'execution-contract.md');
+export async function executeContractValidator(workDir: string) {
+  const contractContent = await readArtifactContent(workDir, 'execution-contract.md');
   if (!contractContent) {
     return {
       validation: { valid: false, issues: [], summary: { errors: 0, warnings: 0, info: 0 } },
@@ -20,7 +20,7 @@ export async function executeContractValidator(changeDir: string) {
   }
 
   const report = sharedValidator.validateExecutionContract(contractContent);
-  const isStale = await isContractStale(changeDir);
+  const isStale = await isContractStale(workDir);
 
   const recommendations: string[] = [];
   if (isStale) recommendations.push('Contract is stale — regenerate with contract-builder');
@@ -30,20 +30,20 @@ export async function executeContractValidator(changeDir: string) {
   return { validation: report, isStale, recommendations };
 }
 
-export async function executeArtifactInspector(changeDir: string) {
+export async function executeArtifactInspector(workDir: string) {
   const results: Record<string, unknown> = {};
 
-  const proposalContent = await readArtifactContent(changeDir, 'proposal.md');
+  const proposalContent = await readArtifactContent(workDir, 'proposal.md');
   if (proposalContent) {
     results.proposal = sharedValidator.validateChangeContent('proposal', proposalContent);
   } else {
     results.proposal = { valid: false, error: 'File not found', issues: [], summary: { errors: 1, warnings: 0, info: 0 } };
   }
 
-  const specFiles = await listSpecFiles(changeDir);
+  const specFiles = await listSpecFiles(workDir);
   results.specs = {};
   for (const specFile of specFiles) {
-    const specContent = await readSpecContent(changeDir, specFile);
+    const specContent = await readSpecContent(workDir, specFile);
     if (specContent) {
       (results.specs as Record<string, unknown>)[specFile] = sharedValidator.validateSpecContent(
         specFile.replace('.md', ''),
@@ -52,14 +52,14 @@ export async function executeArtifactInspector(changeDir: string) {
     }
   }
 
-  const designContent = await readArtifactContent(changeDir, 'design.md');
+  const designContent = await readArtifactContent(workDir, 'design.md');
   if (designContent) {
     results.design = sharedValidator.validateDesign(designContent);
   } else {
     results.design = { valid: false, error: 'File not found', issues: [], summary: { errors: 1, warnings: 0, info: 0 } };
   }
 
-  const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
+  const tasksContent = await readArtifactContent(workDir, 'tasks.md');
   if (tasksContent) {
     results.tasks = sharedValidator.validateTasks(tasksContent);
   } else {

@@ -44,7 +44,7 @@ describe('Continuation Hook — Build Pause 3-State', () => {
 
   it('should detect corrupted pause: build_pause set but contract missing', async () => {
     await writeState(dir, { state: 'executing', mode: 'full', build_pause: 'plan-ready' });
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
     expect(data?.pause_state).toBe('corrupted');
@@ -55,7 +55,7 @@ describe('Continuation Hook — Build Pause 3-State', () => {
   it('should detect normal pause: build_pause set but isolation/build_mode not set', async () => {
     await writeState(dir, { state: 'executing', mode: 'full', build_pause: 'plan-ready' });
     await writeFile(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nTest');
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
     expect(data?.pause_state).toBe('normal');
@@ -69,7 +69,7 @@ describe('Continuation Hook — Build Pause 3-State', () => {
       isolation: 'branch', build_mode: 'inline',
     });
     await writeFile(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nTest');
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
     expect(data?.pause_state).toBe('stale');
@@ -80,7 +80,7 @@ describe('Continuation Hook — Build Pause 3-State', () => {
   it('should not treat executing without build_pause as paused', async () => {
     await writeState(dir, { state: 'executing', mode: 'full' });
     await writeFile(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nTest');
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
     // executing requires user consent before dispatching build-executor
@@ -105,7 +105,7 @@ describe('Continuation Hook — Terminal States', () => {
 
   it('should return next:done for closing state', async () => {
     await writeState(dir, { state: 'closing', mode: 'full' });
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     const data = result.data as Record<string, unknown>;
     expect(data?.shouldContinue).toBe(false);
     expect(data?.next).toBe('done');
@@ -113,7 +113,7 @@ describe('Continuation Hook — Terminal States', () => {
 
   it('should return next:done for abandoned state', async () => {
     await writeState(dir, { state: 'abandoned', mode: 'full' });
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     const data = result.data as Record<string, unknown>;
     expect(data?.shouldContinue).toBe(false);
     expect(data?.next).toBe('done');
@@ -136,7 +136,7 @@ describe('Continuation Hook — Auto-Transition Config', () => {
 
   it('should auto-transition by default for non-manual states', async () => {
     await writeState(dir, { state: 'specifying', mode: 'full' });
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     const data = result.data as Record<string, unknown>;
     expect(data?.shouldContinue).toBe(true);
     expect(data?.next).toBe('auto');
@@ -145,7 +145,7 @@ describe('Continuation Hook — Auto-Transition Config', () => {
 
   it('should not auto-transition for executing state', async () => {
     await writeState(dir, { state: 'executing', mode: 'full' });
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     const data = result.data as Record<string, unknown>;
     expect(data?.shouldContinue).toBe(false);
     expect(data?.next).toBe('manual');
@@ -153,7 +153,7 @@ describe('Continuation Hook — Auto-Transition Config', () => {
 
   it('should not auto-transition for approved-for-build state', async () => {
     await writeState(dir, { state: 'approved-for-build', mode: 'full' });
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     const data = result.data as Record<string, unknown>;
     expect(data?.shouldContinue).toBe(false);
     expect(data?.next).toBe('manual');
@@ -162,7 +162,7 @@ describe('Continuation Hook — Auto-Transition Config', () => {
   it('should respect auto_transition: false in config', async () => {
     await writeState(dir, { state: 'specifying', mode: 'full' });
     await writeConfig(dir, { auto_transition: false });
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     const data = result.data as Record<string, unknown>;
     expect(data?.shouldContinue).toBe(false);
     expect(data?.next).toBe('manual');
@@ -180,14 +180,14 @@ describe('Continuation Hook — Auto-Transition Config', () => {
     };
     for (const [state, expectedSkill] of Object.entries(stateSkillMap)) {
       await writeState(dir, { state, mode: 'full' });
-      const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+      const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
       const data = result.data as Record<string, unknown>;
       expect(data?.skill).toBe(expectedSkill);
     }
   });
 
   it('should handle no state file', async () => {
-    const result = await hook.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
+    const result = await hook.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'autocontinue' });
     const data = result.data as Record<string, unknown>;
     expect(data?.shouldContinue).toBe(false);
     expect(data?.next).toBe('manual');

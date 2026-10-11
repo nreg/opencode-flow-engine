@@ -34,9 +34,9 @@ export function createStateManager(
       return { success: true };
     },
 
-    async restoreState(changeDir: string): Promise<FeatureResult> {
+    async restoreState(workDir: string): Promise<FeatureResult> {
       try {
-        const boulderPath = `${changeDir}/${BOULDER_STATE_FILE}`;
+        const boulderPath = `${workDir}/${BOULDER_STATE_FILE}`;
         const exists = await fileExists(boulderPath);
         if (!exists) {
           return { success: true, data: { restored: false, reason: "No boulder state found" } };
@@ -48,7 +48,7 @@ export function createStateManager(
         }
 
         const currentState = (boulderState.state as string) || "exploring";
-        const repairedState = await this.detectStateMismatch(changeDir, currentState);
+        const repairedState = await this.detectStateMismatch(workDir, currentState);
 
         if (repairedState !== currentState) {
           Logger.log(`[SFLOW] Detected state mismatch: state=${currentState} but artifacts indicate ${repairedState}. Auto-repairing.`);
@@ -63,7 +63,7 @@ export function createStateManager(
           boulderState.afkTier = 0;
         }
 
-        const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
+        const statePath = `${workDir}/.flow-engine/sflow/state.json`;
         await writeJsonFile(statePath, {
           ...boulderState,
           restoredAt: new Date().toISOString(),
@@ -87,14 +87,14 @@ export function createStateManager(
       }
     },
 
-    async detectStateMismatch(changeDir: string, currentState: string): Promise<string> {
+    async detectStateMismatch(workDir: string, currentState: string): Promise<string> {
       // R4-2: Delegate to canonical standalone function
-      return detectStateMismatch(changeDir, currentState);
+      return detectStateMismatch(workDir, currentState);
     },
 
-    async persistState(changeDir: string): Promise<FeatureResult> {
+    async persistState(workDir: string): Promise<FeatureResult> {
       try {
-        const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
+        const statePath = `${workDir}/.flow-engine/sflow/state.json`;
         const stateExists = await fileExists(statePath);
         if (!stateExists) {
           return { success: true, data: { persisted: false, reason: "No workflow state to persist" } };
@@ -105,7 +105,7 @@ export function createStateManager(
           return { success: true, data: { persisted: false, reason: "Empty workflow state" } };
         }
 
-        const boulderPath = `${changeDir}/${BOULDER_STATE_FILE}`;
+        const boulderPath = `${workDir}/${BOULDER_STATE_FILE}`;
         await writeJsonFile(boulderPath, {
           ...state,
           persistedAt: new Date().toISOString(),
@@ -131,9 +131,9 @@ export function createStateManager(
       }
     },
 
-    async getState(changeDir: string): Promise<FeatureResult> {
+    async getState(workDir: string): Promise<FeatureResult> {
       try {
-        return await wf.getState(changeDir);
+        return await wf.getState(workDir);
       } catch (error) {
         return {
           success: false,
@@ -142,9 +142,9 @@ export function createStateManager(
       }
     },
 
-    async updateState(changeDir: string, updates: Record<string, unknown>): Promise<FeatureResult> {
+    async updateState(workDir: string, updates: Record<string, unknown>): Promise<FeatureResult> {
       try {
-        return await wf.transitionState(changeDir, (updates.state as string) || "exploring");
+        return await wf.transitionState(workDir, (updates.state as string) || "exploring");
       } catch (error) {
         return {
           success: false,
@@ -153,9 +153,9 @@ export function createStateManager(
       }
     },
 
-    async isContractApproved(changeDir: string): Promise<FeatureResult> {
+    async isContractApproved(workDir: string): Promise<FeatureResult> {
       try {
-        const state = await wf.getState(changeDir);
+        const state = await wf.getState(workDir);
         if (!state.success) return state;
         return {
           success: true,
@@ -169,13 +169,13 @@ export function createStateManager(
       }
     },
 
-    async approveContract(changeDir: string): Promise<FeatureResult> {
+    async approveContract(workDir: string): Promise<FeatureResult> {
       try {
-        const current = await wf.getState(changeDir);
+        const current = await wf.getState(workDir);
         if (!current.success) return current;
-        const result = await wf.transitionState(changeDir, "approved-for-build");
+        const result = await wf.transitionState(workDir, "approved-for-build");
         if (result.success) {
-          await this.persistState(changeDir);
+          await this.persistState(workDir);
         }
         return {
           success: result.success,
@@ -189,9 +189,9 @@ export function createStateManager(
       }
     },
 
-    async upgradeMode(changeDir: string, newMode: string, reason: string): Promise<FeatureResult> {
+    async upgradeMode(workDir: string, newMode: string, reason: string): Promise<FeatureResult> {
       try {
-        const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
+        const statePath = `${workDir}/.flow-engine/sflow/state.json`;
         const state = await readJsonFile<Record<string, unknown>>(statePath);
         if (!state) {
           return { success: false, error: "State file not found" };
@@ -206,7 +206,7 @@ export function createStateManager(
 
         await atomicWriteJsonFile(statePath, state);
 
-        await this.persistState(changeDir);
+        await this.persistState(workDir);
 
         return {
           success: true,
@@ -226,9 +226,9 @@ export function createStateManager(
       }
     },
 
-    async setBuildPause(changeDir: string, pauseType: string): Promise<FeatureResult> {
+    async setBuildPause(workDir: string, pauseType: string): Promise<FeatureResult> {
       try {
-        const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
+        const statePath = `${workDir}/.flow-engine/sflow/state.json`;
         const state = await readJsonFile<Record<string, unknown>>(statePath);
         if (!state) {
           return { success: false, error: "State file not found" };
@@ -246,9 +246,9 @@ export function createStateManager(
       }
     },
 
-    async clearBuildPause(changeDir: string): Promise<FeatureResult> {
+    async clearBuildPause(workDir: string): Promise<FeatureResult> {
       try {
-        const statePath = `${changeDir}/.flow-engine/sflow/state.json`;
+        const statePath = `${workDir}/.flow-engine/sflow/state.json`;
         const state = await readJsonFile<Record<string, unknown>>(statePath);
         if (!state) {
           return { success: false, error: "State file not found" };
@@ -268,18 +268,18 @@ export function createStateManager(
 
     // ─── LESSONS.md Methods ────────────────────────────────────────────────
 
-    async grepLessons(changeDir: string, keywords: string[]): Promise<FeatureResult> {
+    async grepLessons(workDir: string, keywords: string[]): Promise<FeatureResult> {
       try {
-        const hits = await searchLessonsInFile(changeDir, keywords);
+        const hits = await searchLessonsInFile(workDir, keywords);
         return { success: true, data: { hits } };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
 
-    async addLesson(changeDir: string, entry: import('./lessons.js').LessonEntry): Promise<FeatureResult> {
+    async addLesson(workDir: string, entry: import('./lessons.js').LessonEntry): Promise<FeatureResult> {
       try {
-        const lessonsPath = changeDir + '/.flow-engine/sflow/lessons.md';
+        const lessonsPath = workDir + '/.flow-engine/sflow/lessons.md';
         const existing = await readFile(lessonsPath);
         const entries = existing ? parseLessonsMd(existing) : [];
         const nextIndex = entries.length + 1;
@@ -321,7 +321,7 @@ export function createStateManager(
         const formatted = '\n\n' + formatLessonEntry(nextIndex, { ...entry, firstSeen: entry.firstSeen || new Date().toISOString(), lastReviewed: new Date().toISOString() });
         if (!existing) {
           const header = '# LESSONS — 跨任务失败知识库\n\n';
-          await ensureDir(changeDir + '/.flow-engine/sflow');
+          await ensureDir(workDir + '/.flow-engine/sflow');
           await writeFile(lessonsPath, header + formatted.trim());
         } else {
           await writeFile(lessonsPath, existing.replace(/\n*$/, '') + formatted);
@@ -334,34 +334,34 @@ export function createStateManager(
 
     // ─── PROGRESS.md Methods ───────────────────────────────────────────────
 
-    async writeProgress(changeDir: string, data: import('./progress.js').ProgressData): Promise<FeatureResult> {
+    async writeProgress(workDir: string, data: import('./progress.js').ProgressData): Promise<FeatureResult> {
       try {
-        await writeProgressFile(changeDir, data);
+        await writeProgressFile(workDir, data);
         return { success: true, data: { written: true, taskId: data.taskId, timestamp: new Date().toISOString() } };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
 
-    async readProgress(changeDir: string): Promise<FeatureResult> {
+    async readProgress(workDir: string): Promise<FeatureResult> {
       try {
-        const data = await readProgressFile(changeDir);
+        const data = await readProgressFile(workDir);
         return { success: true, data: data || null };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
 
-    async checkProgressAntiRepeat(changeDir: string, plannedApproach: string): Promise<FeatureResult> {
+    async checkProgressAntiRepeat(workDir: string, plannedApproach: string): Promise<FeatureResult> {
       try {
-        const result = await detectProgressAntiRepeat(changeDir, plannedApproach);
+        const result = await detectProgressAntiRepeat(workDir, plannedApproach);
         return { success: true, data: result };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
 
-    async writeProgressSnapshot(changeDir: string, data: { taskId?: string; currentState: string; nextStep?: string; excludedApproaches: import('./progress.js').ExcludedApproach[] }): Promise<FeatureResult> {
+    async writeProgressSnapshot(workDir: string, data: { taskId?: string; currentState: string; nextStep?: string; excludedApproaches: import('./progress.js').ExcludedApproach[] }): Promise<FeatureResult> {
       try {
         const progressData: import('./progress.js').ProgressData = {
           taskId: data.taskId,
@@ -374,16 +374,16 @@ export function createStateManager(
           pendingAssumptions: [],
           clues: [],
         };
-        await writeProgressFile(changeDir, progressData);
+        await writeProgressFile(workDir, progressData);
         return { success: true, data: { written: true, timestamp: new Date().toISOString() } };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
 
-    async addLessonsFromProgress(changeDir: string, taskId?: string): Promise<FeatureResult> {
+    async addLessonsFromProgress(workDir: string, taskId?: string): Promise<FeatureResult> {
       try {
-        const progress = await readProgressFile(changeDir);
+        const progress = await readProgressFile(workDir);
         if (!progress || progress.excludedApproaches.length === 0) {
           return { success: true, data: { nominated: 0, reason: 'No excluded approaches found in PROGRESS.md' } };
         }
@@ -411,7 +411,7 @@ export function createStateManager(
             reevaluateWhen: '条件变化后可重新评估',
           };
 
-          const result = await this.addLesson(changeDir, lessonEntry);
+          const result = await this.addLesson(workDir, lessonEntry);
           const resultData = result.data as { id?: string } | undefined;
           if (result.success && resultData?.id) {
             nominatedIds.push(resultData.id);
@@ -435,10 +435,10 @@ export function createStateManager(
       }
     },
 
-    async clearProgressSnapshot(changeDir: string): Promise<FeatureResult> {
+    async clearProgressSnapshot(workDir: string): Promise<FeatureResult> {
       try {
         const { unlink } = await import('node:fs/promises');
-        await unlink(changeDir + '/.flow-engine/sflow/progress.md');
+        await unlink(workDir + '/.flow-engine/sflow/progress.md');
         return { success: true, data: { cleared: true, timestamp: new Date().toISOString() } };
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
@@ -449,7 +449,7 @@ export function createStateManager(
     },
 
     async updateSubagentProgress(
-      changeDir: string,
+      workDir: string,
       checkpoint: {
         planTask: string;
         specTask?: string;
@@ -465,7 +465,7 @@ export function createStateManager(
       },
     ): Promise<FeatureResult> {
       try {
-        const progressPath = changeDir + '/.flow-engine/sflow/subagent-progress.md';
+        const progressPath = workDir + '/.flow-engine/sflow/subagent-progress.md';
         const now = new Date().toISOString();
         const lines: string[] = [];
         lines.push('# Subagent Progress Checkpoint', '');
@@ -486,23 +486,23 @@ export function createStateManager(
           lines.push('- **Unresolved feedback**: ' + checkpoint.unresolvedFeedback.join('; '));
         }
         lines.push('', '_Updated: ' + now + '_');
-        await ensureDir(changeDir + '/.flow-engine/sflow');
+        await ensureDir(workDir + '/.flow-engine/sflow');
         await writeFile(progressPath, lines.join('\n'));
         return { success: true, data: { written: true, stage: checkpoint.stage, timestamp: now } };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
-    async isContractStale(changeDir: string): Promise<FeatureResult> {
+    async isContractStale(workDir: string): Promise<FeatureResult> {
       try {
-        const stateExists = await fileExists(`${changeDir}/.flow-engine/sflow/state.json`);
-        const contractExists = await artifactExists(changeDir, 'execution-contract.md');
+        const stateExists = await fileExists(`${workDir}/.flow-engine/sflow/state.json`);
+        const contractExists = await artifactExists(workDir, 'execution-contract.md');
 
         if (!stateExists || !contractExists) {
           return { success: true, data: { stale: false } };
         }
 
-        const stale = await checkContractStale(changeDir);
+        const stale = await checkContractStale(workDir);
         return { success: true, data: { stale } };
       } catch (error) {
         return {

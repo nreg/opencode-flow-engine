@@ -49,7 +49,7 @@ describe('Task 4.3: debugging 回退原因显式记录', () => {
 
   it('回退到 specifying 时记录原因，写入 state 转换记录', async () => {
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -68,7 +68,7 @@ describe('Task 4.3: debugging 回退原因显式记录', () => {
 
   it('回退到 bridging 时记录原因', async () => {
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -85,7 +85,7 @@ describe('Task 4.3: debugging 回退原因显式记录', () => {
 
   it('缺原因回退被拒，报错含 Fix 指引', async () => {
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -101,7 +101,7 @@ describe('Task 4.3: debugging 回退原因显式记录', () => {
 
   it('debugging → executing 正常推进无需回退原因', async () => {
     const result = await hook.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',

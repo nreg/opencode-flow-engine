@@ -43,11 +43,11 @@ function shortSha(value: string): string {
  *
  * 仅约束**新写入的 pass 收据**；fail 收据不要求证明改动量（调用方负责分流）。
  *
- * @param changeDir 项目根目录
+ * @param workDir 项目根目录
  * @param base 审查区间起点 commit
  * @param head 审查区间终点 commit
  */
-export async function assertNonEmptyDiff(changeDir: string, base: string, head: string): Promise<void> {
+export async function assertNonEmptyDiff(workDir: string, base: string, head: string): Promise<void> {
   const baseSha = String(base ?? '').trim();
   const headSha = String(head ?? '').trim();
 
@@ -64,12 +64,12 @@ export async function assertNonEmptyDiff(changeDir: string, base: string, head: 
   const { execGitAsync } = await import('../../helpers/git-async.js');
   const output = await execGitAsync(
     ['diff', '--name-only', baseSha, headSha, '--'],
-    changeDir,
+    workDir,
   );
 
   if (output === undefined) {
     Logger.warn(
-      `[P0-1] Skipping non-empty diff validation (${shortSha(baseSha)}..${shortSha(headSha)}): git unavailable for ${changeDir}`,
+      `[P0-1] Skipping non-empty diff validation (${shortSha(baseSha)}..${shortSha(headSha)}): git unavailable for ${workDir}`,
     );
     return;
   }
@@ -95,15 +95,15 @@ export async function assertNonEmptyDiff(changeDir: string, base: string, head: 
  * - 如果收据有 plan scope 信息，跳过（属于其他 plan）
  * - 迁移后保留原文件（向后兼容）
  *
- * @param changeDir - 项目根目录
+ * @param workDir - 项目根目录
  * @param plan - 当前 execution plan
  */
 export async function migrateLegacyReceipts(
-  changeDir: string,
+  workDir: string,
   plan: ExecutionPlan,
 ): Promise<void> {
-  const rootPaths = getOverlayPaths(changeDir);
-  const planPaths = getPlanScopedPaths(changeDir, plan);
+  const rootPaths = getOverlayPaths(workDir);
+  const planPaths = getPlanScopedPaths(workDir, plan);
 
   // 确保目标目录存在
   await ensureReceiptDir(planPaths.reviews);
@@ -112,17 +112,17 @@ export async function migrateLegacyReceipts(
   await ensureReceiptDir(planPaths.repairState);
 
   // 迁移 reviews
-  await migrateReceiptType(changeDir, 'reviews', rootPaths, planPaths, plan);
+  await migrateReceiptType(workDir, 'reviews', rootPaths, planPaths, plan);
 
   // 迁移 repair-state
-  await migrateReceiptType(changeDir, 'repair-state', rootPaths, planPaths, plan);
+  await migrateReceiptType(workDir, 'repair-state', rootPaths, planPaths, plan);
 }
 
 /**
  * 迁移某一类型的收据（reviews 或 repair-state）。
  */
 async function migrateReceiptType(
-  changeDir: string,
+  workDir: string,
   type: 'reviews' | 'repair-state',
   rootPaths: ReturnType<typeof getOverlayPaths>,
   planPaths: ReturnType<typeof getPlanScopedPaths>,
@@ -210,17 +210,17 @@ async function listJsonFiles(dir: string): Promise<string[]> {
  * - 根级路径为兼容镜像，plan-scoped 路径为权威副本
  * - 收据中包含 plan_hash 和 plan_revision 字段
  *
- * @param changeDir - The project/change directory
+ * @param workDir - The project/change directory
  * @param waveId - The wave ID to record the receipt for
  * @param receipt - The receipt data (status, base, head, report)
  * @returns The full ReviewReceipt with recorded_at timestamp
  */
 export async function recordReviewReceipt(
-  changeDir: string,
+  workDir: string,
   waveId: string,
   receipt: Omit<ReviewReceipt, 'recorded_at'>,
 ): Promise<ReviewReceipt> {
-  const plan = await readExecutionPlan(changeDir);
+  const plan = await readExecutionPlan(workDir);
   if (!plan) {
     throw new Error('No execution plan found. Create an execution plan first before recording review receipts.');
   }
@@ -242,20 +242,20 @@ export async function recordReviewReceipt(
   }
 
   // T2.6: Check repair state for circuit breaker
-  const previousRepair = await readRepairState(changeDir, plan, waveId);
+  const previousRepair = await readRepairState(workDir, plan, waveId);
 
   // P0-2: Check for active adjudication authorization
   let authorization: Adjudication | null = null;
   if (previousRepair?.status === 'adjudication-required') {
-    const previousReceipt = await readCurrentReviewReceipt(changeDir, plan, waveId);
-    authorization = await readActiveAdjudicationAsync(changeDir, plan, waveId, previousRepair, previousReceipt);
+    const previousReceipt = await readCurrentReviewReceipt(workDir, plan, waveId);
+    authorization = await readActiveAdjudicationAsync(workDir, plan, waveId, previousRepair, previousReceipt);
     if (!authorization) {
       throw new Error(`Wave "${waveId}" requires adjudication before another review can be recorded`);
     }
   }
 
   // T2.9: 优先读取 plan-scoped 收据，回退到根级 legacy 收据
-  const previousReceipt = await readCurrentReviewReceipt(changeDir, plan, waveId);
+  const previousReceipt = await readCurrentReviewReceipt(workDir, plan, waveId);
   
   // P0-2: startsNewChain — if previous repair is resolved and previous receipt is NOT fail,
   // we can start a new failure chain (allow new fail after resolved repair)
@@ -270,12 +270,12 @@ export async function recordReviewReceipt(
 
   // P0-1: 仅 pass 收据需要证明「审查了真实改动」；fail 收据不受非空限制
   if (receipt.status === 'pass') {
-    await assertNonEmptyDiff(changeDir, receipt.base, receipt.head);
+    await assertNonEmptyDiff(workDir, receipt.base, receipt.head);
   }
 
   // P1-5: Validate final review range for 'final' policy
   if (plan.review_policy === 'final') {
-    await validateFinalReviewRange(changeDir, plan, receipt.base, receipt.head);
+    await validateFinalReviewRange(workDir, plan, receipt.base, receipt.head);
   }
 
   // 构建完整收据（包含 plan scope 信息）
@@ -291,20 +291,20 @@ export async function recordReviewReceipt(
   };
 
   // T2.9: 双写机制 - plan-scoped 权威副本
-  const planPaths = getPlanScopedPaths(changeDir, plan);
+  const planPaths = getPlanScopedPaths(workDir, plan);
   const planReceiptPath = planPaths.reviews + '/' + waveId + '.json';
   await ensureReceiptDir(planPaths.reviews);
   await atomicWriteJsonFile(planReceiptPath, fullReceipt);
 
   // T2.9: 双写机制 - 根级兼容镜像
-  const rootPaths = getOverlayPaths(changeDir);
+  const rootPaths = getOverlayPaths(workDir);
   const rootReceiptPath = rootPaths.reviews + '/' + waveId + '.json';
   await ensureReceiptDir(rootPaths.reviews);
   await atomicWriteJsonFile(rootReceiptPath, fullReceipt);
 
   // T2.6: Update repair state
   const updatedRepairState = await updateRepairState(
-    changeDir,
+    workDir,
     plan,
     waveId,
     previousRepair,
@@ -319,7 +319,7 @@ export async function recordReviewReceipt(
 
   // P0-2: Consume adjudication authorization if one was used
   if (authorization) {
-    await consumeAdjudication(changeDir, plan, waveId, authorization.id, fullReceipt);
+    await consumeAdjudication(workDir, plan, waveId, authorization.id, fullReceipt);
   }
 
   return fullReceipt;
@@ -329,18 +329,18 @@ export async function recordReviewReceipt(
  * 读取当前 plan 的 review 收据。
  * T2.9: 优先读取 plan-scoped 路径，回退到根级 legacy 路径。
  *
- * @param changeDir - 项目根目录
+ * @param workDir - 项目根目录
  * @param plan - 当前 execution plan
  * @param waveId - Wave ID
  * @returns Review 收据或 null
  */
 export async function readCurrentReviewReceipt(
-  changeDir: string,
+  workDir: string,
   plan: ExecutionPlan,
   waveId: string,
 ): Promise<ReviewReceipt | null> {
   // 优先读取 plan-scoped 路径
-  const planPaths = getPlanScopedPaths(changeDir, plan);
+  const planPaths = getPlanScopedPaths(workDir, plan);
   const planReceiptPath = planPaths.reviews + '/' + waveId + '.json';
   const planReceipt = await readJsonFile<ReviewReceipt>(planReceiptPath);
 
@@ -353,7 +353,7 @@ export async function readCurrentReviewReceipt(
   }
 
   // 回退到根级 legacy 路径
-  const rootPaths = getOverlayPaths(changeDir);
+  const rootPaths = getOverlayPaths(workDir);
   const rootReceiptPath = rootPaths.reviews + '/' + waveId + '.json';
   const rootReceipt = await readJsonFile<ReviewReceipt>(rootReceiptPath);
 
@@ -375,18 +375,18 @@ export async function readCurrentReviewReceipt(
  * 读取 repair state。
  * T2.8: 优先读取 plan-scoped 路径，回退到根级 legacy 路径。
  *
- * @param changeDir - 项目根目录
+ * @param workDir - 项目根目录
  * @param plan - 当前 execution plan
  * @param waveId - Wave ID
  * @returns Repair state 或 null
  */
 export async function readRepairState(
-  changeDir: string,
+  workDir: string,
   plan: ExecutionPlan,
   waveId: string,
 ): Promise<RepairState | null> {
   // 优先读取 plan-scoped 路径
-  const planPaths = getPlanScopedPaths(changeDir, plan);
+  const planPaths = getPlanScopedPaths(workDir, plan);
   const planStatePath = planPaths.repairState + '/' + waveId + '.json';
   const planState = await readJsonFile<RepairState>(planStatePath);
 
@@ -399,7 +399,7 @@ export async function readRepairState(
   }
 
   // 回退到根级 legacy 路径
-  const rootPaths = getOverlayPaths(changeDir);
+  const rootPaths = getOverlayPaths(workDir);
   const rootStatePath = rootPaths.repairState + '/' + waveId + '.json';
   const rootState = await readJsonFile<RepairState>(rootStatePath);
 
@@ -500,7 +500,7 @@ export function validateRepairContinuity(
  *
  * T2.8: 已迁移到 plan-scoped 路径
  *
- * @param changeDir - The project/change directory
+ * @param workDir - The project/change directory
  * @param plan - The current execution plan
  * @param waveId - The wave ID
  * @param previousRepair - The previous repair state (may be null)
@@ -510,7 +510,7 @@ export function validateRepairContinuity(
  * @returns The updated repair state or null if deleted
  */
 export async function updateRepairState(
-  changeDir: string,
+  workDir: string,
   plan: ExecutionPlan,
   waveId: string,
   previousRepair: RepairState | null,
@@ -519,7 +519,7 @@ export async function updateRepairState(
   maxFailures: number = MAX_REPAIR_FAILURES,
 ): Promise<RepairState | null> {
   // T2.8: 使用 plan-scoped 路径
-  const planPaths = getPlanScopedPaths(changeDir, plan);
+  const planPaths = getPlanScopedPaths(workDir, plan);
   const repairStateDir = planPaths.repairState;
   await ensureDir(repairStateDir);
   const statePath = repairStateDir + '/' + waveId + '.json';
@@ -650,17 +650,17 @@ export function validateIssueId(issue: string): boolean {
  * The authorization is stored in the adjudication ledger and consumed when the
  * next review is recorded. One authorization = one review attempt.
  *
- * @param changeDir - Project root directory
+ * @param workDir - Project root directory
  * @param waveId - The wave ID to adjudicate
  * @param input - Adjudication input (decision, confirmed, reason)
  * @returns The authorization object
  */
 export async function adjudicateWave(
-  changeDir: string,
+  workDir: string,
   waveId: string,
   input: { decision: string; confirmed: boolean; reason: string },
 ): Promise<Adjudication> {
-  const plan = await readExecutionPlan(changeDir);
+  const plan = await readExecutionPlan(workDir);
   if (!plan) {
     throw new Error('No execution plan found. Create an execution plan first before adjudicating.');
   }
@@ -687,8 +687,8 @@ export async function adjudicateWave(
   }
 
   // Read current receipt and repair state
-  const previousReceipt = await readCurrentReviewReceipt(changeDir, plan, waveId);
-  const previousRepair = await readRepairState(changeDir, plan, waveId);
+  const previousReceipt = await readCurrentReviewReceipt(workDir, plan, waveId);
+  const previousRepair = await readRepairState(workDir, plan, waveId);
 
   // Verify wave is in adjudication-required state
   if (previousReceipt?.status !== 'fail' || previousRepair?.status !== 'adjudication-required') {
@@ -696,13 +696,13 @@ export async function adjudicateWave(
   }
 
   // Check for existing active adjudication
-  const existingAuth = await readActiveAdjudicationAsync(changeDir, plan, waveId, previousRepair, previousReceipt);
+  const existingAuth = await readActiveAdjudicationAsync(workDir, plan, waveId, previousRepair, previousReceipt);
   if (existingAuth) {
     throw new Error(`Wave '${waveId}' already has an active review authorization`);
   }
 
   // Read or create adjudication ledger
-  const ledger = await readAdjudicationLedger(changeDir, plan, waveId) ?? {
+  const ledger = await readAdjudicationLedger(workDir, plan, waveId) ?? {
     plan_hash: plan.hash,
     plan_revision: plan.revision,
     wave_id: waveId,
@@ -730,7 +730,7 @@ export async function adjudicateWave(
   };
 
   ledger.adjudications.push(authorization);
-  await writeAdjudicationLedger(changeDir, plan, waveId, ledger);
+  await writeAdjudicationLedger(workDir, plan, waveId, ledger);
 
   return { ...authorization, active: true } as Adjudication & { active: boolean };
 }
@@ -739,11 +739,11 @@ export async function adjudicateWave(
  * P0-2: Read the adjudication ledger for a wave.
  */
 async function readAdjudicationLedger(
-  changeDir: string,
+  workDir: string,
   plan: ExecutionPlan,
   waveId: string,
 ): Promise<AdjudicationLedger | null> {
-  const planPaths = getPlanScopedPaths(changeDir, plan);
+  const planPaths = getPlanScopedPaths(workDir, plan);
   const ledgerPath = planPaths.planRoot + '/adjudications/' + safeName(waveId) + '.json';
   const ledger = await readJsonFile<AdjudicationLedger>(ledgerPath);
   return ledger;
@@ -753,12 +753,12 @@ async function readAdjudicationLedger(
  * P0-2: Write the adjudication ledger for a wave.
  */
 async function writeAdjudicationLedger(
-  changeDir: string,
+  workDir: string,
   plan: ExecutionPlan,
   waveId: string,
   ledger: AdjudicationLedger,
 ): Promise<void> {
-  const planPaths = getPlanScopedPaths(changeDir, plan);
+  const planPaths = getPlanScopedPaths(workDir, plan);
   const ledgerDir = planPaths.planRoot + '/adjudications';
   await ensureDir(ledgerDir);
   const ledgerPath = ledgerDir + '/' + safeName(waveId) + '.json';
@@ -770,7 +770,7 @@ async function writeAdjudicationLedger(
  * Reads the adjudication ledger and returns the latest active authorization.
  */
 export async function readActiveAdjudicationAsync(
-  changeDir: string,
+  workDir: string,
   plan: ExecutionPlan,
   waveId: string,
   repair: RepairState | null,
@@ -781,7 +781,7 @@ export async function readActiveAdjudicationAsync(
     return null;
   }
 
-  const ledger = await readAdjudicationLedger(changeDir, plan, waveId);
+  const ledger = await readAdjudicationLedger(workDir, plan, waveId);
   if (!ledger || ledger.adjudications.length === 0) {
     return null;
   }
@@ -812,13 +812,13 @@ export async function readActiveAdjudicationAsync(
  * Marks the authorization as consumed and records the review receipt.
  */
 async function consumeAdjudication(
-  changeDir: string,
+  workDir: string,
   plan: ExecutionPlan,
   waveId: string,
   authorizationId: string,
   receipt: ReviewReceipt,
 ): Promise<void> {
-  const ledger = await readAdjudicationLedger(changeDir, plan, waveId);
+  const ledger = await readAdjudicationLedger(workDir, plan, waveId);
   if (!ledger) return;
 
   const authorization = ledger.adjudications.find(a => a.id === authorizationId);
@@ -834,7 +834,7 @@ async function consumeAdjudication(
     ...(receipt.issue ? { issue: receipt.issue } : {}),
   };
 
-  await writeAdjudicationLedger(changeDir, plan, waveId, ledger);
+  await writeAdjudicationLedger(workDir, plan, waveId, ledger);
 }
 
 // ─── P1-1: Review Targets ──────────────────────────────────────────────────────
@@ -888,13 +888,13 @@ export interface RecommendationStateInput {
  * - Tampered plan (hash mismatch)
  * - Cross-workflow plan (workflow mismatch)
  *
- * @param changeDir - Project root directory
+ * @param workDir - Project root directory
  * @param state - Current state.json content
  * @returns The recovered revision number, or null if not recoverable
  * @throws Error if recovery is not possible due to validation failures
  */
 export async function resolveRecommendationPlanRevision(
-  changeDir: string,
+  workDir: string,
   state: RecommendationStateInput,
 ): Promise<number | null> {
   // If state has the revision, return it directly
@@ -903,7 +903,7 @@ export async function resolveRecommendationPlanRevision(
   }
 
   // Try to recover from plan file
-  const plan = await readExecutionPlan(changeDir);
+  const plan = await readExecutionPlan(workDir);
   if (!plan) {
     return null;
   }
@@ -955,17 +955,17 @@ export async function resolveRecommendationPlanRevision(
  * Uses `git rev-parse --verify` to resolve short SHAs to full SHAs.
  * Returns null if the SHA is invalid or git is unavailable.
  *
- * @param changeDir - Project root directory
+ * @param workDir - Project root directory
  * @param sha - The SHA to normalize (can be short or full)
  * @returns The normalized 40-character SHA, or null if invalid
  */
-export async function normalizeCommitSha(changeDir: string, sha: string): Promise<string | null> {
+export async function normalizeCommitSha(workDir: string, sha: string): Promise<string | null> {
   const trimmed = String(sha ?? '').trim();
   if (!trimmed) return null;
 
   try {
     const { execGitAsync } = await import('../../helpers/git-async.js');
-    const result = (await execGitAsync(['rev-parse', '--verify', trimmed], changeDir))?.trim();
+    const result = (await execGitAsync(['rev-parse', '--verify', trimmed], workDir))?.trim();
 
     // Verify it's a valid 40-char SHA
     if (result && FULL_COMMIT_SHA.test(result)) {
@@ -985,12 +985,12 @@ export async function normalizeCommitSha(changeDir: string, sha: string): Promis
  * Normalizes short SHAs to 40-character full SHAs.
  * Does NOT default to current HEAD if sha is missing.
  *
- * @param changeDir - Project root directory
+ * @param workDir - Project root directory
  * @param sha - The commit SHA to use as review base (short or full)
  * @returns The normalized review_base SHA, or null if invalid
  */
-export async function recordReviewBase(changeDir: string, sha?: string): Promise<string | null> {
-  const plan = await readExecutionPlan(changeDir);
+export async function recordReviewBase(workDir: string, sha?: string): Promise<string | null> {
+  const plan = await readExecutionPlan(workDir);
   if (!plan) {
     throw new Error('No execution plan found. Create an execution plan first before recording review base.');
   }
@@ -1006,7 +1006,7 @@ export async function recordReviewBase(changeDir: string, sha?: string): Promise
   }
 
   // Normalize the SHA
-  const normalizedSha = await normalizeCommitSha(changeDir, sha);
+  const normalizedSha = await normalizeCommitSha(workDir, sha);
   if (!normalizedSha) {
     throw new Error(
       `Invalid review base SHA '${sha}': could not resolve to a valid 40-character commit SHA.`,
@@ -1017,7 +1017,7 @@ export async function recordReviewBase(changeDir: string, sha?: string): Promise
   let targetBranch: string | undefined;
   try {
     const { execGitAsync } = await import('../../helpers/git-async.js');
-    targetBranch = (await execGitAsync(['rev-parse', '--abbrev-ref', 'HEAD'], changeDir))?.trim();
+    targetBranch = (await execGitAsync(['rev-parse', '--abbrev-ref', 'HEAD'], workDir))?.trim();
   } catch {
     // Non-git environment: target_branch is undefined
     Logger.warn('[P1-5] Could not determine target branch: git unavailable');
@@ -1037,11 +1037,11 @@ export async function recordReviewBase(changeDir: string, sha?: string): Promise
   updatedPlan.hash = await computeContentHash(updatedPlan);
 
   // Write updated plan
-  const planPath = changeDir + '/.flow-engine/sflow/execution-plan.json';
+  const planPath = workDir + '/.flow-engine/sflow/execution-plan.json';
   await writeJsonFile(planPath, updatedPlan);
 
   // P2-2：改写 plan.hash 后同步 state.execution_plan_hash（派生键失准防御）
-  await syncExecutionPlanHashToState(changeDir, updatedPlan);
+  await syncExecutionPlanHashToState(workDir, updatedPlan);
 
   return normalizedSha;
 }
@@ -1051,8 +1051,8 @@ export async function recordReviewBase(changeDir: string, sha?: string): Promise
  * plan-scoped 目录 identity 以 hash 为键，改写 plan.hash 后必须同步 state 摘要，
  * 否则派生键失准（plan-scoped 目录无法定位）。
  */
-export async function syncExecutionPlanHashToState(changeDir: string, plan: ExecutionPlan): Promise<void> {
-  const statePath = changeDir + '/.flow-engine/sflow/state.json';
+export async function syncExecutionPlanHashToState(workDir: string, plan: ExecutionPlan): Promise<void> {
+  const statePath = workDir + '/.flow-engine/sflow/state.json';
   await stateFileMutex.runExclusive(async () => {
     const state = await readJsonFile<Record<string, unknown>>(statePath);
     if (state) {
@@ -1072,18 +1072,18 @@ export async function syncExecutionPlanHashToState(changeDir: string, plan: Exec
  * 此函数复用 recordReviewBase 的 WRITE_ONCE + SHA 规范化逻辑，
  * 在 git 环境取 HEAD 作为锚点；非 git 环境降级为 no-op。
  *
- * @param changeDir - Project root directory
+ * @param workDir - Project root directory
  * @returns The recorded review_base SHA, or null if not applicable
  */
-export async function recordReviewBaseFromHead(changeDir: string): Promise<string | null> {
+export async function recordReviewBaseFromHead(workDir: string): Promise<string | null> {
   // WRITE_ONCE 由 recordReviewBase 保证：已有 review_base 时为 no-op
-  const plan = await readExecutionPlan(changeDir);
+  const plan = await readExecutionPlan(workDir);
   if (!plan || plan.review_base) return plan?.review_base ?? null;
 
   let headSha: string | undefined;
   try {
     const { execGitAsync } = await import('../../helpers/git-async.js');
-    headSha = (await execGitAsync(['rev-parse', 'HEAD'], changeDir))?.trim();
+    headSha = (await execGitAsync(['rev-parse', 'HEAD'], workDir))?.trim();
   } catch {
     // Non-git environment: degrade to no-op
     return null;
@@ -1091,7 +1091,7 @@ export async function recordReviewBaseFromHead(changeDir: string): Promise<strin
   if (!headSha || !FULL_COMMIT_SHA.test(headSha)) return null;
 
   try {
-    return await recordReviewBase(changeDir, headSha);
+    return await recordReviewBase(workDir, headSha);
   } catch (error) {
     Logger.warn(`[P2-3] Failed to record review_base at plan creation: ${error instanceof Error ? error.message : String(error)}`);
     return null;
@@ -1104,14 +1104,14 @@ export async function recordReviewBaseFromHead(changeDir: string): Promise<strin
  * For 'final' review policy, the review range must start at review_base
  * and cover all changes up to HEAD.
  *
- * @param changeDir - Project root directory
+ * @param workDir - Project root directory
  * @param plan - The execution plan (must have review_base set for final policy)
  * @param base - The review base commit
  * @param head - The review head commit
  * @throws Error if the range is invalid
  */
 export async function validateFinalReviewRange(
-  changeDir: string,
+  workDir: string,
   plan: ExecutionPlan,
   base: string,
   head: string,
@@ -1135,7 +1135,7 @@ export async function validateFinalReviewRange(
   // Resolve HEAD commit first (non-git environment → skip validation gracefully)
   // execGitAsync 失败时返回 undefined（不抛异常），与降级语义一致
   const { execGitAsync } = await import('../../helpers/git-async.js');
-  const headCommit = (await execGitAsync(['rev-parse', 'HEAD'], changeDir))?.trim();
+  const headCommit = (await execGitAsync(['rev-parse', 'HEAD'], workDir))?.trim();
   if (headCommit === undefined) {
     Logger.warn('[P1-5] Could not validate final review range: git unavailable');
     return;
@@ -1156,12 +1156,12 @@ export async function validateFinalReviewRange(
  * Note: This checks for a .git directory at the specified path, not whether
  * the directory is inside a git repo (which would traverse parent directories).
  */
-export async function isGitEnvironment(changeDir: string): Promise<boolean> {
+export async function isGitEnvironment(workDir: string): Promise<boolean> {
   try {
     const { existsSync } = await import('fs');
     const { join } = await import('path');
-    // Check if .git exists at the changeDir level (not parent traversal)
-    return existsSync(join(changeDir, '.git'));
+    // Check if .git exists at the workDir level (not parent traversal)
+    return existsSync(join(workDir, '.git'));
   } catch {
     return false;
   }

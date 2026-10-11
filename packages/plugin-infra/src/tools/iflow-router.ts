@@ -87,8 +87,8 @@ const IFLOW_INTENT_PATTERNS: Array<{
 /**
  * Detect IFlow state from .flow-engine/iflow/ directory artifacts
  */
-async function detectIFlowState(changeDir: string): Promise<IFlowStateResult> {
-  const iflowDir = `${changeDir}/.flow-engine/iflow`;
+async function detectIFlowState(workDir: string): Promise<IFlowStateResult> {
+  const iflowDir = `${workDir}/.flow-engine/iflow`;
   const dirExists = await directoryExists(iflowDir);
 
   let result: IFlowStateResult;
@@ -314,7 +314,7 @@ export function createIFlowRouterTool(): ToolDefinition {
     name: "iflow_router",
     description: "Detect current IFlow state from .flow-engine/iflow/ directory artifacts and route to the appropriate agent. Supports IFlow-specific intent patterns.",
     parameters: {
-      changeDir: {
+      workDir: {
         type: "string",
         description: "Path to the change directory",
         required: true,
@@ -326,8 +326,8 @@ export function createIFlowRouterTool(): ToolDefinition {
       },
     },
     execute: async (params, context) => {
-      const p = params as { changeDir?: string; intent?: string };
-      const changeDir = resolveChangeDir(p.changeDir, context.directory);
+      const p = params as { workDir?: string; intent?: string };
+      const workDir = resolveChangeDir(p.workDir, context.directory);
       const userIntent = p.intent || '';
 
       try {
@@ -360,7 +360,7 @@ export function createIFlowRouterTool(): ToolDefinition {
         if (userIntent) {
           const matched = matchIFlowIntent(userIntent);
           if (matched) {
-            const detection = await detectIFlowState(changeDir);
+            const detection = await detectIFlowState(workDir);
             const allowedAgents = IFLOW_STATE_AGENTS[matched.state] || [];
             return {
               title: 'IFlow Router',
@@ -383,7 +383,7 @@ export function createIFlowRouterTool(): ToolDefinition {
         }
 
         // Phase 2: Artifact-based state detection
-        const detection = await detectIFlowState(changeDir);
+        const detection = await detectIFlowState(workDir);
         const allowedAgents = IFLOW_STATE_AGENTS[detection.state] || [];
 
         return {

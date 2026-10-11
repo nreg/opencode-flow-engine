@@ -137,7 +137,7 @@ describe('T3.2: slash-commands 入口阻断终端状态路由', () => {
 
     // When: 调用 workflow_router tool
     const result = await routerTool.execute(
-      { changeDir: testDir, intent: '审查代码' },
+      { workDir: testDir, intent: '审查代码' },
       { directory: testDir }
     );
 
@@ -161,7 +161,7 @@ describe('T3.2: slash-commands 入口阻断终端状态路由', () => {
 
     // When: 调用 workflow_router tool
     const result = await routerTool.execute(
-      { changeDir: testDir, intent: '执行任务' },
+      { workDir: testDir, intent: '执行任务' },
       { directory: testDir }
     );
 
@@ -188,7 +188,7 @@ describe('T3.2: slash-commands 入口阻断终端状态路由', () => {
 
       // When: 分别调用被阻断的入口
       const result = await routerTool.execute(
-        { changeDir: testDir, intent: '执行任务' },
+        { workDir: testDir, intent: '执行任务' },
         { directory: testDir }
       );
 
@@ -226,7 +226,7 @@ describe('T3.3: 横向命令豁免逻辑', () => {
 
     // When: 用户输入横向命令（全面test）
     const result = await routerTool.execute(
-      { changeDir: testDir, intent: '全面test' },
+      { workDir: testDir, intent: '全面test' },
       { directory: testDir }
     );
 
@@ -249,7 +249,7 @@ describe('T3.3: 横向命令豁免逻辑', () => {
 
     // When: 用户输入横向命令（/flow-review）
     const result = await routerTool.execute(
-      { changeDir: testDir, intent: '/flow-review' },
+      { workDir: testDir, intent: '/flow-review' },
       { directory: testDir }
     );
 
@@ -272,7 +272,7 @@ describe('T3.3: 横向命令豁免逻辑', () => {
 
     // When: 用户输入横向命令（AFK）
     const result = await routerTool.execute(
-      { changeDir: testDir, intent: '开启AFK' },
+      { workDir: testDir, intent: '开启AFK' },
       { directory: testDir }
     );
 
@@ -294,7 +294,7 @@ describe('T3.3: 横向命令豁免逻辑', () => {
 
     // When: 用户输入非横向命令（执行任务）
     const result = await routerTool.execute(
-      { changeDir: testDir, intent: '执行任务' },
+      { workDir: testDir, intent: '执行任务' },
       { directory: testDir }
     );
 

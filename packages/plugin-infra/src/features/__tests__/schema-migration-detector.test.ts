@@ -7,7 +7,7 @@
  *   - FRAMEWORK_DETECTORS (framework detection priority list)
  *   - detectSchemaChanges(diffFiles) — detect schema changes from diff file list
  *   - generateMigrationFile(change, framework) — generate reversible migration content
- *   - checkMigrationFileExists(changeDir, change) — check if migration file exists
+ *   - checkMigrationFileExists(workDir, change) — check if migration file exists
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdir, rm, writeFile } from 'fs/promises';

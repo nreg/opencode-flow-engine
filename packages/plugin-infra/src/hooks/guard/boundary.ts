@@ -35,8 +35,8 @@ export const READ_FILES_WHITELIST = [
   'node_modules/', '.git/',
 ];
 
-export function getBoundaryCacheKey(changeDir: string, contractHash: string): string {
-  return changeDir + ':' + contractHash;
+export function getBoundaryCacheKey(workDir: string, contractHash: string): string {
+  return workDir + ':' + contractHash;
 }
 
 /**
@@ -206,13 +206,13 @@ export function matchesBoundary(filePath: string, patterns: string[]): boolean {
 /**
  * Get the active task ID from subagent-progress.md (with tasks.md fallback).
  */
-export async function getActiveTaskId(changeDir: string): Promise<string | null> {
-  const sp = await readFile(changeDir + '/.flow-engine/sflow/subagent-progress.md').catch(() => null);
+export async function getActiveTaskId(workDir: string): Promise<string | null> {
+  const sp = await readFile(workDir + '/.flow-engine/sflow/subagent-progress.md').catch(() => null);
   if (sp) {
     const planMatch = sp.match(/\*\*Plan task\*\*:\s*(T\d+)/i);
     if (planMatch?.[1]) return planMatch[1].toUpperCase();
   }
-  const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
+  const tasksContent = await readArtifactContent(workDir, 'tasks.md');
   if (tasksContent) {
     // D7: 复选框解析统一走 parseTasks，与门禁 / 计划推荐同源
     for (const task of parseTasks(tasksContent)) {

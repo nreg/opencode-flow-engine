@@ -98,7 +98,7 @@ export interface ApplyDeltaResult {
  */
 export interface PublicationContext {
   /** 变更目录（绝对路径） */
-  changeDir: string;
+  workDir: string;
   /** 项目根目录 */
   projectRoot: string;
   /** Baseline specs 目录 */
@@ -141,8 +141,8 @@ function digest(entries: Array<[string, string]>): string {
  * 从 spec 文件路径提取 capability 名称
  * 假设路径格式为 .../specs/<capability>/spec.md
  */
-function capabilityFromSpecFile(changeDir: string, file: string): string {
-  const parts = relative(join(changeDir, 'specs'), file).split(/[/\\]/);
+function capabilityFromSpecFile(workDir: string, file: string): string {
+  const parts = relative(join(workDir, 'specs'), file).split(/[/\\]/);
   return parts[0] ?? '';
 }
 
@@ -497,12 +497,12 @@ export function applyDeltaToBaseline(
  * 解析发布上下文
  * 从变更目录推导项目根目录和 baseline specs 目录
  */
-export function resolvePublicationContext(changeDir: string): PublicationContext {
-  const absoluteChangeDir = resolve(changeDir);
+export function resolvePublicationContext(workDir: string): PublicationContext {
+  const absoluteChangeDir = resolve(workDir);
   const changesDir = dirname(absoluteChangeDir);
   const projectRoot = basename(changesDir) === 'changes' ? dirname(changesDir) : dirname(absoluteChangeDir);
   return {
-    changeDir: absoluteChangeDir,
+    workDir: absoluteChangeDir,
     projectRoot,
     baselineSpecsDir: join(projectRoot, 'specs'),
   };
@@ -513,14 +513,14 @@ export function resolvePublicationContext(changeDir: string): PublicationContext
  * 用于检测 delta 是否在发布后被修改
  */
 export async function hashChangeDelta(
-  changeDir: string,
+  workDir: string,
   specFiles: string[]
 ): Promise<string> {
   const entries: Array<[string, string]> = [];
   for (const file of specFiles) {
     const content = await readFile(file);
     if (content) {
-      const relPath = relative(changeDir, file);
+      const relPath = relative(workDir, file);
       entries.push([toPosix(relPath), content]);
     }
   }
@@ -549,7 +549,7 @@ export async function hashPublishedBaseline(
 /**
  * 创建发布收据
  * 
- * @param changeDir 变更目录
+ * @param workDir 变更目录
  * @param projectRoot 项目根目录
  * @param specFiles delta spec 文件列表
  * @param baselineBeforeHash 应用 delta 前的 baseline 哈希
@@ -557,13 +557,13 @@ export async function hashPublishedBaseline(
  * @returns 发布收据对象
  */
 export async function createPublicationReceipt(
-  changeDir: string,
+  workDir: string,
   projectRoot: string,
   specFiles: string[],
   baselineBeforeHash: string,
   changeId: string
 ): Promise<PublicationReceipt> {
-  const capabilities = [...new Set(specFiles.map(file => capabilityFromSpecFile(changeDir, file)))].sort();
+  const capabilities = [...new Set(specFiles.map(file => capabilityFromSpecFile(workDir, file)))].sort();
   const baselineAfterHash = await hashPublishedBaseline(projectRoot, capabilities);
   
   return {
@@ -625,14 +625,14 @@ export async function readPublicationReceipt(
  * 3. Delta 哈希未变更
  * 4. Baseline 哈希未变更
  * 
- * @param changeDir 变更目录
+ * @param workDir 变更目录
  * @param projectRoot 项目根目录
  * @param receipt 发布收据
  * @param specFiles 当前 delta spec 文件列表
  * @returns 验证结果
  */
 export async function validatePublicationReceipt(
-  changeDir: string,
+  workDir: string,
   projectRoot: string,
   receipt: PublicationReceipt,
   specFiles: string[]
@@ -643,14 +643,14 @@ export async function validatePublicationReceipt(
   }
   
   // 检查 capabilities 是否匹配
-  const currentCapabilities = [...new Set(specFiles.map(file => capabilityFromSpecFile(changeDir, file)))].sort();
+  const currentCapabilities = [...new Set(specFiles.map(file => capabilityFromSpecFile(workDir, file)))].sort();
   const receiptCapabilities = receipt.capability.split(',').sort();
   if (JSON.stringify(currentCapabilities) !== JSON.stringify(receiptCapabilities)) {
     return { pass: false, reason: 'Publication receipt capabilities no longer match the active change.' };
   }
   
   // 检查 delta 哈希
-  const currentDeltaHash = await hashChangeDelta(changeDir, specFiles);
+  const currentDeltaHash = await hashChangeDelta(workDir, specFiles);
   // 注意：receipt 中没有存储 source_hash，这里需要从 baseline_hash 推导
   // 简化实现：仅检查 baseline 哈希
   

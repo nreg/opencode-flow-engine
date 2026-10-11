@@ -181,7 +181,7 @@ export interface CreateExecutionPlanParams {
  * 6. T2.10: 自动迁移旧收据到 plan-scoped 目录
  */
 export async function createExecutionPlan(
-  changeDir: string,
+  workDir: string,
   params: CreateExecutionPlanParams,
 ): Promise<ExecutionPlan> {
   // Import migrateLegacyReceipts dynamically to avoid circular dependency
@@ -191,7 +191,7 @@ export async function createExecutionPlan(
   validatePlanStructure(params.waves, params.mode);
 
   // 2. Read state.json for hashes
-  const statePath = changeDir + '/' + STATE_FILE;
+  const statePath = workDir + '/' + STATE_FILE;
   const state = await readJsonFile<Record<string, unknown>>(statePath);
   if (!state) {
     throw new Error('Cannot create execution plan: state.json not found at ' + statePath);
@@ -217,8 +217,8 @@ export async function createExecutionPlan(
   plan.hash = await computeContentHash(plan);
 
   // 5. Write the plan to disk
-  const planPath = changeDir + '/' + EXECUTION_PLAN_FILE;
-  await ensureDir(changeDir + '/.flow-engine/sflow');
+  const planPath = workDir + '/' + EXECUTION_PLAN_FILE;
+  await ensureDir(workDir + '/.flow-engine/sflow');
   await writeJsonFile(planPath, plan);
 
   // 6. Update state.json with execution_plan_hash
@@ -234,7 +234,7 @@ export async function createExecutionPlan(
   // T2.10: 自动迁移旧收据到 plan-scoped 目录（在 hash 计算完成后）
   // 注意：这里 plan.hash 已经计算完成，可以安全调用
   try {
-    await migrateLegacyReceipts(changeDir, plan);
+    await migrateLegacyReceipts(workDir, plan);
   } catch (error) {
     // 迁移失败不应阻止 plan 创建，记录警告即可
     Logger.warn(`[T2.10] Failed to migrate legacy receipts: ${error instanceof Error ? error.message : String(error)}`);
@@ -246,7 +246,7 @@ export async function createExecutionPlan(
   if ((state.state as string | undefined) === 'executing') {
     try {
       const { recordReviewBaseFromHead } = await import('./review-receipts.js');
-      await recordReviewBaseFromHead(changeDir);
+      await recordReviewBaseFromHead(workDir);
     } catch (error) {
       // 补写失败不应阻止 plan 创建，记录警告即可
       Logger.warn(`[P2-3] Failed to record review_base at plan creation: ${error instanceof Error ? error.message : String(error)}`);
@@ -255,7 +255,7 @@ export async function createExecutionPlan(
 
   // N-1: 补锚点可能改写磁盘上的计划（写入 review_base/target_branch），
   // 返回磁盘上的最新快照，避免把补锚点前的陈旧对象交给调用方。
-  return (await readExecutionPlan(changeDir)) ?? plan;
+  return (await readExecutionPlan(workDir)) ?? plan;
 }
 
 // ─── Task 2.2: readExecutionPlan ──────────────────────────────────────────────
@@ -264,8 +264,8 @@ export async function createExecutionPlan(
  * Read and parse the execution plan from .flow-engine/sflow/execution-plan.json.
  * Returns null if the file does not exist.
  */
-export async function readExecutionPlan(changeDir: string): Promise<ExecutionPlan | null> {
-  const planPath = changeDir + '/' + EXECUTION_PLAN_FILE;
+export async function readExecutionPlan(workDir: string): Promise<ExecutionPlan | null> {
+  const planPath = workDir + '/' + EXECUTION_PLAN_FILE;
   return readJsonFile<ExecutionPlan>(planPath);
 }
 
@@ -285,9 +285,9 @@ export interface HashValidationResult {
  */
 export async function validatePlanHashes(
   plan: ExecutionPlan,
-  changeDir: string,
+  workDir: string,
 ): Promise<HashValidationResult> {
-  const statePath = changeDir + '/' + STATE_FILE;
+  const statePath = workDir + '/' + STATE_FILE;
   const state = await readJsonFile<Record<string, unknown>>(statePath);
 
   if (!state) {
@@ -337,14 +337,14 @@ export interface ReviseExecutionPlanParams {
  * - T2.10: 自动迁移旧收据到新的 plan-scoped 目录
  */
 export async function reviseExecutionPlan(
-  changeDir: string,
+  workDir: string,
   params: ReviseExecutionPlanParams,
 ): Promise<ExecutionPlan> {
   // Import migrateLegacyReceipts dynamically to avoid circular dependency
   const { migrateLegacyReceipts } = await import('./review-receipts.js');
 
   // 1. Read existing plan
-  const existingPlan = await readExecutionPlan(changeDir);
+  const existingPlan = await readExecutionPlan(workDir);
   if (!existingPlan) {
     throw new Error('No existing execution plan to revise. Use createExecutionPlan instead.');
   }
@@ -365,7 +365,7 @@ export async function reviseExecutionPlan(
   validatePlanStructure(params.waves, params.mode);
 
   // 3. Read current state.json for hashes
-  const statePath = changeDir + '/' + STATE_FILE;
+  const statePath = workDir + '/' + STATE_FILE;
   const state = await readJsonFile<Record<string, unknown>>(statePath);
   if (!state) {
     throw new Error('Cannot revise execution plan: state.json not found');
@@ -398,7 +398,7 @@ export async function reviseExecutionPlan(
   revisedPlan.hash = await computeContentHash(revisedPlan);
 
   // Write revised plan to disk
-  const planPath = changeDir + '/' + EXECUTION_PLAN_FILE;
+  const planPath = workDir + '/' + EXECUTION_PLAN_FILE;
   await writeJsonFile(planPath, revisedPlan);
 
   // Update state.json with new execution_plan_hash
@@ -413,7 +413,7 @@ export async function reviseExecutionPlan(
 
   // T2.10: 自动迁移旧收据到新的 plan-scoped 目录（在 hash 计算完成后）
   try {
-    await migrateLegacyReceipts(changeDir, revisedPlan);
+    await migrateLegacyReceipts(workDir, revisedPlan);
   } catch (error) {
     // 迁移失败不应阻止 plan 修订，记录警告即可
     Logger.warn(`[T2.10] Failed to migrate legacy receipts: ${error instanceof Error ? error.message : String(error)}`);

@@ -6,9 +6,9 @@ import { ARTIFACT_NAMES } from '../../features/state-manager/artifact-paths.js';
 
 export const SOURCE_CODE_PATTERNS = /\.(ts|js|tsx|jsx|mjs|cjs|mts|cts|py|java|kt|rs|go|rb|php|c|cpp|h|hpp|cs|swift|vue|svelte|css|scss|less)$/i;
 
-export function isArtifactPath(filePath: string, changeDir: string): boolean {
+export function isArtifactPath(filePath: string, workDir: string): boolean {
   const normalized = filePath.replace(/\\/g, '/');
-  const changeDirNorm = changeDir.replace(/\\/g, '/');
+  const changeDirNorm = workDir.replace(/\\/g, '/');
   
   if (normalized.includes('.flow-engine/sflow/')) {
     const afterSflow = normalized.split('.flow-engine/sflow/')[1] || '';

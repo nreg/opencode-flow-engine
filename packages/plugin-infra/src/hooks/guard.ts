@@ -35,10 +35,10 @@ import type { SchemaMigrationGuardOptions } from "./guard/checks/index.js";
 import { checkDirectShortPath, isDirectShortPathTransition } from "../features/guard-checks/check-direct-short-path.js";
 import { formatGuardFixHint, GUARD_FIX_ENTRIES } from "../features/guard-fix-hint.js";
 
-export async function detectActiveWorkflow(changeDir: string): Promise<'iflow' | 'sflow' | 'none'> {
-  const iflowExists = await directoryExists(`${changeDir}/.flow-engine/iflow`);
+export async function detectActiveWorkflow(workDir: string): Promise<'iflow' | 'sflow' | 'none'> {
+  const iflowExists = await directoryExists(`${workDir}/.flow-engine/iflow`);
   if (iflowExists) return 'iflow';
-  const sflowExists = await directoryExists(`${changeDir}/.flow-engine/sflow`);
+  const sflowExists = await directoryExists(`${workDir}/.flow-engine/sflow`);
   if (sflowExists) return 'sflow';
   return 'none';
 }
@@ -50,17 +50,17 @@ export async function detectActiveWorkflow(changeDir: string): Promise<'iflow' |
  * READ-ONLY (C4): never writes state.
  */
 async function checkGitBranchIsolation(
-  changeDir: string,
+  workDir: string,
   data: Record<string, unknown> | undefined,
   activeWorkflow: 'iflow' | 'sflow' | 'none',
 ): Promise<HookResult> {
-  if (!changeDir) return { success: true };
+  if (!workDir) return { success: true };
 
   // C7: Only apply for sflow workflow
   if (activeWorkflow !== 'sflow') return { success: true };
 
   // Only check during executing/debugging states
-  const stateData = await readJsonFile<{ state?: string }>(`${changeDir}/${getStateFilePath('sflow')}`);
+  const stateData = await readJsonFile<{ state?: string }>(`${workDir}/${getStateFilePath('sflow')}`);
   const currentState = stateData?.state;
   if (currentState !== 'executing' && currentState !== 'debugging') return { success: true };
 
@@ -71,7 +71,7 @@ async function checkGitBranchIsolation(
   try {
     const { execSync } = await import('child_process');
     const branch = execSync('git rev-parse --abbrev-ref HEAD', {
-      cwd: changeDir,
+      cwd: workDir,
       encoding: 'utf8',
       stdio: 'pipe',
     }).trim();
@@ -95,15 +95,15 @@ async function checkGitBranchIsolation(
  * Get IFlow guards — only active when .flow-engine/iflow/ directory exists.
  * This ensures IFlow guards never interfere with SFlow workflows.
  */
-async function getIFlowGuards(changeDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult[]> {
-  if (!changeDir) return [];
+async function getIFlowGuards(workDir: string, data?: Record<string, unknown>, activeWorkflow?: 'iflow' | 'sflow' | 'none'): Promise<HookResult[]> {
+  if (!workDir) return [];
   if (activeWorkflow === 'sflow') return [];
   if (activeWorkflow !== 'iflow') {
-    const hasIflow = await iflowDirectoryExists(changeDir);
+    const hasIflow = await iflowDirectoryExists(workDir);
     if (!hasIflow) return [];
   }
 
-  const iflowResult = await checkIFlowGuards(changeDir, data);
+  const iflowResult = await checkIFlowGuards(workDir, data);
   return [iflowResult];
 }
 
@@ -117,25 +117,25 @@ async function getIFlowGuards(changeDir: string, data?: Record<string, unknown>,
  * - 非快路径场景（如 full 的常规转换）直接放行，不误伤
  */
 async function checkDirectShortPathGuard(
-  changeDir: string,
+  workDir: string,
   data: Record<string, unknown> | undefined,
   activeWorkflow: 'iflow' | 'sflow' | 'none',
 ): Promise<HookResult> {
-  if (!changeDir || !data) return { success: true };
+  if (!workDir || !data) return { success: true };
   if (activeWorkflow !== 'sflow') return { success: true };
 
   const newState = data.newState as string | undefined;
   if (!newState) return { success: true };
 
   const stateData = await readJsonFile<{ state?: string; mode?: string; workflow?: string }>(
-    `${changeDir}/${getStateFilePath('sflow')}`,
+    `${workDir}/${getStateFilePath('sflow')}`,
   );
   const currentState = stateData?.state || 'exploring';
   const workflow = String(stateData?.workflow ?? stateData?.mode ?? '').trim() || 'full';
 
   if (!isDirectShortPathTransition(currentState, newState, workflow)) return { success: true };
 
-  const result = await checkDirectShortPath(changeDir, workflow);
+  const result = await checkDirectShortPath(workDir, workflow);
   if (result.pass) return { success: true };
 
   return {
@@ -156,32 +156,32 @@ export function createGuardHook(): HookHandler {
     name: "guard",
     description: "Guard state transitions and block invalid operations (read-only)",
     execute: async (context) => {
-      const { changeDir, data } = context;
+      const { workDir, data } = context;
 
       try {
-        const activeWorkflow = await detectActiveWorkflow(changeDir);
+        const activeWorkflow = await detectActiveWorkflow(workDir);
 
         const guards = [
-          await checkArtifactAndPhaseConsistency(changeDir, activeWorkflow),
-          await checkPresetUpgrade(changeDir, activeWorkflow),
-          await checkContractStalenessGuard(changeDir, activeWorkflow),
-          await checkWorkflowModeTransition(changeDir, data, activeWorkflow),
-          await checkDirectShortPathGuard(changeDir, data, activeWorkflow),
-          await checkTaskCompletion(changeDir, activeWorkflow),
-          await checkWaveDependencies(changeDir, activeWorkflow),
-          await checkReceiptIntegrity(changeDir, activeWorkflow),
-          await checkClosingGate(changeDir, activeWorkflow),
-          await checkSpecsMerged(changeDir, activeWorkflow),
-          await checkGitBranchIsolation(changeDir, data, activeWorkflow),
-          await checkDebuggingState(changeDir, context.action, data, activeWorkflow),
-          await checkProgressAntiRepeatGuard(changeDir, data, activeWorkflow),
-          await checkFileWriteGuard(changeDir, data, activeWorkflow),
-          await checkReadFilesBoundary(changeDir, data, activeWorkflow),
-          await checkGitCommitBoundary(changeDir, data, activeWorkflow),
-          await checkSchemaMigrationGuard(changeDir),
-          await checkLessonsGuard(changeDir, data, activeWorkflow),
-          await checkAbstractionGrepGuard(changeDir, data),
-          ...(await getIFlowGuards(changeDir, data, activeWorkflow)),
+          await checkArtifactAndPhaseConsistency(workDir, activeWorkflow),
+          await checkPresetUpgrade(workDir, activeWorkflow),
+          await checkContractStalenessGuard(workDir, activeWorkflow),
+          await checkWorkflowModeTransition(workDir, data, activeWorkflow),
+          await checkDirectShortPathGuard(workDir, data, activeWorkflow),
+          await checkTaskCompletion(workDir, activeWorkflow),
+          await checkWaveDependencies(workDir, activeWorkflow),
+          await checkReceiptIntegrity(workDir, activeWorkflow),
+          await checkClosingGate(workDir, activeWorkflow),
+          await checkSpecsMerged(workDir, activeWorkflow),
+          await checkGitBranchIsolation(workDir, data, activeWorkflow),
+          await checkDebuggingState(workDir, context.action, data, activeWorkflow),
+          await checkProgressAntiRepeatGuard(workDir, data, activeWorkflow),
+          await checkFileWriteGuard(workDir, data, activeWorkflow),
+          await checkReadFilesBoundary(workDir, data, activeWorkflow),
+          await checkGitCommitBoundary(workDir, data, activeWorkflow),
+          await checkSchemaMigrationGuard(workDir),
+          await checkLessonsGuard(workDir, data, activeWorkflow),
+          await checkAbstractionGrepGuard(workDir, data),
+          ...(await getIFlowGuards(workDir, data, activeWorkflow)),
         ];
 
         const allWarnings: string[] = [];

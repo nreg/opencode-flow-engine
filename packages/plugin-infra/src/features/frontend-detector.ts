@@ -6,7 +6,7 @@
  * 2. Frontend config files (tailwind.config / vite.config / next.config / nuxt.config)
  * 3. Frontend dependencies in package.json (react/vue/svelte/next/nuxt/tailwindcss/@angular/core)
  *
- * Results are cached in memory per changeDir for the duration of a session.
+ * Results are cached in memory per workDir for the duration of a session.
  * The cache is cleared when clearFrontendCache() is called (typically on session end).
  */
 
@@ -74,24 +74,24 @@ async function findConfigFile(dir: string, pattern: string): Promise<boolean> {
 }
 
 /**
- * Detect if the project at changeDir is a frontend project.
+ * Detect if the project at workDir is a frontend project.
  *
  * Detection strategy (three dimensions, any hit returns true):
  * 1. Frontend file extensions — glob scan with maxDepth=3
  * 2. Frontend config files — check for well-known config file patterns
  * 3. Frontend dependencies — check package.json dependencies/devDependencies
  *
- * Results are cached per changeDir for the session lifetime.
+ * Results are cached per workDir for the session lifetime.
  */
-export async function isFrontendProject(changeDir: string): Promise<boolean> {
-  if (frontendCache.has(changeDir)) return frontendCache.get(changeDir)!;
+export async function isFrontendProject(workDir: string): Promise<boolean> {
+  if (frontendCache.has(workDir)) return frontendCache.get(workDir)!;
 
   // 1. Extension detection
   const frontendExtensions = ['.tsx', '.jsx', '.vue', '.svelte', '.css', '.scss', '.less', '.html'];
   for (const ext of frontendExtensions) {
-    const found = await findFilesByExtension(changeDir, ext, 3);
+    const found = await findFilesByExtension(workDir, ext, 3);
     if (found) {
-      frontendCache.set(changeDir, true);
+      frontendCache.set(workDir, true);
       return true;
     }
   }
@@ -99,15 +99,15 @@ export async function isFrontendProject(changeDir: string): Promise<boolean> {
   // 2. Config file detection
   const configPatterns = ['tailwind.config.*', 'vite.config.*', 'next.config.*', 'nuxt.config.*'];
   for (const pattern of configPatterns) {
-    const found = await findConfigFile(changeDir, pattern);
+    const found = await findConfigFile(workDir, pattern);
     if (found) {
-      frontendCache.set(changeDir, true);
+      frontendCache.set(workDir, true);
       return true;
     }
   }
 
   // 3. package.json frontend dependency detection
-  const pkgPath = path.join(changeDir, 'package.json');
+  const pkgPath = path.join(workDir, 'package.json');
   if (await fileExists(pkgPath)) {
     const pkg = await readJsonFile<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(pkgPath);
     if (pkg) {
@@ -115,14 +115,14 @@ export async function isFrontendProject(changeDir: string): Promise<boolean> {
       const frontendDeps = ['react', 'vue', 'svelte', 'next', 'nuxt', 'tailwindcss', '@angular/core'];
       for (const dep of frontendDeps) {
         if (dep in deps) {
-          frontendCache.set(changeDir, true);
+          frontendCache.set(workDir, true);
           return true;
         }
       }
     }
   }
 
-  frontendCache.set(changeDir, false);
+  frontendCache.set(workDir, false);
   return false;
 }
 

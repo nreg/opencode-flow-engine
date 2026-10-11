@@ -63,7 +63,7 @@ describe('Task 4.1: realpathSync.native（8.3 短名防御）', () => {
     expect(src).not.toMatch(/realpathSync\((?!\.native)/);
   });
 
-  it('8.3 短名 changeDir 下收据不被误判为符号链接（短路径可用时）', async () => {
+  it('8.3 短名 workDir 下收据不被误判为符号链接（短路径可用时）', async () => {
     await cleanup();
     const longDir = join(ROOT, 'change-dir-long-name');
     await mkdir(longDir + '/.flow-engine/sflow/reviews', { recursive: true });

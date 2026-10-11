@@ -48,7 +48,7 @@ describe('Guard Hook — Preset Upgrade Detection', () => {
 
   it('should not block full workflow', async () => {
     await writeStateFile(dir, { state: 'executing', mode: 'full' });
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
     expect(result.block).toBeUndefined();
   });
@@ -57,21 +57,21 @@ describe('Guard Hook — Preset Upgrade Detection', () => {
     await writeStateFile(dir, { state: 'executing', mode: 'hotfix' });
     // Write tasks.md with 3 tasks (exceeds hotfix MAX_TASKS=2)
     await writeFileContent(dir + '/tasks.md', '- [ ] task one\n- [ ] task two\n- [ ] task three');
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toContain('Preset upgrade');
   });
 
   it('should not block exploring state without artifacts', async () => {
     await writeStateFile(dir, { state: 'exploring', mode: 'full' });
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 
   it('should block tweak with too many tasks', async () => {
     await writeStateFile(dir, { state: 'executing', mode: 'tweak' });
     await writeFileContent(dir + '/tasks.md', '- [ ] t1\n- [ ] t2\n- [ ] t3\n- [ ] t4\n- [ ] t5');
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toContain('Preset upgrade');
   });
@@ -79,14 +79,14 @@ describe('Guard Hook — Preset Upgrade Detection', () => {
   it('should detect schema change in hotfix and trigger upgrade', async () => {
     await writeStateFile(dir, { state: 'executing', mode: 'hotfix' });
     await writeFileContent(dir + '/tasks.md', '- [ ] alter table users add column email text');
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toContain('schema');
   });
 
   it('should not block when no tasks.md exists', async () => {
     await writeStateFile(dir, { state: 'executing', mode: 'hotfix' });
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 
@@ -98,7 +98,7 @@ describe('Guard Hook — Preset Upgrade Detection', () => {
     await writeFileContent(dir + '/specs/test.md', '# Test Spec\n\n## Purpose\nTest spec.');
     await writeFileContent(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nHotfix scope.\n\n## Task Batches\n- [ ] task one\n- [ ] task two\n- [ ] task three');
     await writeFileContent(dir + '/tasks.md', '- [ ] task one\n- [ ] task two\n- [ ] task three');
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/Preset upgrade|upgrade/i);
   });
@@ -139,7 +139,7 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
     await writeIFlowState(dir, 'executing');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -154,7 +154,7 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
     await writeIFlowArtifact(dir, 'PLAN.md', '# Plan\n\n## Tasks\n- Do something');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -168,7 +168,7 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
     await writeFileContent(dir + '/tasks.md', '- [ ] t1\n- [ ] t2\n- [ ] t3');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -182,7 +182,7 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
     await writeIFlowDir(dir);
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -196,7 +196,7 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
     await writeFileContent(dir + '/tasks.md', '- [ ] incomplete task');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'check',
@@ -209,7 +209,7 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
     await writeIFlowDir(dir);
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'tool:write',
@@ -222,7 +222,7 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
     await writeIFlowState(dir, 'discussing');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'tool:write',
@@ -242,7 +242,7 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
     await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'tool:write',
@@ -263,7 +263,7 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
     await writeIFlowArtifact(dir, 'VERIFICATION.md', '# Verification');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'tool:write',
@@ -283,7 +283,7 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
     await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'tool:read',
@@ -301,7 +301,7 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
     await writeIFlowArtifact(dir, 'PLAN.md', '# Plan');
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'tool:bash',
@@ -318,7 +318,7 @@ describe('Guard Hook — IFlow mode applies selective guards', () => {
     await writeStateFile(dir, { state: 'exploring', mode: 'full' });
 
     const result = await guard.execute({
-      changeDir: dir,
+      workDir: dir,
       stateFile: '',
       pluginRoot: '',
       action: 'tool:read',
@@ -345,21 +345,21 @@ describe('Guard Hook — Debugging State', () => {
 
   it('should block non-debugging actions in debugging state', async () => {
     await writeStateFile(dir, { state: 'debugging', mode: 'full' });
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'tool:write' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'tool:write' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toContain('debugging state');
   });
 
   it('should allow bug-investigator actions in debugging state', async () => {
     await writeStateFile(dir, { state: 'debugging', mode: 'full' });
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'bug-investigator:investigate' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'bug-investigator:investigate' });
     expect(result.block).toBeUndefined();
     expect(result.success).toBe(true);
   });
 
   it('should allow build-executor in debugging state (for fix verification)', async () => {
     await writeStateFile(dir, { state: 'debugging', mode: 'full' });
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'build-executor:verify' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'build-executor:verify' });
     expect(result.block).toBeUndefined();
     expect(result.success).toBe(true);
   });
@@ -393,7 +393,7 @@ describe('Guard Hook — detectActiveWorkflow single-call optimization', () => {
     });
 
     try {
-      await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+      await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
 
       // After optimization: detectActiveWorkflow called once at entry,
       // which calls directoryExists at most 2 times (.flow-engine/iflow + .flow-engine/sflow)
@@ -415,7 +415,7 @@ describe('Guard Hook — detectActiveWorkflow single-call optimization', () => {
     });
 
     try {
-      await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+      await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
 
       // IFlow short-circuit: detectActiveWorkflow uses 1 call for .flow-engine/iflow/,
       // plus additional calls from selective guards (e.g., checkIFlowArtifactAndPhaseConsistency)
@@ -435,14 +435,14 @@ describe('Guard Hook — detectActiveWorkflow single-call optimization', () => {
     await writeFileContent(dir + '/execution-contract.md', '# Contract\n\n## Intent Lock\nFull scope.');
     await writeFileContent(dir + '/tasks.md', '- [x] done task');
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 
   it('should maintain IFlow selective guard behavior after optimization', async () => {
     await ensureDir(dir + '/.flow-engine/iflow');
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 });

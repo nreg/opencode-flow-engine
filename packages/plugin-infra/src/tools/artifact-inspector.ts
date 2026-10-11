@@ -16,7 +16,7 @@ export function createArtifactInspectorTool(): ToolDefinition {
     name: 'artifact_inspector',
     description: 'Inspect planning artifacts for completeness and consistency',
     parameters: {
-      changeDir: {
+      workDir: {
         type: 'string',
         description: 'Path to the change directory',
         required: true,
@@ -28,11 +28,11 @@ export function createArtifactInspectorTool(): ToolDefinition {
       },
     },
     execute: async (params, context) => {
-      const { changeDir, artifactType } = params as {
-        changeDir?: string;
+      const { workDir, artifactType } = params as {
+        workDir?: string;
         artifactType?: string;
       };
-      const resolvedDir = resolveChangeDir(changeDir, context.directory);
+      const resolvedDir = resolveChangeDir(workDir, context.directory);
 
       try {
         const results: Record<string, unknown> = {};

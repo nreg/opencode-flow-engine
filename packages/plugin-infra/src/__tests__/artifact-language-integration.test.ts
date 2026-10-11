@@ -42,7 +42,7 @@ describe('Artifact Language Integration', () => {
       // 执行状态转换
       const hook = createStateTransitionHook();
       const result = await hook.execute({
-        changeDir: TEST_DIR,
+        workDir: TEST_DIR,
         data: { newState: 'specifying' },
         stateFile: '',
         pluginRoot: '',
@@ -71,7 +71,7 @@ describe('Artifact Language Integration', () => {
       // 执行状态转换
       const hook = createStateTransitionHook();
       const result = await hook.execute({
-        changeDir: TEST_DIR,
+        workDir: TEST_DIR,
         data: { newState: 'specifying' },
         stateFile: '',
         pluginRoot: '',
@@ -100,7 +100,7 @@ describe('Artifact Language Integration', () => {
       // 执行状态转换
       const hook = createStateTransitionHook();
       const result = await hook.execute({
-        changeDir: TEST_DIR,
+        workDir: TEST_DIR,
         data: { newState: 'specifying' },
         stateFile: '',
         pluginRoot: '',
@@ -131,7 +131,7 @@ describe('Artifact Language Integration', () => {
       // 执行状态转换（从 bridging 到 specifying）
       const hook = createStateTransitionHook();
       const result = await hook.execute({
-        changeDir: TEST_DIR,
+        workDir: TEST_DIR,
         data: { newState: 'specifying' },
         stateFile: '',
         pluginRoot: '',
@@ -164,7 +164,7 @@ describe('Artifact Language Integration', () => {
       // 执行状态转换（从 bridging 到 specifying）
       const hook = createStateTransitionHook();
       const result = await hook.execute({
-        changeDir: TEST_DIR,
+        workDir: TEST_DIR,
         data: { newState: 'specifying' },
         stateFile: '',
         pluginRoot: '',
@@ -187,7 +187,7 @@ describe('Artifact Language Integration', () => {
       // 尝试无效转换（exploring → executing）
       const hook = createStateTransitionHook();
       const result = await hook.execute({
-        changeDir: TEST_DIR,
+        workDir: TEST_DIR,
         data: { newState: 'executing' },
         stateFile: '',
         pluginRoot: '',

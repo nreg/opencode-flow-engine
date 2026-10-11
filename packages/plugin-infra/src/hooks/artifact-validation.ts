@@ -17,20 +17,20 @@ export function createArtifactValidationHook(): HookHandler {
     name: 'artifact_validation',
     description: 'Validate artifacts when transitioning between states',
     execute: async (context) => {
-      const { changeDir, data } = context;
+      const { workDir, data } = context;
 
       try {
         const newState = data?.newState as string;
 
         switch (newState) {
           case 'specifying':
-            return await validateForSpecifying(changeDir);
+            return await validateForSpecifying(workDir);
           case 'bridging':
-            return await validateForBridging(changeDir);
+            return await validateForBridging(workDir);
           case 'approved-for-build':
-            return await validateForExecution(changeDir);
+            return await validateForExecution(workDir);
           case 'closing':
-            return await validateForClosing(changeDir);
+            return await validateForClosing(workDir);
           default:
             return { success: true };
         }
@@ -44,8 +44,8 @@ export function createArtifactValidationHook(): HookHandler {
   };
 }
 
-async function validateForSpecifying(changeDir: string): Promise<HookResult> {
-  const proposalContent = await readArtifactContent(changeDir, 'proposal.md');
+async function validateForSpecifying(workDir: string): Promise<HookResult> {
+  const proposalContent = await readArtifactContent(workDir, 'proposal.md');
   if (!proposalContent) {
     return {
       success: false,
@@ -68,8 +68,8 @@ async function validateForSpecifying(changeDir: string): Promise<HookResult> {
   return { success: true };
 }
 
-async function validateForBridging(changeDir: string): Promise<HookResult> {
-  const specFiles = await listSpecFiles(changeDir);
+async function validateForBridging(workDir: string): Promise<HookResult> {
+  const specFiles = await listSpecFiles(workDir);
 
   if (specFiles.length === 0) {
     return {
@@ -82,7 +82,7 @@ async function validateForBridging(changeDir: string): Promise<HookResult> {
 
   // Step 1: Schema validation (delta specs)
   for (const specFile of specFiles) {
-    const specContent = await readSpecContent(changeDir, specFile);
+    const specContent = await readSpecContent(workDir, specFile);
     if (specContent) {
       // Validate as delta spec (not baseline spec)
       const report = sharedValidator.validateDeltaSpec(specContent, specFile.replace('.md', ''));
@@ -98,11 +98,11 @@ async function validateForBridging(changeDir: string): Promise<HookResult> {
   }
 
   // Step 2: Preflight delta specs against baselines (Wave 3: P1)
-  const projectRoot = deriveProjectRoot(changeDir);
+  const projectRoot = deriveProjectRoot(workDir);
   if (projectRoot) {
-    // Only run preflight if changeDir follows changes/ convention
+    // Only run preflight if workDir follows changes/ convention
     for (const specFile of specFiles) {
-      const preflightError = await preflightDeltaSpec(projectRoot, changeDir, specFile);
+      const preflightError = await preflightDeltaSpec(projectRoot, workDir, specFile);
       if (preflightError) {
         return {
           success: false,
@@ -117,8 +117,8 @@ async function validateForBridging(changeDir: string): Promise<HookResult> {
   return { success: true };
 }
 
-async function validateForExecution(changeDir: string): Promise<HookResult> {
-  const contractContent = await readArtifactContent(changeDir, 'execution-contract.md');
+async function validateForExecution(workDir: string): Promise<HookResult> {
+  const contractContent = await readArtifactContent(workDir, 'execution-contract.md');
   if (!contractContent) {
     return {
       success: false,
@@ -141,8 +141,8 @@ async function validateForExecution(changeDir: string): Promise<HookResult> {
   return { success: true };
 }
 
-async function validateForClosing(changeDir: string): Promise<HookResult> {
-  const tasksContent = await readArtifactContent(changeDir, 'tasks.md');
+async function validateForClosing(workDir: string): Promise<HookResult> {
+  const tasksContent = await readArtifactContent(workDir, 'tasks.md');
   if (!tasksContent) {
     return {
       success: false,
@@ -168,15 +168,15 @@ async function validateForClosing(changeDir: string): Promise<HookResult> {
 // ─── Wave 3: P1 Spec Baseline Preflight ──────────────────────────────────────
 
 /**
- * Derive projectRoot from changeDir
+ * Derive projectRoot from workDir
  * 
- * spec-superflow convention: changeDir is under changes/ directory
+ * spec-superflow convention: workDir is under changes/ directory
  * Example: /project/changes/my-change → /project
  * 
- * If changeDir doesn't follow this convention, return null (skip preflight)
+ * If workDir doesn't follow this convention, return null (skip preflight)
  */
-function deriveProjectRoot(changeDir: string): string | null {
-  const parent = dirname(changeDir);
+function deriveProjectRoot(workDir: string): string | null {
+  const parent = dirname(workDir);
   const dirName = basename(parent);
   
   // Check if parent directory is named 'changes'
@@ -196,11 +196,11 @@ function deriveProjectRoot(changeDir: string): string | null {
  */
 async function preflightDeltaSpec(
   projectRoot: string,
-  changeDir: string,
+  workDir: string,
   specFile: string
 ): Promise<string | null> {
   // Extract capability from spec file path
-  // specFile is relative to changeDir/specs, e.g., "auth.md"
+  // specFile is relative to workDir/specs, e.g., "auth.md"
   const capability = specFile.replace('.md', '');
   
   // Read baseline spec
@@ -209,7 +209,7 @@ async function preflightDeltaSpec(
   const baselineContent = baselineExists ? (await readFile(baselinePath) || '') : '';
   
   // Read delta spec with dual-path compatibility
-  const deltaContent = await readSpecContent(changeDir, specFile);
+  const deltaContent = await readSpecContent(workDir, specFile);
   
   if (!deltaContent) {
     // No delta spec content, skip

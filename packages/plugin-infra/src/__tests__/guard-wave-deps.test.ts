@@ -98,7 +98,7 @@ describe('checkWaveDependencies', () => {
     await writeExecutionPlan(dir, plan);
     await writeReceiptsForPlan(dir, plan);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
     expect(result.block).toBeUndefined();
   });
@@ -120,7 +120,7 @@ describe('checkWaveDependencies', () => {
     };
     await writeExecutionPlan(dir, plan);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/circular/i);
   });
@@ -141,7 +141,7 @@ describe('checkWaveDependencies', () => {
     };
     await writeExecutionPlan(dir, plan);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/missing|non-existent|reference/i);
   });
@@ -162,7 +162,7 @@ describe('checkWaveDependencies', () => {
     };
     await writeExecutionPlan(dir, plan);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/empty/i);
   });
@@ -171,7 +171,7 @@ describe('checkWaveDependencies', () => {
     await writeStateFile(dir, { state: 'executing', mode: 'full' });
     // No execution-plan.json written
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     // Should not block — backward compatible
     expect(result.block).toBeUndefined();
   });
@@ -180,7 +180,7 @@ describe('checkWaveDependencies', () => {
     // No .flow-engine/sflow/ directory — no sflow workflow detected
     await ensureDir(dir + '/.flow-engine/iflow');
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 
@@ -202,7 +202,7 @@ describe('checkWaveDependencies', () => {
     await writeExecutionPlan(dir, plan);
     await writeReceiptsForPlan(dir, plan);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 
@@ -224,7 +224,7 @@ describe('checkWaveDependencies', () => {
     };
     await writeExecutionPlan(dir, plan);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/circular/i);
   });
@@ -265,7 +265,7 @@ describe('topologicalSort for cycle detection', () => {
     await writeExecutionPlan(dir, plan);
     await writeReceiptsForPlan(dir, plan);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 
@@ -289,7 +289,7 @@ describe('topologicalSort for cycle detection', () => {
     await writeExecutionPlan(dir, plan);
     await writeReceiptsForPlan(dir, plan);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.success).toBe(true);
   });
 
@@ -309,7 +309,7 @@ describe('topologicalSort for cycle detection', () => {
     };
     await writeExecutionPlan(dir, plan);
 
-    const result = await guard.execute({ changeDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
+    const result = await guard.execute({ workDir: dir, stateFile: '', pluginRoot: '', action: 'check' });
     expect(result.block).toBe(true);
     expect(result.blockReason).toMatch(/circular/i);
   });

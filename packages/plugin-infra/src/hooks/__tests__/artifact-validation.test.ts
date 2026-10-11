@@ -31,11 +31,11 @@ async function cleanupDir(dir: string): Promise<void> {
 
 describe('Wave 3: P1 Spec Baseline Preflight', () => {
   const projectRoot = tempDir('wave3-preflight-project');
-  const changeDir = join(projectRoot, 'changes', 'test-change');
+  const workDir = join(projectRoot, 'changes', 'test-change');
 
   beforeEach(async () => {
     await cleanupDir(projectRoot);
-    await ensureDir(changeDir);
+    await ensureDir(workDir);
   });
 
   afterEach(async () => {
@@ -70,7 +70,7 @@ Users SHALL be able to login with email and password.
     );
 
     // Setup: Create delta spec with conflict (MODIFY non-existent requirement)
-    const deltaSpecDir = join(changeDir, '.flow-engine', 'sflow', 'specs');
+    const deltaSpecDir = join(workDir, '.flow-engine', 'sflow', 'specs');
     await ensureDir(deltaSpecDir);
     await writeFile(
       join(deltaSpecDir, 'auth.md'),
@@ -90,7 +90,7 @@ This requirement SHALL not exist in baseline.
     // Execute validation
     const hook = createArtifactValidationHook();
     const result = await hook.execute({
-      changeDir,
+      workDir,
       data: { newState: 'bridging' },
     } as any);
 
@@ -126,7 +126,7 @@ Users SHALL be able to login with email and password.
     );
 
     // Setup: Create delta spec with ADDED (compatible)
-    const deltaSpecDir = join(changeDir, '.flow-engine', 'sflow', 'specs');
+    const deltaSpecDir = join(workDir, '.flow-engine', 'sflow', 'specs');
     await ensureDir(deltaSpecDir);
     await writeFile(
       join(deltaSpecDir, 'auth.md'),
@@ -146,7 +146,7 @@ Users SHALL be able to logout.
     // Execute validation
     const hook = createArtifactValidationHook();
     const result = await hook.execute({
-      changeDir,
+      workDir,
       data: { newState: 'bridging' },
     } as any);
 
@@ -171,7 +171,7 @@ Authentication capability.
     );
 
     // Create a delta spec for a different capability (no baseline for this one)
-    const deltaSpecDir = join(changeDir, '.flow-engine', 'sflow', 'specs');
+    const deltaSpecDir = join(workDir, '.flow-engine', 'sflow', 'specs');
     await ensureDir(deltaSpecDir);
     await writeFile(
       join(deltaSpecDir, 'new-feature.md'),
@@ -191,7 +191,7 @@ New feature SHALL work.
     // Execute validation
     const hook = createArtifactValidationHook();
     const result = await hook.execute({
-      changeDir,
+      workDir,
       data: { newState: 'bridging' },
     } as any);
 
@@ -199,8 +199,8 @@ New feature SHALL work.
     expect(result.success).toBe(true);
   });
 
-  it('should skip preflight when changeDir is not in changes/ directory', async () => {
-    // Setup: Use a changeDir that doesn't follow changes/ convention
+  it('should skip preflight when workDir is not in changes/ directory', async () => {
+    // Setup: Use a workDir that doesn't follow changes/ convention
     const nonStandardChangeDir = join(projectRoot, 'workflows', 'test');
     await ensureDir(nonStandardChangeDir);
 
@@ -238,7 +238,7 @@ Test requirement SHALL work.
     // Execute validation
     const hook = createArtifactValidationHook();
     const result = await hook.execute({
-      changeDir: nonStandardChangeDir,
+      workDir: nonStandardChangeDir,
       data: { newState: 'bridging' },
     } as any);
 
@@ -250,7 +250,7 @@ Test requirement SHALL work.
     // Setup: No baseline spec
 
     // Setup: Create delta spec
-    const deltaSpecDir = join(changeDir, '.flow-engine', 'sflow', 'specs');
+    const deltaSpecDir = join(workDir, '.flow-engine', 'sflow', 'specs');
     await ensureDir(deltaSpecDir);
     await writeFile(
       join(deltaSpecDir, 'auth.md'),
@@ -270,7 +270,7 @@ Users SHALL be able to login.
     // Execute validation
     const hook = createArtifactValidationHook();
     const result = await hook.execute({
-      changeDir,
+      workDir,
       data: { newState: 'bridging' },
     } as any);
 

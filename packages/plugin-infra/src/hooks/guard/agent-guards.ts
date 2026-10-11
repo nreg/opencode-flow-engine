@@ -47,7 +47,7 @@ function hasDecisionPointFlag(state: Record<string, unknown> | null, flagKey: st
  * without the user's explicit consent (the "no blind flight" rule).
  */
 export async function checkFlowIntelScanGuard(
-  changeDir: string,
+  workDir: string,
   data: Record<string, unknown>,
 ): Promise<AgentGuardResult> {
   const agent = (data.agent as string) || '';
@@ -59,7 +59,7 @@ export async function checkFlowIntelScanGuard(
   }
 
   // Read state.json and check decisionPoints array for intel_scan_confirmed flag
-  const stateData = await readJsonFile<Record<string, unknown>>(`${changeDir}/${getStateFilePath('sflow')}`);
+  const stateData = await readJsonFile<Record<string, unknown>>(`${workDir}/${getStateFilePath('sflow')}`);
   if (hasDecisionPointFlag(stateData, 'intel_scan_confirmed')) {
     return { success: true };
   }
@@ -79,7 +79,7 @@ export async function checkFlowIntelScanGuard(
  * First-time creation (file does not exist) is always allowed.
  */
 export async function checkFlowArchitectWriteGuard(
-  changeDir: string,
+  workDir: string,
   data: Record<string, unknown>,
 ): Promise<AgentGuardResult> {
   const agent = (data.agent as string) || '';
@@ -97,12 +97,12 @@ export async function checkFlowArchitectWriteGuard(
   // I1 fix: Ensure path is absolute before checking file existence
   const fullPath = normalizedPath.startsWith('/') || normalizedPath.includes(':')
     ? normalizedPath
-    : path.join(changeDir, normalizedPath);
+    : path.join(workDir, normalizedPath);
   const archExists = await fileExists(fullPath);
   if (!archExists) return { success: true };
 
   // C1 fix: Check decisionPoints array for architect_write_approved flag
-  const stateData = await readJsonFile<Record<string, unknown>>(`${changeDir}/${getStateFilePath('sflow')}`);
+  const stateData = await readJsonFile<Record<string, unknown>>(`${workDir}/${getStateFilePath('sflow')}`);
   if (hasDecisionPointFlag(stateData, 'architect_write_approved')) {
     return { success: true };
   }
@@ -121,7 +121,7 @@ export async function checkFlowArchitectWriteGuard(
  * check if the current project is a frontend project. If not, block the operation.
  */
 export async function checkFlowRestyleFrontendGuard(
-  changeDir: string,
+  workDir: string,
   data: Record<string, unknown>,
 ): Promise<AgentGuardResult> {
   const agent = (data.agent as string) || '';
@@ -131,7 +131,7 @@ export async function checkFlowRestyleFrontendGuard(
   if (!agent.includes('flow-restyle')) return { success: true };
   if (!['write', 'edit', 'bash'].includes(toolName)) return { success: true };
 
-  const isFrontend = await isFrontendProject(changeDir);
+  const isFrontend = await isFrontendProject(workDir);
   if (isFrontend) return { success: true };
 
   return {
@@ -156,17 +156,17 @@ export async function checkFlowRestyleFrontendGuard(
  * reference graph grep + explicit confirmation first.
  */
 export async function checkBreakingChangeGuard(
-  changeDir: string,
+  workDir: string,
   data: Record<string, unknown>,
 ): Promise<AgentGuardResult> {
-  // Guard: skip if no changeDir or no data
-  if (!changeDir || !data || typeof data !== 'object') return { success: true };
+  // Guard: skip if no workDir or no data
+  if (!workDir || !data || typeof data !== 'object') return { success: true };
 
   // Only activate during executing/debugging states — other states are already
   // protected by the generic guard chain (C4: planning phases block writes,
   // terminal states block all writes). The breaking change guard is specifically
   // for the execution phase where writes are allowed but must be controlled.
-  const stateData = await readJsonFile<Record<string, unknown>>(`${changeDir}/${getStateFilePath('sflow')}`);
+  const stateData = await readJsonFile<Record<string, unknown>>(`${workDir}/${getStateFilePath('sflow')}`);
   const currentState = (stateData?.state as string) || '';
   if (currentState !== 'executing' && currentState !== 'debugging') {
     return { success: true };
@@ -252,7 +252,7 @@ export async function checkBreakingChangeGuard(
     const writeFilePath = (data.filePath as string) || '';
     const resolvedWritePath = writeFilePath.startsWith('/') || writeFilePath.includes(':')
       ? writeFilePath
-      : path.join(changeDir, writeFilePath);
+      : path.join(workDir, writeFilePath);
     const targetExists = await fileExists(resolvedWritePath);
     if (!targetExists) {
       // New file creation — not breaking
@@ -291,13 +291,13 @@ export async function checkBreakingChangeGuard(
  * (More precise blocking conditions first)
  */
 export async function createAgentSpecificGuards(
-  changeDir: string,
+  workDir: string,
   data: Record<string, unknown>,
 ): Promise<AgentGuardResult | null> {
   const guards = [checkFlowIntelScanGuard, checkFlowArchitectWriteGuard, checkFlowRestyleFrontendGuard, checkBreakingChangeGuard];
   const allWarnings: string[] = [];
   for (const guard of guards) {
-    const result = await guard(changeDir, data);
+    const result = await guard(workDir, data);
     if (!result.success && result.block) {
       return result;
     }

@@ -14,7 +14,7 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
         image_paths: z.array(z.string()).optional().describe('Paths to reference images for image-to-image style transfer or multi-image composition. Single path for style transfer, multiple paths for composition.'),
       },
       execute: async (args: { prompt: string; output_path?: string; size?: string; ratio?: string; image_paths?: string[] }, context) => {
-        const changeDir = resolveChangeDir(undefined, context.directory);
+        const workDir = resolveChangeDir(undefined, context.directory);
         try {
           const { readFile, writeFile, mkdir } = await import('node:fs/promises');
           const { homedir } = await import('node:os');
@@ -37,7 +37,7 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
           let imageUrls: string[] | undefined;
           if (Array.isArray(args.image_paths) && args.image_paths.length > 0) {
             imageUrls = await Promise.all(args.image_paths.map(async (imgPath: string) => {
-              const fullImgPath = isAbsolute(imgPath) ? imgPath : join(changeDir, imgPath);
+              const fullImgPath = isAbsolute(imgPath) ? imgPath : join(workDir, imgPath);
               const imgExt = extname(imgPath).toLowerCase();
               const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
               const mime = mimeMap[imgExt] || 'image/png';
@@ -83,7 +83,7 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
           const imgBuffer = await imgResponse.arrayBuffer();
 
           const outputPath = args.output_path || `src/assets/images/gen-${Date.now()}.png`;
-          const fullPath = join(changeDir, outputPath);
+          const fullPath = join(workDir, outputPath);
           await mkdir(dirname(fullPath), { recursive: true });
           await writeFile(fullPath, Buffer.from(imgBuffer));
 
@@ -121,7 +121,7 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
         frame_rate: z.number().optional().describe('Frame rate 1-60 (default: 24)'),
       },
       execute: async (args: { prompt: string; output_path?: string; width?: number; height?: number; num_frames?: number; frame_rate?: number }, context) => {
-        const changeDir = resolveChangeDir(undefined, context.directory);
+        const workDir = resolveChangeDir(undefined, context.directory);
         try {
           const { readFile, writeFile, mkdir } = await import('node:fs/promises');
           const { homedir } = await import('node:os');
@@ -195,7 +195,7 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
           const videoBuffer = await videoResponse.arrayBuffer();
 
           const outputPath = args.output_path || `src/assets/videos/gen-${Date.now()}.mp4`;
-          const fullPath = join(changeDir, outputPath);
+          const fullPath = join(workDir, outputPath);
           await mkdir(dirname(fullPath), { recursive: true });
           await writeFile(fullPath, Buffer.from(videoBuffer));
 
@@ -227,7 +227,7 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
         prompt: z.string().optional().describe('Question or instruction about the image (default: "请详细描述这张图片的内容")'),
       },
       execute: async (args: { image_path: string; prompt?: string }, context) => {
-        const changeDir = resolveChangeDir(undefined, context.directory);
+        const workDir = resolveChangeDir(undefined, context.directory);
         try {
           const { readFile } = await import('node:fs/promises');
           const { homedir } = await import('node:os');
@@ -243,7 +243,7 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
             return { title: 'Agnes Image Understand', output: JSON.stringify({ success: false, error: 'Agnesmore auth not found or invalid. Run /connect in OpenCode to configure agnesmore first.' }, null, 2) };
           }
 
-          const imagePath = isAbsolute(args.image_path) ? args.image_path : join(changeDir, args.image_path);
+          const imagePath = isAbsolute(args.image_path) ? args.image_path : join(workDir, args.image_path);
           const ext = extname(args.image_path).toLowerCase();
           const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
           const mime = mimeMap[ext] || 'image/png';
@@ -309,7 +309,7 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
         n: z.number().optional().describe('Number of images to generate (default: 1). Only the first image is saved when n > 1.'),
       },
       execute: async (args: { prompt: string; output_path?: string; ratio?: string; n?: number }, context) => {
-        const changeDir = resolveChangeDir(undefined, context.directory);
+        const workDir = resolveChangeDir(undefined, context.directory);
         try {
           const { readFile, writeFile, mkdir } = await import('node:fs/promises');
           const { homedir } = await import('node:os');
@@ -379,7 +379,7 @@ export function createAgnesTools(): Record<string, LocalToolDefinition> {
           const imgBuffer = await imgResponse.arrayBuffer();
 
           const outputPath = args.output_path || `src/assets/images/sense-${Date.now()}.png`;
-          const fullPath = join(changeDir, outputPath);
+          const fullPath = join(workDir, outputPath);
           await mkdir(dirname(fullPath), { recursive: true });
           await writeFile(fullPath, Buffer.from(imgBuffer));
 

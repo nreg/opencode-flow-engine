@@ -415,7 +415,7 @@ Users SHALL login.
     it('should resolve context from change directory', () => {
       const context = resolvePublicationContext(CHANGE_DIR);
 
-      expect(context.changeDir).toBe(CHANGE_DIR);
+      expect(context.workDir).toBe(CHANGE_DIR);
       expect(context.projectRoot).toBe(PROJECT_ROOT);
       expect(context.baselineSpecsDir).toBe(join(PROJECT_ROOT, 'specs'));
     });

@@ -34,10 +34,10 @@ import { getStateFilePath } from "../../features/state-manager.js";
  * READ-ONLY: never writes state.
  */
 export async function checkSchemaMigrationGuard(
-  changeDir: string,
+  workDir: string,
   data?: Record<string, unknown>,
 ): Promise<HookResult> {
-  if (!changeDir || !data) return { success: true };
+  if (!workDir || !data) return { success: true };
 
   const toolName = (data.toolName as string) || '';
   if (toolName !== 'write' && toolName !== 'edit') return { success: true };
@@ -47,7 +47,7 @@ export async function checkSchemaMigrationGuard(
 
   // Only check during executing/debugging states
   const stateData = await readJsonFile<{ state?: string }>(
-    `${changeDir}/${getStateFilePath('sflow')}`,
+    `${workDir}/${getStateFilePath('sflow')}`,
   );
   const currentState = stateData?.state || '';
   if (currentState !== 'executing' && currentState !== 'debugging') {
@@ -61,7 +61,7 @@ export async function checkSchemaMigrationGuard(
   // Check if migration files exist for each detected schema change
   const missingMigrations: string[] = [];
   for (const change of schemaChanges) {
-    const migrationExists = await checkMigrationFileExists(changeDir, change);
+    const migrationExists = await checkMigrationFileExists(workDir, change);
     if (!migrationExists) {
       missingMigrations.push(
         `${change.tableName} (${change.framework}, ${change.type})`,
@@ -100,10 +100,10 @@ export async function checkSchemaMigrationGuard(
  * READ-ONLY: never writes state.
  */
 export async function checkAbstractionGrepGuard(
-  changeDir: string,
+  workDir: string,
   data?: Record<string, unknown>,
 ): Promise<HookResult> {
-  if (!changeDir || !data) return { success: true };
+  if (!workDir || !data) return { success: true };
 
   const toolName = (data.toolName as string) || '';
   // Only check for new file creation (write), not edits
@@ -114,7 +114,7 @@ export async function checkAbstractionGrepGuard(
 
   // Only check during executing/debugging states
   const stateData = await readJsonFile<{ state?: string }>(
-    `${changeDir}/${getStateFilePath('sflow')}`,
+    `${workDir}/${getStateFilePath('sflow')}`,
   );
   const currentState = stateData?.state || '';
   if (currentState !== 'executing' && currentState !== 'debugging') {
@@ -129,12 +129,12 @@ export async function checkAbstractionGrepGuard(
   const fullPath = filePath.replace(/\\/g, '/');
   const absolutePath = fullPath.startsWith('/') || fullPath.includes(':')
     ? fullPath
-    : `${changeDir}/${fullPath}`;
+    : `${workDir}/${fullPath}`;
   const alreadyExists = await fileExists(absolutePath);
   if (alreadyExists) return { success: true };
 
   // Check if grep self-check has been recorded for this category
-  const hasRecord = await hasGrepRecord(changeDir, abstraction.category);
+  const hasRecord = await hasGrepRecord(workDir, abstraction.category);
   if (!hasRecord) {
     return {
       success: true,

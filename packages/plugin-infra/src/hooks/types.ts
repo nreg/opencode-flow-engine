@@ -29,7 +29,7 @@ export interface HookHandler {
  * Hook context
  */
 export interface HookContext {
-  changeDir: string;
+  workDir: string;
   stateFile: string;
   pluginRoot: string;
   action: string;

@@ -43,7 +43,7 @@ describe('P1-1 fail-closed：guard 钩子异常一律 block', () => {
     );
 
     const hook = createGuardHook();
-    const result = await hook.execute({ changeDir: dir, data: {} } as any);
+    const result = await hook.execute({ workDir: dir, data: {} } as any);
 
     // fail-closed：异常不得穿透为无 block 的失败
     expect(result.block).toBe(true);

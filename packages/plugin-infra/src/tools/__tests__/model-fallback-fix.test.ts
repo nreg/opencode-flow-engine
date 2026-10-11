@@ -860,7 +860,7 @@ describe('NEW-P0-B: async watcher 路径配额错误识别与换模', () => {
       subagentType: 'build-executor',
       status: 'running',
       createdAt: Date.now(),
-      changeDir: '',
+      workDir: '',
       resolvedModel: 'provider/quota-primary',
       prompt: 'original-task-prompt',
     });
@@ -901,7 +901,7 @@ describe('NEW-P0-B: async watcher 路径配额错误识别与换模', () => {
       subagentType: 'build-executor',
       status: 'running',
       createdAt: Date.now(),
-      changeDir: '',
+      workDir: '',
       resolvedModel: 'provider/broken-model',
     });
     const watcher = createBackgroundTaskWatcher({
@@ -976,7 +976,7 @@ describe('NEW-P0-B: async watcher 路径配额错误识别与换模', () => {
       subagentType: 'build-executor',
       status: 'running',
       createdAt: Date.now(),
-      changeDir: '',
+      workDir: '',
       resolvedModel: 'provider/watch-primary',
       prompt: 'original-task-prompt',
     });
@@ -1013,7 +1013,7 @@ describe('NEW-P0-B: async watcher 路径配额错误识别与换模', () => {
       subagentType: 'build-executor',
       status: 'running',
       createdAt: Date.now(),
-      changeDir: '',
+      workDir: '',
       resolvedModel: 'provider/watch-primary',
       prompt: 'original-task-prompt',
     });
@@ -1314,7 +1314,7 @@ describe('FIX-P0-1: 产出正向判定', () => {
         subagentType: 'build-executor',
         status: 'running',
         createdAt: Date.now(),
-        changeDir: '',
+        workDir: '',
         resolvedModel: 'provider/no-signal-primary',
       });
       const watcher = createBackgroundTaskWatcher({
@@ -1700,7 +1700,7 @@ describe('FIX-P1-3: abort 与模型故障分离', () => {
       subagentType: 'build-executor',
       status: 'running',
       createdAt: Date.now(),
-      changeDir: '',
+      workDir: '',
       resolvedModel: 'provider/abort-primary',
     });
     const watcher = createBackgroundTaskWatcher({

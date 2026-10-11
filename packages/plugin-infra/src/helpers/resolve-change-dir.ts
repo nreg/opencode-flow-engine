@@ -1,5 +1,5 @@
 /**
- * Unified changeDir resolution utility
+ * Unified workDir resolution utility
  * 
  * Provides a single source of truth for resolving the project/change directory
  * across all tools and features. Eliminates path splitting issues where
@@ -7,7 +7,7 @@
  * 
  * Priority: explicitChangeDir > contextDirectory > cwd
  * 
- * @param explicitChangeDir - Explicitly provided changeDir (highest priority)
+ * @param explicitChangeDir - Explicitly provided workDir (highest priority)
  * @param contextDirectory - Directory from tool context (second priority)
  * @returns Resolved absolute or relative path to the project directory
  * @throws Error if no path can be resolved
@@ -43,7 +43,7 @@ export function resolveChangeDir(
   const callerInfo = extractCallerInfo();
   
   throw new Error(
-    `Unable to resolve changeDir: no explicit path, no context directory, and cwd unavailable${errorReason}${callerInfo}`,
+    `Unable to resolve workDir: no explicit path, no context directory, and cwd unavailable${errorReason}${callerInfo}`,
   );
 }
 

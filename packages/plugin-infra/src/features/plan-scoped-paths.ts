@@ -27,8 +27,8 @@ const PLANS_DIR = 'plans';
  * 获取根级 SDD 路径（兼容层）。
  * 用于读取 legacy 收据或在 plan-scoped 机制启用前的文件。
  */
-export function getOverlayPaths(changeDir: string) {
-  const root = join(changeDir, SDD_ROOT);
+export function getOverlayPaths(workDir: string) {
+  const root = join(workDir, SDD_ROOT);
   return {
     root,
     reviews: join(root, 'reviews'),
@@ -97,12 +97,12 @@ export interface PlanScopedPaths {
  * 获取 plan-scoped 路径。
  * 根据 plan identity 派生所有收据目录路径。
  *
- * @param changeDir - 项目根目录
+ * @param workDir - 项目根目录
  * @param plan - Execution plan 对象
  * @returns Plan-scoped 路径结构
  */
-export function getPlanScopedPaths(changeDir: string, plan: ExecutionPlan): PlanScopedPaths {
-  const rootPaths = getOverlayPaths(changeDir);
+export function getPlanScopedPaths(workDir: string, plan: ExecutionPlan): PlanScopedPaths {
+  const rootPaths = getOverlayPaths(workDir);
   const planIdentity = getPlanIdentity(plan);
   const planRoot = join(rootPaths.root, PLANS_DIR, planIdentity);
 
@@ -133,12 +133,12 @@ export interface CurrentPlanScopedPaths extends PlanScopedPaths {
  * 获取当前 plan 的 scoped 路径。
  * 读取 execution-plan.json 并派生路径。
  *
- * @param changeDir - 项目根目录
+ * @param workDir - 项目根目录
  * @returns 当前 plan-scoped 路径结构，如果 execution plan 不存在则返回 null
  * @throws 如果 execution plan 文件存在但无法解析
  */
-export async function getCurrentPlanScopedPaths(changeDir: string): Promise<CurrentPlanScopedPaths | null> {
-  const planPath = getOverlayPaths(changeDir).executionPlan;
+export async function getCurrentPlanScopedPaths(workDir: string): Promise<CurrentPlanScopedPaths | null> {
+  const planPath = getOverlayPaths(workDir).executionPlan;
 
   // 检查 execution plan 是否存在
   const exists = await fileExists(planPath);
@@ -159,7 +159,7 @@ export async function getCurrentPlanScopedPaths(changeDir: string): Promise<Curr
   }
 
   // 派生 plan-scoped 路径
-  const paths = getPlanScopedPaths(changeDir, plan);
+  const paths = getPlanScopedPaths(workDir, plan);
 
   return {
     plan,
@@ -189,22 +189,22 @@ export interface RecordDirectoryResolution {
  * 2. 如果 plan-scoped 目录存在，使用它
  * 3. 否则使用根级目录，并返回 legacy plan 用于过滤
  *
- * @param changeDir - 项目根目录
+ * @param workDir - 项目根目录
  * @param field - 收据类型字段（'reviews' | 'checkpoints' | 'handoffs' | 'repairState'）
  * @returns 收据目录解析结果
  */
 export async function resolveRecordDirectory(
-  changeDir: string,
+  workDir: string,
   field: 'reviews' | 'checkpoints' | 'handoffs' | 'repairState',
 ): Promise<RecordDirectoryResolution> {
   let currentScope: CurrentPlanScopedPaths | null;
   try {
-    currentScope = await getCurrentPlanScopedPaths(changeDir);
+    currentScope = await getCurrentPlanScopedPaths(workDir);
   } catch {
     // 恢复场景：如果 execution plan 格式错误，返回根级目录
     // 保持 checkpoint/handoff 读取可用，以便诊断信息能够显示
     return {
-      directory: getOverlayPaths(changeDir)[field],
+      directory: getOverlayPaths(workDir)[field],
       legacyPlan: null,
     };
   }
@@ -212,7 +212,7 @@ export async function resolveRecordDirectory(
   // 如果没有 execution plan，使用根级目录
   if (!currentScope) {
     return {
-      directory: getOverlayPaths(changeDir)[field],
+      directory: getOverlayPaths(workDir)[field],
       legacyPlan: null,
     };
   }
@@ -229,7 +229,7 @@ export async function resolveRecordDirectory(
 
   // plan-scoped 目录不存在，使用根级目录并标记为 legacy
   return {
-    directory: getOverlayPaths(changeDir)[field],
+    directory: getOverlayPaths(workDir)[field],
     legacyPlan: currentScope.plan,
   };
 }

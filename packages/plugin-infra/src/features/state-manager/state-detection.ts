@@ -56,9 +56,9 @@ export interface WorkflowStateDetection {
  * Ensure migration target directory exists.
  * Single responsibility: directory creation only.
  */
-export async function ensureMigrateDir(changeDir: string): Promise<void> {
+export async function ensureMigrateDir(workDir: string): Promise<void> {
   const { mkdir } = await import('node:fs/promises');
-  const sflowDir = `${changeDir}/.flow-engine/sflow`;
+  const sflowDir = `${workDir}/.flow-engine/sflow`;
   await mkdir(sflowDir, { recursive: true });
 }
 
@@ -88,8 +88,8 @@ export async function migrateSingleArtifact(srcPath: string, dstPath: string): P
  * Non-destructive: copies files, does not delete originals.
  * Uses migration marker to skip redundant migrations.
  */
-export async function migrateLegacyArtifacts(changeDir: string): Promise<void> {
-  const sflowDir = `${changeDir}/.flow-engine/sflow`;
+export async function migrateLegacyArtifacts(workDir: string): Promise<void> {
+  const sflowDir = `${workDir}/.flow-engine/sflow`;
   const markerPath = `${sflowDir}/.artifacts-migrated`;
   
   if (await fileExists(markerPath)) {
@@ -97,21 +97,21 @@ export async function migrateLegacyArtifacts(changeDir: string): Promise<void> {
   }
   
   try {
-    await ensureMigrateDir(changeDir);
+    await ensureMigrateDir(workDir);
   } catch (err) {
-    Logger.warn(`[migrateLegacyArtifacts] ensureMigrateDir failed for ${changeDir}: ${err instanceof Error ? err.message : String(err)}`);
+    Logger.warn(`[migrateLegacyArtifacts] ensureMigrateDir failed for ${workDir}: ${err instanceof Error ? err.message : String(err)}`);
     return;
   }
   
   const artifacts = ['proposal.md', 'design.md', 'tasks.md', 'execution-contract.md', 'ui-design.md'];
   
   for (const artifact of artifacts) {
-    const legacyPath = `${changeDir}/${artifact}`;
+    const legacyPath = `${workDir}/${artifact}`;
     const newPath = `${sflowDir}/${artifact}`;
     await migrateSingleArtifact(legacyPath, newPath);
   }
   
-  const legacySpecsDir = `${changeDir}/specs`;
+  const legacySpecsDir = `${workDir}/specs`;
   const newSpecsDir = `${sflowDir}/specs`;
   
   const legacySpecsExists = await directoryExists(legacySpecsDir);
@@ -144,23 +144,23 @@ export async function migrateLegacyArtifacts(changeDir: string): Promise<void> {
  * Read artifacts once and return a reusable map (avoids redundant I/O).
  * Uses dual-path compatibility: new path (.flow-engine/sflow/) preferred, legacy path fallback.
  */
-export async function detectArtifactExistence(changeDir: string): Promise<{
+export async function detectArtifactExistence(workDir: string): Promise<{
   proposal: boolean; design: boolean; tasks: boolean; specs: boolean;
   specsFileCount: number; contract: boolean; uiDesign: boolean;
   executionPlan: boolean;
 }> {
-  await migrateLegacyArtifacts(changeDir).catch(() => {});
+  await migrateLegacyArtifacts(workDir).catch(() => {});
   
   const [proposal, design, tasks, contract, uiDesign, executionPlan] = await Promise.all([
-    artifactExists(changeDir, 'proposal.md'),
-    artifactExists(changeDir, 'design.md'),
-    artifactExists(changeDir, 'tasks.md'),
-    artifactExists(changeDir, 'execution-contract.md'),
-    artifactExists(changeDir, 'ui-design.md'),
-    fileExists(changeDir + '/.flow-engine/sflow/execution-plan.json'),
+    artifactExists(workDir, 'proposal.md'),
+    artifactExists(workDir, 'design.md'),
+    artifactExists(workDir, 'tasks.md'),
+    artifactExists(workDir, 'execution-contract.md'),
+    artifactExists(workDir, 'ui-design.md'),
+    fileExists(workDir + '/.flow-engine/sflow/execution-plan.json'),
   ]);
   
-  const specFiles = await listSpecFiles(changeDir);
+  const specFiles = await listSpecFiles(workDir);
   const specsFileCount = specFiles.length;
   
   return {
@@ -177,21 +177,21 @@ export async function detectArtifactExistence(changeDir: string): Promise<{
  * Artifact-first approach: inspects filesystem, then reads state.json for approval status.
  * Supports all 9 states including ui-design for frontend projects.
  *
- * @param changeDir - The project/change directory
+ * @param workDir - The project/change directory
  * @param artifactsOpt - Optional pre-fetched artifact existence map (avoids redundant I/O)
  */
 export async function detectWorkflowState(
-  changeDir: string,
+  workDir: string,
   artifactsOpt?: WorkflowStateDetection['artifacts'],
 ): Promise<WorkflowStateDetection> {
-  const artifacts = artifactsOpt ?? await detectArtifactExistence(changeDir);
+  const artifacts = artifactsOpt ?? await detectArtifactExistence(workDir);
   const stateData = await readJsonFile<{
     state?: string;
     mode?: string;
     contractApproved?: boolean;
     isFrontend?: boolean;  // P2-3: 语言继承 - 前端项目标记缓存
   }>(
-    changeDir + '/.flow-engine/sflow/state.json',
+    workDir + '/.flow-engine/sflow/state.json',
   ).catch(() => null);
 
   const isApproved = (
@@ -211,7 +211,7 @@ export async function detectWorkflowState(
     isFrontend = stateData.isFrontend === true;
   } else {
     const { detectFrontend } = await import('../workflow-manager.js');
-    isFrontend = await detectFrontend(changeDir);
+    isFrontend = await detectFrontend(workDir);
   }
 
   let state: string;
@@ -251,17 +251,17 @@ export async function detectWorkflowState(
 
   // Contract staleness override — only applies to sFlow context
   if (artifacts.contract) {
-    const hasSFlowDir = await directoryExists(`${changeDir}/.flow-engine/sflow`);
+    const hasSFlowDir = await directoryExists(`${workDir}/.flow-engine/sflow`);
     if (hasSFlowDir) {
       try {
-        const stale = await checkContractStale(changeDir);
+        const stale = await checkContractStale(workDir);
         if (stale) {
           state = 'bridging';
           skill = 'contract-builder';
           reasons.push('Contract is stale, needs regeneration');
         }
       } catch (err) {
-        Logger.warn(`[detectWorkflowState] Contract staleness check failed for ${changeDir}: ${err instanceof Error ? err.message : String(err)}`);
+        Logger.warn(`[detectWorkflowState] Contract staleness check failed for ${workDir}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }
@@ -273,8 +273,8 @@ export async function detectWorkflowState(
   };
 }
 
-export async function detectStateMismatch(changeDir: string, currentState: string): Promise<string> {
-  const artifacts = await detectArtifactExistence(changeDir);
+export async function detectStateMismatch(workDir: string, currentState: string): Promise<string> {
+  const artifacts = await detectArtifactExistence(workDir);
   const hp = artifacts.proposal;
   const hd = artifacts.design;
   const ht = artifacts.tasks;
@@ -282,24 +282,24 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
   const hc = artifacts.contract;
   const hui = artifacts.uiDesign;
   const hep = artifacts.executionPlan;
-  const pc = hp ? await readArtifactContent(changeDir, 'proposal.md') : null;
-  const tc = ht ? await readArtifactContent(changeDir, 'tasks.md') : null;
+  const pc = hp ? await readArtifactContent(workDir, 'proposal.md') : null;
+  const tc = ht ? await readArtifactContent(workDir, 'tasks.md') : null;
   const inc = tc ? tc.split('\n').filter((l: string) => l.match(/^-\s*\[\s\]/)).length : 0;
   const allDone = tc ? tc.split('\n').filter((l: string) => l.match(/^-\s*\[.\]+\s/)).length > 0 && inc === 0 : false;
   if (hc && (currentState === 'approved-for-build' || currentState === 'executing')) {
-    const sd = await readJsonFile<Record<string, unknown>>(changeDir + '/.flow-engine/sflow/state.json');
+    const sd = await readJsonFile<Record<string, unknown>>(workDir + '/.flow-engine/sflow/state.json');
     const sh = (sd?.contract_hash as string) || '';
     if (sh) {
-      const cc = await readArtifactContent(changeDir, 'execution-contract.md');
+      const cc = await readArtifactContent(workDir, 'execution-contract.md');
       const ch = await simpleHash(cc || '');
       if (ch !== sh) return 'bridging';
     }
   }
   if (hep && (currentState === 'executing' || currentState === 'debugging')) {
-    const plan = await readJsonFile<Record<string, unknown>>(changeDir + '/.flow-engine/sflow/execution-plan.json');
+    const plan = await readJsonFile<Record<string, unknown>>(workDir + '/.flow-engine/sflow/execution-plan.json');
     const planContractHash = (plan?.contract_hash as string) || '';
     if (planContractHash && hc) {
-      const cc = await readArtifactContent(changeDir, 'execution-contract.md');
+      const cc = await readArtifactContent(workDir, 'execution-contract.md');
       const ch = await simpleHash(cc || '');
       if (ch !== planContractHash) return 'bridging';
     }
@@ -313,10 +313,10 @@ export async function detectStateMismatch(changeDir: string, currentState: strin
     if (hui) {
       try {
         const { unlink } = await import('node:fs/promises');
-        const uiDesignPath = await resolveArtifactPath(changeDir, 'ui-design.md');
+        const uiDesignPath = await resolveArtifactPath(workDir, 'ui-design.md');
         await unlink(uiDesignPath);
       } catch (err) {
-        Logger.warn(`[detectStateMismatch] Failed to delete invalid ui-design.md at ${changeDir}: ${err instanceof Error ? err.message : String(err)}`);
+        Logger.warn(`[detectStateMismatch] Failed to delete invalid ui-design.md at ${workDir}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
     return 'specifying';

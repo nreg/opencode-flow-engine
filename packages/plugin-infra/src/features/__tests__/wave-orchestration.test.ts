@@ -22,7 +22,7 @@ describe('Wave Orchestration Constraints', () => {
 Execute the following waves:
 - Wave 1: DP state progression fix
 - Wave 2: Wave orchestration fix
-- Wave 3: changeDir unification fix
+- Wave 3: workDir unification fix
 - Wave 4: Completion notification fix
 - Wave 5: Integration verification
 - Wave 6: Final cleanup
@@ -305,7 +305,7 @@ describe('Wave Orchestration Tool Integration (P0-2)', () => {
     const multiWavePrompt = `
 Execute Wave 1: DP state progression fix
 Execute Wave 2: Wave orchestration fix
-Execute Wave 3: changeDir unification fix
+Execute Wave 3: workDir unification fix
     `.trim();
     
     const result = await callFlowAgentTool.execute!(

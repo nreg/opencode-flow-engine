@@ -34,7 +34,7 @@ describe('contract_validator：execution-contract.md 错位提示', () => {
 
     const tool = createContractValidatorTool();
     const result = await tool.execute(
-      { changeDir: workDir },
+      { workDir: workDir },
       { directory: workDir } as never,
     );
     const parsed = JSON.parse(result.output);
@@ -49,7 +49,7 @@ describe('contract_validator：execution-contract.md 错位提示', () => {
   it('未命中错位时保留原建议，并附工件目录说明', async () => {
     const tool = createContractValidatorTool();
     const result = await tool.execute(
-      { changeDir: workDir },
+      { workDir: workDir },
       { directory: workDir } as never,
     );
     const parsed = JSON.parse(result.output);
@@ -66,7 +66,7 @@ describe('artifact_inspector：File not found 错位提示', () => {
 
     const tool = createArtifactInspectorTool();
     const result = await tool.execute(
-      { changeDir: workDir, artifactType: 'proposal' },
+      { workDir: workDir, artifactType: 'proposal' },
       { directory: workDir } as never,
     );
     const parsed = JSON.parse(result.output);
@@ -83,7 +83,7 @@ describe('artifact_inspector：File not found 错位提示', () => {
 
     const tool = createArtifactInspectorTool();
     const result = await tool.execute(
-      { changeDir: workDir, artifactType: 'design' },
+      { workDir: workDir, artifactType: 'design' },
       { directory: workDir } as never,
     );
     const parsed = JSON.parse(result.output);
@@ -97,7 +97,7 @@ describe('artifact_inspector：File not found 错位提示', () => {
 
     const tool = createArtifactInspectorTool();
     const result = await tool.execute(
-      { changeDir: workDir, artifactType: 'tasks' },
+      { workDir: workDir, artifactType: 'tasks' },
       { directory: workDir } as never,
     );
     const parsed = JSON.parse(result.output);
@@ -110,7 +110,7 @@ describe('artifact_inspector：File not found 错位提示', () => {
 
     const tool = createArtifactInspectorTool();
     const result = await tool.execute(
-      { changeDir: workDir, artifactType: 'ui-design' },
+      { workDir: workDir, artifactType: 'ui-design' },
       { directory: workDir } as never,
     );
     const parsed = JSON.parse(result.output);
@@ -121,7 +121,7 @@ describe('artifact_inspector：File not found 错位提示', () => {
   it('未命中错位时保留 File not found 语义并附工件目录说明', async () => {
     const tool = createArtifactInspectorTool();
     const result = await tool.execute(
-      { changeDir: workDir, artifactType: 'proposal' },
+      { workDir: workDir, artifactType: 'proposal' },
       { directory: workDir } as never,
     );
     const parsed = JSON.parse(result.output);

@@ -306,7 +306,7 @@ describe('I1: checkFlowArchitectWriteGuard — path prefix normalization', () =>
     await cleanupDir(dir);
   });
 
-  it('should handle relative path to ARCHITECTURE.md by resolving against changeDir', async () => {
+  it('should handle relative path to ARCHITECTURE.md by resolving against workDir', async () => {
     await writeStateFile(dir, { state: 'specifying', mode: 'full' });
     // Create existing ARCHITECTURE.md
     await writeFileContent(join(dir, 'ARCHITECTURE.md'), '# Architecture\n');

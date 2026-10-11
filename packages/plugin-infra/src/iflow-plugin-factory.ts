@@ -91,7 +91,7 @@ export {
   iflowSessionErrorHandlers as iflowSessionErrorHandlersForTest,
 };
 /**
- * P2-3″ 测试观测点：记录 handler 创建时实际收到的 changeDir（语义同 sflow 版本）。
+ * P2-3″ 测试观测点：记录 handler 创建时实际收到的 workDir（语义同 sflow 版本）。
  * 仅作测试观测，不参与任何生产分支。
  */
 const iflowSessionErrorHandlerWorkDir = new Map<string, string>();
@@ -165,7 +165,7 @@ function createIFlowTools(
       },
       execute: async (args, context) => {
         return createIFlowRouterTool().execute(
-          { ...args, changeDir: resolveChangeDir(undefined, context.directory) },
+          { ...args, workDir: resolveChangeDir(undefined, context.directory) },
           context,
         );
       },
@@ -238,7 +238,7 @@ function createIFlowPluginServer(
           const sessionStartHook = hookComposer.getHook('session_start');
           if (sessionStartHook) {
             await sessionStartHook.execute({
-              changeDir: workDir,
+              workDir: workDir,
               stateFile: `${workDir}/${getStateFilePath('iflow')}`,
               pluginRoot: '',
               action: 'session.created',
@@ -255,7 +255,7 @@ function createIFlowPluginServer(
           const sessionEndHook = hookComposer.getHook('session_end');
           if (sessionEndHook) {
             await sessionEndHook.execute({
-              changeDir: workDir,
+              workDir: workDir,
               stateFile: `${workDir}/${getStateFilePath('iflow')}`,
               pluginRoot: '',
               action: 'session.deleted',
@@ -503,7 +503,7 @@ function createIFlowPluginServer(
         const guardHook = hookComposer.getHook('guard');
         if (guardHook) {
           const guardResult = await guardHook.execute({
-            changeDir: workDir,
+            workDir: workDir,
             stateFile: `${workDir}/${getStateFilePath('iflow')}`,
             pluginRoot: '',
             action: `tool:${toolName}`,
@@ -543,7 +543,7 @@ function createIFlowPluginServer(
             const iflowTransitionHook = hookComposer.getHook('iflow_state_transition');
             if (iflowTransitionHook) {
               const result = await iflowTransitionHook.execute({
-                changeDir: workDir,
+                workDir: workDir,
                 stateFile: `${workDir}/${getStateFilePath('iflow')}`,
                 pluginRoot: '',
                 action: 'state-transition',

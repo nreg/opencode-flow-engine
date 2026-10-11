@@ -189,7 +189,7 @@ describe('Hook Composer', () => {
     it('should execute guard hook', async () => {
       composer.initialize();
       const result = await composer.executeHook('guard', {
-        changeDir: '/path/to/change',
+        workDir: '/path/to/change',
         stateFile: '',
         pluginRoot: '',
         action: 'transition',
@@ -202,7 +202,7 @@ describe('Hook Composer', () => {
     it('should execute artifact_validation hook', async () => {
       composer.initialize();
       const result = await composer.executeHook('artifact_validation', {
-        changeDir: '/path/to/change',
+        workDir: '/path/to/change',
         stateFile: '',
         pluginRoot: '',
         action: 'validate',
@@ -216,7 +216,7 @@ describe('Hook Composer', () => {
       composer.initialize();
       const tmpDir = mkdtempSync(join(tmpdir(), 'sflow-hook-test-'));
       const result = await composer.executeHook('state_transition', {
-        changeDir: tmpDir,
+        workDir: tmpDir,
         stateFile: '',
         pluginRoot: '',
         action: 'transition',
@@ -230,7 +230,7 @@ describe('Hook Composer', () => {
       composer.initialize();
       const tmpDir = mkdtempSync(join(tmpdir(), 'iflow-hook-test-'));
       const result = await composer.executeHook('iflow_state_transition', {
-        changeDir: tmpDir,
+        workDir: tmpDir,
         stateFile: '',
         pluginRoot: '',
         action: 'state-transition',
@@ -248,7 +248,7 @@ describe('Hook Composer', () => {
       mkdirSync(iflowStateDir, { recursive: true });
       writeFileSync(join(iflowStateDir, 'state.json'), JSON.stringify({ state: 'discussing' }));
       const result = await composer.executeHook('iflow_state_transition', {
-        changeDir: tmpDir,
+        workDir: tmpDir,
         stateFile: '',
         pluginRoot: '',
         action: 'state-transition',
@@ -262,7 +262,7 @@ describe('Hook Composer', () => {
     it('should return error for unknown hook', async () => {
       composer.initialize();
       const result = await composer.executeHook('unknown' as any, {
-        changeDir: '',
+        workDir: '',
         stateFile: '',
         pluginRoot: '',
         action: 'test',
@@ -276,7 +276,7 @@ describe('Hook Composer', () => {
     it('should execute all enabled hooks', async () => {
       composer.initialize();
       const result = await composer.executeAllHooks({
-        changeDir: '/path/to/change',
+        workDir: '/path/to/change',
         stateFile: '',
         pluginRoot: '',
         action: 'validate',
@@ -291,7 +291,7 @@ describe('Hook Composer', () => {
       composer.initialize();
       composer.disableHook('guard');
       const result = await composer.executeAllHooks({
-        changeDir: '/path/to/change',
+        workDir: '/path/to/change',
         stateFile: '',
         pluginRoot: '',
         action: 'validate',

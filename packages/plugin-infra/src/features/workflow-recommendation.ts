@@ -458,7 +458,7 @@ async function withHash(content: Omit<WorkflowSelectionRecord, 'hash'>): Promise
  * 写入 .flow-engine/sflow/workflow-selection.json
  */
 export async function saveWorkflowRecommendation(
-  changeDir: string,
+  workDir: string,
   facts: Partial<WorkflowFacts>
 ): Promise<WorkflowSelectionRecord> {
   const recommendation = recommendWorkflowPath(facts);
@@ -469,7 +469,7 @@ export async function saveWorkflowRecommendation(
     selection: null,
   });
 
-  const targetPath = `${changeDir}/${WORKFLOW_SELECTION_FILE}`;
+  const targetPath = `${workDir}/${WORKFLOW_SELECTION_FILE}`;
   await ensureDir(targetPath.substring(0, targetPath.lastIndexOf('/')));
   await atomicWriteJsonFile(targetPath, record);
 
@@ -479,8 +479,8 @@ export async function saveWorkflowRecommendation(
 /**
  * 读取工作流选择收据
  */
-export async function readWorkflowSelection(changeDir: string): Promise<ReadWorkflowSelectionResult> {
-  const path = `${changeDir}/${WORKFLOW_SELECTION_FILE}`;
+export async function readWorkflowSelection(workDir: string): Promise<ReadWorkflowSelectionResult> {
+  const path = `${workDir}/${WORKFLOW_SELECTION_FILE}`;
   
   if (!(await fileExists(path))) {
     return {
@@ -549,7 +549,7 @@ function normalizeLegacyRecord(record: WorkflowSelectionRecord): WorkflowSelecti
  * - Quick 风险覆盖需要 verification_strategy
  */
 export async function recordWorkflowSelection(
-  changeDir: string,
+  workDir: string,
   options: {
     mode: WorkflowMode;
     reason: string;
@@ -561,7 +561,7 @@ export async function recordWorkflowSelection(
   const { mode, reason, confirmed, acknowledged, verificationStrategy } = options;
 
   // 读取现有收据
-  const loaded = await readWorkflowSelection(changeDir);
+  const loaded = await readWorkflowSelection(workDir);
   if (!loaded.valid) {
     throw new Error(loaded.failures.join('; '));
   }
@@ -611,7 +611,7 @@ export async function recordWorkflowSelection(
     },
   });
 
-  const targetPath = `${changeDir}/${WORKFLOW_SELECTION_FILE}`;
+  const targetPath = `${workDir}/${WORKFLOW_SELECTION_FILE}`;
   await atomicWriteJsonFile(targetPath, selected);
 
   return selected;
@@ -621,7 +621,7 @@ export async function recordWorkflowSelection(
  * 自动接受推荐的工作流（quick 或 hotfix）
  */
 export async function acceptWorkflowRecommendation(
-  changeDir: string,
+  workDir: string,
   options: {
     source: string;
     verificationStrategy: string;
@@ -629,7 +629,7 @@ export async function acceptWorkflowRecommendation(
 ): Promise<WorkflowSelectionRecord> {
   const { source, verificationStrategy } = options;
 
-  const loaded = await readWorkflowSelection(changeDir);
+  const loaded = await readWorkflowSelection(workDir);
   if (!loaded.valid) {
     throw new Error(loaded.failures.join('; '));
   }
@@ -673,7 +673,7 @@ export async function acceptWorkflowRecommendation(
     },
   });
 
-  const targetPath = `${changeDir}/${WORKFLOW_SELECTION_FILE}`;
+  const targetPath = `${workDir}/${WORKFLOW_SELECTION_FILE}`;
   await atomicWriteJsonFile(targetPath, accepted);
 
   return accepted;

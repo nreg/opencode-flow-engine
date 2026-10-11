@@ -89,9 +89,9 @@ export {
   sflowSessionErrorHandlers as sflowSessionErrorHandlersForTest,
 };
 /**
- * P2-3″ 测试观测点：记录各 workDir 下 handler 创建时实际收到的 changeDir。
+ * P2-3″ 测试观测点：记录各 workDir 下 handler 创建时实际收到的 workDir。
  *
- * 目的：此前的接线测试只观测缓存 Map 的 key，若工厂把 `changeDir` 回退为
+ * 目的：此前的接线测试只观测缓存 Map 的 key，若工厂把 `workDir` 回退为
  * `process.cwd()`，全量套件仍绿（P1-2 回归可无声复现）。此处记录「真正传进
  * createSessionErrorHandler 的值」，使该接线可被直接断言。
  * 仅作测试观测，不参与任何生产分支。
@@ -162,8 +162,8 @@ function createWorkflowRouterTools(client: SFlowClient): Record<string, LocalToo
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
       execute: async (args, context) => {
-        const changeDir = resolveChangeDir(undefined, context.directory);
-        return createWorkflowRouterTool().execute({ ...args, changeDir }, context);
+        const workDir = resolveChangeDir(undefined, context.directory);
+        return createWorkflowRouterTool().execute({ ...args, workDir }, context);
       },
     },
 
@@ -173,8 +173,8 @@ function createWorkflowRouterTools(client: SFlowClient): Record<string, LocalToo
         state: z.string().optional().describe('Optional state hint to override detection'),
       },
       execute: async (args, context) => {
-        const changeDir = resolveChangeDir(undefined, context.directory);
-        return createIFlowRouterTool().execute({ ...args, changeDir }, context);
+        const workDir = resolveChangeDir(undefined, context.directory);
+        return createIFlowRouterTool().execute({ ...args, workDir }, context);
       },
     },
   };
@@ -191,8 +191,8 @@ function createContractTools(): Record<string, LocalToolDefinition> {
         const explicitChangeDir = args.contract_path
           ? args.contract_path.replace(/[/\\]execution-contract\.md$/, '')
           : undefined;
-        const changeDir = resolveChangeDir(explicitChangeDir, context.directory);
-        const result = await executeContractValidator(changeDir);
+        const workDir = resolveChangeDir(explicitChangeDir, context.directory);
+        const result = await executeContractValidator(workDir);
         return { title: 'Contract Validator', output: JSON.stringify(result, null, 2) };
       },
     },
@@ -206,8 +206,8 @@ function createContractTools(): Record<string, LocalToolDefinition> {
         const explicitChangeDir = args.artifact_path
           ? args.artifact_path.replace(/[/\\](proposal|design|tasks)\.md$/, '').replace(/[/\\]specs$/, '')
           : undefined;
-        const changeDir = resolveChangeDir(explicitChangeDir, context.directory);
-        const result = await executeArtifactInspector(changeDir);
+        const workDir = resolveChangeDir(explicitChangeDir, context.directory);
+        const result = await executeArtifactInspector(workDir);
         return { title: 'Artifact Inspector', output: JSON.stringify(result, null, 2) };
       },
     },
@@ -231,7 +231,7 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
         override: z.boolean().optional().describe('Whether this is a user override of the recommended mode'),
       },
       execute: async (args, context) => {
-        const changeDir = resolveChangeDir(undefined, context.directory);
+        const workDir = resolveChangeDir(undefined, context.directory);
         const { mode, waves, source, rationale, override } = args as {
           mode: 'inline' | 'batch-inline' | 'sdd';
           waves: Array<{
@@ -247,29 +247,29 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
 
         try {
           // REP-2: Validate contract existence (dual-path compatibility)
-          const contractExists = await artifactExists(changeDir, 'execution-contract.md');
+          const contractExists = await artifactExists(workDir, 'execution-contract.md');
           if (!contractExists) {
             return { title: 'Record Execution Plan', output: JSON.stringify({ success: false, error: 'execution-contract.md not found. Create a contract before recording an execution plan.' }, null, 2) };
           }
 
           // REP-3: Validate workflow state
-          const currentState = await getCurrentWorkflowState(changeDir);
+          const currentState = await getCurrentWorkflowState(workDir);
           const validStates = ['approved-for-build', 'executing'];
           if (!currentState || !validStates.includes(currentState)) {
             return { title: 'Record Execution Plan', output: JSON.stringify({ success: false, error: `Invalid state for recording execution plan: "${currentState}". Must be one of: ${validStates.join(', ')}` }, null, 2) };
           }
 
-          const existingPlan = await readExecutionPlan(changeDir);
+          const existingPlan = await readExecutionPlan(workDir);
           let plan;
 
           if (currentState === 'approved-for-build' && !existingPlan) {
-            plan = await createExecutionPlan(changeDir, { mode, source, rationale, waves });
+            plan = await createExecutionPlan(workDir, { mode, source, rationale, waves });
           } else if (currentState === 'executing' && existingPlan) {
-            plan = await reviseExecutionPlan(changeDir, { mode, source, rationale, waves });
+            plan = await reviseExecutionPlan(workDir, { mode, source, rationale, waves });
           } else if (currentState === 'approved-for-build' && existingPlan) {
-            plan = await reviseExecutionPlan(changeDir, { mode, source, rationale, waves });
+            plan = await reviseExecutionPlan(workDir, { mode, source, rationale, waves });
           } else {
-            plan = await createExecutionPlan(changeDir, { mode, source, rationale, waves });
+            plan = await createExecutionPlan(workDir, { mode, source, rationale, waves });
           }
 
           return {
@@ -300,9 +300,9 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
       description: 'Read and display the current execution plan from .flow-engine/sflow/execution-plan.json. Shows mode, waves, dependencies, review status, and plan hash.',
       args: {},
       execute: async (_args: Record<string, never>, context) => {
-        const changeDir = resolveChangeDir(undefined, context.directory);
+        const workDir = resolveChangeDir(undefined, context.directory);
         try {
-          const plan = await readExecutionPlan(changeDir);
+          const plan = await readExecutionPlan(workDir);
           if (!plan) {
             return { title: 'Show Execution Plan', output: JSON.stringify({ success: false, error: 'No execution plan found. Create one with record_execution_plan first.' }, null, 2) };
           }
@@ -311,7 +311,7 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
           const waveStatuses: Array<{ id: string; tasks: number; strategy: string; depends_on: string[]; review: string }> = [];
           for (const wave of plan.waves) {
             let reviewStatus = 'no receipt';
-            const receiptPath = `${changeDir}/.flow-engine/sflow/reviews/${wave.id}.json`;
+            const receiptPath = `${workDir}/.flow-engine/sflow/reviews/${wave.id}.json`;
             try {
               const receipt = await (await import('@opencode-flow-engine/shared')).readJsonFile<{ status?: string }>(receiptPath);
               if (receipt) {
@@ -367,7 +367,7 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
         issue: z.string().optional().describe('Stable issue identifier for the unresolved finding (required for fail receipts on schema_version 2 plans, e.g. "BUG-123")'),
       },
       execute: async (args, context) => {
-        const changeDir = resolveChangeDir(undefined, context.directory);
+        const workDir = resolveChangeDir(undefined, context.directory);
         const { waveId, status, base, head, report, issue } = args as {
           waveId: string;
           status: 'pass' | 'fail';
@@ -378,7 +378,7 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
         };
 
         try {
-          const receipt = await recordReviewReceipt(changeDir, waveId, {
+          const receipt = await recordReviewReceipt(workDir, waveId, {
             status,
             base,
             head,
@@ -421,7 +421,7 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
         reason: z.string().describe('Reason for the adjudication (required, no control characters)'),
       },
       execute: async (args, context) => {
-        const changeDir = resolveChangeDir(undefined, context.directory);
+        const workDir = resolveChangeDir(undefined, context.directory);
         const { waveId, decision, confirmed, reason } = args as {
           waveId: string;
           decision: string;
@@ -430,7 +430,7 @@ function createExecutionPlanTools(): Record<string, LocalToolDefinition> {
         };
 
         try {
-          const authorization = await adjudicateWave(changeDir, waveId, { decision, confirmed, reason });
+          const authorization = await adjudicateWave(workDir, waveId, { decision, confirmed, reason });
           return {
             title: 'Adjudicate Wave',
             output: JSON.stringify({
@@ -586,7 +586,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
             const sessionStartHook = hookComposer.getHook('session_start');
             if (sessionStartHook) {
               await sessionStartHook.execute({
-                changeDir: workDir,
+                workDir: workDir,
                 stateFile: `${workDir}/${getStateFilePath('sflow')}`,
                 pluginRoot: '',
                 action: 'session.created',
@@ -596,7 +596,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
             const sessionEndHook = hookComposer.getHook('session_end');
             if (sessionEndHook) {
               await sessionEndHook.execute({
-                changeDir: workDir,
+                workDir: workDir,
                 stateFile: `${workDir}/${getStateFilePath('sflow')}`,
                 pluginRoot: '',
                 action: 'session.deleted',
@@ -797,7 +797,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           }
           if (guardHook) {
             const guardResult = await guardHook.execute({
-              changeDir: workDir,
+              workDir: workDir,
               stateFile: `${workDir}/${getStateFilePath('sflow')}`,
               pluginRoot: '',
               action: `tool:${toolName}`,
@@ -842,7 +842,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           if (validationHook) {
             const currentState = await getCurrentWorkflowState(workDir);
             const validationCtx: HookContext = {
-              changeDir: workDir,
+              workDir: workDir,
               stateFile: `${workDir}/${getStateFilePath('sflow')}`,
               pluginRoot: '',
               action: `tool:${toolName}:after`,
@@ -876,7 +876,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
               const iflowTransitionHook = hookComposer.getHook('iflow_state_transition');
               if (iflowTransitionHook) {
                 const result = await iflowTransitionHook.execute({
-                  changeDir: workDir,
+                  workDir: workDir,
                   stateFile: `${workDir}/${getStateFilePath('iflow')}`,
                   pluginRoot: '',
                   action: 'state-transition',
@@ -897,7 +897,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
             const transitionHook = hookComposer.getHook('state_transition');
             if (transitionHook) {
               await transitionHook.execute({
-                changeDir: workDir,
+                workDir: workDir,
                 stateFile: `${workDir}/${getStateFilePath('sflow')}`,
                 pluginRoot: '',
                 action: 'state-transition',
@@ -909,7 +909,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           const postProcessHook = hookComposer.getHook('post_process');
           if (postProcessHook) {
             const ppResult = await postProcessHook.execute({
-              changeDir: workDir,
+              workDir: workDir,
               stateFile: `${workDir}/${getStateFilePath('sflow')}`,
               pluginRoot: '',
               action: `tool:${toolName}:after`,
@@ -921,7 +921,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
                 const transitionHook = hookComposer.getHook('state_transition');
                 if (transitionHook) {
                   await transitionHook.execute({
-                    changeDir: workDir,
+                    workDir: workDir,
                     stateFile: `${workDir}/${getStateFilePath('sflow')}`,
                     pluginRoot: '',
                     action: 'state-transition',
@@ -956,7 +956,7 @@ export function createSFlowPluginModule(pluginId: string = 'opencode-sflow'): Pl
           const continuationHook = hookComposer.getHook('continuation');
           if (!continuationHook) return;
           const result = await continuationHook.execute({
-            changeDir: workDir,
+            workDir: workDir,
             stateFile: `${workDir}/${getStateFilePath('sflow')}`,
             pluginRoot: '',
             action: 'autocontinue',

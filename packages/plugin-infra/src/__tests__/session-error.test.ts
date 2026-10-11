@@ -107,7 +107,7 @@ describe('D2 ① non-transient 错误事件 → 拉黑 + 通知', () => {
   it('402 配额错误应拉黑模型并写入通知', async () => {
     const fx = makeFakeEffects();
     const handler = createSessionErrorHandler({
-      changeDir: '',
+      workDir: '',
       modelResolver: () => 'provider/quota-model',
       sideEffects: fx,
       dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
@@ -134,7 +134,7 @@ describe('D2 ① non-transient 错误事件 → 拉黑 + 通知', () => {
     const fx = makeFakeEffects();
     // 用真实副作用（直接依赖 agent-builder）验证冷却语义
     const handler = createSessionErrorHandler({
-      changeDir: '',
+      workDir: '',
       modelResolver: () => 'provider/real-quota',
       sideEffects: {
         blacklistModel: (model, opts) => {
@@ -156,7 +156,7 @@ describe('D2 ② transient 错误事件 → 拉黑（短冷却）+ 通知', () =
   it('429 瞬态错误应拉黑模型并写入通知', async () => {
     const fx = makeFakeEffects();
     const handler = createSessionErrorHandler({
-      changeDir: '',
+      workDir: '',
       modelResolver: () => 'provider/transient-model',
       sideEffects: fx,
       dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
@@ -179,7 +179,7 @@ describe('D2 ② transient 错误事件 → 拉黑（短冷却）+ 通知', () =
   it('5xx 瞬态错误同样拉黑 + 通知', async () => {
     const fx = makeFakeEffects();
     const handler = createSessionErrorHandler({
-      changeDir: '',
+      workDir: '',
       modelResolver: () => 'provider/5xx-model',
       sideEffects: fx,
       dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
@@ -196,7 +196,7 @@ describe('D2 ③ abort 错误事件 → 零动作', () => {
   it('MessageAbortedError 不应拉黑、不应通知', async () => {
     const fx = makeFakeEffects();
     const handler = createSessionErrorHandler({
-      changeDir: '',
+      workDir: '',
       modelResolver: () => 'provider/should-not-be-touched',
       sideEffects: fx,
       dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
@@ -223,7 +223,7 @@ describe('D2 ④ none 分类 → 不拉黑', () => {
   it('无码具名错误（MessageOutputLengthError）分类未命中，不拉黑不通知', async () => {
     const fx = makeFakeEffects();
     const handler = createSessionErrorHandler({
-      changeDir: '',
+      workDir: '',
       modelResolver: () => 'provider/len-model',
       sideEffects: fx,
       dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
@@ -256,7 +256,7 @@ describe('D2 ⑤ 同 sessionID 重复事件去重（只拉黑/通知一次）', 
   it('窗口内重复 session.error 仅处理一次', async () => {
     const fx = makeFakeEffects();
     const handler = createSessionErrorHandler({
-      changeDir: '',
+      workDir: '',
       modelResolver: () => 'provider/dup-model',
       sideEffects: fx,
       // 大窗口，确保两条事件都在去重窗口内
@@ -278,7 +278,7 @@ describe('D2 ⑥ 分类未命中不产生通知', () => {
   it('无码错误即使模型可解析也不产生通知', async () => {
     const fx = makeFakeEffects();
     const handler = createSessionErrorHandler({
-      changeDir: '',
+      workDir: '',
       modelResolver: () => 'provider/unknown-code-model',
       sideEffects: fx,
       dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
@@ -296,7 +296,7 @@ describe('D2 ⑥ 分类未命中不产生通知', () => {
   it('无法定位模型时也不产生通知（避免误拉黑）', async () => {
     const fx = makeFakeEffects();
     const handler = createSessionErrorHandler({
-      changeDir: '',
+      workDir: '',
       modelResolver: () => undefined, // 注册表中无此 session
       sideEffects: fx,
       dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
@@ -337,7 +337,7 @@ describe('P1-1 ① 换模后旧 session 迟到事件不拉黑新模型', () => {
     // 模拟 P1-1 场景：registry 已换模，resolvedModel 指向健康新模型 B，
     // 但迟到的错误事件属于旧模型 A。modelResolver 内置护栏：attemptedModels>1 返回 undefined。
     const handler = createSessionErrorHandler({
-      changeDir: '',
+      workDir: '',
       // 护栏版解析器（与三工厂一致）：已换模 session 返回 undefined
       modelResolver: () => undefined,
       sideEffects: fx,
@@ -367,7 +367,7 @@ describe('P1-1 ① 换模后旧 session 迟到事件不拉黑新模型', () => {
     const fx = makeFakeEffects();
     // 未换模 session：modelResolver 返回当前模型（B），护栏不拦截
     const handler = createSessionErrorHandler({
-      changeDir: '',
+      workDir: '',
       modelResolver: () => 'provider/current-model',
       sideEffects: fx,
       dedupWindowMs: SESSION_ERROR_DEDUP_WINDOW_MS,
@@ -477,7 +477,7 @@ describe('P2-2′: 三工厂 sessionErrorHandler 接线（workDir 建键 + 实�
 
   /**
    * 工厂 modelResolver 反查工厂私有 backgroundTaskRegistry（测试无法注入），
-   * 空 registry → 解析不到模型 → 'no-model'。因此「changeDir 是否为 workDir」
+   * 空 registry → 解析不到模型 → 'no-model'。因此「workDir 是否为 workDir」
    * 用两条可观测锚点钉死：
    *   1) handler 缓存 Map 以 workDir 为 key（写死 process.cwd() 则所有 workDir
    *      共用一个 key，不同 workDir 共享实例 → 串写）；
@@ -549,14 +549,14 @@ describe('P2-2′: 三工厂 sessionErrorHandler 接线（workDir 建键 + 实�
     expect(sflow.getSflowSessionErrorHandlerForTest('/p22-other-dir')).not.toBe(h1);
   });
 
-  it('sflow 工厂：handler 收到的 changeDir 就是注入的 workDir（非 process.cwd）', async () => {
+  it('sflow 工厂：handler 收到的 workDir 就是注入的 workDir（非 process.cwd）', async () => {
     const workDir = await mkdtemp(join(tmpdir(), 'sflow-p23-dir-'));
     try {
       const sflow = await import('../sflow-plugin-factory.js');
       const handler = sflow.getSflowSessionErrorHandlerForTest(workDir);
 
-      // 直接断言「创建 handler 时传进 createSessionErrorHandler 的 changeDir」。
-      // 这是 P1-2 的核心接线：通知/落盘目录由 handler 内部 changeDir 决定。
+      // 直接断言「创建 handler 时传进 createSessionErrorHandler 的 workDir」。
+      // 这是 P1-2 的核心接线：通知/落盘目录由 handler 内部 workDir 决定。
       expect(sflow.sflowSessionErrorHandlerWorkDirForTest.get(workDir)).toBe(workDir);
       expect(sflow.sflowSessionErrorHandlerWorkDirForTest.get(workDir)).not.toBe(
         process.cwd(),
@@ -584,7 +584,7 @@ describe('P2-2′: 三工厂 sessionErrorHandler 接线（workDir 建键 + 实�
     }
   });
 
-  it('三工厂 changeDir 观测值均为注入 workDir 且互不相同（无串写）', async () => {
+  it('三工厂 workDir 观测值均为注入 workDir 且互不相同（无串写）', async () => {
     const dirS = await mkdtemp(join(tmpdir(), 'p23-s-'));
     const dirI = await mkdtemp(join(tmpdir(), 'p23-i-'));
     const dirC = await mkdtemp(join(tmpdir(), 'p23-c-'));
@@ -724,7 +724,7 @@ describe('P1-2 ① 通知文件落在机器级运行时目录而非 process.cwd(
     }
   });
 
-  it('changeDir 经构造参数注入，workDir 仍被接受（与 cwd 解耦）', () => {
+  it('workDir 经构造参数注入，workDir 仍被接受（与 cwd 解耦）', () => {
     // 验证 createSessionErrorHandler 的 deps.workDir 被接受：
     // workDir 只用于事件诊断/回溯，不再决定通知落点（落点由 runtimeRoot 决定）。
     const handler = createSessionErrorHandler({
