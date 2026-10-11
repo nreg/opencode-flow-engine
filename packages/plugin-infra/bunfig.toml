@@ -1,0 +1,10 @@
+[test]
+# P2-1：包级 preload 覆盖——Bun 的 bunfig.toml 只从 cwd 加载、无父目录遍历
+# （官方实证）。本包 package.json 自带 "test": "bun test"，从包目录跑测试时
+# 仓库根 bunfig 的 preload 不生效 → 测试隔离失效、真实
+# %USERPROFILE%/.flow-engine/sflow 被写（Gate 审查实证 +198 字节）。
+# 此处把同一个全局测试 setup 以包级 bunfig 再次挂载，保证无论从仓库根还是
+# 从包目录执行 bun test，FLOW_ENGINE_LOG_ROOT 都被导向 tmpdir。
+# 相对路径按 bunfig 所在目录（= 本包目录）解析（bun 1.4.0 实证）。
+# canonical 测试命令仍是仓库根 bun test（见 AGENTS.md）。
+preload = ["../../scripts/test-setup.ts"]

@@ -114,8 +114,20 @@ npm run build
 ### Test
 
 ```bash
-npm test
+bun test
 ```
+
+**Canonical 测试命令 = 仓库根 `bun test`（从仓库根目录执行）。**
+
+原因（P2-1 Gate 修复）：Bun 的 bunfig.toml 只从 cwd 加载、无父目录遍历（官方实证）：
+
+- 仓库根 `bunfig.toml` 的 `[test] preload`（`scripts/test-setup.ts`）把
+  `FLOW_ENGINE_LOG_ROOT` 导向 tmpdir，避免测试向真实
+  `%USERPROFILE%/.flow-engine/sflow` 写日志——该隔离只在 cwd = 仓库根时生效；
+- `packages/plugin-infra/package.json` 自带 `"test": "bun test"`，从包目录跑测试时
+  根 bunfig 不生效。该包已增补包级 `bunfig.toml` 挂载同一 preload 兜底，
+  但包目录下仍有依赖 cwd = 仓库根的存量用例（如 skills 目录路径）会失败；
+- 因此全量测试、CI、提交前验证一律从仓库根执行 `bun test`。
 
 ## License
 
