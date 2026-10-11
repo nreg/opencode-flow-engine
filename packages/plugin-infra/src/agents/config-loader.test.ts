@@ -2,7 +2,7 @@
  * Config Loader tests
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { existsSync, unlinkSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, unlinkSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -408,37 +408,123 @@ describe('Config Loader', () => {
 });
 
 describe('Config File Integration with Agent Builder', () => {
-  const CWD_SFLOW = join(process.cwd(), '.flow-engine/sflow');
-  const CWD_CONFIG = join(CWD_SFLOW, 'config.json');
   const USER_CONFIG_DIR = join(tmpdir(), `sflow-test-user-${Date.now()}`);
   const USER_CONFIG_FILE = join(USER_CONFIG_DIR, 'opencode-flow-engine.json');
 
+  /**
+   * cwd 隔离夹具根目录。
+   *
+   * 该 describe 用例的被测行为就是「从 cwd 读取 .flow-engine/sflow/config.json」，
+   * 因此夹具必须落在 process.cwd() 下；但绝不能让 cwd 指向仓库/项目目录，
+   * 否则清理动作会递归删除真实工件目录。故统一 chdir 到独立临时目录。
+   */
+  const FIXTURE_ROOT = join(tmpdir(), `sflow-cwd-fixture-${process.pid}-${Date.now()}`);
+  /** 原始 cwd（还原用） */
+  const ORIGINAL_CWD = process.cwd();
+
+  /** 夹具 cwd 下的工件目录；随 process.chdir 变化，必须调用时求值 */
+  function cwdSflowDir(): string {
+    return join(process.cwd(), '.flow-engine/sflow');
+  }
+
   function writeCwdConfig(data: unknown) {
-    if (!existsSync(CWD_SFLOW)) {
-      mkdirSync(CWD_SFLOW, { recursive: true });
+    const dir = cwdSflowDir();
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
     }
-    writeFileSync(CWD_CONFIG, JSON.stringify(data, null, 2));
+    writeFileSync(join(dir, 'config.json'), JSON.stringify(data, null, 2));
+  }
+
+  /**
+   * 仅当目标目录内容 ⊆ {config.json} 时才允许递归删除。
+   * 发现其他文件/目录则跳过并告警——钉死「绝不删异物」。
+   */
+  function isRemovableCwdSflowDir(dir: string): boolean {
+    if (!existsSync(dir)) return true;
+    try {
+      return readdirSync(dir).every((entry) => entry === 'config.json');
+    } catch {
+      return false;
+    }
   }
 
   function cleanCwdConfig() {
-    try { unlinkSync(CWD_CONFIG); } catch {}
+    const dir = cwdSflowDir();
+    try { unlinkSync(join(dir, 'config.json')); } catch {}
     // Only remove .flow-engine/sflow if it's empty (i.e., only our test config file was in it)
-    try { rmSync(CWD_SFLOW, { recursive: true, force: true }); } catch {}
+    try {
+      if (isRemovableCwdSflowDir(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+      } else {
+        console.warn(
+          `[config-loader.test] 跳过删除非空夹具目录 ${dir}：存在非测试内容，已拒绝递归删除`,
+        );
+      }
+    } catch {}
     try { rmSync(USER_CONFIG_DIR, { recursive: true, force: true }); } catch {}
   }
 
   beforeEach(() => {
-    cleanCwdConfig();
-    clearConfigCache();
-    // Isolate from user-level config: point to a temp empty config
-    mkdirSync(USER_CONFIG_DIR, { recursive: true });
-    writeFileSync(USER_CONFIG_FILE, JSON.stringify({}, null, 2));
-    process.env.FLOW_ENGINE_USER_CONFIG_FILE = USER_CONFIG_FILE;
+    // 切入隔离目录：cwd 相对夹具自然落在临时目录，不再指向项目目录
+    mkdirSync(FIXTURE_ROOT, { recursive: true });
+    process.chdir(FIXTURE_ROOT);
+    try {
+      cleanCwdConfig();
+      clearConfigCache();
+      // Isolate from user-level config: point to a temp empty config
+      mkdirSync(USER_CONFIG_DIR, { recursive: true });
+      writeFileSync(USER_CONFIG_FILE, JSON.stringify({}, null, 2));
+      process.env.FLOW_ENGINE_USER_CONFIG_FILE = USER_CONFIG_FILE;
+    } catch (err) {
+      process.chdir(ORIGINAL_CWD);
+      throw err;
+    }
   });
   afterEach(() => {
+    // try/finally 保证 cwd 一定被还原，避免污染同进程内其它用例
+    try {
+      cleanCwdConfig();
+      clearConfigCache();
+      delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+    } finally {
+      process.chdir(ORIGINAL_CWD);
+      rmSync(FIXTURE_ROOT, { recursive: true, force: true });
+    }
+  });
+
+  it('should isolate cwd to a temp fixture dir instead of the project dir', () => {
+    expect(process.cwd()).toBe(FIXTURE_ROOT);
+    expect(process.cwd()).not.toBe(ORIGINAL_CWD);
+    // 夹具路径必须落在隔离目录下，绝不能命中项目目录真实工件
+    expect(cwdSflowDir().startsWith(FIXTURE_ROOT)).toBe(true);
+  });
+
+  it('cleanCwdConfig should NOT recursively delete a dir containing foreign entries', () => {
+    const dir = cwdSflowDir();
+    mkdirSync(dir, { recursive: true });
+    const foreign = join(dir, 'state.json');
+    writeFileSync(foreign, '{}');
+
+    const originalWarn = console.warn;
+    let warned = '';
+    console.warn = (msg: unknown) => { warned += String(msg); };
+    try {
+      cleanCwdConfig();
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    // 异物必须存活
+    expect(existsSync(foreign)).toBe(true);
+    expect(warned).toContain('跳过删除');
+  });
+
+  it('cleanCwdConfig should remove the dir when only config.json remains', () => {
+    const dir = cwdSflowDir();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'config.json'), '{}');
     cleanCwdConfig();
-    clearConfigCache();
-    delete process.env.FLOW_ENGINE_USER_CONFIG_FILE;
+    expect(existsSync(dir)).toBe(false);
   });
 
   it('should load config file and apply to agent when .flow-engine/sflow/config.json exists', async () => {
