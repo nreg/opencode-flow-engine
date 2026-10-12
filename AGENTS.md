@@ -117,6 +117,10 @@ npm run build
 bun test
 ```
 
+### Attention
+
+> 新增智能体时需要同步白名单：BUILTIN_AGENTS
+
 **Canonical 测试命令 = 仓库根 `bun test`（从仓库根目录执行）。**
 
 原因（P2-1 Gate 修复）：Bun 的 bunfig.toml 只从 cwd 加载、无父目录遍历（官方实证）：
