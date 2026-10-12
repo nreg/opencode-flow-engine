@@ -459,7 +459,11 @@ describe('pollSessionCompletion - Batch 3: Event bus driven polling', () => {
       const targetSessionID = 'session-fallback';
       mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
 
-      // Change to idle after 300ms (no event dispatched)
+      // Change to idle after 800ms (no event dispatched)
+      // FU-4 修复：翻转时点从 300ms 拉开到 800ms。原 300ms 与 fallbackThreshold
+      // 200ms 仅 100ms 余量，全量负载下轮询迭代延迟抖动跨越 200ms 时晚于 300ms
+      // 执行 → 走完成路径跳过 fallback 语义（竞态）。800ms 提供 600ms 余量，
+      // 保留"事件未达 → fallback 轮询 → 轮询检测 idle"语义。
       setTimeout(() => {
         mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'idle' }] });
         mockSession.messages.mockResolvedValue({
@@ -468,7 +472,7 @@ describe('pollSessionCompletion - Batch 3: Event bus driven polling', () => {
             { parts: [{ type: 'text', text: 'polled response' }] },
           ],
         });
-      }, 300);
+      }, 800);
 
       // Act
       const result = await pollSessionCompletion(mockClient, targetSessionID, {
@@ -792,7 +796,9 @@ describe('pollSessionCompletion - Batch 5: Diagnostic logging', () => {
       const targetSessionID = 'session-fallback-log';
       mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'busy' }] });
 
-      // Change to idle after 300ms (no event dispatched)
+      // Change to idle after 800ms (no event dispatched)
+      // FU-4 修复：翻转时点从 300ms 拉开到 800ms（同 R3 fallback 用例），
+      // 消除 fallbackThreshold 200ms 与翻转 300ms 之间仅 100ms 的竞态窗口。
       setTimeout(() => {
         mockSession.status.mockResolvedValue({ data: [{ id: targetSessionID, type: 'idle' }] });
         mockSession.messages.mockResolvedValue({
@@ -801,7 +807,7 @@ describe('pollSessionCompletion - Batch 5: Diagnostic logging', () => {
             { parts: [{ type: 'text', text: 'response' }] },
           ],
         });
-      }, 300);
+      }, 800);
 
       // Act
       await pollSessionCompletion(mockClient, targetSessionID, {

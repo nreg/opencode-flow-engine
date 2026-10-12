@@ -18,6 +18,7 @@ import { createCallFlowAgentTools, resetRunningSubagentCounts, createBackgroundT
 import { normalizeToPosix } from '../../helpers/normalize-to-posix.js';
 import { resetGlobalEventBus, getGlobalEventBus } from '../../features/event-bus.js';
 import { clearUnavailableModels, markModelUnavailable, getAlternativeModel, isModelAvailable } from '../../agents/agent-builder.js';
+import { refreshAvailableModels, resetModelAvailability } from '../../agents/model-availability.js';
 import { Logger } from '../../utils/logger.js';
 
 // ─── Test helpers ──────────────────────────────────────────────────────────
@@ -3058,8 +3059,11 @@ describe('Batch 5: Event-driven integration', () => {
       const elapsed = Date.now() - startTime;
 
       // Assert: Should respond quickly (event-driven response < polling interval)
-      // Allow up to 250ms to account for timing variance
-      expect(elapsed).toBeLessThan(250);
+      // 性能断言孪生修复：本用例语义是"事件驱动比纯轮询快"（事件 50ms 到达 vs
+      // 轮询间隔兜底），不是压测满载吞吐。原 250ms 断言在满载下实测 511ms 超限
+      // （脆弱）。放宽到 2000ms——仍远小于纯轮询路径（DEFAULT_SYNC_MAX_WAIT_MS
+      // 秒级），保留语义去掉时序脆弱性。
+      expect(elapsed).toBeLessThan(2000);
     });
   });
 });
@@ -3543,14 +3547,33 @@ describe('D1: 参数归一化防 "None" 与畸形 ID fail fast', () => {
 describe('模型级故障转移 (model fallback)', () => {
   let promptCalls: Array<{ id: string; body: Record<string, unknown> }>;
 
-  beforeEach(() => {
+  // FU-3 修复：预热可用性快照为 ready。getNextCandidate 在快照 cold/failed 时
+  // 跳过黑名单检查（fallback-state.ts 的 availabilityTrusted 守卫）——隔离跑时
+  // 快照未预热（cold），F-4 预先拉黑的 fallback 链被跳过 → 仍换模 3 次 prompt；
+  // 全量跑时前面的测试把快照焐热为 ready → 通过。测试顺序/共享状态竞态。
+  // beforeEach 显式 refreshAvailableModels 置 ready，afterEach resetModelAvailability
+  // 复位 cold，不依赖测试顺序。
+  const availabilityProbeClient = {
+    provider: {
+      list: async () => ({
+        data: {
+          all: [{ id: 'provider', models: { 'test-model': {}, 'alt-1': {}, 'alt-2': {} } }],
+          connected: ['provider'],
+        },
+      }),
+    },
+  } as never;
+
+  beforeEach(async () => {
     promptCalls = [];
     currentTools = null;
     clearUnavailableModels(); // D-9：每个测试前清理黑名单
+    await refreshAvailableModels(availabilityProbeClient); // FU-3：显式预热快照为 ready
   });
 
   afterEach(() => {
     clearUnavailableModels(); // D-9：每个测试后清理黑名单
+    resetModelAvailability(); // FU-3：复位可用性快照为 cold，不向后续测试泄漏 ready 状态
   });
 
   it('F-1: 换模型重试成功（首次 poll 失败 → 拉黑 → 换模型 → 重 prompt → 成功）', async () => {
