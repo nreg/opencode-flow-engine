@@ -267,6 +267,16 @@ const BUILTIN_AGENTS: BuiltinAgentName[] = [
   'iflow-verifier',
   'iflow-researcher',
   'iflow-shipper',
+  // 共享跨工作流智能体（workflows/shared/index.ts SHARED_AGENT_NAMES）。
+  // FU-1（方案 A）：白名单扩展使 agents.<name> per-agent 配置对共享智能体可达，
+  // 透传方式与工作流子代理一致（agentOverridesFromConfig → configOverrides）。
+  'test-engineer',
+  'review-engineer',
+  'flow-architect',
+  'flow-intel',
+  'flow-evolve',
+  'flow-health',
+  'flow-restyle',
 ];
 
 /**

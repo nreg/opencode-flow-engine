@@ -118,20 +118,31 @@ describe('工厂层采样参数接线（Wave 3 · R-5 · SP-14..SP-18）', () =>
     expect(agent.variant).toBe('max');
   });
 
-  // ─── SP-17: iflow 共享智能体透传（第二注册循环，最易遗漏） ────────────────
+  // ─── SP-17: 共享智能体 per-agent 配置可达（F4 第二注册循环，字段级合并） ────
   //
-  // 取值来源说明（偏离合约字面写法，已向用户报告）：
-  // 合约 SP-17 字面要求「在 agents.<共享智能体> 上配置 top_p/variant」。
-  // 但 agentOverridesFromConfig（config-loader.ts:275-310）只遍历 BUILTIN_AGENTS
-  // （config-loader.ts:254-270），该白名单不含任何共享智能体，因此共享智能体的
-  // per-agent 配置（model/temperature/top_p/variant 一律）从来不会进入 override。
-  // 此为 Wave 1/2 之前的既有行为，非本波次引入，且修复需改 config-loader.ts
-  // ——超出 Wave 3 文件白名单（DC-7），故此处不修改，改用可达的档位级取值验证
-  // F4 接线本身：test-engineer 静态绑定 review 档位（AGENT_PROFILES:132）。
-  it('SP-17: iflow 共享智能体（F4 第二注册循环）透传 top_p', async () => {
+  // FU-1 更新（方案 A）：BUILTIN_AGENTS 白名单已扩展 7 个共享智能体
+  // （config-loader.ts:254-271），agentOverridesFromConfig 现在会为共享智能体
+  // 生成 per-agent override，F4 共享循环（iflow-plugin-factory.ts:361-402）经
+  // override?.temperature/top_p/variant 与 createAgent Priority 4
+  // config-override（agent-builder.ts:389/454-473）透传全部字段。
+  // 原「per-agent 不可达」实证记录已过时，本用例改为钉死可达行为：
+  //   ① per-agent model 覆盖 AGENT_PROFILES review 档位（Priority 4 > Priority 5）
+  //   ② per-agent temperature/top_p 覆盖档位同名字段（字段级合并）
+  //   ③ variant 不再恒 undefined
+  //   ④ fallback_models 生效于模型解析链（cfg.agent 键集合不新增键，不泄漏）
+  it('SP-17: 共享智能体 per-agent 配置可达（F4 第二注册循环，字段级合并）', async () => {
     useConfig({
       modelProfiles: {
-        review: { model: 'test-provider/shared-model', fallback_models: [], top_p: 0.6 },
+        review: { model: 'test-provider/tier-model', fallback_models: [], top_p: 0.6, temperature: 0.5 },
+      },
+      agents: {
+        'test-engineer': {
+          model: 'test-provider/agent-model',
+          temperature: 0.2,
+          top_p: 0.8,
+          variant: 'max',
+          fallback_models: ['test-provider/fb-1'],
+        },
       },
     });
 
@@ -144,12 +155,19 @@ describe('工厂层采样参数接线（Wave 3 · R-5 · SP-14..SP-18）', () =>
     const agent = (cfg.agent as Record<string, Record<string, unknown>>)['test-engineer'];
     expect(agent).toBeDefined();
     // F4 独有锚：共享循环 description 固定含 "(shared, cross-workflow)"
-    // （iflow-plugin-factory.ts:392）。原 mode==='subagent' 锚无区分力——
-    // F3 getAgentMode 回落值与 F4 硬编码取值必然相同，无法识别走错注册循环。
+    // （iflow-plugin-factory.ts:392），确认走的是第二注册循环
     expect(agent.description).toContain('shared, cross-workflow');
-    expect(agent.top_p).toBe(0.6);
-    // variant 无档位级来源，共享智能体 per-agent variant 不可达 → 未配置即 undefined
-    expect(agent.variant).toBeUndefined();
+    // ① per-agent model 覆盖 AGENT_PROFILES review 档位（Priority 4 config-override）
+    expect(agent.model).toBe('test-provider/agent-model');
+    // ② 字段级合并：per-agent temperature/top_p 覆盖档位同名字段
+    expect(agent.temperature).toBe(0.2);
+    expect(agent.top_p).toBe(0.8);
+    // ③ variant 不再恒 undefined
+    expect(agent.variant).toBe('max');
+    // ④ fallback_models 不作为 cfg.agent 键泄漏（键集合仍为 9 键）
+    expect(Object.keys(agent).sort()).toEqual(
+      ['color', 'description', 'mode', 'model', 'prompt', 'temperature', 'tools', 'top_p', 'variant'].sort(),
+    );
   });
 
   // ─── SP-18: 旧配置回归 ──────────────────────────────────────────────────
